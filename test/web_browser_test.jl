@@ -478,3 +478,84 @@ end
   @test clipboard(w) == "in a"
   close(w)
 end
+
+@testset "a game that has the mouse and the keys" begin
+  # What a key's code is, wherever the keyboard's layout puts what it types
+  @test Live.code_of("w") == "KeyW" && Live.code_of("W") == "KeyW" && Live.code_of("1") == "Digit1" && Live.code_of(" ") == "Space"
+  @test Live.code_of("Shift") == "ShiftLeft" && Live.code_of("Enter") == "Enter" && Live.code_of("-") == "Minus" && Live.code_of("é") == ""
+  @test Browsers.key_code(Keys.w) == "KeyW" && Browsers.key_code(getproperty(Keys, Symbol("7"))) == "Digit7" && Browsers.key_code(Keys.ctrl) == "ControlLeft"
+  @test Browsers.key_name(getproperty(Keys, Symbol("1")), true) == "!" && Browsers.key_name(Keys.slash, false) == "/"
+
+  # A page that turns its view with the mouse and moves with W, A, S and D, as 3D.html in Jake's City folder does
+  b = Browser(html="""<body style="margin:0"><canvas id=c width=400 height=300 style="display:block"></canvas><script>
+    var heard = [], c = document.getElementById('c')
+    c.addEventListener('mousedown', e => { heard.push('down ' + e.button + ' ' + e.buttons); c.requestPointerLock() })
+    c.addEventListener('click', () => heard.push('click'))
+    document.addEventListener('pointerlockchange', () => heard.push('locked ' + (document.pointerLockElement === c)))
+    document.addEventListener('mousemove', e => heard.push('move ' + e.movementX + ' ' + e.movementY + ' ' + (e.target === c)))
+    addEventListener('keydown', e => { heard.push('down ' + e.key + ' ' + e.code + ' ' + e.repeat); if (e.code === 'Space') e.preventDefault() })
+    addEventListener('keyup', e => heard.push('up ' + e.code))
+    c.addEventListener('wheel', e => { heard.push('wheel ' + e.deltaY + ' ' + (e instanceof WheelEvent)); e.preventDefault() }, {passive: false})
+    </script></body>""", wide=400px, high=300px)
+  w = Window(b, size=(400px, 300px))
+  frame(w); frame(w)
+  l = b.view.live
+  last() = Live.evaluate(l, "heard[heard.length - 1]")
+  heard() = Live.evaluate(l, "heard.join('|')")
+  forget() = Live.evaluate(l, "heard.length = 0")
+
+  # Before a click, a move of the mouse says how far it went
+  move!(w, (100px, 100px))
+  move!(w, (110px, 95px))
+  @test last() == "move 10 -5 true" && b.locked === nothing
+
+  # A click gives the canvas the mouse to itself, and the pointer is kept in the middle of the view
+  forget()
+  click!(w, (110px, 95px))
+  @test Live.locked(l) && b.locked == (200px, 150px)
+  @test endswith(heard(), "|down 0 1|locked true|click")   # the click moves the mouse there first
+  # A move says how far the mouse went from there, and nothing else hears it
+  forget()
+  move!(w, (207px, 147px))
+  @test heard() == "move 7 -3 true"
+  move!(w, (195px, 150px))
+  @test last() == "move -5 0 true"
+
+  # The keys say where they are, whether they go down again as they're held, and ⇧ goes down too
+  forget()
+  w.keys |= Keys.w
+  onkey(w, KeyPress{Keys.w}(0, false, w))
+  onkey(w, KeyPress{Keys.w}(0, true, w))
+  w.keys ⊻= Keys.w
+  onkey(w, KeyRelease{Keys.w}(0, w))
+  press!(w, getproperty(Keys, Symbol("1")))
+  holding(w, [Keys.shft]) do
+    onkey(w, KeyPress{Keys.shft}(0, w))
+    onkey(w, KeyRelease{Keys.shft}(0, w))
+  end
+  press!(w, Keys.space)
+  @test heard() == "down w KeyW false|down w KeyW true|up KeyW|down 1 Digit1 false|up Digit1|down Shift ShiftLeft false|up ShiftLeft|down   Space false|up Space"
+  # The wheel goes to the canvas, which keeps it from scrolling the page
+  forget()
+  onscroll(w, typeof(w.mouse)(0px, -2px), true)
+  @test heard() == "wheel 60 true" && Browsers.scrolled(b) == 0
+
+  # Esc takes the mouse back, and the page hears that it no longer has it, but not the Esc
+  forget()
+  press!(w, Keys.escape)
+  @test !Live.locked(l)
+  @test b.locked === nothing
+  @test heard() == "locked false|up Escape"
+  # The script can let the mouse go itself, and a view that loses the keyboard takes it back
+  click!(w, (200px, 150px))
+  @test b.locked !== nothing
+  Live.evaluate(l, "document.exitPointerLock()")
+  frame(w)
+  @test b.locked === nothing && last() == "locked false"
+  click!(w, (200px, 150px))
+  @test b.locked !== nothing
+  w.focus = nothing
+  frame(w)
+  @test b.locked === nothing && !Live.locked(l)
+  close(w)
+end

@@ -5,12 +5,15 @@
 #     draw(canvas, p)           # as any page of main.jl
 #     step!(l)                  # run the timers that are due. Gives how many seconds until the next, or nothing.
 #     click!(l, x, y)           # a click at a point of the page. False when a script said to do no more with it.
-#     move!(l, x, y)            # the mouse is at a point of the page now
+#     move!(l, x, y; dx, dy)    # the mouse is at a point of the page now, after it moved by (dx, dy)
 #     press!(l, x, y), release!(l, x, y)   # the mouse button goes down there, and comes up
+#     wheel!(l, x, y, dx, dy)   # the wheel scrolls there. False when a script said not to scroll the page.
+#     locked(l), unlock!(l)     # a script has the mouse to itself (requestPointerLock), and Esc takes it back
 #     scroll!(l, 400)           # the top of the window is 400 px down the page
 #     focus!(l, element)        # give an element the keyboard. `l.focused` is the element that has it.
 #     input!(l, element, "text")           # type into a field
 #     key!(l, "keydown", "Enter")          # a key goes down, or comes up with "keyup"
+#     key!(l, "keydown", "w"; code="KeyW", repeat=true)   # where the key is, and whether it goes down again as it's held
 #     submit!(l, form)          # send a form
 #     refresh!(l)               # a file that the page waited for has come: lay the page out again with it
 #     resize!(l, 500)           # the page is 500 px wide now
@@ -205,15 +208,25 @@ click!(l::Live, x, y) = begin
   JS.click!(l.scripts, at(l, x / z, y / z; fresh=false), x / z, y / z - l.scroll)
 end
 
-"What an event of the mouse says to a script: where the mouse is in the window"
-mouse(l::Live, x, y) = (z = l.options.zoom; Dict{String,Any}("bubbles" => true, "cancelable" => true, "clientX" => x / z, "clientY" => y / z - l.scroll))
+"""
+What an event of the mouse says to a script: where the mouse is in the
+window, how far it moved since the last event (`dx` and `dy`, in px of the
+page as it's drawn), and which buttons are down: 1 for the left one.
+"""
+mouse(l::Live, x, y; dx=0.0, dy=0.0, buttons=0) = begin
+  z = l.options.zoom
+  Dict{String,Any}("bubbles" => true, "cancelable" => true, "clientX" => x / z, "clientY" => y / z - l.scroll,
+                   "movementX" => dx / z, "movementY" => dy / z, "buttons" => buttons)
+end
 
 """
-The mouse is at the point `(x, y)` of the page now. The page's scripts hear
-`mousemove` on the element there, and `mouseout` and `mouseover` when that's
-another element than before. With no point, the mouse has left the page.
+The mouse is at the point `(x, y)` of the page now, after it moved by `(dx,
+dy)` px. The page's scripts hear `mousemove` on the element there, and
+`mouseout` and `mouseover` when that's another element than before. With no
+point, the mouse has left the page. While a script has the mouse to itself,
+the element that asked hears each `mousemove`: see `locked`.
 """
-move!(l::Live, x, y) = begin
+move!(l::Live, x, y; dx=0.0, dy=0.0, buttons=0) = begin
   z = l.options.zoom
   e = at(l, x / z, y / z; fresh=false)
   if e !== l.over
@@ -221,15 +234,39 @@ move!(l::Live, x, y) = begin
     l.over = e
     e === nothing || JS.fire!(l.scripts, e, "mouseover", mouse(l, x, y))
   end
-  e === nothing || JS.fire!(l.scripts, e, "mousemove", mouse(l, x, y))
+  e === nothing || JS.fire!(l.scripts, e, "mousemove", mouse(l, x, y; dx, dy, buttons))
   l
 end
 move!(l::Live) = (l.over === nothing || (JS.fire!(l.scripts, l.over, "mouseout"); l.over = nothing); l)
 
 "The mouse button goes down at the point `(x, y)` of the page. False when a script said to do no more with it."
-press!(l::Live, x, y) = (z = l.options.zoom; JS.fire!(l.scripts, at(l, x / z, y / z; fresh=false), "mousedown", mouse(l, x, y)))
+press!(l::Live, x, y) = (z = l.options.zoom; JS.fire!(l.scripts, at(l, x / z, y / z; fresh=false), "mousedown", mouse(l, x, y; buttons=1)))
 "The mouse button comes up at the point `(x, y)` of the page"
 release!(l::Live, x, y) = (z = l.options.zoom; JS.fire!(l.scripts, at(l, x / z, y / z; fresh=false), "mouseup", mouse(l, x, y)))
+
+"""
+The wheel or the trackpad scrolls by `(dx, dy)` px, as the page is drawn,
+with the mouse at the point `(x, y)` of the page. More than 0 is down, and to
+the right. The page's scripts hear `wheel` on the element there. False when
+a script said to do no more with it: then the page doesn't scroll.
+"""
+wheel!(l::Live, x, y, dx, dy) = begin
+  z = l.options.zoom
+  init = mouse(l, x, y)
+  init["deltaX"], init["deltaY"], init["deltaMode"] = dx / z, dy / z, 0
+  JS.fire!(l.scripts, at(l, x / z, y / z; fresh=false), "wheel", init)
+end
+
+"""
+True while a script of the page has the mouse to itself, since it asked with
+`requestPointerLock`, as a game does to turn its view with the mouse. Each
+event of the mouse goes to the element that asked then. The caller hides the
+pointer meanwhile, and says how far the mouse moves with `move!`.
+"""
+locked(l::Live) = JS.locked(l.scripts)
+
+"Take the mouse back from the script that has it to itself, as Esc does"
+unlock!(l::Live) = (JS.unlock!(l.scripts); l)
 
 "How far down the page the top of the window can be: the page's height less the window's, in px before the zoom"
 reach(l::Live) = l.options.high === nothing ? 0.0 : max(0.0, (seen(l).tall - l.options.high) / l.options.zoom)
@@ -255,19 +292,34 @@ input!(l::Live, e::Element, value::AbstractString) = JS.input!(l.scripts, e, val
 
 """
 A key of the keyboard goes down (`type` is "keydown") or comes up ("keyup").
-`key` is what it types, like "a" or "Enter". The element that has the
-keyboard hears it, or the page's <body>. False when a script said to do no
-more with it.
+`key` is what it types, like "a" or "Enter". `code` says which key it is,
+wherever the keyboard's layout puts what it types, like "KeyA" or "Digit1":
+a game reads it to move with W, A, S and D. `repeat` is true when the key goes
+down again because it's held. The element that has the keyboard hears it, or
+the page's <body>. False when a script said to do no more with it.
 """
-key!(l::Live, type::AbstractString, key::AbstractString; shift=false, ctrl=false, alt=false, meta=false) =
+key!(l::Live, type::AbstractString, key::AbstractString; code=code_of(key), repeat=false, shift=false, ctrl=false, alt=false, meta=false) =
   JS.fire!(l.scripts, something(l.focused, l.doc.body), type,
-           Dict{String,Any}("bubbles" => true, "cancelable" => true, "key" => key, "code" => length(key) == 1 ? "" : key, "keyCode" => keycode(key),
+           Dict{String,Any}("bubbles" => true, "cancelable" => true, "key" => key, "code" => code, "keyCode" => keycode(key), "repeat" => repeat,
                             "shiftKey" => shift, "ctrlKey" => ctrl, "altKey" => alt, "metaKey" => meta))
 
 # The number that an old script knows a key by
-const KEYCODES = Dict("Backspace" => 8, "Tab" => 9, "Enter" => 13, "Escape" => 27, " " => 32, "PageUp" => 33, "PageDown" => 34, "End" => 35, "Home" => 36,
-                      "ArrowLeft" => 37, "ArrowUp" => 38, "ArrowRight" => 39, "ArrowDown" => 40, "Delete" => 46)
+const KEYCODES = Dict("Backspace" => 8, "Tab" => 9, "Enter" => 13, "Shift" => 16, "Control" => 17, "Alt" => 18, "Escape" => 27, " " => 32,
+                      "PageUp" => 33, "PageDown" => 34, "End" => 35, "Home" => 36, "ArrowLeft" => 37, "ArrowUp" => 38, "ArrowRight" => 39,
+                      "ArrowDown" => 40, "Delete" => 46, "Meta" => 91)
 keycode(key::AbstractString) = get(() -> length(key) == 1 && isascii(key) ? Int(uppercase(only(key))) : 0, KEYCODES, key)
+
+# What a script calls the keys of a US keyboard that type a sign, and the keys that are held with others
+const SIGN_CODES = Dict('-' => "Minus", '=' => "Equal", '[' => "BracketLeft", ']' => "BracketRight", ';' => "Semicolon", '\'' => "Quote",
+                        ',' => "Comma", '.' => "Period", '/' => "Slash", '\\' => "Backslash", '`' => "Backquote")
+const HELD_CODES = Dict("Shift" => "ShiftLeft", "Control" => "ControlLeft", "Alt" => "AltLeft", "Meta" => "MetaLeft")
+
+"The code of the key that types `key` by itself on a US keyboard, like \"KeyA\" for \"a\", \"Digit1\" for \"1\" and \"Space\" for \" \". A key with a name, like \"Enter\", is its code."
+code_of(key::AbstractString) = begin
+  length(key) == 1 || return get(HELD_CODES, key, key)
+  c = only(key)
+  'a' <= lowercase(c) <= 'z' ? "Key" * uppercase(key) : '0' <= c <= '9' ? "Digit" * key : c == ' ' ? "Space" : get(SIGN_CODES, c, "")
+end
 
 "Send the form `form`, as the button `by` does, or the Return key with nothing"
 submit!(l::Live, form::Element, by::Union{Element,Nothing}=nothing) = JS.submit!(l.scripts, form, by)
@@ -291,4 +343,4 @@ end
 "Run `code` in the page, and give the value of its last statement. What the script throws is thrown here, as a `ScriptError`."
 evaluate(l::Live, code::AbstractString; kw...) = JS.evaluate(l.scripts, code; kw...)
 
-export Live, ScriptError, live, page!, step!, waiting, click!, move!, press!, release!, scroll!, focus!, input!, key!, submit!, refresh!, fire!, evaluate
+export Live, ScriptError, live, page!, step!, waiting, click!, move!, press!, release!, wheel!, locked, unlock!, scroll!, focus!, input!, key!, submit!, refresh!, fire!, evaluate

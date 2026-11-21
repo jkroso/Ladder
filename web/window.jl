@@ -99,6 +99,10 @@ class MouseEvent extends UIEvent {
 class PointerEvent extends MouseEvent {
   constructor(type, init = {}) { super(type, init); this.pointerId = init.pointerId ?? 1; this.pointerType = init.pointerType ?? 'mouse'; this.isPrimary = init.isPrimary ?? true }
 }
+class WheelEvent extends MouseEvent {
+  constructor(type, init = {}) { super(type, init); for (const k of ['deltaX', 'deltaY', 'deltaZ', 'deltaMode']) this[k] = Number(init[k] ?? 0) }
+}
+Object.assign(WheelEvent, {DOM_DELTA_PIXEL: 0, DOM_DELTA_LINE: 1, DOM_DELTA_PAGE: 2})
 class KeyboardEvent extends UIEvent {
   constructor(type, init = {}) {
     super(type, init)
@@ -124,7 +128,7 @@ class ErrorEvent extends Event {
 const HANDLED = ['abort', 'blur', 'change', 'click', 'contextmenu', 'dblclick', 'error', 'focus', 'focusin', 'focusout', 'input', 'keydown', 'keypress',
   'keyup', 'load', 'mousedown', 'mouseenter', 'mouseleave', 'mousemove', 'mouseout', 'mouseover', 'mouseup', 'pointerdown', 'pointermove', 'pointerup',
   'readystatechange', 'reset', 'resize', 'scroll', 'select', 'submit', 'toggle', 'touchend', 'touchmove', 'touchstart', 'transitionend', 'animationend',
-  'wheel', 'DOMContentLoaded', 'hashchange', 'popstate', 'unload', 'beforeunload', 'message', 'visibilitychange']
+  'wheel', 'DOMContentLoaded', 'hashchange', 'popstate', 'unload', 'beforeunload', 'message', 'visibilitychange', 'pointerlockchange', 'pointerlockerror']
 
 class EventTarget {
   addEventListener(type, listener, options) {
@@ -694,6 +698,15 @@ class Element extends Node {
   setPointerCapture() {}
   releasePointerCapture() {}
   hasPointerCapture() { return false }
+  // The element has the mouse to itself: see "the mouse to itself" below
+  requestPointerLock() {
+    if (!this.isConnected) {
+      microtask(() => dispatch(document, new Event('pointerlockerror', {bubbles: true})))
+      return Promise.reject(wrong('WrongDocumentError', 'An element that is not in the page can not have the mouse.'))
+    }
+    lock(this)
+    return Promise.resolve()
+  }
   requestFullscreen() { return Promise.reject(new TypeError('Fullscreen is not supported')) }
 }
 parental(Element.prototype)
@@ -968,6 +981,25 @@ let focused = null
 let state = 'loading'
 let running = null
 
+// The mouse to itself: a script asks for it with `requestPointerLock`, as a game asks to turn its view with the mouse.
+// Until the script lets it go (`document.exitPointerLock`), or Julia takes it back (as Esc does), each event of the mouse
+// goes to that element, and none is over any other. Julia hides the pointer, and a `mousemove` says only how far the
+// mouse moved. The page hears `pointerlockchange` after each change, as a browser tells it.
+let locked = null
+const holder = () => locked && locked.isConnected ? locked : (locked = null)
+function lock(target) {
+  if (holder() === target) return
+  locked = target
+  microtask(() => dispatch(document, new Event('pointerlockchange', {bubbles: true})))
+}
+function unlock() {
+  if (!locked) return
+  locked = null
+  microtask(() => dispatch(document, new Event('pointerlockchange', {bubbles: true})))
+}
+// The events that go to the element that has the mouse to itself, and the ones that it has none of then
+const MOUSING = /^(mouse|wheel|click|dblclick|contextmenu)/, CROSSING = /^mouse(over|out|enter|leave)$/
+
 class Document extends Node {
   get nodeType() { return 9 }
   get nodeName() { return '#document' }
@@ -1019,6 +1051,7 @@ class Document extends Node {
   get hidden() { return false }
   get visibilityState() { return 'visible' }
   get fullscreenElement() { return null }
+  get pointerLockElement() { return holder() }
   get designMode() { return 'off' }
   get dir() { return this.documentElement.dir }
   get styleSheets() { return [] }
@@ -1060,6 +1093,7 @@ class Document extends Node {
   open() { return this }
   close() {}
   exitFullscreen() { return Promise.resolve() }
+  exitPointerLock() { unlock() }
 }
 parental(Document.prototype)
 handlers(Document.prototype)
@@ -1617,7 +1651,7 @@ Object.assign(global, {
     if (value !== undefined) o.value = value
     return o
   },
-  Event, CustomEvent, UIEvent, MouseEvent, PointerEvent, KeyboardEvent, FocusEvent, InputEvent, ErrorEvent, EventTarget, DOMException,
+  Event, CustomEvent, UIEvent, MouseEvent, PointerEvent, WheelEvent, KeyboardEvent, FocusEvent, InputEvent, ErrorEvent, EventTarget, DOMException,
   Node, CharacterData, Text, Comment, DocumentFragment, Element, HTMLElement, SVGElement, Document, HTMLDocument: Document, NodeList, HTMLCollection,
   DOMTokenList, NodeFilter, TreeWalker, Range, MutationObserver, IntersectionObserver, ResizeObserver, URL, URLSearchParams, Headers, Response,
   XMLHttpRequest, AbortController, AbortSignal, Storage,
@@ -1629,13 +1663,22 @@ handlers(global)
 return {
   tick,
   waiting: () => waiting(native.now()),
-  // A click at a point of the page, on the element with the number `id`
-  click: (id, x, y) => click(wrap(id) ?? document.body ?? document, x, y),
+  // A click at a point of the page, on the element with the number `id`, or on the element that has the mouse to itself
+  click: (id, x, y) => click(holder() ?? wrap(id) ?? document.body ?? document, x, y),
   // Any other event, on the element with the number `id`, or on the window when it's 0. The page hears of a scroll on its document.
   fire(id, type, init) {
-    const C = /^(mouse|dblclick|contextmenu)/.test(type) ? MouseEvent : /^key/.test(type) ? KeyboardEvent : Event
-    return dispatch(id ? wrap(id) : type === 'scroll' ? document : global, new C(type, init ?? (type === 'scroll' ? {bubbles: true} : {})))
+    const C = type === 'wheel' ? WheelEvent : /^(mouse|dblclick|contextmenu)/.test(type) ? MouseEvent : /^key/.test(type) ? KeyboardEvent : Event
+    let target = id ? wrap(id) : type === 'scroll' ? document : global
+    if (holder() && MOUSING.test(type)) {
+      if (CROSSING.test(type)) return true
+      target = locked
+    }
+    return dispatch(target, new C(type, init ?? (type === 'scroll' ? {bubbles: true} : {})))
   },
+  // The number of the element that has the mouse to itself, or 0
+  locked: () => holder() ? locked[ID] : 0,
+  // Julia takes the mouse back, as Esc does
+  unlock,
   // The element with the number `id` gets the keyboard, or with 0 the element that has it loses it
   focus(id) {
     const e = id ? wrap(id) : null

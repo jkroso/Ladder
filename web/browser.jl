@@ -45,9 +45,15 @@
 #     selection there. ⌘A selects all of the page's words. A drag above or
 #     below the view scrolls the page. A drag in a field selects its letters.
 #   - The page's scripts hear the mouse and the keys: `mousemove`, `mouseover`,
-#     `mouseout`, `mousedown`, `mouseup`, `click`, `keydown`, `keyup`, `input`,
-#     `change`, `focus`, `blur`, `scroll` and `submit`. A script that says to
-#     do no more with a click or a key is obeyed.
+#     `mouseout`, `mousedown`, `mouseup`, `click`, `wheel`, `keydown`, `keyup`,
+#     `input`, `change`, `focus`, `blur`, `scroll` and `submit`. A script that
+#     says to do no more with a click, a key or the wheel is obeyed. A key says
+#     where it is (`code`, like "KeyW"), so a game can move with W, A, S and D,
+#     and ⇧, ⌃, ⌥ and ⌘ go down and up too.
+#   - A script can have the mouse to itself (`requestPointerLock`), as a game
+#     does to turn its view with the mouse. The pointer hides, and each move
+#     of the mouse says only how far it went. Esc gives the pointer back, and
+#     so does the view losing the keyboard, or the window going to the back.
 #
 # While it isn't active, it only shows the page: a click and a key go to the
 # nodes above it. `idle` is the shape of the mouse over it then.
@@ -65,9 +71,10 @@
 @use "github.com/jkroso/Font.jl/units" px
 @use "github.com/jkroso/UI.jl/Interface/Geometric"...
 @use "github.com/jkroso/UI.jl/Interface/Specific" ConcreteRect
-@use "github.com/jkroso/UI.jl/Interface/abstract" SemanticUI describe handled window_of focus
+@use "github.com/jkroso/UI.jl/Interface/abstract" SemanticUI describe handled window_of focus onblur
 @use "github.com/jkroso/UI.jl/Interface/draw" draw cursor open_url rect redraw_in! MouseScroll clipboard clipboard! show_menu! with_clip
 @use Skia
+@use GLFW
 @use "./main" => Web
 @use "./live" => Live
 @use "./form" => Forms
@@ -138,6 +145,7 @@ end
   rest::Float64 = 0.0       # until when a slow page's scripts and layout don't run again
   made::Any = nothing       # the size and the zoom that the page was last laid out for
   swallow::Bool = false     # a script said to do no more with the key that's down, so it types nothing
+  locked::Any = nothing     # where in the window the hidden pointer is kept while a script has the mouse to itself, or nothing
   picked::Tuple{Int,Int} = (0, 0)   # the page's words that are selected: where the selection started, and where it ends, as places in the words
   grain::Int = 1                    # what a drag selects: letters, words after two clicks, paragraphs after three
   grown::Tuple{Int,Int} = (0, 0)    # what the click that started the drag selected
@@ -388,8 +396,9 @@ describe(b::Browser) = begin
   v.wide, v.high, v.zoom, v.scripts, v.say, v.limit = b.wide, Float64(flt(b.high)), b.zoom, b.scripts, b.say, LIMIT
   # The page's scripts run and the page is laid out, unless it's a slow page that rests. Another page, or another size
   # of the window, doesn't wait. While the page rests, the window shows it as it was last laid out, and it still scrolls.
+  # A page that has the mouse to itself never rests: it's a game that you're playing, and each frame is yours.
   want = (v.html, v.base, v.wide, v.high, v.zoom, v.scripts)
-  if v.page === nothing || b.made != want || time() >= b.rest
+  if v.page === nothing || b.made != want || time() >= b.rest || b.locked !== nothing
     b.made = want
     began = time()
     try
@@ -407,6 +416,7 @@ describe(b::Browser) = begin
     redraw_in!(b, max(0.0, b.rest - time()))
   end
   b.offset = clamp(b.offset, 0.0, reach(b))
+  lock!(b)
   edge_scroll!(b)
   (loading(b) || Fetch.coming(b.files) > 0 || b.files.landed != b.landed) && redraw_in!(b, 0.05)
   # The caret blinks, so the window has to draw again while a field has the keyboard
@@ -811,11 +821,72 @@ end
 # What a script calls each key that has a name
 const NAMES = Dict(Keys.enter => "Enter", Keys.escape => "Escape", Keys.backspace => "Backspace", Keys.delete => "Delete", Keys.tab => "Tab",
                    Keys.space => " ", Keys.left => "ArrowLeft", Keys.right => "ArrowRight", Keys.up => "ArrowUp", Keys.down => "ArrowDown",
-                   Keys.home => "Home", Keys._end => "End", Keys.pageup => "PageUp", Keys.pagedown => "PageDown")
+                   Keys.home => "Home", Keys._end => "End", Keys.pageup => "PageUp", Keys.pagedown => "PageDown", Keys.capslock => "CapsLock",
+                   Keys.shft => "Shift", Keys.ctrl => "Control", Keys.opt => "Alt", Keys.cmd => "Meta",
+                   (getproperty(Keys, Symbol("f", i)) => "F$i" for i in 1:12)...)
 const LETTERS = Dict(getproperty(Keys, Symbol(c)) => string(c) for c in 'a':'z')
+# What each key of a US keyboard that types a figure or a sign types, by itself and with ⇧
+const SIGNS = Dict(getproperty(Keys, Symbol(c)) => (string(c), string(up)) for (c, up) in zip("0123456789", ")!@#\$%^&*("))
+merge!(SIGNS, Dict(Keys.minus => ("-", "_"), Keys.equal => ("=", "+"), Keys.left_bracket => ("[", "{"), Keys.right_bracket => ("]", "}"),
+                   Keys.semicolon => (";", ":"), Keys.apostrophe => ("'", "\""), Keys.comma => (",", "<"), Keys.period => (".", ">"),
+                   Keys.slash => ("/", "?"), Keys.backslash => ("\\", "|"), Keys.tilde => ("`", "~")))
+# The keys that are held with others
+const HELD = (Keys.cmd, Keys.shft, Keys.opt, Keys.ctrl)
 
-"What a script calls the key `K`, or nothing for a key that this file has no name for"
-key_name(K, shift) = haskey(NAMES, K) ? NAMES[K] : haskey(LETTERS, K) ? (shift ? uppercase(LETTERS[K]) : LETTERS[K]) : nothing
+"What a script calls the key `K`: what it types, or its name, like \"Enter\". Nothing for a key that this file has no name for."
+key_name(K, shift) = haskey(NAMES, K) ? NAMES[K] : haskey(LETTERS, K) ? (shift ? uppercase(LETTERS[K]) : LETTERS[K]) :
+                     haskey(SIGNS, K) ? SIGNS[K][shift ? 2 : 1] : nothing
+
+"The code that a script knows the key `K` by, which says where the key is and not what it types: \"KeyW\", \"Digit1\", \"Space\", \"ShiftLeft\""
+key_code(K) = (name = key_name(K, false); name === nothing ? "" : Live.code_of(name))
+
+"The buttons of the mouse that are down in the window `w`, as a script counts them: 1 for the left one"
+buttons(w) = Keys.mouse_left in w.keys ? 1 : 0
+
+"""
+While a script of the page has the mouse to itself (`requestPointerLock`),
+the pointer is hidden and kept in the middle of the view, and a move of the
+mouse tells the page only how far it went. The pointer shows again where it
+was once the script lets it go or Esc takes it back. So it does when the view
+loses the keyboard, stops being active, or its window isn't the front one, as
+in a browser. `b.locked` is where the hidden pointer is kept.
+"""
+lock!(b::Browser) = begin
+  l, w = live(b), window_of(b)
+  r = w === nothing ? nothing : rect(b)
+  glfw = w === nothing || isempty(w.glfw) ? nothing : w.glfw[1]
+  wants = l !== nothing && Live.locked(l)
+  if wants && (!b.active || r === nothing || !focused(b) || (glfw !== nothing && GLFW.GetWindowAttrib(glfw, GLFW.FOCUSED) == 0))
+    Live.unlock!(l)
+    wants = false
+  end
+  if wants && b.locked === nothing
+    b.locked = (r.left + r.width / 2, r.top + r.height / 2)
+    glfw === nothing || GLFW.SetInputMode(glfw, GLFW.CURSOR, GLFW.CURSOR_DISABLED)
+    keep!(b)
+  elseif !wants && b.locked !== nothing
+    b.locked = nothing
+    glfw === nothing || GLFW.SetInputMode(glfw, GLFW.CURSOR, GLFW.CURSOR_NORMAL)
+  end
+  b
+end
+
+"Put the hidden pointer back where it's kept, so that the next move of the mouse says how far the mouse went from there"
+keep!(b::Browser) = begin
+  w = window_of(b)
+  (b.locked === nothing || w === nothing || isempty(w.glfw)) && return b
+  GLFW.SetCursorPos(w.glfw[1], Float64(flt(b.locked[1])), Float64(flt(b.locked[2])))
+  b
+end
+
+# A view that loses the keyboard takes the mouse back from a script that has it to itself. The page hears `blur`, as
+# when a browser's window goes to the back, so a game lets go of a key that was held, whose `keyup` goes elsewhere.
+onblur(b::Browser, from) = begin
+  lock!(b)
+  l = live(b)
+  l === nothing || Live.fire!(l, "blur")
+  nothing
+end
 
 cursor(b::Browser) = begin
   b.active || return b.idle
@@ -829,17 +900,36 @@ end
 
 onmouse(b::Browser, ev::MouseMove) = begin
   b.active || return nothing
-  l, at = live(b), point(b, ev.position)
+  w, l = ev.window, live(b)
+  # While a script has the mouse to itself, the page hears how far the mouse went from where the hidden pointer is kept
+  from = something(b.locked, w.mouse)
+  dx, dy = Float64(flt(ev.position[1] - from[1])), Float64(flt(ev.position[2] - from[2]))
+  if b.locked !== nothing
+    keep!(b)
+    at = point(b, b.locked)
+    (l === nothing || at === nothing || dx == dy == 0) && return handled
+    Live.move!(l, at...; dx, dy, buttons=buttons(w))
+    wake!(b)
+    return handled
+  end
+  at = point(b, ev.position)
   at === nothing && return handled
-  b.down !== nothing && Keys.mouse_left in ev.window.keys && drag!(b, at...)
+  b.down !== nothing && Keys.mouse_left in w.keys && drag!(b, at...)
   l === nothing && return handled
-  Live.move!(l, at...)
+  Live.move!(l, at...; dx, dy, buttons=buttons(w))
   l.scripts.changed && redraw_in!(b, 0)
   handled
 end
 
 onscroll(b::Browser, ev::MouseScroll) = begin
   b.active || return nothing
+  # The page's scripts hear the wheel first, and one that says to do no more with it keeps the page where it is
+  l, at = live(b), point(b, b.locked)
+  if l !== nothing && at !== nothing
+    go = Live.wheel!(l, at..., -30 * Float64(flt(ev.delta[1])), -30 * Float64(flt(ev.delta[2])))
+    l.scripts.changed && wake!(b)
+    (go && b.locked === nothing) || return handled
+  end
   scroll!(b, scrolled(b) - 30 * Float64(flt(ev.delta[2])))
   at = point(b)
   b.down === nothing || at === nothing || drag!(b, at...)
@@ -855,8 +945,18 @@ onkey(b::Browser, ev::KeyPress{Keys.mouse_left}) = begin
   l = live(b)
   b.down, b.drag, b.dragged = (x, y), :none, time()
   shift = held_keys(ev.window) == Keys.shft   # ⇧ by itself grows the selection
+  # The element that has the mouse to itself hears the button, which selects nothing
+  if b.locked !== nothing
+    l === nothing || Live.press!(l, point(b, b.locked)...)
+    lock!(b)
+    wake!(b)
+    return handled
+  end
   # A script that says to do no more with the button going down keeps the keyboard where it is, and selects nothing
-  if l === nothing || Live.press!(l, x, y)
+  went = l === nothing || Live.press!(l, x, y)
+  # A script that asked for the mouse to itself, as a game does when it's clicked, has it from now on, and the button selects nothing
+  l === nothing || lock!(b)
+  if went && b.locked === nothing
     e = element(b, x, y)
     to = e !== nothing && Forms.typed(e) ? e : nothing
     was = field(b)
@@ -878,19 +978,21 @@ onkey(b::Browser, ev::KeyRelease{Keys.mouse_left}) = begin
   (b.active && b.down !== nothing) || return nothing
   from = b.down
   b.down, b.drag = nothing, :none
-  at = point(b)
+  at = point(b, b.locked)
   at === nothing && return handled
   l = live(b)
   l === nothing || Live.release!(l, at...)
   wake!(b)
-  # The mouse that came up where it went down clicked
-  hypot(at[1] - from[1], at[2] - from[2]) <= SLACK && click!(b, at...)
+  # The mouse that came up where it went down clicked. While a script has the mouse to itself, the mouse is always there.
+  (b.locked !== nothing || hypot(at[1] - from[1], at[2] - from[2]) <= SLACK) && click!(b, at...)
   handled
 end
 
 "A click at the point `(x, y)` of the page"
 click!(b::Browser, x, y) = begin
   l, p = live(b), b.view.page
+  # A click while a script has the mouse to itself goes to that script's element, and follows no link
+  b.locked === nothing || return (l === nothing || Live.click!(l, x, y); b)
   e = element(b, x, y)
   link = Web.link(p, x, y)
   if l !== nothing
@@ -933,15 +1035,28 @@ end
 onkey(b::Browser, ev::KeyPress{K}) where K = begin
   b.active || return nothing
   w = ev.window
-  # A key that's held with others types nothing itself, and the other buttons of the mouse do nothing here
-  K in (Keys.cmd, Keys.shft, Keys.opt, Keys.ctrl, Keys.mouse_right, Keys.mouse_middle, Keys.mouse_back, Keys.mouse_forward) && return nothing
+  # The other buttons of the mouse do nothing here
+  K in (Keys.mouse_right, Keys.mouse_middle, Keys.mouse_back, Keys.mouse_forward) && return nothing
   cmd, shift = Keys.cmd in w.keys, Keys.shft in w.keys
   l, name = live(b), key_name(K, shift)
+  # Esc takes the mouse back from a script that has it to itself, and the page doesn't hear that Esc
+  if K == Keys.escape && l !== nothing && Live.locked(l)
+    Live.unlock!(l)
+    lock!(b)
+    wake!(b)
+    return handled
+  end
+  keydown() = Live.key!(l, "keydown", name; code=key_code(K), repeat=ev.is_repeat, shift, meta=cmd, ctrl=Keys.ctrl in w.keys, alt=Keys.opt in w.keys)
+  # A key that's held with others types nothing itself. The page's scripts hear it go down, and the app has it too.
+  if K in HELD
+    l === nothing || (keydown(); l.scripts.changed && wake!(b))
+    return nothing
+  end
   b.swallow = false
   b.touched = time()
   # The page's scripts hear the key first. One that says to do no more with it keeps it from the field and from the page.
   if l !== nothing && name !== nothing
-    go = Live.key!(l, "keydown", name; shift, meta=cmd, ctrl=Keys.ctrl in w.keys, alt=Keys.opt in w.keys)
+    go = keydown()
     wake!(b)
     go || return (b.swallow = true; handled)
   end
@@ -968,9 +1083,10 @@ end
 
 onkey(b::Browser, ev::KeyRelease{K}) where K = begin
   b.active || return nothing
-  l, name = live(b), key_name(K, Keys.shft in ev.window.keys)
+  w = ev.window
+  l, name = live(b), key_name(K, Keys.shft in w.keys)
   (l === nothing || name === nothing) && return nothing
-  Live.key!(l, "keyup", name)
+  Live.key!(l, "keyup", name; code=key_code(K), shift=Keys.shft in w.keys, meta=Keys.cmd in w.keys, ctrl=Keys.ctrl in w.keys, alt=Keys.opt in w.keys)
   l.scripts.changed && wake!(b)
   nothing
 end

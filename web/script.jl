@@ -145,7 +145,7 @@ Scripts(doc::Document; load=address -> nothing, base="", say=(level, text) -> no
       got === :waiting ? false : got === true ? address : error(got)
     end,
     "resolve" => (name, from) -> something(module_address(s, name, from), name)))
-  for name in ("tick", "waiting", "click", "fire", "script", "ready", "alive", "rejected", "focus", "input", "submit")
+  for name in ("tick", "waiting", "click", "fire", "script", "ready", "alive", "rejected", "focus", "input", "submit", "locked", "unlock")
     s.hooks[name] = made[name]
   end
   JS.unhandled!(s.js, s.hooks["rejected"])
@@ -597,6 +597,16 @@ submit!(s::Scripts, form::Element, by::Union{Element,Nothing}=nothing) = guarded
 fire!(s::Scripts, e::Union{Element,Nothing}, type::AbstractString, init=Dict{String,Any}("bubbles" => true, "cancelable" => true)) =
   guarded(() -> s.hooks["fire"](number(s, e), type, init), s, true)::Bool
 
+"""
+True while a script of the page has the mouse to itself, since it asked with
+`requestPointerLock`. Each event of the mouse goes to the element that asked
+then, and the page hears of no element that the mouse is over.
+"""
+locked(s::Scripts) = guarded(() -> s.hooks["locked"](), s, 0) != 0
+
+"Take the mouse back from the script that has it to itself, as Esc does. The page hears `pointerlockchange`."
+unlock!(s::Scripts) = (guarded(() -> s.hooks["unlock"](), s); nothing)
+
 "Run `code` in the page, and give the value of its last statement. What the script throws is thrown here, as a `ScriptError`."
 evaluate(s::Scripts, code::AbstractString; kw...) = JS.evaluate(s.js, code; kw...)
 
@@ -747,4 +757,4 @@ sweep!(s::Scripts) = begin
   nothing
 end
 
-export Scripts, ScriptError, start!, step!, waiting, click!, fire!, focus!, input!, submit!, sweep!, evaluate
+export Scripts, ScriptError, start!, step!, waiting, click!, fire!, focus!, input!, submit!, locked, unlock!, sweep!, evaluate
