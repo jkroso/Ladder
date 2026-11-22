@@ -188,7 +188,7 @@ const program = Ref("git")
 
 # The app that's built keeps what these hold when it's made. A git that ran then never ends in the app,
 # so the app starts with nothing asked.
-__init__() = (empty!(STATES); empty!(LOGS); nothing)
+__init__() = (empty!(STATES); empty!(LOGS); empty!(SHOWS); nothing)
 
 "Run git in the folder `root` and give what it printed, or nothing when it failed"
 ask(root, args) = begin
@@ -282,7 +282,7 @@ commits(root::AbstractString, n::Integer=30) =
   kept(read_log, LOGS, (String(root), Int(n)), root, `log -n $n --pretty=format:$LOG_FORMAT`, Commit[])
 
 "How many gits that were started here still run"
-running() = count(a -> a.running, values(STATES)) + count(a -> a.running, values(LOGS))
+running() = count(a -> a.running, values(STATES)) + count(a -> a.running, values(LOGS)) + count(a -> a.running, values(SHOWS))
 
 "True while a git that was started here still runs"
 busy() = running() > 0
@@ -404,4 +404,106 @@ ago(t::Real, now::Real=time()) = begin
   s < 86400 ? "$(round(Int, s / 3600)) h ago" :
   s < 14 * 86400 ? (d = round(Int, s / 86400); d == 1 ? "yesterday" : "$d days ago") :
   Libc.strftime("%-d %b %Y", t)
+end
+
+# --- what one commit holds ------------------------------------------------------------
+#
+# A click on a commit in git's panel shows what the commit holds: its message,
+# who made it and when, and the lines of each file that it changed. `shown`
+# asks git once for each commit, since a commit never changes.
+
+"One file that a commit changed, and its part of the commit's diff"
+@def struct Touched
+  path::String = ""              # its path from the top folder, after the commit
+  from::String = ""              # its path before the commit, when the commit moved it, or ""
+  kind::Symbol = :changed        # :changed, :new, :deleted or :renamed
+  binary::Bool = false           # git shows no lines of it, as for a picture
+  lines::UnitRange{Int} = 1:0    # the lines of the diff that are about it
+end
+
+"What a commit holds: who made it and when, its whole message, and its diff as `git show` writes it, file by file"
+@def struct Shown
+  known::Bool = false                    # git has answered
+  hash::String = ""                      # the whole hash
+  author::String = ""
+  time::Float64 = 0.0
+  message::String = ""                   # its first line, an empty line and the rest, as it was written
+  diff::Vector{String} = String[]        # the lines of its diff
+  files::Vector{Touched} = Touched[]     # each file that it changed, in the order of the diff
+end
+
+"How `shown` asks git to write a commit's hash, author, time and message, with the byte 1f between them and 1e after the last"
+const SHOW_FORMAT = "%H%x1f%an%x1f%at%x1f%B%x1e"
+
+"A path as the diff writes it: without git's quotes, and without the `a/` or `b/` before it. /dev/null is \"\"."
+diff_path(s::AbstractString) = begin
+  s = strip(replace(s, r"\t.*$" => ""))
+  # git puts a name with odd characters in quotes, with a \ before each quote and \ in it
+  length(s) >= 2 && startswith(s, '"') && endswith(s, '"') && (s = replace(s[2:end-1], "\\\"" => "\"", "\\\\" => "\\"))
+  s == "/dev/null" ? "" : String(replace(s, r"^[ab]/" => ""))
+end
+
+"The path in a `diff --git a/x b/x` line. A file that keeps its name has it twice, so the half after `b/` is its path."
+git_line_path(line::AbstractString) = begin
+  s = chop(line, head=length("diff --git "), tail=0)
+  n = length(s)
+  # "a/" * p * " b/" * p is 2 * length(p) + 5 characters long
+  isodd(n) && (k = (n - 5) ÷ 2; k > 0 && s[3:2+k] == s[end-k+1:end]) && return String(s[end-k+1:end])
+  m = match(r" b/(.*)$", s)
+  m === nothing ? "" : diff_path(m[1])
+end
+
+"Read what `git show` printed with `SHOW_FORMAT`"
+read_shown(text::AbstractString) = begin
+  head, _, rest = partition(text, '\x1e')
+  f = split(head, '\x1f', limit=4)
+  length(f) == 4 || return Shown(known=true)
+  diff = String.(split(rest, '\n'))
+  # git puts an empty line between the message and the diff, and ends with a newline
+  while !isempty(diff) && isempty(diff[1]); popfirst!(diff) end
+  while !isempty(diff) && isempty(diff[end]); pop!(diff) end
+  starts = [i for (i, l) in enumerate(diff) if startswith(l, "diff --git ")]
+  files = map(enumerate(starts)) do (n, s)
+    stop = n < length(starts) ? starts[n+1] - 1 : length(diff)
+    path, from, kind, binary = git_line_path(diff[s]), "", :changed, false
+    old = nothing
+    for i in s+1:stop
+      l = diff[i]
+      startswith(l, "@@") && break
+      startswith(l, "new file mode") ? (kind = :new) :
+      startswith(l, "deleted file mode") ? (kind = :deleted) :
+      startswith(l, "rename from ") ? (kind = :renamed; from = diff_path(l[13:end])) :
+      startswith(l, "rename to ") ? (path = diff_path(l[11:end])) :
+      startswith(l, "Binary files ") || startswith(l, "GIT binary patch") ? (binary = true) :
+      startswith(l, "--- ") ? (old = diff_path(l[5:end])) :
+      startswith(l, "+++ ") ? (new = diff_path(l[5:end]); path = isempty(new) ? something(old, path) : new) : nothing
+    end
+    Touched(; path, from, kind, binary, lines=s:stop)
+  end
+  Shown(known=true, hash=String(f[1]), author=String(f[2]), time=something(tryparse(Float64, f[3]), 0.0),
+        message=String(rstrip(f[4])), diff=diff, files=files)
+end
+
+"`text` cut at the first `c`: what comes before it, `c`, and what comes after it"
+partition(text::AbstractString, c::Char) = begin
+  i = findfirst(c, text)
+  i === nothing ? (text, "", "") : (text[1:prevind(text, i)], string(c), text[nextind(text, i):end])
+end
+
+const SHOWS = Dict{Tuple{String,String},Asked{Shown}}()
+
+"""
+What the commit `hash` of the repository whose top folder is `root` holds, as
+git gave it: `known` is false until git has answered. A merge shows what it
+brought to the branch that it was made on. It's nothing when git couldn't
+find the commit.
+"""
+shown(root::AbstractString, hash::AbstractString) = begin
+  key = (String(root), String(hash))
+  # A commit never changes, so it's asked once. Before that, git is asked at once.
+  s = kept(read_shown, SHOWS, key, root,
+           `-c core.quotePath=false show --no-color --no-ext-diff -M --diff-merges=first-parent --format=$SHOW_FORMAT $hash --`,
+           Shown(); fresh=1e9)
+  a = SHOWS[key]
+  !s.known && a.at > 0 && !a.running ? nothing : s
 end

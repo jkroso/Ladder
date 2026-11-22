@@ -1576,6 +1576,13 @@ a page that covers the page's space (see `page_covers`), which leaves it room.
 page_side(e, o) = nothing
 
 """
+Take a step back in what `page_view` gives for `o`, before the window shows the
+file that showed before: true when it took one. The page of a repository goes
+from a commit back to the repository's files.
+"""
+page_back!(e, o) = false
+
+"""
 What shows under the text of the page `o`, which the directory `d` holds: a
 node, or nothing. A kind of folder has a method of this to add to each page
 that it holds, as a folder of notes lists the pages that link to the page.
@@ -1808,8 +1815,12 @@ step_back!(e, from, to) = begin
   false
 end
 
-"Show the file that showed before the one that shows now. It's false when no file showed before."
-go_back!(e) = step_back!(e, e.back, e.ahead)
+"""
+Show the file that showed before the one that shows now. It's false when no
+file showed before. A folder's own page can take a step back of its own first,
+as the page of a repository goes from a commit back to its files: see `page_back!`.
+"""
+go_back!(e) = (o = page_object(e); o !== nothing && page_back!(e, o)) || step_back!(e, e.back, e.ahead)
 
 "Show the file that `go_back!` left. It's false when there is none, or when another file was opened since."
 go_forward!(e) = step_back!(e, e.ahead, e.back)
@@ -14939,8 +14950,9 @@ folded(t::DiffText, room) = begin
   isempty(out) ? [1:0] : out
 end
 
-"How wide the lines of a change are in the block of `v`: as wide as the page's text, less the line at each edge of the block"
-diff_wide(v::ChangesView) = num(editor(v).width) - 2
+"How wide the lines of a change are in the block of `v`: as wide as the page's text, less the line at each edge of the block. What holds `v` can say otherwise."
+diff_wide(v::ChangesView) = diff_wide(getfield(v, :parent), v)
+diff_wide(_, v::ChangesView) = num(editor(v).width) - 2
 
 "The face of a comment"
 note_face() = Face(SANS, "", 12.5px, colours.ink, false)
@@ -15025,8 +15037,8 @@ added_colour() = colours.added
 
 "How many lines a change adds and takes away, as two small numbers"
 tally_words(added, removed) =
-  ((added > 0 ? (Box(label("+$added", 12px, color=added_colour(), weight="Medium")),) : ())...,
-   (removed > 0 ? (Box(label("−$removed", 12px, color=removed_colour(), weight="Medium")),) : ())...)
+  ((added > 0 ? (Box(label("+$(commas(added))", 12px, color=added_colour(), weight="Medium")),) : ())...,
+   (removed > 0 ? (Box(label("−$(commas(removed))", 12px, color=removed_colour(), weight="Medium")),) : ())...)
 
 "The end of a file's path that fits in `limit` characters, with … for the folders that it leaves out"
 short_path(file, limit=44) = begin
@@ -39852,7 +39864,12 @@ of the repository is in git's panel at the right of the window: see `GitPanel`.
   scroll::Scroll = Scroll(width(grow=grow), height(grow=grow))
 end
 
-page_view(e, d::GitDirectory) = (path = string(d.path); Git.istop(path) ? node!(() -> RepoView(path=path), e, (:repo, path)) : nothing)
+page_view(e, d::GitDirectory) = begin
+  path = string(d.path)
+  Git.istop(path) || return nothing
+  # A click on a commit in git's panel shows the commit in place of the files: see "a commit's page"
+  isempty(shown_commit(e, path)) ? node!(() -> RepoView(path=path), e, (:repo, path)) : e.nodes[(:commit, path)]
+end
 # The page of a repository covers the page's space, so git's panel has the room at its right
 page_fills(e, d::GitDirectory) = Git.istop(string(d.path))
 page_covers(e, d::GitDirectory) = Git.istop(string(d.path))
@@ -39964,10 +39981,6 @@ describe(p::GitPanel) = begin
         Box(label(basename(rel), 13px)), (isempty(dir) ? () : (Box(label(dir, 12px, color=colours.faint)),))...),
       Box(label(change_words(kind, rel in s.staged), 12px, color=colours.faint)))
   end
-  # A commit's first line can be long, so it wraps in the panel's width
-  commit(c) = Column(width(grow=grow), padding(8px, 6px), child_gap=4px, Alignment.Start, name="Commit",
-    Box(width(grow=grow), Alignment.Start, Text(c.subject, size=13px, family=SANS, color=colours.ink, wrap=WrapMode.words)),
-    Box(label(c.hash * "  ·  " * c.author * "  ·  " * Git.ago(c.time), 11px, color=colours.faint)))
   # Nothing in the panel makes it wider than its column: a name that's too long is cut off at its edge
   reuse!(p.scroll, Column(width(grow=grow), Alignment.Start, padding(2px, 10px, 24px, 10px), clip_x=true, name="Git",
     Column(width(grow=grow), Alignment.Start, padding(8px, 4px, 12px, 8px), child_gap=4px,
@@ -39980,10 +39993,248 @@ describe(p::GitPanel) = begin
      [change(rel, kind) for (rel, kind) in changes])...,
     Box(height(14px)),
     page_heading("Last commits"),
-    (isempty(log) ? (page_note(s.known ? "This repository has no commit yet." : "Asking git…"),) : map(commit, log))...))
+    (isempty(log) ? (page_note(s.known ? "This repository has no commit yet." : "Asking git…"),) : [commit_line(e, p.path, c) for c in log])...))
 end
 
 cursor(::GitPanel) = :arrow
+
+# --- a commit's page -----------------------------------------------------------------------
+#
+# A click on a commit in git's panel shows what the commit holds, in the page
+# beside the panel: its message, who made it and when, and the lines of each
+# file that it changed, drawn as a block of changes draws them. The commit is
+# lit in the panel. A click on it again, the arrow at the top of the page, or
+# going back (⌘⌥←) shows the repository's files again. A click on a commit's
+# file shows the file as it is now.
+#
+# A commit can change thousands of lines, so a file's lines start hidden when
+# there are more than `OPEN_MOST` of them, or when the files over it already
+# show `OPEN_ALL` lines. A click on the file's row shows them or hides them.
+
+push!(BLOCK_ICONS, "arrow-left", "chevron-down", "chevron-right", "clipboard", "box-arrow-up-right")
+
+"The most lines of a diff that a commit's file shows when its page opens. A file with more starts with its lines hidden."
+const OPEN_MOST = 1500
+"The most lines of a diff that all of a commit's files show together when its page opens"
+const OPEN_ALL = 5000
+
+"What the page of a repository shows in place of its files while a commit shows: see \"a commit's page\""
+@def mutable struct CommitView <: SemanticUI
+  root::String = ""
+  hash::String = ""                          # the commit, as git's panel has it, or "" while the repository's files show
+  open::Dict{Int,Bool} = Dict{Int,Bool}()    # whether the lines of each file show, by the file's place in the commit
+  views::Dict{Int,Any} = Dict{Int,Any}()     # the changes of each file whose lines have shown, by its place: a ChangesView
+  tallies::Dict{Int,Tuple{Int,Int}} = Dict{Int,Tuple{Int,Int}}()   # how many lines each file gains and loses
+  rows::Dict{Any,PageRow} = Dict{Any,PageRow}()
+  parts::Dict{Any,Any} = Dict{Any,Any}()     # its buttons
+  scroll::Scroll = Scroll(width(grow=grow), height(grow=grow))
+  wide::Float64 = 0.0                        # how wide the lines of the changes are, in this frame
+end
+
+"The commit that the page of the repository at `root` shows, or \"\" while it shows the repository's files"
+shown_commit(e, root) = (v = get(e.nodes, (:commit, root), nothing); v === nothing ? "" : v.hash)
+
+"""
+Show the commit `hash` of the repository at `root` in the repository's page.
+The commit that shows already goes away again, and the repository's files show.
+"""
+show_commit!(e, root, hash) = begin
+  v = node!(() -> CommitView(root=root), e, (:commit, root))
+  v.hash = v.hash == hash ? "" : hash
+  empty!(v.open); empty!(v.views); empty!(v.tallies); empty!(v.rows)
+  v.scroll.offset = 0px
+  redraw_in!(e, 0)
+  e
+end
+
+"Show the repository's files in the page of the repository at `root` again, in place of a commit. It's true when a commit showed."
+close_commit!(e, root) = isempty(shown_commit(e, root)) ? false : (show_commit!(e, root, shown_commit(e, root)); true)
+
+"The page of a repository takes a step back of its own: from a commit to the repository's files"
+page_back!(e, d::GitDirectory) = close_commit!(e, string(d.path))
+
+"""
+A commit in git's panel. A click shows what it holds in the page, and a click
+on the commit that shows shows the repository's files again.
+"""
+@def mutable struct CommitLine <: SemanticUI
+  root::String = ""
+  commit::Git.Commit = Git.Commit()
+end
+
+describe(l::CommitLine) = begin
+  c = l.commit
+  on = shown_commit(editor(l), l.root) == c.hash
+  # Its first line can be long, so it wraps in the panel's width
+  Column(width(grow=grow), padding(8px, 6px), radius(6px), child_gap=4px, Alignment.Start, name="Commit",
+         background(on ? colours.active : ishovered(l) ? colours.hover : clear),
+    Box(width(grow=grow), Alignment.Start, Text(c.subject, size=13px, family=SANS, color=colours.ink, wrap=WrapMode.words)),
+    Box(label(c.hash * "  ·  " * c.author * "  ·  " * Git.ago(c.time), 11px, color=colours.faint)))
+end
+
+cursor(::CommitLine) = :hand
+onkey(l::CommitLine, ::KeyPress{Keys.mouse_left}) = (show_commit!(editor(l), l.root, l.commit.hash); handled)
+
+"The line of git's panel for the commit `c` of the repository at `root`"
+commit_line(e, root, c) = (l = node!(() -> CommitLine(root=root), e, (:commit_line, root, c.hash)); l.commit = c; l)
+
+"How wide the lines of the changes of `v` are, as the commit's page `p` lays them out: as wide as its column, less the line at each side"
+diff_wide(p::CommitView, v::ChangesView) = p.wide - 2
+
+"How many lines file `k` of the commit `s` gains and loses"
+file_tally(v::CommitView, s, k) = get!(v.tallies, k) do
+  added = removed = 0
+  inside = false
+  for l in view(s.diff, s.files[k].lines)
+    inside |= startswith(l, "@@")
+    inside || continue
+    startswith(l, '+') && (added += 1)
+    startswith(l, '-') && (removed += 1)
+  end
+  (added, removed)
+end
+
+"Which files of the commit `s` show their lines when its page opens: each one in order, until they would show too many"
+open_first!(v::CommitView, s) = begin
+  total = 0
+  for (k, f) in enumerate(s.files)
+    n = length(f.lines)
+    # A file that isn't text has no lines, only words that say so
+    v.open[k] = f.binary || (n <= OPEN_MOST && total + n <= OPEN_ALL)
+    v.open[k] && (total += n)
+  end
+  v
+end
+
+"The changes of file `k` of the commit `s`, read once, as a block of changes that's only shown"
+file_changes(v::CommitView, s, k) = get!(v.views, k) do
+  lines = s.diff[s.files[k].lines]
+  own!(v, ChangesView(data=Diffs.changes(lines), lines=lines))
+end
+
+"""
+The message of a commit as lines to show: its paragraphs, each as one line,
+since git wraps a message by hand. A line of a list, and a line like
+`Co-Authored-By: …`, stays a line of its own.
+"""
+message_lines(message) = begin
+  out = String[]
+  for para in split(strip(message), r"\n\s*\n")
+    for line in split(para, '\n')
+      line = strip(line)
+      isempty(line) && continue
+      own = occursin(r"^([-*•]\s|\d+[.)]\s|[A-Za-z-]+:\s)", line)
+      isempty(out) || own || out[end] == "" ? push!(out, String(line)) : (out[end] *= " " * line)
+    end
+    push!(out, "")   # an empty line ends a paragraph
+  end
+  isempty(out) || pop!(out)
+  out
+end
+
+"When `t` was, as a date and a time, like `22 Nov 2026, 4:21 pm`"
+commit_when(t) = replace(Libc.strftime("%-d %b %Y, %-I:%M %p", t), "AM" => "am", "PM" => "pm")
+
+"What the commit's page says of file `f`, after its name: that it's new, deleted or moved"
+touched_words(f) = f.kind == :new ? "New" : f.kind == :deleted ? "Deleted" : f.kind == :renamed ? "Moved from $(f.from)" : ""
+
+"The part of the commit's page for file `k` of the commit `s`: a row with its name, then its lines"
+commit_file(v::CommitView, e, s, k) = begin
+  f = s.files[k]
+  path = joinpath(v.root, f.path)
+  open = get(v.open, k, false)
+  dir = dirname(f.path)
+  added, removed = file_tally(v, s, k)
+  words = touched_words(f)
+  head = page_row!(v, (:file, k), _ -> (v.open[k] = !open; redraw_in!(e, 0); nothing),
+    Box(width(12px), Icon(open ? "chevron-down" : "chevron-right", size=10px, color=colours.dim)),
+    Row(width(grow=grow), height(grow=grow), clip=true, child_gap=6px,
+      Box(label(basename(f.path), 13px, weight="Semibold")),
+      (isempty(dir) ? () : (Box(label(dir, 12px, color=colours.faint)),))...,
+      (isempty(words) ? () : (Box(label(words, 12px, color=git_colour(f.kind))),))...),
+    tally_words(added, removed)...,
+    # The file as it is now. A file that's gone has nothing to show.
+    (isfile(path) ? (block_button!(v, (:show, k), (:show, path), icon="box-arrow-up-right", tip="Show $(basename(f.path)) as it is now"),) : ())...)
+  top = Box(width(grow=grow), padding(4px, 4px), background(colours.stripe), head)
+  note(words) = Box(width(grow=grow), padding(12px, 10px), border(1px, :solid, colours.line)[:top], label(words, 12.5px, color=colours.dim))
+  # A file whose lines have never shown says why they don't
+  hidden = added + removed
+  !open && !haskey(v.views, k) && hidden > 0 &&
+    return Column(block_look()..., clip=true, name="File", top,
+                  note("Its $(commas(hidden)) changed lines are hidden, as they're many. A click on its row shows them."))
+  open || return Column(block_look()..., clip=true, name="File", top)
+  c = file_changes(v, s, k)
+  hunks = c.data.hunks
+  # A file with no lines to show says why
+  why = f.binary ? "Ladder can't show the lines of this file, because it isn't text." :
+        !isempty(hunks) ? nothing :
+        f.kind == :renamed ? "Its lines are the same as before." :
+        f.kind == :new ? "It's an empty file." : "Its lines didn't change."
+  why === nothing || return Column(block_look()..., clip=true, name="File", top, note(why))
+  parts = Any[]
+  for (j, h) in enumerate(hunks)
+    place = lowercasefirst(Diffs.place(h))
+    push!(parts, Row(width(grow=grow), height(26px), padding(12px, 0px), child_gap=8px, Alignment.Center, clip=true,
+                     border(1px, :solid, colours.line)[:top], background(colours.block),
+      Box(label(isempty(place) ? "" : uppercasefirst(place), 11.5px, color=colours.dim)),
+      Row(width(grow=grow), height(grow=grow), clip=true,
+          Box(Text(h.about, size=11.5px, family=codefont(), subfamily=codestyle(), color=colours.faint, wrap=WrapMode.none)))))
+    push!(parts, block_part!(() -> HunkArea(of=c, k=j), c, (:hunk, j)))
+  end
+  Column(block_look()..., clip=true, name="File", top, parts...)
+end
+
+act!(v::CommitView, action, w) = begin
+  e = editor(v)
+  action[1] == :beside && return (beside!(e, action[2]); handled)
+  action[1] == :copy && return (clipboard!(w, action[2]); handled)
+  action[1] == :show && return (show_path!(e, action[2]); handled)
+  action[1] == :close && return (close_commit!(e, v.root); handled)
+  handled
+end
+
+describe(v::CommitView) = begin
+  e = editor(v)
+  s = Git.shown(v.root, v.hash)
+  room, _ = page_room(e)
+  # As wide as the room beside the sidebar and git's panel, since lines of code are long
+  v.wide = max(num(room) - num(right_w(e)) * right_opened(e) - 2num(PAGE_X), 240.0)
+  back = block_button!(v, :close, (:close,), icon="arrow-left", words=basename(v.root), tip="Show the repository's files again")
+  top = Row(width(grow=grow), back)
+  body = if s === nothing
+    (page_title("git", "No such commit", "git can't find the commit $(v.hash) in this repository."),)
+  elseif !s.known
+    redraw_in!(e, 0.1)   # git answers in a later frame
+    (page_note("Asking git…"),)
+  else
+    isempty(v.open) && open_first!(v, s)
+    lines = message_lines(s.message)
+    added = sum(k -> file_tally(v, s, k)[1], eachindex(s.files), init=0)
+    removed = sum(k -> file_tally(v, s, k)[2], eachindex(s.files), init=0)
+    n = length(s.files)
+    two = e.beside && v.wide - 2 >= BESIDE_LEAST
+    narrow = v.wide - 2 < BESIDE_LEAST
+    short = first(s.hash, 7)
+    message = Column(width(grow=grow, max=e.widest * e.zoom), Alignment.Start, padding(8px, 0px, 18px, 8px), child_gap=8px,
+      Box(width(grow=grow), Alignment.Start, Text(isempty(lines) ? "(No message)" : lines[1], size=22px, family=SANS, subfamily="Bold", color=colours.ink, wrap=WrapMode.words)),
+      Row(child_gap=8px, Alignment.Center,
+        Box(label(s.author * "  ·  " * commit_when(s.time), 13px, color=colours.dim)),
+        block_button!(v, :copy, (:copy, s.hash), icon="clipboard", words=short, tip="Copy the commit's whole hash")),
+      [isempty(l) ? Box(height(4px)) : Box(width(grow=grow), Alignment.Start, Text(l, size=14px, family=SANS, color=colours.ink, wrap=WrapMode.words))
+       for l in lines[2:end]]...)
+    bar = Row(width(grow=grow), height(34px), padding(0px, 0px, 0px, 8px), child_gap=8px, Alignment.Center,
+      Box(label(n == 0 ? "No file changed" : n == 1 ? "1 file changed" : "$(commas(n)) files changed", 13px, color=colours.dim, weight="Semibold")),
+      tally_words(added, removed)..., Box(width(grow=grow)),
+      block_button!(v, :under, (:beside, false), icon="view-stacked", on=!two, tip="Show the new lines under the old lines"),
+      block_button!(v, :beside, (:beside, true), icon="layout-split", on=two, off=narrow,
+                    tip=narrow ? "The window is too narrow to show the old lines beside the new lines" : "Show the old lines beside the new lines"))
+    (message, bar, [commit_file(v, e, s, k) for k in eachindex(s.files)]...)
+  end
+  reuse!(v.scroll, Row(width(grow=grow), Alignment.Start, justify=Alignment.Center, padding(PAGE_TOP, PAGE_X, PAGE_BOTTOM, PAGE_X),
+    Column(width(px(v.wide)), Alignment.Start, child_gap=10px, name="Commit", top, body...)))
+end
+
+cursor(::CommitView) = :arrow
 
 # --- a commit of the file that shows ---------------------------------------------------------
 #
