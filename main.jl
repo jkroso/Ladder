@@ -46871,8 +46871,14 @@ end
 #   - A click on a favourite opens its folder in the page, and leaves the
 #     sidebar as it is. Drag a favourite to put it in another place in the
 #     list. A right-click shows its menu.
-#   - Under the projects is the tree of what's in the folder, as the sidebar
-#     shows it, and as a plain folder shows in the page.
+#   - Under the projects is a table of what's in the folder: the folders and
+#     files that the sidebar lists, each with its size and when it changed.
+#     The one that changed last is first. A click on the heading of a column
+#     sorts the table by that column, and a second click sorts it the other
+#     way. A folder's time is when anything in it last changed, at any depth,
+#     apart from hidden things. home.jl finds those times on a second thread,
+#     and hears of each change from macOS after that. While a folder is still
+#     being read, its time says so, and it sorts by its own time.
 #   - A project is a git repository. Its line says how many of its files
 #     changed, and when the last one did. A click on it opens its folder. A
 #     project's menu has Hide from This Page. The button Hidden Projects lists the hidden ones,
@@ -46914,10 +46920,10 @@ favourite_item(path) = Home.isfavourite(path) ? "Remove from Favourites" : "Add 
 #
 # A folder that has no page of its own shows in the page as the tree of its
 # folders and files, as the sidebar shows them: the same rows, icons and
-# marks, its folders first, then its files, each by name. The home folder's
-# page ends with the same tree. A click on a folder opens it in the page, and
-# a click on a file shows it. A right-click shows the menu of the folder or
-# the file. The folder is read again each second, so a new file gets its row.
+# marks, its folders first, then its files, each by name. A click on a folder
+# opens it in the page, and a click on a file shows it. A right-click shows the
+# menu of the folder or the file. The folder is read again each second, so a
+# new file gets its row.
 
 "What the page shows of a folder that has no page of its own: its name, and the tree of what's in it"
 @def mutable struct FolderPage <: SemanticUI
@@ -46955,7 +46961,7 @@ folder_tree!(e, owner, path) = begin
   t
 end
 
-"The tree of the folder at `path`, drawn for `owner`, a part of the page. Its icons are in line with the icons of a folder's own page, like the home folder's projects."
+"The tree of the folder at `path`, drawn for `owner`, a part of the page. Its icons are in line with the icons of a folder's own page."
 folder_tree_part(e, owner, path) =
   Column(width(grow=grow), Alignment.Start, padding(0px, 0px, 12px, 5.5px), with_theme(() -> describe!(folder_tree!(e, owner, path)), page_tree_theme()))
 
@@ -46978,6 +46984,16 @@ describe(v::FolderPage) =
 cursor(::FolderPage) = :arrow
 onkey(v::FolderPage, ev::KeyPress{Keys.mouse_right}) = folder_tree_menu!(editor(v), ev.window, v.path)
 
+"A folder or a file in the table of the home folder's page"
+@def struct HomeItem
+  path::String = ""
+  object::Any = nothing   # its object, as the sidebar lists it
+  folder::Bool = false
+  size::Int = 0           # of a file, in bytes
+  when::Float64 = 0.0     # when it last changed, or 0 when macOS doesn't say. For a folder, when anything in it did.
+  known::Bool = true      # its time is known. A folder's isn't while it's still being read.
+end
+
 "What the page shows of the home folder: the favourite folders, and the work of the last 7 days"
 @def mutable struct HomeView <: SemanticUI
   path::String = ""
@@ -46991,7 +47007,26 @@ onkey(v::FolderPage, ev::KeyPress{Keys.mouse_right}) = folder_tree_menu!(editor(
   press::Any = nothing                           # the favourite that the mouse went down on, and where
   drag::Any = nothing                            # the favourite that's dragged, and the place in the list that it would go to
   shown::Vector{String} = String[]               # the folders of the projects that show, from the top
+  items::Vector{HomeItem} = HomeItem[]           # each folder and file in the folder, as it was read last
+  read::Float64 = 0.0                            # when the folder was read
+  sort::Symbol = :when                           # the column that the table is sorted by: :name, :size or :when
+  desc::Bool = true                              # Z, the largest or the newest first
+  heads::Dict{Symbol,Any} = Dict{Symbol,Any}()   # the heading of each column of the table
+  every::Bool = false                            # the table shows every row, not only the first ones
 end
+
+"The heading of a column of the table on the home folder's page. A click on it sorts the table by that column."
+@def mutable struct HomeHead <: SemanticUI
+  view::Any = nothing   # the HomeView that it's on
+  key::Symbol = :name   # :name, :size or :when
+end
+
+"The words of each heading of the table on the home folder's page"
+const HOME_HEADS = Dict(:name => "Name", :size => "Size", :when => "Modified")
+"How wide the columns of sizes and times are"
+const HOME_COL_W = 90px
+"How many rows the table shows before the button that shows them all"
+const HOME_ROWS_FIRST = 100
 
 "A favourite folder on the home folder's page"
 @def mutable struct FavouriteCard <: SemanticUI
@@ -47103,12 +47138,19 @@ project_menu!(v::HomeView, w, path) = begin
   nothing
 end
 
-# A right-click on a project shows its menu, and one on a row of the tree shows the menu of its folder or file
+# A right-click on a project shows its menu, and one on a row of the table shows the menu of its folder or file
 onkey(v::HomeView, ev::KeyPress{Keys.mouse_right}) = begin
   for (key, r) in v.rows
-    key isa Tuple && key[1] == :project && ishovered(r) && (project_menu!(v, ev.window, key[2]); return handled)
+    (key isa Tuple && ishovered(r)) || continue
+    key[1] == :project && (project_menu!(v, ev.window, key[2]); return handled)
+    if key[1] == :item
+      # The name is typed where it shows in the sidebar, so the table has no Rename
+      path = key[2]
+      file_menu!(editor(v), ev.window, path; items=filter(!=("Rename"), file_menu(path)))
+      return handled
+    end
   end
-  folder_tree_menu!(editor(v), ev.window, v.path)
+  nothing
 end
 
 "The line of the project `p` on the page `v`: its name, its folder, how many of its files changed, and when the last one did"
@@ -47119,6 +47161,88 @@ project_line(v::HomeView, e, p::Home.Project) =
     (p.path == v.path ? () : (Box(label(tilde(dirname(p.path)), 12px, color=colours.faint)),))...,
     Box(width(grow=grow)),
     Box(label(files_words(p.count) * "  ·  " * Git.ago(p.when), 12px, color=colours.dim)))
+
+"Read the folder of the home folder's page `v` again, a second after it was last read: the folders and files that the sidebar lists, each with its size and when it, or anything in it, last changed"
+home_items!(e, v::HomeView) = begin
+  time() - v.read < 1 && return v.items
+  v.read = time()
+  d = try object(e, v.path) catch; nothing end
+  found = d isa AbstractDirectory ? entries(e, d) : FSObject[]
+  paths = String[joinpath(v.path, o.path.name) for o in found]
+  # When anything in each folder last changed, for the folders that have been read
+  deep = Home.newest(v.path, [p for (p, o) in zip(paths, found) if o isa AbstractDirectory])
+  v.items = map(zip(paths, found)) do (path, o)
+    folder = o isa AbstractDirectory
+    # macOS can refuse to say, as it does for the Trash before Ladder has Full Disk Access
+    st = try stat(path) catch; nothing end
+    own = st === nothing ? 0.0 : st.mtime
+    HomeItem(path=path, object=o, folder=folder, size=folder || st === nothing ? 0 : Int(st.size),
+             when=folder ? max(own, get(deep, path, 0.0)) : own, known=!folder || haskey(deep, path))
+  end
+end
+
+"The folders and files of the home folder's page `v`, in the order of the column that the table is sorted by. Rows with the same value keep the sidebar's order."
+home_sorted(v::HomeView) = begin
+  by = v.sort == :name ? (it -> lowercase(entry_name(it.object))) :
+       v.sort == :size ? (it -> it.folder ? -1 : it.size) : (it -> it.when)
+  sort(v.items, by=by, rev=v.desc, alg=MergeSort)
+end
+
+"Sort the table of the page `v` by the column `key`. A second click on the same column sorts it the other way. A new column starts with A, the largest or the newest first."
+home_sort!(v::HomeView, key::Symbol) = begin
+  v.sort == key ? (v.desc = !v.desc) : ((v.sort, v.desc) = (key, key != :name))
+  nothing
+end
+
+"The heading of the column `key` of the table on the page `v`"
+home_head(v::HomeView, key::Symbol) = get!(() -> own!(v, HomeHead(view=v, key=key)), v.heads, key)
+
+describe(h::HomeHead) = begin
+  v = h.view
+  on = v.sort == h.key
+  lit = ishovered(h)
+  # The arrow of the order that the table has. On another heading, the mouse over it shows the order that a click gives.
+  down = on ? v.desc : h.key != :name
+  arrow = on || lit ? (Icon(down ? "chevron-down" : "chevron-up", size=9px, color=on ? colours.ink : colours.faint),) : ()
+  # The words are in a Box of their own, so they're as wide as they are and don't fill the heading
+  parts = (Box(label(HOME_HEADS[h.key], 11px, color=on || lit ? colours.ink : colours.dim)), arrow...)
+  # The arrow goes on the side away from the column's edge, so it doesn't push the words when it shows
+  Row(h.key == :name ? width(grow=grow) : fixed(HOME_COL_W), height(grow=grow), Alignment.Center, child_gap=4px, name="Heading",
+      justify=h.key == :name ? Alignment.Start : Alignment.End, (h.key == :name ? parts : reverse(parts))...)
+end
+
+cursor(::HomeHead) = :hand
+onkey(h::HomeHead, ::KeyPress{Keys.mouse_left}) = (home_sort!(h.view, h.key); redraw_in!(h.view, 0); handled)
+
+"The row of the table on the page `v` for the folder or the file `it`: its icon and name, its size, and when it changed"
+home_item_row(v::HomeView, e, it::HomeItem) = begin
+  o = it.object
+  name = entry_name(o)
+  page_row!(v, (:item, it.path), _ -> (open_folder!(e, it.path); nothing),
+    Box(width(16px), Icon(entry_icon(o), size=14px, color=colours.dim)),
+    Row(width(grow=grow), height(grow=grow), clip=true, child_gap=8px,
+      Box(label(name, 13px, color=ishidden(name) ? colours.dim : colours.ink)), entry_marks(e, o)...),
+    # Each at the right of its column, under its heading. A Box of their own keeps the words from filling the column.
+    Box(fixed(HOME_COL_W), Alignment.End, Box(label(it.folder ? "" : Zips.size_words(it.size), 12px, color=colours.faint))),
+    Box(fixed(HOME_COL_W), Alignment.End, Box(label(!it.known ? "Reading…" : it.when > 0 ? Git.ago(it.when) : "", 12px, color=colours.faint))))
+end
+
+"The table of the folders and files of the home folder's page `v`, with a heading over each column"
+home_table(v::HomeView, e) = begin
+  home_items!(e, v)
+  redraw_in!(e, 1)   # the folder is read again each second, so a new file gets its row
+  isempty(v.items) && return (page_note("This folder is empty."),)
+  items = home_sorted(v)
+  shown = v.every ? items : items[1:min(HOME_ROWS_FIRST, end)]
+  more = length(items) - length(shown)
+  # The headings are in line with the rows' words: the name's after the icon, the others at the right
+  heads = Row(width(grow=grow), height(24px), padding(8px, 0px), child_gap=8px, name="Headings",
+    Box(width(16px)), home_head(v, :name), home_head(v, :size), home_head(v, :when))
+  (heads, Box(width(grow=grow), height(1px), background(colours.line)),
+   [home_item_row(v, e, it) for it in shown]...,
+   (more > 0 ? (Row(padding(8px, 8px), page_button!(v, :items, _ -> (v.every = true; nothing), words="Show $more More")),) :
+    v.every && length(items) > HOME_ROWS_FIRST ? (Row(padding(8px, 8px), page_button!(v, :items, _ -> (v.every = false; nothing), words="Show Fewer")),) : ())...)
+end
 
 describe(v::HomeView) = begin
   e = editor(v)
@@ -47179,10 +47303,10 @@ describe(v::HomeView) = begin
           Box(label(tilde(dirname(path)), 12px, color=colours.faint)),
           Box(width(grow=grow)),
           Box(label("Show on This Page", 12px, color=colours.accent))) for path in hid]...) : ())...,
-    # Last, what's in the folder, as the sidebar shows it
+    # Last, a table of what's in the folder
     Box(height(18px)),
     page_heading("Folders and files"),
-    folder_tree_part(e, v, v.path))
+    home_table(v, e)...)
 end
 
 cursor(::HomeView) = :arrow

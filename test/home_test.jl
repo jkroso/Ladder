@@ -81,6 +81,41 @@ end
   @test H.favourites() == []
 end
 
+"Give the folder or the file at `path` the time `t` as the time that it last changed"
+stamp(path, t) = run(`touch -m -t $(Libc.strftime("%Y%m%d%H%M.%S", t)) $path`)
+"Give the folder at `path` and everything in it, at any depth, the time `t`"
+stamp_all(path, t) = run(`find $path -exec touch -m -t $(Libc.strftime("%Y%m%d%H%M.%S", t)) "{}" +`)
+"Wait until `f()` is true, for no longer than `s` seconds, and say whether it is"
+wait_until(f; s=10) = (t0 = time(); while !f() && time() - t0 < s; sleep(0.05) end; f())
+
+@testset "a folder's time is when anything in it last changed, at any depth" begin
+  root = mkpath(joinpath(dir, "times"))
+  put(rel) = (p = joinpath(root, rel); mkpath(dirname(p)); write(p, "x"); p)
+  put("Deep/a/b/c/new.txt"); put("Deep/old.txt"); put("Deep/a/.git/HEAD"); put("Flat/one.txt"); put("Library/Caches/x")
+  now = time()
+  stamp_all(root, now - 100hour)
+  stamp(joinpath(root, "Deep/a/b/c/new.txt"), now - 3hour)
+  # Neither a hidden file nor what's in the Library counts
+  stamp(joinpath(root, "Deep/a/.git/HEAD"), now - 0.1hour)
+  stamp(joinpath(root, "Library/Caches/x"), now - 1hour)
+  deep, flat, library = folders = [joinpath(root, n) for n in ("Deep", "Flat", "Library")]
+  # The Library's time is known at once: it's its own. The others are read on a second thread.
+  @test haskey(H.newest(root, folders), library)
+  @test wait_until(() -> H.times_read(root))
+  got = H.newest(root, folders)
+  @test isapprox(got[deep], now - 3hour, atol=1)
+  @test isapprox(got[flat], now - 100hour, atol=1)
+  @test isapprox(got[library], now - 100hour, atol=1)
+  # A change that macOS tells of moves its folder's time on, at any depth, in the Library too
+  put("Flat/x/y/z.txt"); put("Library/Caches/y")
+  @test wait_until(() -> (g = H.newest(root, folders); g[flat] > now - 60 && g[library] > now - 60))
+  # A change in a hidden folder doesn't
+  put("Deep/a/.git/index")
+  sleep(1.5)
+  @test isapprox(H.newest(root, folders)[deep], now - 3hour, atol=1)
+  H.forget_times!()
+end
+
 K.PLACE_KINDS[home] = K.HomeDirectory
 K.HOME[] = home
 const e = K.build_editor(page)
@@ -215,15 +250,55 @@ end
   frames()
 end
 
-@testset "under the projects is the tree of the home folder, as the sidebar shows it" begin
-  t = e.nodes[(:folder_tree, home)]
-  @test t isa K.Tree.ListTree && rect(t) !== nothing
-  # The sidebar's rows, in its order: the folders, then the files, each by name. Hidden folders stay out.
-  @test [basename(c.firstchild.path) for c in t.children] == ["Alpha", "Beta", "Code", "Desktop", "Gamma", "Library", "Mail", "list.csv", "page.md"]
-  @test all(c -> c isa K.Tree.Item && c.firstchild isa K.FileLabel, t.children)
-  shot("tree")
+@testset "under the projects is a table of the home folder, the newest first" begin
+  v = view()
+  H.forget_times!()
+  now = time()
+  ages = ["page.md" => 0.02, "Desktop" => 2, "Code" => 26, "list.csv" => 50, "Mail" => 80,
+          "Alpha" => 100, "Beta" => 120, "Gamma" => 140, "Library" => 400]
+  foreach(((name, h),) -> stamp_all(joinpath(home, name), now - h * hour), ages)
+  # A folder's time is when anything in it changed, apart from hidden things
+  stamp(main_file, now - 0.5hour)
+  stamp(joinpath(app, ".git", "HEAD"), now)
+  order = ["page.md", "Code", "Desktop", "list.csv", "Mail", "Alpha", "Beta", "Gamma", "Library"]
+  # Until a folder is read, its time says so
+  all_read() = (v.read = 0.0; frames(1); all(it -> it.known, v.items))
+  @test wait_until(all_read)
+  frames()
+  names() = [K.entry_name(it.object) for it in K.home_sorted(v)]
+  row(name) = v.rows[(:item, joinpath(home, name))]
+  # The sidebar's folders and files, with no hidden folder, the one that changed last first
+  @test v.sort == :when && v.desc
+  @test names() == order
+  @test isapprox(only(it.when for it in v.items if basename(it.path) == "Code"), now - 0.5hour, atol=1)
+  # The rows show in that order, from the top
+  tops = [K.num(rect(row(n)).top) for n in order]
+  @test issorted(tops) && allunique(tops)
+  shot("table")
+  # A click on a heading sorts the table by its column, and a second click sorts it the other way
+  by_name = ["Alpha", "Beta", "Code", "Desktop", "Gamma", "Library", "list.csv", "Mail", "page.md"]
+  click(middle(v.heads[:name]))
+  @test v.sort == :name && !v.desc && names() == by_name
+  @test issorted([K.num(rect(row(n)).top) for n in by_name])
+  click(middle(v.heads[:name]))
+  @test v.desc && names() == reverse(by_name)
+  # The largest file first. A folder has no size, so the folders come last, in the sidebar's order.
+  click(middle(v.heads[:size]))
+  @test v.sort == :size && v.desc
+  @test names() == ["page.md", "list.csv", "Alpha", "Beta", "Code", "Desktop", "Gamma", "Library", "Mail"]
+  # A new column starts with the newest first, and a second click puts the oldest first
+  click(middle(v.heads[:when]))
+  @test v.sort == :when && v.desc && names() == order
+  click(middle(v.heads[:when]))
+  @test !v.desc && names() == reverse(order)
+  shot("table-oldest")
+  click(middle(v.heads[:when]))
+  @test v.desc
+  # A new file deep in a folder puts the folder first, as soon as macOS tells of it
+  made("Mail/Inbox/2.eml", "Subject: hello\n\nhello\n")
+  @test wait_until(() -> (v.read = 0.0; frames(1); names()[1] == "Mail"))
+  shot("table-change")
   # A right-click shows the row's menu, with no Rename
-  row(name) = only(c.firstchild for c in t.children if basename(c.firstchild.path) == name)
   right_click(middle(row("Code")))
   @test menu() !== nothing && "Show in Finder" in menu().items && !("Rename" in menu().items)
   key(Keys.escape)

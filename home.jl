@@ -1,13 +1,14 @@
 # What the home folder's page shows, apart from the window that shows it: the
 # folders that you chose as favourites, and the work that changed in the last
-# week. main.jl draws the page. This file keeps the list of favourites and
-# finds the work.
+# week. main.jl draws the page. This file keeps the list of favourites,
+# finds the work, and finds when anything in each folder last changed.
 #
 #     favourites()                       # ["/Users/jake/Desktop/Canon", ...], in the order that you put them
 #     favourite!("/Users/jake/Notes")    # puts the folder at the end of the list
 #     unfavourite!("/Users/jake/Notes")  # takes it off the list
 #     move_favourite!(path, 1)           # puts it first
 #     recent(homedir())                  # [Project(path="/Users/jake/Desktop/JuliaLang/Ladder", files=[...]), ...]
+#     newest(homedir(), folders)         # when anything in each folder last changed, at any depth
 #
 # Ladder keeps the favourites in a file of its own, in its folder in
 # ~/Library/Application Support, one folder on each line. The same file keeps
@@ -30,6 +31,7 @@
 
 @use "github.com/jkroso/Prospects.jl" @def
 @use Dates: Dates, DateTime
+@use FileWatching
 
 # --- the favourites ---------------------------------------------------------------------
 
@@ -367,11 +369,214 @@ end
 "Find the work again the next time that it's asked for"
 forget!() = (RECENT.at = 0.0; nothing)
 
+# --- when anything in a folder last changed ---------------------------------------------------
+#
+#     newest(homedir(), ["/Users/jake/Desktop", ...])   # Dict("/Users/jake/Desktop" => 1.795e9, ...)
+#
+# The table on the home folder's page says when anything in each of its
+# folders last changed: the newest time of the folder itself and of each
+# folder and file in it, at any depth. Hidden folders and files don't count.
+# Git changes the files in a repository's .git when Ladder only asks it
+# something, and the Finder writes .DS_Store when it shows a folder.
+#
+# Ladder reads each folder once, on a second thread, the first time that the
+# page asks for it. Most folders take a part of a second. A folder of half a
+# million files took 10 seconds. Before it starts, Ladder asks macOS to tell it
+# of each change in the home folder, at any depth (FSEvents). Each change
+# moves its folder's time on. A change that's newer than the start of a
+# folder's reading ends that reading: nothing that the reading could still
+# find is newer. A folder's time never goes back, since taking a file out of a
+# folder changes the folder's own time.
+#
+# ~/Library isn't read. It holds more than a million files, a read of it took 8
+# minutes, and macOS asks you before an app reads the data that other apps
+# keep there. Its time is its own until macOS tells of a change in it. Apps
+# change files there all the time, so that's about a second.
+
+"The folders that `newest` doesn't read, by name: their time is their own, and each change that macOS tells of"
+const UNREAD = Set(["Library"])
+
+"The reading of one folder: the folders in it that are still to read, and the newest time found so far"
+mutable struct Reading
+  stack::Vector{String}
+  best::Float64
+end
+
+"What's known of when the folders of one folder last changed"
+mutable struct Times
+  root::String
+  times::Dict{String,Float64}     # the newest time in each folder, as far as it's known, by its path
+  known::Set{String}              # the folders whose time is known: read to the end, or changed after their reading started
+  asked::Set{String}              # the folders that were asked for
+  queue::Vector{String}           # the folders that wait to be read
+  started::Dict{String,Float64}   # when the reading of each folder started
+  reading::Bool                   # a second thread reads folders now
+  monitor::Any                    # what hears of the changes from macOS, or nothing
+  lock::ReentrantLock
+end
+Times(root) = Times(root, Dict{String,Float64}(), Set{String}(), Set{String}(), String[], Dict{String,Float64}(), false, nothing, ReentrantLock())
+
+"What's known of the folders of each folder that `newest` was asked about, by that folder's path"
+const TIMES = Dict{String,Times}()
+const TIMES_LOCK = ReentrantLock()
+
+"The time that the folder or the file at `path` last changed, or 0 when it's gone or macOS doesn't say. A link has its own time."
+own_time(path::AbstractString) = try lstat(path).mtime catch; 0.0 end
+
+"""
+When anything in each of the folders `folders` of the folder `root` last
+changed, at any depth, by the folder's path. A folder that's still being
+read isn't in it. The first time that a folder is asked for, a second
+thread starts to read it.
+"""
+newest(root::AbstractString, folders) = begin
+  t = lock(() -> get!(() -> Times(String(root)), TIMES, root), TIMES_LOCK)
+  lock(t.lock) do
+    for f in folders
+      f in t.asked && continue
+      push!(t.asked, f)
+      if basename(f) in UNREAD
+        t.times[f] = max(get(t.times, f, 0.0), own_time(f))
+        push!(t.known, f)
+      else
+        push!(t.queue, f)
+      end
+    end
+    # macOS tells of the changes from before the first folder's reading starts
+    t.monitor === nothing && (t.monitor = listen!(t))
+    if !t.reading && !isempty(t.queue)
+      t.reading = true
+      errormonitor(Threads.@spawn read_all!(t))
+    end
+    Dict{String,Float64}(f => get(t.times, f, 0.0) for f in t.known)
+  end
+end
+
+"""
+Read the folders that wait in `t`'s queue. Each step reads one folder inside
+each of them in turn, so a small folder's time is known soon, even while a
+big one is still being read. It runs on Julia's worker thread, apart from
+the window's.
+"""
+read_all!(t::Times) = begin
+  open = Dict{String,Reading}()
+  while true
+    lock(t.lock) do
+      while !isempty(t.queue)
+        f = popfirst!(t.queue)
+        t.started[f] = time()
+        # A link to a folder counts with the time of the folder that it leads to. Inside, links aren't followed.
+        open[f] = Reading([f], try stat(f).mtime catch; 0.0 end)
+      end
+      isempty(open) && (t.reading = false)
+    end
+    isempty(open) && return
+    for (f, r) in collect(open)
+      ended = lock(() -> f in t.known, t.lock)
+      ended || isempty(r.stack) || read_one!(r)
+      if ended || isempty(r.stack)
+        lock(t.lock) do
+          t.times[f] = max(get(t.times, f, 0.0), r.best)
+          push!(t.known, f)
+        end
+        delete!(open, f)
+      end
+    end
+    # The thread is the one that runs a page's code too, so that waits no more than a step
+    yield()
+  end
+end
+
+"Read the last folder of `r`'s list: the times of what's in it, apart from what's hidden. Its folders go on the list."
+read_one!(r::Reading) = begin
+  dir = pop!(r.stack)
+  # macOS doesn't let Ladder read some folders, like the Trash before Ladder has Full Disk Access
+  names = try readdir(dir) catch; return end
+  for name in names
+    startswith(name, '.') && continue
+    path = joinpath(dir, name)
+    st = try lstat(path) catch; continue end
+    r.best = max(r.best, st.mtime)
+    isdir(st) && push!(r.stack, path)
+  end
+end
+
+"""
+Hear of each change from macOS in the folder of `t`, at any depth. It's
+nothing when macOS can't be asked.
+"""
+listen!(t::Times) = begin
+  m = try watch_deep(t.root) catch err
+    @warn "Ladder can't hear of changes in $(t.root)" exception=err
+    return nothing
+  end
+  errormonitor(Threads.@spawn while true
+    name = try first(wait(m)) catch; break end
+    try changed!(t, name) catch err; @warn "Ladder couldn't take in a change" exception=err end
+  end)
+  m
+end
+
+"""
+A watcher of the folder at `root` that hears of changes at any depth. Julia's
+`FolderMonitor` only hears of the things in the folder itself, so its watch
+starts again with libuv's flag for every depth. On a Mac, libuv asks
+FSEvents, and a change's name is its path from `root`.
+"""
+watch_deep(root::AbstractString) = begin
+  m = FileWatching.FolderMonitor(root)
+  cb = @cfunction(FileWatching.uv_fseventscb_folder, Cvoid, (Ptr{Cvoid}, Ptr{Int8}, Int32, Int32))
+  Base.iolock_begin()
+  err = try
+    ccall(:uv_fs_event_stop, Cint, (Ptr{Cvoid},), m.handle)
+    ccall(:uv_fs_event_start, Cint, (Ptr{Cvoid}, Ptr{Cvoid}, Cstring, Cint), m.handle, cb, root, UV_FS_EVENT_RECURSIVE)
+  finally
+    Base.iolock_end()
+  end
+  err == 0 || (close(m); error("libuv couldn't watch $root at every depth: error $err"))
+  m
+end
+
+"libuv's flag that asks to hear of changes at every depth of a folder"
+const UV_FS_EVENT_RECURSIVE = Cint(4)
+
+"Take in the change that macOS told of at `name`, the path of a folder or a file from the folder of `t`"
+changed!(t::Times, name::AbstractString) = begin
+  parts = split(name, '/', keepempty=false)
+  isempty(parts) && return
+  # A change inside a hidden folder, or to a hidden file, doesn't count
+  any(p -> startswith(p, '.'), parts[2:end]) && return
+  folder = joinpath(t.root, parts[1])
+  path = joinpath(t.root, name)
+  # The thing's own time. A thing that went has none, but the folder that held it changed when it went.
+  when = length(parts) == 1 ? own_time(path) : max(own_time(path), own_time(dirname(path)))
+  lock(t.lock) do
+    t.times[folder] = max(get(t.times, folder, 0.0), when)
+    started = get(t.started, folder, Inf)
+    when >= started && push!(t.known, folder)
+  end
+  nothing
+end
+
+"Forget what's known of when folders changed, and stop hearing of changes, for a test"
+forget_times!() = lock(TIMES_LOCK) do
+  for t in values(TIMES)
+    t.monitor === nothing || close(t.monitor)
+  end
+  empty!(TIMES)
+  nothing
+end
+
+"True when no folder of `root` is being read or waits to be, for a test"
+times_read(root::AbstractString) = (t = get(TIMES, root, nothing); t === nothing || lock(() -> !t.reading && isempty(t.queue), t.lock))
+
 # The app that's built keeps what these hold when it's made. A search that ran then never ends in the
 # app, so the app starts with nothing found, and reads its file again.
 __init__() = begin
   RECENT.home, RECENT.projects, RECENT.at, RECENT.done, RECENT.running = "", Project[], 0.0, false, false
   READ[] = (-1.0, Kept())
   empty!(IGNORED)
+  # What was read, and what heard of changes, when the app was made, are gone
+  empty!(TIMES)
   nothing
 end
