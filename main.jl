@@ -367,6 +367,7 @@
 @use "./calendar" => Calendars
 @use "./linkcard" => Cards
 @use "./columns" => Columns
+@use "./repeats" => Repeats
 @use "./find" => Searches
 @use "./sketch" => Sketches
 @use "./canvas" => Canvases
@@ -13660,6 +13661,195 @@ save_html(e, v::SaveView) = begin
 end
 
 BLOCKS[SAVE] = BlockKind("Save", "save", SaveView, save_html)
+
+# --- a form that adds a row to a table ---------------------------------------------------------
+#
+# A code block in the language `form` shows a field for each column of the
+# table above it, and a button, Add, that adds a row to the table with what's
+# in the fields. forms.jl says how the block is written, and what each field
+# takes. A line `to: Jobs` in the block adds to the first table under the
+# heading Jobs.
+#
+# Return in a field adds the row too. Tab goes to the next field, ⇧Tab to the
+# one before, and Esc gives the keyboard back to the page. A field for a number
+# or a day says so in grey words while it's empty. A column with a few words
+# that come again, like Quote and Booked, has a button for each beside its
+# field, and a click puts that word in the field. After an add, the fields are
+# empty again, the first has the keyboard, and the line under them says what
+# was added. One ⌘Z takes the row away.
+#
+# What's typed in the fields isn't in the file until it's added. Only a table
+# of the page's text takes rows: not a sheet, a spreadsheet or a filter.
+
+const FORM = Forms.FORM
+push!(BLOCK_ICONS, "input-cursor-text", "plus-lg")
+
+"What a `form` block shows: a field for each column of a table, and a button that adds a row"
+@def mutable struct FormView <: SemanticUI
+  n::Int = 0                               # its place among the page's forms
+  first::Int = 0                           # the lines of its block, when the page was last laid out
+  last::Int = 0
+  spec::Forms.Form = Forms.Form()
+  lines::Vector{String} = String[]         # the lines that `spec` was read from
+  said::String = ""                        # what the last add did, or ""
+  parts::Dict{Any,Any} = Dict{Any,Any}()   # its fields and its buttons, kept between frames
+end
+
+reread!(v::FormView, lines) = begin
+  lines == v.lines && return v
+  v.lines = lines
+  v.spec = Forms.query(lines)
+  v
+end
+
+"""
+The table of the page that the form `v` adds rows to, as `page_tables` gives
+it: the one under the heading that `to` names, or the one nearest above. It's
+words that say why, when there's no table that it can add to.
+"""
+form_table(v::FormView) = begin
+  e = editor(v)
+  tables = page_tables(e)
+  to = String(strip(v.spec.to))
+  k = isempty(to) ? something(findlast(t -> t.last < v.first, tables), 0) : something(named_table(e, tables, to), 0)
+  k == 0 && return isempty(to) ? "Put a table over this form, and the form adds rows to it." : "This page has no table called “$(to)”."
+  t = tables[k]
+  kinds(e.buf)[t.first].kind == Kind.table || return "A form adds rows only to a table of the page's text, and the one $(isempty(to) ? "above" : "called “$(to)”") is a $(table_kind(e, t))."
+  t
+end
+
+"What the form calls the table `t`: its heading, or “the table above”"
+form_target(t) = isempty(t.under) ? "the table above" : t.under
+
+"The field of the form `v` for column `k`"
+form_field(v::FormView, k::Int) = block_part!(v, (:field, k)) do
+  TextInput(placeholder="", font_family=SANS, font_size=13px, look=(_, text) -> Row(width(grow=grow), height(grow=grow), clip=true, text))
+end
+
+"The column whose field has the keyboard of the window `w`, or nothing"
+form_focused(v::FormView, w) = begin
+  for (key, part) in v.parts
+    key isa Tuple && key[1] == :field && part === w.focus && return key[2]
+  end
+  nothing
+end
+
+"How many fields the form `v` has: one for each column of its table"
+form_width(v::FormView) = (t = form_table(v); t isa String ? 0 : length(first(t.rows)))
+
+"""
+Add a row to the table of the form `v`, with what's in its fields, in one edit,
+so one ⌘Z takes it away. The caret stays with its text. The fields are emptied
+then, and the first gets the keyboard. Nothing happens while every field is empty.
+"""
+add_row!(v::FormView) = begin
+  t = form_table(v)
+  t isa String && return v
+  e = editor(v)
+  b = e.buf
+  readonly(b) && return v
+  cells = [form_field(v, k).text for k in 1:length(first(t.rows))]
+  all(c -> isempty(strip(c)), cells) && return v
+  at = line_end(b, t.last)
+  line = Forms.row_line(cells)
+  caret, anchor = b.caret, b.anchor
+  edit!(b, at, at, "\n" * line)
+  stop = (t.last + 1, length(line))
+  b.caret, b.anchor = moved(caret, at, at, stop), moved(anchor, at, at, stop)
+  for k in eachindex(cells)
+    f = form_field(v, k)
+    f.text, f.cursor, f.anchor = "", 0, 0
+  end
+  name = first(filter(!isempty, strip.(cells)))
+  v.said = "Added “$(length(name) > 40 ? first(name, 39) * "…" : name)” to $(form_target(t))."
+  w = window_of(v)
+  w === nothing || focus(form_field(v, 1))
+  redraw_in!(v, 0)
+  v
+end
+
+act!(v::FormView, action, w) = begin
+  if action isa Tuple && action[1] == :choice
+    # A button of a field puts its word in the field
+    _, k, word = action
+    f = form_field(v, k)
+    f.text, f.cursor, f.anchor = word, length(word), length(word)
+    focus(f)
+    return handled
+  end
+  action == :add && add_row!(v)
+  handled
+end
+
+# Return in a field adds the row. Tab and ⇧Tab go from field to field, round to the first or the last. Esc gives the page the keyboard.
+onkey(v::FormView, ev::KeyPress{Keys.enter}) = begin
+  (unmodified(ev) && form_focused(v, ev.window) !== nothing) || return nothing
+  add_row!(v)
+  handled
+end
+onkey(v::FormView, ev::KeyPress{Keys.tab}) = begin
+  k = form_focused(v, ev.window)
+  (k !== nothing && (unmodified(ev) || only_held(ev, Keys.shft))) || return nothing
+  # The field that's left keeps no selection, and the next one has all its words selected
+  left = form_field(v, k)
+  left.anchor = left.cursor
+  f = form_field(v, mod1(k + (only_held(ev, Keys.shft) ? -1 : 1), max(form_width(v), 1)))
+  f.anchor, f.cursor = 0, length(f.text)
+  focus(f)
+  handled
+end
+onkey(v::FormView, ev::KeyPress{Keys.escape}) = begin
+  (unmodified(ev) && form_focused(v, ev.window) !== nothing) || return nothing
+  focus(editor(v))
+  handled
+end
+
+"The words in a field of the form while it's empty, which say what it takes"
+form_hint(f::Forms.Field) = f.kind == :number ? "A number" : f.kind == :day ? "A day, like $(calendar_today())" : ""
+
+describe(v::FormView) = begin
+  e = editor(v)
+  t = form_table(v)
+  fields = t isa String ? Forms.Field[] : Forms.fields(t.rows)
+  with_theme(component_theme(e.zoom)) do
+    title = !isempty(v.spec.title) ? v.spec.title : t isa String ? "Form" : "Add a row to $(form_target(t))"
+    bar = block_bar(Box(width(10px)), Icon("input-cursor-text", size=14px, color=colours.dim), Box(width(6px)),
+                    Box(label(title, 13px, weight="Semibold")), Box(width(grow=grow)))
+    t isa String && return Column(block_look()..., clip=true, name="Form", bar, block_note(t))
+    w = window_of(v)
+    keys = maximum(f -> measure(Face(SANS, "", 12px, colours.dim, false), f.name), fields, init=0px) + 4px
+    rows = map(enumerate(fields)) do (k, f)
+      field = form_field(v, k)
+      field.placeholder = form_hint(f)
+      typing = w !== nothing && w.focus === field
+      choices = [block_button!(v, (:choice, k, j), (:choice, k, word), words=word, on=strip(field.text) == word, tip="Put “$(word)” in $(f.name)")
+                 for (j, word) in enumerate(f.choices)]
+      Row(width(grow=grow), child_gap=8px, Alignment.Center, name="Field",
+        Box(fixed(keys), Alignment.Start, label(f.name, 12px, color=colours.dim)),
+        Row(width(grow=grow), height(28px), padding(8px, 0px), radius(6px), Alignment.Center,
+            background(colours.bg), border(1px, :solid, typing ? colours.accent : colours.line),
+            Box(width(grow=grow), height(grow=grow), field)),
+        choices...)
+    end
+    empty = all(k -> isempty(strip(form_field(v, k).text)), eachindex(fields))
+    words = !isempty(v.said) ? v.said : "Return or Add puts what's typed in a new row of $(form_target(t))."
+    foot = Row(width(grow=grow), child_gap=8px, Alignment.Center,
+      (isempty(v.said) ? () : (Icon("check2", size=13px, color=colours.dim),))...,
+      Box(width(grow=grow), Text(words, size=12px, family=SANS, color=colours.dim, wrap=WrapMode.words)),
+      block_button!(v, :add, :add, icon="plus-lg", words="Add", tip=empty ? "Type in a field first" : "Add a row to $(form_target(t))", off=empty, bold=true))
+    Column(block_look()..., clip=true, name="Form", bar,
+      Column(width(grow=grow), Alignment.Start, padding(12px, 12px, 10px, 12px), child_gap=8px, rows..., Box(height(2px)), foot))
+  end
+end
+
+"The form block as HTML: which table it adds rows to"
+form_html(e, v::FormView) = begin
+  t = form_table(v)
+  title = isempty(v.spec.title) ? "" : "<strong>$(escape(v.spec.title))</strong>: "
+  "<p><em>$(title)A form that adds rows to $(t isa String ? "a table" : escape(form_target(t))).</em></p>"
+end
+
+BLOCKS[FORM] = BlockKind("Form", "input-cursor-text", FormView, form_html)
 
 # --- rows loaded from a server or a file --------------------------------------------------------
 #
@@ -31311,6 +31501,8 @@ const INSERTS = [
   ("Save",          ["```$SAVE", "to: ", "```", "", ""], (2, 4)),
   # The block shows a list of files to choose from, so the caret goes under it
   ("Load",          ["```$LOAD", "```", "", ""], (4, 0)),
+  # The block shows a field for each column of the table above it, so the caret goes under it
+  ("Form",          ["```$FORM", "```", "", ""], (4, 0)),
   ("Sketch",        ["```$SKETCH", "```", "", ""],  (4, 0)),
   ("Canvas",        ["```$CANVAS", "```", "", ""],  (4, 0)),
   ("Web Page",      ["```$WEBVIEW", "https://", "```", "", ""], (2, 8)),

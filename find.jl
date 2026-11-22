@@ -20,7 +20,7 @@
 #
 # - `code blocks`: the blocks of code that Ladder shows as code
 # - `sheets`, `spreadsheets`, `live blocks`, `diagrams`, `takeoffs`,
-#   `schedules`, `charts`, `boards`, `calendars`, `day sliders`, `columns`, `sketches`, `signatures`, `contacts`, `maps`, `find lists`, `filters`, `save blocks`, `load blocks`, `email lists`,
+#   `schedules`, `charts`, `boards`, `calendars`, `day sliders`, `columns`, `sketches`, `signatures`, `contacts`, `maps`, `find lists`, `filters`, `save blocks`, `forms`, `load blocks`, `email lists`,
 #   `time logs`, `questions`, `changes`: the blocks that Ladder shows as that component
 #
 # A block is listed by the heading that it's under. A block of code, and a
@@ -83,6 +83,7 @@ const WHATS = (todo=what_is("to-do items", "to-dos", "todos", "todo", "to-do", "
                find=what_is("find lists", "find list", "finds", one="find list", langs=(FIND,)),
                filter=what_is("filters", "filter", one="filter", langs=("filter",)),
                save=what_is("save blocks", "save block", "saves", one="save block", langs=("save",)),
+               form=what_is("forms", "form", one="form", langs=("form",)),
                load=what_is("load blocks", "load block", "loads", one="load block", langs=("load",)),
                check=what_is("checks", "check", "check blocks", one="block of checks", many="blocks of checks", langs=("check",)),
                email=what_is("email lists", "email list", "emails", one="email list", langs=("email",)),

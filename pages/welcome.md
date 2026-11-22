@@ -827,6 +827,22 @@ When `to` is a web address, like `to: https://example.com/api/costs`, the button
 
 The line under the top of the block says what a click will do. After a click, it says when the rows went and what the server said.
 
+## Forms
+
+A code block in the language `form` shows a field for each column of the table above it. Type in the fields and press Return, or click Add, and the form adds a row to the table.
+
+| Client | Due | Status |
+|---|---|---|
+| Smith | 2026-11-25 | Quote |
+| Jones | 2026-12-02 | Booked |
+| Brown | 2026-12-09 | Quote |
+
+```form
+title: New job
+```
+
+Tab goes to the next field, and ⇧Tab to the one before. A field for a column of numbers, or of days, says so while it's empty. A column with a few words that come again, like Quote and Booked, has a button for each of them beside its field. A line like `title: New job` is the words at the top of the form. A line like `to: Jobs` adds the rows to the first table under the heading Jobs. One ⌘Z takes a row away again.
+
 ## Loading rows
 
 A code block in the language `load` shows the rows of a file or of a server as a table. A filter, a chart or a save block under it uses those rows. This block shows the costs in [costs.csv](costs.csv), and loads them again when the file changes:

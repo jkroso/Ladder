@@ -56,6 +56,7 @@ The block at the top of this page is front matter: lines at the very top of a fi
 - [A chart of a table's numbers](welcome.md#charts)
 - [A filter: the rows of a CSV file, a JSON file or a table that meet some conditions](welcome.md#filters)
 - [A save block: write the rows of a table into a file, or send them to a server](welcome.md#saving-rows)
+- [A form: a field for each column of a table, and a button that adds a row](welcome.md#forms)
 - [A load block: the rows of a file or of a server, as a table](welcome.md#loading-rows)
 - [Sums in a line of text](components.md#sums-in-a-line-of-text)
 - [Julia code that runs where it is](julia.md)
