@@ -29986,6 +29986,11 @@ end
 #     folder opens beside it. Click a file to show it, or a folder to open it.
 #     See "the list of a folder, under a › of the path".
 #   - A right-click on a name shows the menu of that folder or file.
+#   - A click on the file's name pins the path: it stays open when the mouse
+#     leaves it, and while you open folders from it, until a second click on
+#     the name. A pinned path is in the middle of the bar, where the file's
+#     name is, and has no border or shadow, since it's part of the bar. Its
+#     file's name is shaded.
 #
 # After the file's name come the headings over the caret, from the biggest,
 # and the component that the caret is on: `welcome.md › H2 › Sheet`. A heading
@@ -30011,6 +30016,8 @@ end
   parts::Vector{Entry} = Entry[]                                 # the headings over the caret and the component that it's on, after the file's name
   marks::Dict{Int,Any} = Dict{Int,Any}()                         # the TitlePart of each of those
   drops::Dict{Int,Any} = Dict{Int,Any}()                         # the PartArrow after the file's name (0) and after each heading, by its place in `parts`
+  centred::Bool = false                                          # true when it's in the middle of the bar, as a pinned path is
+  title_at::Any = nothing                                        # where the file's name was in the bar when the path was put in place
 end
 
 "A heading over the caret, or the component that the caret is on, after the file's name in the path"
@@ -30043,6 +30050,9 @@ const TT_WAIT = 0.15    # how many seconds the mouse is over the name before the
 const TT_MOST = 80      # the most things that a list of a folder shows
 const TT_PART = 180px   # how wide the name of a component in the path can be
 const TT_MARK = 14px    # how big a heading's mark is in the path, like H2
+
+"True when a click on the file's name pinned the path open, so it stays when the mouse leaves it"
+trail_pinned(e) = get(e.nodes, :title_pinned, false) === true
 
 "How wide each name of `steps` is in the top bar. The file's name is a little bolder."
 title_widths(steps) = [measure(Face(SANS, i == length(steps) ? "Medium" : "", 13px, colours.ink, false), n) + 2TT_PAD
@@ -30145,7 +30155,9 @@ title_trail!(e, t) = begin
   # A list of a folder under a ›, or a search under one, keeps the path, until a click or Esc takes it away
   searching = any(p -> p.key == TS_KEY, popups(w))
   listing = searching || any(p -> p.content isa FolderList, popups(w))
-  if !((ishovered(t) || listing) && !nofile(e) && isabspath(path) && isdir(dirname(path)) && renaming(e, :title) != path && e.popup == :none)
+  # A pinned path shows while the bar shows the file's name, with the mouse anywhere
+  pinned = trail_pinned(e) && slideshow(e) === nothing && !as_app(e) && !screening(e)
+  if !((ishovered(t) || listing || pinned) && !nofile(e) && isabspath(path) && isdir(dirname(path)) && renaming(e, :title) != path && e.popup == :none)
     delete!(e.nodes, :title_hover)
     listing && (close_folder_lists!(e, w); close_title_search!(e, w))
     open && close_popup!(w, :title_trail)
@@ -30153,13 +30165,20 @@ title_trail!(e, t) = begin
   end
   searching && search_tick!(e, w)
   since = get!(e.nodes, :title_hover, time())
-  time() - since < TT_WAIT && return redraw_in!(e, TT_WAIT)
+  !pinned && time() - since < TT_WAIT && return redraw_in!(e, TT_WAIT)
   kept = get(e.nodes, :title_trail, nothing)
-  (open && kept isa TitleTrail && kept.path == path && kept.size == window_size(e) && kept.parts == focus_parts(e)) || show_title_trail!(e, t, w, path)
-  # A window hears nothing when the mouse leaves it, so the path looks for itself
-  isempty(w.glfw) || (sync_mouse!(w); redraw_in!(e, 0.2))
+  # The path follows the file's name when the name moves, as it does while a sidebar or git's panel slides open.
+  # The name's place is from the last frame, so one more frame checks that the path is where the name is now.
+  (open && kept isa TitleTrail && kept.path == path && kept.size == window_size(e) && kept.parts == focus_parts(e) &&
+   (kept.centred || !pinned) && kept.title_at == title_place(e, t)) ||
+    (show_title_trail!(e, t, w, path); redraw_in!(e, 0))
+  # A window hears nothing when the mouse leaves it, so the path looks for itself. A pinned path stays, so it looks only while the mouse is on it.
+  isempty(w.glfw) || (pinned && !ishovered(t)) || (sync_mouse!(w); redraw_in!(e, 0.2))
   nothing
 end
+
+"Where the file's name is in the top bar: the left edge and the width of its node, and the room in it before the name"
+title_place(e, t) = (r = rect(t); r === nothing ? nothing : (r.left, r.width, get(e.nodes, :title_lead, 0px)))
 
 "Put the path to `path` over the top bar, with the file's name where the bar shows it"
 show_title_trail!(e, t, w, path) = begin
@@ -30177,12 +30196,16 @@ show_title_trail!(e, t, w, path) = begin
   shown = title_steps(all, wide - 8px - start - trail_parts_wide(e, parts))
   v = get!(() -> own!(t, TitleTrail()), e.nodes, :title_trail)
   v.path == path || (empty!(v.crumbs); empty!(v.arrows))
-  v.path, v.steps, v.size, v.parts = path, shown, window_size(e), parts
+  # A pinned path is in the middle of the bar. After a click unpins it, it stays there until it closes, so the name doesn't move from under the mouse.
+  v.centred = trail_pinned(e) || (v.centred && any(p -> p.key == :title_trail, popups(w)))
+  v.path, v.steps, v.size, v.parts, v.title_at = path, shown, window_size(e), parts, title_place(e, t)
   widths = title_widths(shown)
   total = title_wide(shown) + trail_parts_wide(e, parts)
   # How far the file's name is from the path's left edge
   before = sum(widths[1:end-1], init=0px) + TT_ARROW * (length(shown) - 1) + TT_EDGE + 1px + TT_PAD
-  x = clamp(r.left + get(e.nodes, :title_lead, 0px) - before, start, max(start, wide - 8px - total))
+  # The name is in the middle of its room in the bar, with the headings after it and as much room before it, so the middle of the name's node is the bar's
+  x = v.centred ? r.left + r.width / 2 - total / 2 : r.left + get(e.nodes, :title_lead, 0px) - before
+  x = clamp(x, start, max(start, wide - 8px - total))
   popup!(w, v, anchor=(x, (TOPBAR_H - TT_H) / 2), placement=:below, gap=0px, width=total, key=:title_trail,
          modal=false, theme=menu_theme())
   nothing
@@ -30219,14 +30242,18 @@ describe(v::TitleTrail) = begin
       v.parts[k].level < 7 && push!(parts, drop(k))
     end
   end
-  # Each name fills the height inside the border and 1px more, so its hover box has as much room above it as below
+  # Each name fills the height inside the border and 1px more, so its hover box has as much room above it as below.
+  # A pinned path has no shadow and no border: it's part of the bar, not something that floats over the page. Its
+  # border is clear, so that its names stay where they are.
+  pinned = trail_pinned(e)
   Row(width(grow=grow), height(TT_H), padding(TT_EDGE, 1px), radius(7px), Alignment.Center, name="Path",
-      background(colours.bg), border(1px, :solid, colours.line), lifted, parts...)
+      background(colours.bg), border(1px, :solid, pinned ? clear : colours.line), (pinned ? () : (lifted,))..., parts...)
 end
 
+# The file's name is shaded while the path is pinned, as it is under the mouse
 describe(c::TitleCrumb) =
   Box(height(grow=grow), padding(TT_PAD, 0px), radius(5px), Alignment.Center, justify=Alignment.Center, name="Step",
-      background(!c.last && ishovered(c) ? colours.hover : clear),
+      background(ishovered(c) || c.last && trail_pinned(editor(c)) ? colours.hover : clear),
     label(c.name, 13px, color=c.last ? colours.ink : colours.dim, weight=c.last ? "Medium" : ""))
 
 describe(a::TitleArrow) = begin
@@ -30259,7 +30286,7 @@ describe(a::PartArrow) = begin
     Icon("chevron-right", size=8px, color=colours.faint))
 end
 
-cursor(c::TitleCrumb) = c.last ? :arrow : :hand
+cursor(::TitleCrumb) = :hand
 cursor(p::TitlePart) = p.k == length(p.parent.parts) ? :arrow : :hand
 cursor(::PartArrow) = :hand
 
@@ -30273,7 +30300,10 @@ end
 onkey(a::PartArrow, ev::KeyPress{Keys.mouse_left}) = open_title_search!(editor(a), ev.window, a)
 cursor(::TitleArrow) = :hand
 
-onkey(c::TitleCrumb, ev::KeyPress{Keys.mouse_left}) = (c.last || title_go!(editor(c), ev.window, c.path); handled)
+onkey(c::TitleCrumb, ev::KeyPress{Keys.mouse_left}) = (c.last ? pin_trail!(editor(c)) : title_go!(editor(c), ev.window, c.path); handled)
+
+"Pin the path in the top bar open, or let it close again when the mouse leaves it"
+pin_trail!(e) = (e.nodes[:title_pinned] = !trail_pinned(e); nothing)
 onkey(a::TitleArrow, ev::KeyPress{Keys.mouse_left}) = (open_folder_list!(editor(a), ev.window, a); handled)
 
 # A right-click on a name shows the menu of its folder or file, as in the sidebar. Only the file's own name can be renamed in the bar.

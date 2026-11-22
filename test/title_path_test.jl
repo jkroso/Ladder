@@ -227,4 +227,42 @@ end
   @test K.num(r.left) >= K.num(K.mac_buttons_room(e)) && K.num(r.left + r.width) <= 1100
 end
 
+"The path's box in the window"
+path_box() = rect(only(p for p in popups(w) if p.key == :title_trail).content)
+"How far the middle of the path is from the middle of the file's name in the bar"
+off_middle() = (r = path_box(); t = rect(e.nodes[:title]); abs(K.num(r.left + r.width / 2) - K.num(t.left + t.width / 2)))
+
+@testset "a click on the file's name pins the path open, in the middle of the bar, and a second click lets it go" begin
+  at((550, 400)); @test !showing()
+  hover!()
+  @test off_middle() > 20   # while it only shows under the mouse, the name stays where the bar has it, and the folders go to its left
+  click(middle(crumb(a)))
+  @test K.trail_pinned(e)
+  at((550, 400))
+  @test showing()   # it stays when the mouse leaves it
+  @test off_middle() <= 2
+  shot("pinned")
+  # It stays while you go from folder to folder with it
+  click(middle(crumb(plain)))
+  @test e.buf.path == plain
+  at((550, 400))
+  @test showing() && trail().steps[end] == ("Plain", plain) && off_middle() <= 2
+  K.open!(e, a); frames()
+  @test showing() && trail().steps[end] == ("a.md", a) && off_middle() <= 2
+  # It follows the file's name when the sidebar opens, and when it closes again
+  before = rect(e.nodes[:title])
+  K.toggle_panel!(e); sleep(1); frames()
+  @test abs(K.num(rect(e.nodes[:title]).left - before.left)) > 50   # the name moved over
+  @test showing() && off_middle() <= 2
+  K.toggle_panel!(e); sleep(1); frames()
+  @test !e.panel && off_middle() <= 2
+  # A second click on the name lets it go when the mouse leaves it. Until then it stays where it is, under the mouse.
+  click(middle(crumb(a)))
+  @test !K.trail_pinned(e) && showing() && off_middle() <= 2
+  at((550, 400))
+  @test !showing()
+  hover!()
+  @test off_middle() > 20
+end
+
 K.HOME[] = ""
