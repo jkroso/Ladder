@@ -120,7 +120,8 @@ end
   # The long first line of the commit wraps, so it doesn't push the lines of the panel past its edge
   @test all(x -> K.num(rect(x).left) + K.num(rect(x).width) <= K.num(q.left) + K.num(q.width) + 0.5, values(p.rows))
   @test K.follow_words(G.state(repo)) == "Follows no other branch"
-  @test K.change_words(:changed, true) == "In the next commit"
+  # Each change has a tick box, which puts it in the next commit
+  @test all(rel -> rect(e.nodes[(:file_tick, repo, rel)]) !== nothing, ["Readme.md", "new.md", "notes.md", "src/deep/b.jl"])
   # The file's name in the top bar is over the middle of the list, not of the space beside the sidebar
   t = rect(e.nodes[:title])
   @test K.num(t.left) + K.num(t.width) / 2 ≈ K.num(r.left) + K.num(r.width) / 2 atol=40

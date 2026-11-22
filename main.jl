@@ -44610,9 +44610,6 @@ end
 "What git's panel says under the branch's name, in words: the branch that it follows. The Pull and Push buttons say how many commits there are to pull and to push."
 follow_words(s) = !s.known ? "Asking git…" : isempty(s.follows) ? "Follows no other branch" : "Follows $(s.follows)"
 
-"What git's panel calls the change `kind` of a file. A change that git has for the next commit says so, as the letter can't."
-change_words(kind, staged) = staged ? "In the next commit" : GIT_WORDS[kind]
-
 # --- push and pull -------------------------------------------------------------------------
 #
 # The Pull and Push buttons at the right of the branch's name in git's panel.
@@ -44860,6 +44857,87 @@ onkey(r::PullWay, ev::KeyPress{Keys.mouse_left}) = begin
   handled
 end
 
+# --- commits from git's panel --------------------------------------------------------------
+#
+# Each file in the list of changes of git's panel has a tick box at its left.
+# A tick puts the file's change in the next commit, as `git add` does, and a
+# click on the box again takes it out. The ticks are git's own, so a file that
+# `git add` put in the next commit somewhere else is ticked too.
+#
+# The Commit button at the right of the heading of the changes commits the
+# ticked files: it says "Commit 2" for two of them. With no file ticked, it says
+# "Commit all", and commits every changed file. Claude writes the message, or
+# you do when the setting says so, as with the Commit button of the top bar.
+# A file that a merge left in two forms has no tick box: a tick would tell git
+# that you've chosen its lines.
+
+"The tick box of a file in the list of changes of git's panel: ticked while the file's change is in the next commit"
+@def mutable struct FileTick <: SemanticUI
+  root::String = ""
+  rel::String = ""   # the file's path from the repository's top folder
+end
+
+"True while the window is busy with a commit of the repository at `root`, or git runs there, so the ticks stay as they are"
+committing(e, root) = (w = get(e.nodes, :writing, nothing); (w !== nothing && w.root == root) || haskey(GIT_RUNS, root))
+
+describe(t::FileTick) = begin
+  e = editor(t)
+  on = t.rel in Git.state(t.root).staged
+  still = committing(e, t.root)
+  Box(width(18px), height(20px), radius(4px), Alignment.Center, name="Tick",
+      background(!still && ishovered(t) ? colours.hover : clear),
+    Icon(on ? "check2-square" : "square", size=13px, color=on ? colours.accent : colours.dim))
+end
+
+cursor(t::FileTick) = committing(editor(t), t.root) ? :arrow : :hand
+onkey(t::FileTick, ::KeyPress{Keys.mouse_left}) = (tick_file!(editor(t), t.root, t.rel); handled)
+
+"The tick box of the file at `rel` of the repository at `root`, whose change is `kind`, or a space as wide for a file that has none"
+file_tick(e, root, rel, kind) = begin
+  kind == :clash && return Box(width(18px))
+  t = node!(FileTick, e, (:file_tick, root, rel))
+  t.root, t.rel = root, rel
+  t
+end
+
+"""
+Put the change of the file at `rel` of the repository at `root` in the next
+commit, or take it out when it's in. A window's changes to the file that
+aren't saved are saved first, so the commit has them.
+"""
+tick_file!(e, root, rel) = begin
+  committing(e, root) && return e
+  s = Git.state(root)
+  path = joinpath(root, rel)
+  done, why = if rel in s.staged
+    # Before the first commit there's nothing to put back, so git only forgets the file
+    s.head == "(initial)" ? Git.act(root, `rm --cached -q -- $rel`) : Git.act(root, `restore --staged -- $rel`)
+  else
+    save_for_commit!(e, root, path, :file)
+    Git.act(root, `add -- $rel`)
+  end
+  Git.forget!()
+  done || say_result!(e, "git couldn't do it: " * git_reason(why))
+  redraw_in!(e, 0)
+  e
+end
+
+"""
+The Commit button of git's panel for the repository at `root`, where git says
+`s` of it. It commits the ticked files, or every changed file when none is
+ticked, and its words say which.
+"""
+commit_button(e, root, s) = begin
+  n = count(rel -> rel in s.staged, keys(s.changes))
+  b = node!(PageButton, e, (:git_button, root, :commit))
+  w = get(e.nodes, :writing, nothing)
+  b.act = _ -> commit_scope!(e, n > 0 ? :staged : :all)
+  b.icon = "check2"
+  b.words = w !== nothing && w.root == root ? "Committing…" : n > 0 ? "Commit $n" : "Commit all"
+  b.off = w !== nothing || haskey(GIT_RUNS, root) || !s.known
+  b
+end
+
 describe(p::GitPanel) = begin
   e = editor(p)
   s = watch_git!(e, p.path)
@@ -44871,10 +44949,11 @@ describe(p::GitPanel) = begin
     # A file shows with what changed in it marked. A file that's gone has nothing to show.
     act = ispath(path) ? (_ -> (show_changes!(e, path); nothing)) : nothing
     page_row!(p, (:change, rel), act,
+      file_tick(e, p.path, rel, kind),
       Box(width(14px), label(GIT_LETTERS[kind], 12px, color=git_colour(kind), weight="Semibold")),
       Row(width(grow=grow), height(grow=grow), clip=true, child_gap=6px,
         Box(label(basename(rel), 13px)), (isempty(dir) ? () : (Box(label(dir, 12px, color=colours.faint)),))...),
-      Box(label(change_words(kind, rel in s.staged), 12px, color=colours.faint)))
+      Box(label(GIT_WORDS[kind], 12px, color=colours.faint)))
   end
   # Nothing in the panel makes it wider than its column: a name that's too long is cut off at its edge
   reuse!(p.scroll, Column(width(grow=grow), Alignment.Start, padding(2px, 10px, 24px, 10px), clip_x=true, name="Git",
@@ -44883,7 +44962,9 @@ describe(p::GitPanel) = begin
         Row(width(grow=grow), clip=true, Box(label(s.known ? s.branch : "…", 15px, weight="Semibold"))),
         send_buttons(e, p.path, s)),
       Box(width(grow=grow), Alignment.Start, Text(follow_words(s), size=12px, family=SANS, color=colours.dim, wrap=WrapMode.words))),
-    page_heading(isempty(changes) ? "Changes" : "Changes  ·  $(length(changes))"),
+    (isempty(changes) ? page_heading("Changes") :
+     Row(width(grow=grow), Alignment.Center, child_gap=8px,
+       page_heading("Changes  ·  $(length(changes))"), commit_button(e, p.path, s))),
     (!s.known ? (page_note("Asking git…"),) :
      isempty(changes) ? (page_note("No file has changed since the last commit."),) :
      [change(rel, kind) for (rel, kind) in changes])...,
@@ -45434,15 +45515,16 @@ end
 """
 Start a commit of the window's file with a message that Claude writes: of the
 whole file with `:file`, of every changed file of its repository with
-`:all`, or of the ticked changes of the file with `:part`. Changes that
-aren't saved are saved first. Claude writes while the window goes on, and
-`commit_tick!` commits when the message comes.
+`:all`, of the ticked changes of the file with `:part`, or of the files that
+are ticked in git's panel with `:staged`. Changes that aren't saved are saved
+first. Claude writes while the window goes on, and `commit_tick!` commits
+when the message comes.
 """
 commit_now!(e, what::Symbol) = begin
   haskey(e.nodes, :writing) && return e   # one at a time
   try
     path = e.buf.path
-    root = git_top(dirname(path))
+    root = repo_of(e)
     isempty(root) && error("git doesn't keep $(basename(path))")
     save_for_commit!(e, root, path, what)
     rel = relpath(realpath(path), realpath(root))
@@ -45455,9 +45537,12 @@ commit_now!(e, what::Symbol) = begin
     elseif what == :part
       part, diff = ticked_text(e, rel)
       diff
+    elseif what == :staged
+      something(Git.ask(root, `diff --cached`), "")
     else
       text_diff(rel, committed_text(root, rel), read(path, String))
     end
+    what == :staged && isempty(strip(diff)) && error("Tick the files to commit.")
     isempty(strip(diff)) && error("$(what == :all ? basename(root) : basename(path)) has no change to commit.")
     length(diff) > MOST_DIFF && (diff = first(diff, MOST_DIFF) * "\n… (the diff goes on)")
     cmd = message_command(message_prompt(root))
@@ -45469,6 +45554,12 @@ commit_now!(e, what::Symbol) = begin
   end
   e
 end
+
+"""
+The top folder of the repository of what the window `e` shows: a file, or a
+folder like a repository's page. It's "" when git keeps neither.
+"""
+repo_of(e) = (path = e.buf.path; isempty(path) ? "" : git_top(isdir(path) ? path : dirname(path)))
 
 "Save the windows' changes that a commit of `what` takes: those of the file at `path`, or with `:all` those of every file of the repository at `root`"
 save_for_commit!(e, root, path, what) = begin
@@ -45489,15 +45580,16 @@ ticked_text(e, rel) = begin
 end
 
 """
-Commit the window's file with `:file`, its ticked changes with `:part`, or
-every changed file of its repository with `:all`. Claude writes the message,
-unless the setting says that you write it. Then the palette asks for it.
+Commit the window's file with `:file`, its ticked changes with `:part`, every
+changed file of its repository with `:all`, or the files that are ticked in
+git's panel with `:staged`. Claude writes the message, unless the setting says
+that you write it. Then the palette asks for it.
 """
 commit_scope!(e, what::Symbol) = begin
   e.own || return commit_now!(e, what)
   # The keyboard goes to the page first, so the file that shows is the one in focus, not a row of the sidebar
   focus(e)
-  open_palette!(e, COMMANDS[what == :file ? :commit : what == :all ? :commit_all : :commit_ticked])
+  open_palette!(e, COMMANDS[what == :file ? :commit : what == :all ? :commit_all : what == :staged ? :commit_staged : :commit_ticked])
   e
 end
 
@@ -45505,11 +45597,22 @@ end
 commit_all_files!(e, message::String) = begin
   words = strip(message)
   isempty(words) && error("Write what the commit changes")
-  root = git_top(dirname(e.buf.path))
+  root = repo_of(e)
   isempty(root) && error("git doesn't keep $(basename(e.buf.path))")
   save_for_commit!(e, root, e.buf.path, :all)
   commit_all!(e, root, String(words))
   say_result!(e, "Committed all changed files")
+  nothing
+end
+
+"Commit the files that are ticked in git's panel, with words that say what changed"
+commit_staged_files!(e, message::String) = begin
+  words = strip(message)
+  isempty(words) && error("Write what the commit changes")
+  root = repo_of(e)
+  isempty(root) && error("git doesn't keep $(basename(e.buf.path))")
+  commit_staged!(e, root, String(words))
+  say_result!(e, "Committed the ticked files")
   nothing
 end
 
@@ -45529,11 +45632,14 @@ commit_ticked!(e, message::String) = begin
 end
 
 # The palette lists these while they have something to commit
-works_here(e, ::Val{:commit_all}) = !isempty(e.buf.path) && (root = git_top(dirname(e.buf.path)); !isempty(root) && !isempty(watch_git!(e, root).changes))
+works_here(e, ::Val{:commit_all}) = (root = repo_of(e); !isempty(root) && !isempty(watch_git!(e, root).changes))
 works_here(e, ::Val{:commit_ticked}) = choosing(e) && !isempty(ticked(e))
+works_here(e, ::Val{:commit_staged}) = (root = repo_of(e); !isempty(root) && !isempty(watch_git!(e, root).staged))
 wide_words(::Val{:commit_all}) = true
 wide_words(::Val{:commit_ticked}) = true
+wide_words(::Val{:commit_staged}) = true
 add_command!(commit_all_files!, name=:commit_all, title="Commit every changed file of the repository, with words that say what changed")
+add_command!(commit_staged_files!, name=:commit_staged, title="Commit the files that are ticked in git's panel, with words that say what changed")
 add_command!(commit_ticked!, name=:commit_ticked, title="Commit the ticked changes of the file, with words that say what they change")
 
 "Say `words` under the top bar for a while"
@@ -45556,8 +45662,10 @@ commit_tick!(e) = begin
   end
   try
     w.what == :file ? commit_file!(e, FS.File(w.path), message) :
-    w.what == :all ? commit_all!(e, w.root, message) : commit_text!(e, w.root, w.rel, w.part, message)
-    say_result!(e, "Committed $(w.what == :all ? "all changed files" : basename(w.path)): $(first(split(message, '\n')))")
+    w.what == :all ? commit_all!(e, w.root, message) :
+    w.what == :staged ? commit_staged!(e, w.root, message) : commit_text!(e, w.root, w.rel, w.part, message)
+    what = w.what == :all ? "all changed files" : w.what == :staged ? "the ticked files" : basename(w.path)
+    say_result!(e, "Committed $what: $(first(split(message, '\n')))")
   catch err
     say_result!(e, trouble(err))
   end
@@ -45565,6 +45673,15 @@ commit_tick!(e) = begin
 end
 
 EACH_FRAME[:commit_message] = commit_tick!
+
+"Commit what git has for the next commit of the repository at `root`, the files that are ticked in git's panel, with the message `message`"
+commit_staged!(e, root, message) = begin
+  done, why = Git.act(root, `commit -m $message`)
+  Git.forget!()
+  redraw_in!(e, 0)
+  done || error("git didn't commit them: " * String(first(split(isempty(strip(why)) ? "it gave no reason" : strip(why), '\n'))))
+  nothing
+end
 
 "Commit every file of the repository at `root` that has a change, with the message `message`"
 commit_all!(e, root, message) = begin
