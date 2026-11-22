@@ -86,6 +86,7 @@ Exit code 3 means that Ladder is not installed, or that it is too old to send a 
 | Several pictures or files as a grid | A `gallery` code block. See below. |
 | A web page as a card, with its title, its description and its picture | A `card` code block with the page's address on a line, like `https://julialang.org`. One card for each address. Ladder gets the page. A bare address outside the block stays text. |
 | A footnote | `[^1]` in the text, and a line that starts with `[^1]:`. |
+| Words with a highlighter's colour behind them | `==the words==`. |
 | Another page | A link to another `.md` file. The user holds ⌘ and clicks it. |
 
 Ladder does not draw HTML tags. Do not use them.

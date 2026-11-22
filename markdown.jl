@@ -13,6 +13,13 @@
 # kinds are note, tip, important, warning and caution, in any case. Words after
 # the `]` are the callout's title. Without them, its title is its kind's name.
 #
+# Two more marks come from Obsidian. ==Words== between two = have a
+# highlighter's colour behind them. %%A note%% between two % is a comment: rich
+# text hides it, and the line shows it while its markup shows. A comment can
+# be on lines of its own: a line that starts with %%, the lines under it, and a
+# line that ends with %%. Those lines are read as a code block in the language
+# %%, so nothing in them is part of the text. Neither mark counts in code.
+#
 # A wiki link names a page and not its file, as Obsidian writes one: [[Ideas]]
 # links to the page Ideas.md. [[Ideas|my ideas]] shows the words "my ideas",
 # and [[Ideas#Plans]] goes to the heading Plans of that page. [[#Plans]] goes to
@@ -126,6 +133,14 @@ toml_matter(lines) = begin
   0
 end
 
+const COMMENT = "%%"   # the language of the lines of a comment that's on lines of its own
+
+"True when `text` can open a comment of several lines: it starts with %%, and no other %% closes it on the same line"
+opens_comment(text::AbstractString) = (s = strip(text); startswith(s, "%%") && !occursin("%%", chop(s, head=2, tail=0)))
+
+"True when `text` can close a comment of several lines: it ends with %%"
+closes_comment(text::AbstractString) = endswith(rstrip(text), "%%")
+
 "The language of the lines of a document's front matter: `MATTER` for YAML or `TOML_MATTER` for TOML"
 matter_lang(lines) = rstrip(lines[1]) == "+++" ? TOML_MATTER : MATTER
 
@@ -134,11 +149,25 @@ classify(lines) = begin
   lang = nothing
   opened = ""   # the backticks or tildes of the fence that opened the code block being read
   dollars = 0   # the line of $$ that closes the formula whose lines are being read, or 0 outside one
+  hush = 0      # the line of %% that closes the comment whose lines are being read, or 0 outside one
   noted, quoted = "", -1   # the kind of callout that the quote being read is, and the last line of a quote that was read
   matter = front_matter(lines)
   map(enumerate(lines)) do (i, text)
     # Front matter is a block of its own, like a code block: its first and last lines open and close it
     i <= matter && return Line(i == 1 || i == matter ? Kind.fence : Kind.code, i == matter ? 1 : 0, 0, matter_lang(lines))
+    # A comment on lines of its own is read as a code block in the language %%, so its lines are no part of the text
+    if hush != 0
+      i < hush && return Line(Kind.code, 0, 0, COMMENT)
+      hush = 0
+      return Line(Kind.fence, 1, 0, COMMENT)
+    elseif lang === nothing && dollars == 0 && opens_comment(text)
+      # A line that starts with %% opens a comment when a line under it ends with %%. Without that one, it's a line of text.
+      close = findnext(closes_comment, lines, i + 1)
+      if close !== nothing
+        hush = close
+        return Line(Kind.fence, 0, 0, COMMENT)
+      end
+    end
     if dollars != 0
       # Only a line of $$ closes a formula, so a line of ``` in it is one of its lines
       i < dollars && return Line(Kind.code, 0, 0, MATH)
@@ -192,18 +221,21 @@ struct Span
   markup::Bool   # true for characters like ** that only say how to draw others
   live::Bool     # true for inline code that runs: the code of !`code`
   math::Bool     # true for the TeX of a formula: the x^2 of $x^2$
+  highlit::Bool  # true for words between == and ==, which have a highlighter's colour behind them
+  comment::Bool  # true for the words of a comment: the note of %%note%%, which rich text hides
 end
 
-Span(col, text, bold, italic, code, strike, link, markup, live) = Span(col, text, bold, italic, code, strike, link, markup, live, false)
+Span(col, text, bold, italic, code, strike, link, markup, live, math=false) = Span(col, text, bold, italic, code, strike, link, markup, live, math, false, false)
 
 struct Style
   bold::Bool
   italic::Bool
   strike::Bool
   link::String
+  highlit::Bool
 end
 
-Style() = Style(false, false, false, "")
+Style() = Style(false, false, false, "", false)
 
 "The link of the text of a wiki link: `[[Ideas#Plans]]` for the link [[Ideas#Plans|my plans]]"
 wikilink(target::AbstractString) = "[[" * target * "]]"
@@ -287,8 +319,8 @@ end
 "Split `chars[from:to]` into spans, added to `out`. `offset` is the column of `chars[1]`."
 function scan!(out, chars, from, to, style::Style, offset)
   plain = from
-  emit(i, j; markup=false, code=false, live=false, math=false, s=style) = i <= j &&
-    push!(out, Span(offset + i - 1, String(chars[i:j]), s.bold, s.italic, code, s.strike, s.link, markup, live, math))
+  emit(i, j; markup=false, code=false, live=false, math=false, comment=false, s=style) = i <= j &&
+    push!(out, Span(offset + i - 1, String(chars[i:j]), s.bold, s.italic, code, s.strike, s.link, markup, live, math, s.highlit, comment))
   i = from
   while i <= to
     c = chars[i]
@@ -323,11 +355,19 @@ function scan!(out, chars, from, to, style::Style, offset)
         plain = i = j + n
         continue
       end
+    elseif c == '%' && next == '%'
+      # %%note%% is a comment, as in Obsidian. Its words are one span, with no markup read inside them.
+      j = find(chars, "%%", i + 2, to)
+      if j != 0
+        emit(plain, i - 1); emit(i, i + 1, markup=true); emit(i + 2, j - 1, comment=true); emit(j, j + 1, markup=true)
+        plain = i = j + 2
+        continue
+      end
     elseif c == '[' && next == '['
       # [[Ideas]] is a wiki link to the page Ideas, and its name shows. [[Ideas|my ideas]] shows the words after the |.
       j, name = wiki_end(chars, i, to)
       if j != 0
-        link = Style(style.bold, style.italic, style.strike, wikilink(name))
+        link = Style(style.bold, style.italic, style.strike, wikilink(name), style.highlit)
         bar = findnext(==('|'), chars, i + 2)
         bar = bar !== nothing && bar < j ? bar : 0
         emit(plain, i - 1)
@@ -347,7 +387,7 @@ function scan!(out, chars, from, to, style::Style, offset)
       if j > i + 2 && !any(isspace, chars[i+2:j-1])
         name = String(chars[i+2:j-1])
         emit(plain, i - 1); emit(i, i + 1, markup=true)
-        emit(i + 2, j - 1, s=Style(style.bold, style.italic, style.strike, "^" * name))
+        emit(i + 2, j - 1, s=Style(style.bold, style.italic, style.strike, "^" * name, style.highlit))
         emit(j, j, markup=true)
         plain = i = j + 1
         continue
@@ -358,17 +398,20 @@ function scan!(out, chars, from, to, style::Style, offset)
       if j > i + 1 && k != 0
         url = String(chars[j+2:k-1])
         emit(plain, i - 1); emit(i, i, markup=true)
-        scan!(out, chars, i + 1, j - 1, Style(style.bold, style.italic, style.strike, url), offset)
+        scan!(out, chars, i + 1, j - 1, Style(style.bold, style.italic, style.strike, url, style.highlit), offset)
         emit(j, k, markup=true)
         plain = i = k + 1
         continue
       end
     elseif (c == '*' || c == '_') && next == c
-      delim, inner = string(c, c), Style(true, style.italic, style.strike, style.link)
+      delim, inner = string(c, c), Style(true, style.italic, style.strike, style.link, style.highlit)
     elseif c == '*' || c == '_'
-      delim, inner = string(c), Style(style.bold, true, style.strike, style.link)
+      delim, inner = string(c), Style(style.bold, true, style.strike, style.link, style.highlit)
     elseif c == '~' && next == '~'
-      delim, inner = "~~", Style(style.bold, style.italic, true, style.link)
+      delim, inner = "~~", Style(style.bold, style.italic, true, style.link, style.highlit)
+    elseif c == '=' && next == '=' && (i + 2 > to || chars[i+2] != '=') && (i == from || chars[i-1] != '=')
+      # ==words== have a highlighter's colour behind them, as in Obsidian. A row of three or more = is only text.
+      delim, inner = "==", Style(style.bold, style.italic, style.strike, style.link, true)
     end
     j = isempty(delim) ? 0 : closer(chars, delim, i, to)
     if j == 0
@@ -435,3 +478,4 @@ end
 words(lines) = sum(text -> count(_ -> true, eachmatch(r"[\p{L}\p{N}][\p{L}\p{N}'’-]*", text)), lines, init=0)
 
 export Kind, Line, Span, Cell, classify, spans, tablecells, isdivider, words, isdone, front_matter, MATTER, TOML_MATTER, MATH, CALLOUTS, callout, opens_callout, wikilink, wikitarget
+export COMMENT, opens_comment, closes_comment

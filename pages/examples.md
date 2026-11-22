@@ -15,6 +15,7 @@ The block at the top of this page is front matter: lines at the very top of a fi
 - [Callouts: a note, a tip or a warning that stands out](welcome.md#text)
 - [Spelling, and finding text in the page](welcome.md#text)
 - [Footnotes](welcome.md#text)
+- [Highlighted words, and comments that the page hides](welcome.md#text)
 - [Wiki links: `[[Page]]` links to a page by its name, wherever it is](welcome.md#text)
 - [The start of a page in a card: hold ⌘ and rest the mouse on a link to it](welcome.md#text)
 - [A link card: a web page as a card, with its title, its description and its picture](welcome.md#link-cards)

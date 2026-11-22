@@ -13,9 +13,10 @@
 # table of a CSV file, or nothing for a line of text. A formula goes in as
 # MathML, which a browser sets itself. `columns` says which lines show side by
 # side: for each group of columns, the first line, the last line and the share
-# of the width of each column.
+# of the width of each column. ==Words== are marked, as a highlighter marks
+# them, and a comment, like %%note%%, is left out.
 
-@use "./markdown" Kind Line Span classify spans tablecells isdivider front_matter isdone MATTER TOML_MATTER MATH callout opens_callout wikitarget
+@use "./markdown" Kind Line Span classify spans tablecells isdivider front_matter isdone MATTER TOML_MATTER MATH COMMENT callout opens_callout wikitarget
 @use "./math" mathml
 
 "`s` with the characters that mean something in HTML written as their names"
@@ -71,6 +72,8 @@ styled!(out, d::Document, text::AbstractString) = begin
 end
 
 styled!(out, d::Document, s::Span, mark) = begin
+  # A comment, like %%note%%, is for whoever writes the page, so the page of HTML leaves it out
+  s.comment && return
   # A formula between $$ is on a line of its own
   s.math && return print(out, mathml(s.text, display=mark == "\$\$"))
   if startswith(s.link, '^')
@@ -87,6 +90,7 @@ styled!(out, d::Document, s::Span, mark) = begin
   elseif s.code
     body = "<code>" * body * "</code>"
   end
+  s.highlit && (body = "<mark>" * body * "</mark>")
   s.strike && (body = "<del>" * body * "</del>")
   s.italic && (body = "<em>" * body * "</em>")
   s.bold && (body = "<strong>" * body * "</strong>")
@@ -137,6 +141,7 @@ const STYLE = """
 body { font: 17px/1.6 Charter, Georgia, serif; color: #2b2622; background: #fdfcf9; max-width: 44em; margin: 3em auto; padding: 0 1.5em; }
 h1, h2, h3, h4, h5, h6 { line-height: 1.25; margin: 1.6em 0 0.5em; }
 a { color: #9c5626; }
+mark { background: #f6e3a0; color: inherit; border-radius: 2px; padding: 0 0.1em; }
 code, pre { font: 0.86em/1.5 Menlo, Consolas, monospace; }
 code { background: #f1ede2; border-radius: 4px; padding: 0.1em 0.35em; }
 pre { background: #f1ede2; border-radius: 6px; padding: 0.9em 1.1em; overflow-x: auto; }
@@ -204,7 +209,8 @@ html(lines::AbstractVector{<:AbstractString}; title="", block=(lang, first, last
       # A code block, as far as the line that closes it
       t = something(findnext(j -> kinds[j].kind == Kind.fence && kinds[j].level == 1, i+1:n, 1), n - i + 1) + i
       t = min(t, n)
-      if !(line.lang in (MATTER, TOML_MATTER))   # front matter says things about the page. It isn't part of it.
+      # Front matter says things about the page, and a comment is for whoever writes it. Neither is part of the page.
+      if !(line.lang in (MATTER, TOML_MATTER, COMMENT))
         tex = line.lang == MATH && kinds[t].kind == Kind.fence ? join(lines[i+1:t-1], "\n") : ""
         made = isempty(strip(tex)) ? block(line.lang, i, t) : mathml(tex, display=true)
         if made === nothing
@@ -260,7 +266,10 @@ html(lines::AbstractVector{<:AbstractString}; title="", block=(lang, first, last
       m = match(NOTE, text)
       made = m === nothing ? file(text) : nothing   # a line that holds only a file can show as something else
       made === nothing || (println(out, made); i += 1; continue)
-      m === nothing ? println(out, "<p>", inline(d, text), "</p>") :
+      body = m === nothing ? inline(d, text) : ""
+      # A line that holds only a comment makes no paragraph
+      m === nothing && isempty(strip(body)) && (i += 1; continue)
+      m === nothing ? println(out, "<p>", body, "</p>") :
                       push!(notes, (String(m[1]), inline(d, chop(text, head=length(m.match), tail=0))))
     end
     i += 1

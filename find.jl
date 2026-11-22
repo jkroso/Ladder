@@ -176,9 +176,9 @@ const ADDRESS = r"https?://\S"
 without_pictures(text::AbstractString) =
   occursin("![", text) ? replace(text, PICTURE => s -> (m = match(PICTURE, s); isempty(strip(m[1])) ? basename(m[2]) : m[1])) : text
 
-"The text of a line as it reads: without what starts it, like the # of a heading, and without the marks of bold and the like"
+"The text of a line as it reads: without what starts it, like the # of a heading, without the marks of bold and the like, and without a comment"
 reads(text::AbstractString, l::Line) =
-  String(strip(join(s.text for s in spans(without_pictures(String(chop(text, head=min(l.prefix, length(text)), tail=0)))) if !s.markup)))
+  String(strip(join(s.text for s in spans(without_pictures(String(chop(text, head=min(l.prefix, length(text)), tail=0)))) if !s.markup && !s.comment)))
 
 "True when the line `text` has a link: words that go somewhere, or an address by itself. A picture and a footnote aren't links."
 haslink(text::AbstractString) =

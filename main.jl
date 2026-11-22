@@ -339,6 +339,7 @@
 @use "./transcribe" Transcription check! finished phrases words_between
 @use "./html" html footnotes NOTE escape
 @use "./markdown" Kind Line Span Cell classify spans tablecells isdivider words isdone front_matter MATTER TOML_MATTER MATH CALLOUTS callout opens_callout wikitarget
+@use "./markdown" COMMENT
 @use "./highlight" tokens left_open
 @use "./sheet" SHEET Result sheetcells parts uses tally known units shown number_at nudged name_values ident cases
 @use "./spreadsheet" SPREADSHEET Value spreadcells spreadtexts isformula letters answers moved
@@ -562,12 +563,13 @@ struct Face
   size::px
   color::Colorant
   chip::Bool
-  lang::String   # the language of code whose parts each get a colour, or "" for text in one colour
+  lang::String    # the language of code whose parts each get a colour, or "" for text in one colour
+  highlit::Bool   # true for ==words==, which have a highlighter's colour behind them
 end
 
-Face(family, style, size, color, chip) = Face(family, style, size, color, chip, "")
-Face(f::Face; style=f.style, size=f.size, color=f.color, family=f.family, chip=f.chip, lang=f.lang) =
-  Face(family, style, size, color, chip, lang)
+Face(family, style, size, color, chip, lang="") = Face(family, style, size, color, chip, lang, false)
+Face(f::Face; style=f.style, size=f.size, color=f.color, family=f.family, chip=f.chip, lang=f.lang, highlit=f.highlit) =
+  Face(family, style, size, color, chip, lang, highlit)
 
 const measured = Dict{Tuple{String,String,Float32,String},px}()
 
@@ -1896,6 +1898,8 @@ face(e, line::Line) = begin
   # A callout's text is the page's own. Its title is bold, in the colour of its kind.
   opens_callout(line) ? Face(emboldened(b), color=callout_colour(line.lang)) :
   k == Kind.blockquote ? (isempty(line.lang) ? Face(b, style=slanted(b.style), color=colours.dim) : b) :
+  # A comment on lines of its own is in the page's font, and dim
+  line.lang == COMMENT ? Face(b, color=colours.dim) :
   # Code is the size that the settings page chooses. The markup of a table or a rule is code's usual size.
   k in (Kind.code, Kind.fence) ? Face(b, family=codefont(), style=codestyle(), size=code_size(e)) :
   k in (Kind.table, Kind.rule) ? Face(b, family=codefont(), style=codestyle(), size=b.size * CODE_SCALE) : b
@@ -1904,14 +1908,19 @@ end
 "The face for one span of a line whose plain text is drawn in `base`"
 face(base::Face, s::Span) = begin
   s.markup && return Face(base, color=colours.faint)
+  # A comment shows only while its line's markup shows, and then it's dim
+  s.comment && return Face(base, color=colours.dim)
   # The TeX of a formula, while it shows as it's written, is in the font of code
   s.math && return Face(codefont(), codestyle(), base.size * 0.86, base.color, false)
   # Inline code that runs is Julia, so its parts get the colours they have in a code block
   s.code && return Face(codefont(), codestyle(), base.size * 0.86, base.color, true, s.live ? "julia" : "")
   f = s.bold ? emboldened(base) : base
   s.italic && !isitalic(f.style) && (f = Face(f, style=slanted(f.style)))
-  Face(f, color=!isempty(s.link) ? colours.accent : s.strike ? colours.faint : base.color)
+  Face(f, color=!isempty(s.link) ? colours.accent : s.strike ? colours.faint : base.color, highlit=s.highlit)
 end
+
+"The colour behind ==words==: a highlighter's yellow, a little darker on a dark page"
+highlighter() = dark_page() ? RGBA(0.85, 0.68, 0.1, 0.38) : RGBA(1.0, 0.85, 0.2, 0.45)
 
 # --- the weights of the page's text and of code --------------------------------------
 #
@@ -2105,6 +2114,15 @@ pieces(e, text::String, line::Line, raw::Bool, i::Int=0) = begin
       isempty(m[3]) || push!(out, piece(String(m[3]), length(m[1]) + length(m[2]), base))
     end
     return out
+  elseif line.lang == COMMENT && k in (Kind.code, Kind.fence)
+    # A comment on lines of its own shows only while the caret is in it. Its words are dim, and its %% are faint.
+    k == Kind.fence && !raw && return out
+    a = k == Kind.fence && line.level == 0 ? length(match(r"^\s*%%", text).match) : 0
+    z = k == Kind.fence && line.level == 1 ? length(text) - length(match(r"%%\s*$", text).match) : length(text)
+    a > 0 && push!(out, piece(head(text, a), 0, Face(base, color=colours.faint)))
+    z > a && push!(out, piece(rest(head(text, z), a), a, base))
+    z < length(text) && push!(out, piece(rest(text, z), z, Face(base, color=colours.faint)))
+    return out
   elseif k == Kind.code && line.lang in (HEX, BITS)
     # In a line of a file's bytes, the place in the file is faint and the bytes as characters are dim
     n = ncodeunits(text)
@@ -2156,7 +2174,7 @@ pieces(e, text::String, line::Line, raw::Bool, i::Int=0) = begin
     push!(out, piece(note_mark(e, note[1]) * ".  ", 0, Face(base, color=colours.accent), atomic=true, n=start, link="^" * note[1]))
   end
   for s in spans(rest(text, start), start)
-    s.markup && !raw && continue
+    (s.markup || s.comment) && !raw && continue
     if startswith(s.link, '^') && !raw
       # [^name] shows as the footnote's number, small and raised
       push!(out, piece(note_mark(e, s.text), s.col, Face(base, size=base.size * 0.7, color=colours.accent), atomic=true, n=length(s.text), link=s.link))
@@ -2429,7 +2447,8 @@ unseen(b::Buffer, i::Int) = begin
   out = Tuple{Int,Int}[]
   kinds(b)[i].kind == Kind.paragraph && start == kinds(b)[i].prefix || start == 0 || push!(out, (-1, start))
   for s in ss
-    s.markup || continue
+    # A comment, like %%note%%, takes no room either
+    (s.markup || s.comment) || continue
     a, z = s.col, s.col + length(s.text)
     !isempty(out) && last(out)[2] == a ? (out[end] = (last(out)[1], z)) : push!(out, (a, z))
   end
@@ -2459,6 +2478,9 @@ line of text or of code.
 solid(b::Buffer, i::Int) = begin
   # A `columns` block that takes no room is such a part, with the empty lines after it that take none
   fold = column_fold(b, i)
+  fold === nothing || return fold
+  # So is a comment on lines of its own, with the empty lines after it that take no room
+  fold = comment_fold(b, i)
   fold === nothing || return fold
   ks = kinds(b)
   k = ks[i]
@@ -2502,8 +2524,44 @@ part(b::Buffer, i::Int) = begin
   run = solid(b, i)
   run === nothing && return nothing
   k = kinds(b)[i].kind
-  # A `columns` block that takes no room doesn't show either
-  k == Kind.table || (k == Kind.fence && run[1] == run[2]) || column_fold(b, i) !== nothing ? nothing : run
+  # A `columns` block that takes no room doesn't show either, and nor does a comment on lines of its own
+  k == Kind.table || (k == Kind.fence && run[1] == run[2]) || column_fold(b, i) !== nothing || comment_fold(b, i) !== nothing ? nothing : run
+end
+
+"True when `text`, a line of text, holds only a comment, like %%note%%"
+comment_only(text::AbstractString) =
+  occursin("%%", text) && (ss = spans(strip(text)); !isempty(ss) && all(s -> s.comment || (s.markup && s.text == "%%"), ss))
+
+"""
+The lines of a comment, when line `i` is one of them: the first and the last.
+That's a comment on lines of its own, or a line that holds only a comment.
+Nothing for any other line. The empty lines after it are part of it too, as
+many as there are empty lines before it, so the room that's left where it
+was is the room between two blocks of the page. As rich text, none of them
+take room, and the caret steps over them. See `column_fold`, which does the
+same for a `columns` block.
+"""
+comment_fold(b::Buffer, i::Int) = begin
+  b.view == :markdown || return nothing
+  ks = kinds(b)
+  lone(k) = ks[k].kind == Kind.paragraph && comment_only(b.lines[k])
+  j = i
+  if ks[i].kind == Kind.blank
+    # An empty line is one of them when the comment is the first thing over it
+    while j > 1 && ks[j].kind == Kind.blank
+      j -= 1
+    end
+    ((ks[j].kind == Kind.fence && ks[j].level == 1 && ks[j].lang == COMMENT) || lone(j)) || return nothing
+  elseif !(ks[i].kind in (Kind.fence, Kind.code) && ks[i].lang == COMMENT) && !lone(i)
+    return nothing
+  end
+  s, t = ks[j].kind == Kind.paragraph ? (j, j) : codeblock(b, j)
+  bare(k) = 1 <= k <= length(ks) && ks[k].kind == Kind.blank
+  n = 0
+  while bare(s - n - 1) && bare(t + n + 1)
+    n += 1
+  end
+  i <= t + n ? (s, t + n) : nothing
 end
 
 """
@@ -2701,7 +2759,8 @@ flow(e, i::Int, raw::Bool=israw(e.buf, i)) = begin
     return get!(() -> file_line(e, text, line, i), e.flows, (:file, text, line, string_opens(e.buf)[i]))
   end
   # The lines that open and close a code block show while the caret is in the block. As rich text, one only shows while it's typed.
-  line.kind == Kind.fence && (raw = rich(e.buf) ? israw(e.buf, i) : incode(e.buf, i))
+  # A comment's first and last lines have its words, so they show with the rest of it
+  line.kind == Kind.fence && (raw = rich(e.buf) && line.lang != COMMENT ? israw(e.buf, i) : incode(e.buf, i))
   build() = laid(e, text, line, raw, i)
   # What inline code made can change its size, so its line is laid out again each time
   !raw && occursin(INLINE, text) && !(line.kind in (Kind.code, Kind.fence, Kind.rule)) && return build()
@@ -2724,9 +2783,10 @@ laid(e, text, line::Line, raw::Bool, i::Int, wide=e.width) = begin
   k = line.kind
   # A hidden ``` line leaves a little room at the top or bottom of its block
   lh = k == Kind.heading ? base.size * 1.35 : body(e).size * (k == Kind.fence && !raw ? 0.6 : 1.65)
-  # Lines of bigger code are further apart
-  k in (Kind.code, Kind.fence) && (lh *= e.code_scale / CODE_SCALE)
-  left = k in (Kind.code, Kind.fence) ? BLOCK_X : k == Kind.blockquote ? QUOTE_X : 0px
+  # Lines of bigger code are further apart. The lines of a comment are laid out as text.
+  code = k in (Kind.code, Kind.fence) && line.lang != COMMENT
+  code && (lh *= e.code_scale / CODE_SCALE)
+  left = code ? BLOCK_X : k == Kind.blockquote ? QUOTE_X : 0px
   # Lines that a list item wraps onto start under its text, not under its bullet
   hang = k in (Kind.bullet, Kind.ordered, Kind.todo) ? sum(p -> measure(p.face, p.text), ps[1:min(end, line.level > 0 ? 2 : 1)], init=0px) : left
   above = k == Kind.heading ? lh * 0.3 : 0px
@@ -2842,7 +2902,7 @@ end
 cellpieces(e, i::Int, text::String, lo::Int, hi::Int, base::Face, raw::Bool) = begin
   out = Piece[]
   for s in spans(rest(head(text, hi), lo), lo)
-    s.markup && !raw && continue
+    (s.markup || s.comment) && !raw && continue
     s.math && !raw && Maths.available() ? push!(out, equation(e, s, base)) :
     s.live && !raw ? push!(out, inline(e, i, s, base)) : symbols!(out, s.text, s.col, face(base, s), s.link)
   end
@@ -23036,7 +23096,7 @@ end
 const SOURCE = r"^\s*(?:`{3,}|~{3,})\s*[^\s`]+[ \t]+((?:\.{1,2}/|~?/|github\.com/)\S+)\s*$"
 
 "True when Ladder itself says what a code block in the language `lang` shows"
-known_lang(lang) = lang in (LIVE, SHEET, SPREADSHEET, DIAGRAM, MATH, TAKEOFF, SCHEDULE, MATTER, TOML_MATTER, HEX, BITS, "julia") || haskey(BLOCKS, lang)
+known_lang(lang) = lang in (LIVE, SHEET, SPREADSHEET, DIAGRAM, MATH, TAKEOFF, SCHEDULE, MATTER, TOML_MATTER, HEX, BITS, COMMENT, "julia") || haskey(BLOCKS, lang)
 
 "What was found in each file that could define a kind of block: when the file was saved, and whether its text defines the function"
 const DEFINES = Dict{Tuple{String,String},Tuple{Float64,Bool}}()
@@ -23924,7 +23984,8 @@ const PLAIN_KINDS = (Kind.blank, Kind.paragraph, Kind.heading, Kind.bullet, Kind
 keep_plain!(kept::Vector{Union{Nothing,PlainLine}}, b::Buffer, i::Int, line::Line, flow::Flow, tall::px) = begin
   text = b.lines[i]
   # A picture, what inline code made, and a footnote's number each come from more than the line's text
-  plain = line.kind in PLAIN_KINDS && !occursin("![", text) && !occursin(INLINE, text) && !occursin("[^", text)
+  # ... and a line with a comment can take no room, which isn't a layout of its own
+  plain = line.kind in PLAIN_KINDS && !occursin("![", text) && !occursin(INLINE, text) && !occursin("[^", text) && !occursin("%%", text)
   kept[i] = plain ? PlainLine(text, line, flow.raw, flow, tall) : nothing
 end
 
@@ -23994,6 +24055,16 @@ layout!(e, width=text_width(e)) = begin
         i = t + 1
         continue
       end
+    end
+    # A comment on lines of its own takes no room, unless the caret is in it. Nor do the empty lines after it that
+    # `comment_fold` counts, unless the caret is on one of them, which then shows.
+    if ks[i].kind == Kind.fence && ks[i].level == 0 && ks[i].lang == COMMENT && !incode(b, i)
+      t = codeblock(b, i)[2]
+      fold = comment_fold(b, i)[2]
+      (caretless(b) || !(t < b.caret[1] <= fold || t < b.anchor[1] <= fold)) && (t = fold)
+      push!(items, flat(e, Item(i, t, top, 0px, nothing)))
+      i = t + 1
+      continue
     end
     # An email shows as it was sent, in place of the lines that were made of it, once its pictures are there
     if sent !== nothing && i == sent[2][1]
@@ -24118,6 +24189,14 @@ layout!(e, width=text_width(e)) = begin
         continue
       end
     end
+    # A line that holds only a comment takes no room either, unless the caret is on it
+    if ks[i].kind == Kind.paragraph && !alone(b, i) && comment_only(b.lines[i])
+      t = something(comment_fold(b, i), (i, i))[2]
+      (caretless(b) || !(i < b.caret[1] <= t || i < b.anchor[1] <= t)) || (t = i)
+      push!(items, flat(e, Item(i, t, top, 0px, nothing)))
+      i = t + 1
+      continue
+    end
     # A line that holds only a picture shows the picture, unless the caret is on the line
     if ks[i].kind == Kind.paragraph && !israw(b, i) && occursin("![", b.lines[i])
       content = picture_item(e, i)
@@ -24194,6 +24273,8 @@ describe(seg::Seg) = begin
   t = Text(seg.text, size=f.size, family=f.family, subfamily=f.style, color=f.color, wrap=WrapMode.none)
   # The number of a footnote is at the top of a box as tall as the text beside it, so it sits high in the line
   seg.atomic && startswith(seg.link, '^') && !endswith(seg.text, ' ') && return Box(fixed(seg.w), height(f.size * 1.9), Alignment.Start, t)
+  # ==Words== have a highlighter's colour behind them
+  f.highlit && !f.chip && return Box(fixed(seg.w), Alignment.Start, radius(2px), background(highlighter()), t)
   # A Text on its own would take a share of the spare room in its row
   f.chip || return Box(fixed(seg.w), Alignment.Start, t)
   if !isempty(f.lang)
@@ -24225,7 +24306,7 @@ describe(e::Editor, it::Item, f::Flow) = begin
   end
   edge = k == Kind.blockquote ? 3px : 0px
   col = Column(width(grow=grow), Alignment.Start, padding(f.above, 0px, f.below, 0px), rows(f, edge)...)
-  if k == Kind.code || k == Kind.fence
+  if (k == Kind.code || k == Kind.fence) && !(1 <= it.first <= length(e.buf.lines) && kinds(e.buf)[it.first].lang == COMMENT)
     col.background = background(colours.block)
   elseif k == Kind.blockquote
     # A callout has its kind's colour down its left, and a little of that colour behind it
@@ -33965,8 +34046,8 @@ misspellings(e, i) = begin
     out = Tuple{Int,Int}[]
     occursin(PICTURE_LINE, text) && return out
     for s in spans(rest(text, line.prefix), line.prefix)
-      # The address of a link and the name of a footnote are markup, so only the words that show are checked
-      (s.markup || s.code || s.math || startswith(s.link, '^')) && continue
+      # The address of a link and the name of a footnote are markup, so only the words that show are checked. A comment doesn't show.
+      (s.markup || s.comment || s.code || s.math || startswith(s.link, '^')) && continue
       for (lo, hi) in misspelt(s.text)
         spellable(rest(head(s.text, hi), lo)) && push!(out, (s.col + lo, s.col + hi))
       end
@@ -38867,6 +38948,12 @@ document, so the count leaves it out.
 word_count(e) = begin
   b = e.buf
   lines = view(b.lines, (b.view == :markdown ? front_matter(b.lines) : 0)+1:length(b.lines))
+  if b.view == :markdown
+    # A comment isn't part of the page's text: neither one on lines of its own, nor a %%note%% in a line
+    ks, skip = kinds(b), length(b.lines) - length(lines)
+    uncommented(text) = join(s.text for s in spans(text) if !s.comment && !(s.markup && s.text == "%%"))
+    lines = [ks[skip+k].kind == Kind.code || !occursin("%%", text) ? text : uncommented(text) for (k, text) in enumerate(lines) if ks[skip+k].lang != COMMENT]
+  end
   n, chars = words(lines), sum(length, lines, init=0)
   said = "$(commas(n)) word$(n == 1 ? "" : "s")  ·  $(commas(chars)) character$(chars == 1 ? "" : "s")  ·  $(max(1, round(Int, n / 230))) min read"
   e.nodes[:result] = (said, time())
@@ -39019,8 +39106,8 @@ end
 
 """
 A run of a line's text that's drawn its own way: a link, a wiki link, bold,
-slanted or struck words, inline code, what inline code came to, a footnote's
-number, or a to-do item's box. It's in the block that holds its line, and
+slanted, struck or highlighted words, a comment, inline code, what inline code
+came to, a footnote's number, or a to-do item's box. It's in the block that holds its line, and
 isn't drawn as a node of its own. `code` is the method that gives it its look.
 """
 @def mutable struct TextRun <: SemanticUI
@@ -39050,6 +39137,8 @@ run_kind(seg::Seg, s, raw::Bool) = begin
   (s === nothing || s.markup) && return nothing
   s.live && !raw && return ("Value", which(inline, Tuple{Any,Int,Span,Face}))
   s.code && return ("Code", which(describe, Tuple{Seg}))
+  s.comment && return ("Comment", looks)
+  s.highlit && return ("Highlighted", which(describe, Tuple{Seg}))
   s.math ? ("Formula", looks) : s.strike ? ("Struck", looks) :
   s.bold && s.italic ? ("Bold italic", looks) : s.bold ? ("Bold", looks) : s.italic ? ("Italic", looks) : nothing
 end

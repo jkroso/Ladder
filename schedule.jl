@@ -223,7 +223,7 @@ todos(lines, kinds=classify(lines)) = begin
   for (i, l) in enumerate(kinds)
     l.kind == Kind.todo || continue
     text = String(chop(lines[i], head=l.prefix, tail=0))
-    name = String(strip(join(s.text for s in spans(text) if !s.markup)))
+    name = String(strip(join(s.text for s in spans(text) if !s.markup && !s.comment)))
     isempty(name) && continue
     n = seen[name] = get(seen, name, 0) + 1
     push!(out, Todo(i, name, n == 1 ? name : "$name #$n", l.level, isdone(lines[i])))

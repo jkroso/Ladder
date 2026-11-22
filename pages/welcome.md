@@ -21,6 +21,16 @@ Hold ⌘ and rest the mouse on a link to a page, like [[examples#Writing]]. A ca
 > [!WARNING] Wet paint
 > The other kinds are `[!TIP]`, `[!IMPORTANT]`, `[!WARNING]` and `[!CAUTION]`. Words after the kind are the callout's title.
 
+Two equals signs on each side of some words, like ==these words==, put a highlighter's colour behind them. Two per cent signs on each side make a comment, which the page hides. This sentence has one at its end.%%You found the comment.%% To see it, put the caret in this paragraph and press ⌘E. The comment shows in a lighter colour than the words round it. Both marks come from Obsidian.
+
+A comment can also have lines of its own. Start a line with `%%`, and end a line under it with `%%`. The page gives those lines no room, and the caret steps over them. There's one under this paragraph. To read it, press ⌘E and move the caret down onto it.
+
+%%
+This comment has lines of its own. Nothing in it is part of the page.
+%%
+
+A comment stays out of the page's HTML, its word count and the spelling check.
+
 A word that the Mac's dictionary doesn't have, like teh, gets a line of red dots under it. Right-click the word to choose the word you meant. Press ⌘F to find text in the page.
 
 A line can point to a footnote[^note]. The footnote is a line of its own, anywhere in the file, and the page gives each footnote a number. Hold ⌘ and click the number to go to the footnote.
@@ -960,7 +970,7 @@ A zip file shows what it holds, without being unpacked: its folders and files, e
 
 Right-click the page to cut, copy or paste. The menu's Insert item adds a new block where you clicked: a heading, a list, a to-do item, a table, a sheet, a spreadsheet, a diagram, a takeoff, a schedule, a chart, a board, a calendar, a sketch, a canvas, a live block and more.
 
-A file can start with front matter: lines like `title: Notes` between two lines of `---`. Ladder shows it as a block of its own. To see how many words a page has, press ⌘⇧P and run Word Count. It leaves the front matter out, and it also says how many characters the page has and how long it takes to read.
+A file can start with front matter: lines like `title: Notes` between two lines of `---`. Ladder shows it as a block of its own. To see how many words a page has, press ⌘⇧P and run Word Count. It leaves out the front matter and the comments, and it also says how many characters the page has and how long it takes to read.
 
 Press ⌘, to open the settings in a window of their own: the colours, the font and its weight, the size of the text and the width of the page. A button there makes Ladder the app that opens your Markdown files. Links at the top of that page go to the other pages of the settings. Code editor has the settings for code: its font, its weight, its size, its indent, its line numbers and whether a long line wraps. Key bindings has the keys of each command. There you can choose the keys of VS Code, Sublime Text or Emacs, or click a command and press the keys you want for it.
 
