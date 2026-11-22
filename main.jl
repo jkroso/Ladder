@@ -188,15 +188,16 @@
 #     top bar shows those bars again. The list of files has a dot beside
 #     a page that an agent waits for. While the list is hidden, the dot is
 #     beside the button that shows it.
-#   - Click the word count to count characters or reading time instead.
+#   - The command Word Count says how many words the page has, how many
+#     characters, and how long it takes to read.
 #   - ⌘+ and ⌘- change the text size by a pixel. ⌘0 puts it back.
 #   - ⌘P prints the page, or saves it as a PDF. ⌘⇧E saves it as a page of HTML.
 #   - ⌃⌘⇧P shows the page as slides, one at a time, for when you show a plan to
 #     someone. A slide starts at each heading of level 1 or 2, and at each line
 #     across the page. → and ← go on and back, and esc shows the page again.
 #   - ⌘, opens the settings in a window of their own, where you choose the
-#     colours, the font and its weight, the text size, the width of the page
-#     and what the count at the top right counts. A button there makes
+#     colours, the font and its weight, the text size and the width of the
+#     page. A button there makes
 #     Ladder the app that opens Markdown files. Links at the top of that
 #     page go to the other pages of the settings: Code editor, for how code
 #     shows, and Key bindings, for the keys of each command. ⌘, again
@@ -409,7 +410,7 @@ const SYMBOL_FONT = "Lucida Grande"
 Base.@kwdef mutable struct Palette
   bg::Colorant        # the page
   ink::Colorant       # text
-  dim::Colorant       # quotes, the title, the word count
+  dim::Colorant       # quotes, the title
   faint::Colorant     # markup characters like ** and #
   marker::Colorant    # bullets and list numbers
   line::Colorant      # table lines and rules
@@ -797,8 +798,6 @@ Base.@kwdef mutable struct Buffer
   across::px = 0px                      # how far it's scrolled to the right, in a file of code whose long lines don't wrap
   kinds::Vector{Line} = Line[]
   kinds_at::Int = -1
-  words::Int = 0
-  chars::Int = 0
   # After Escape the caret is hidden, until a click puts the caret back
   reading::Bool = false
   # True while the page is written as plain text: the part with the caret shows its markup. The window sets it from its setting.
@@ -821,8 +820,6 @@ Base.@kwdef mutable struct Buffer
   # The text as an agent last knew it: what you last sent it, with every change that was made to the file from outside since
   told::Vector{String} = [""]
   sent::Vector{String} = [""]           # the text as it was when you last sent it to an agent, or when the file was opened
-  counted::Vector{String} = String[]    # the lines that were last counted, and how many words and characters they have in all
-  counts::Tuple{Int,Int} = (0, 0)
 end
 
 "True when the file is only shown. Ladder changes Markdown files and the files of code in `CODE_FILES`, and no others."
@@ -930,12 +927,9 @@ kinds(b::Buffer) = begin
     # Each line of a file that isn't Markdown is a line of code, in the language that the file's name gives
     lang = b.view == :hex ? HEX : b.view == :bits ? BITS : file_lang(b.path)
     b.kinds = fill(Line(Kind.code, 0, 0, lang), length(b.lines))
-    # A file that's only shown has no words to count
-    b.view == :code ? count_lines!(b) : ((b.words, b.chars) = (0, 0); b.counted = String[]; b.counts = (0, 0))
     b.kinds_at = b.version
   elseif b.kinds_at != b.version
     b.kinds = classify(b.lines)
-    count_lines!(b)
     b.kinds_at = b.version
   end
   b.kinds
@@ -1011,24 +1005,6 @@ same_chars(a::Vector{Char}, i::Int, b::Vector{Char}, j::Int, n::Int) =
 "The quote of a string in three quotes that's open at the start of line `i` of the page `b`, when `text` is that line, or '\\0'"
 string_open(b::Buffer, i::Int, text::AbstractString) =
   1 <= i <= length(b.lines) && same_text(b.lines[i], String(text)) ? string_opens(b)[i] : '\0'
-
-"""
-Count the words and the characters of a page or of a file of code. After a
-change, only the lines that changed are counted again, so a long file costs
-no more than a short one.
-"""
-count_lines!(b::Buffer) = begin
-  old, lines = b.counted, b.lines
-  isempty(old) && (b.counts = (0, 0))
-  head, tail = unchanged(lines, old)
-  now, was = view(lines, head+1:length(lines)-tail), view(old, head+1:length(old)-tail)
-  b.counts = (b.counts[1] + words(now) - words(was), b.counts[2] + sum(length, now, init=0) - sum(length, was, init=0))
-  b.counted = copy(lines)
-  # Front matter says things about a document, so a document's counts leave it out
-  matter = view(lines, 1:(b.view == :markdown ? front_matter(lines) : 0))
-  b.words, b.chars = b.counts[1] - words(matter), b.counts[2] - sum(length, matter, init=0)
-  b
-end
 
 dirty(b::Buffer) = b.version != b.saved
 name(b::Buffer) = isempty(b.path) ? "Untitled" : basename(b.path)
@@ -1205,7 +1181,6 @@ end
   zoom::Float64 = 1.0
   remember::Bool = false                # write the settings to a file when they change
   settings::Bool = false                # this window opened to show the settings page
-  stat::Symbol = :words                 # what the count at the top right counts
   plain::Bool = false                   # the part of the page with the caret shows its markup: plain text, and not rich text
   spelling::Bool = true                 # put a line of dots under each word that's spelt wrong
   updates::Bool = true                  # the app looks for a newer version of itself, and gets it, without being asked
@@ -1291,10 +1266,6 @@ comes to. See "what Julia code ran, down a level".
 end
 "The file's name in the middle of the top bar. A right-click on it shows the file's menu."
 @def mutable struct Title <: SemanticUI end
-@def mutable struct Count <: SemanticUI       # the word count in the top bar
-  rect::NTuple{4,px} = (0px, 0px, 0px, 0px)
-  quiet::Bool = false
-end
 "How many of the checks of a file of Julia code pass, in the top bar. A click goes to the next check that fails."
 @def mutable struct CheckCount <: SemanticUI
   rect::NTuple{4,px} = (0px, 0px, 0px, 0px)
@@ -3809,9 +3780,6 @@ sandbox(e) = get!(e.nodes, :sandbox) do
   # ... and the width of the page, in pixels
   Core.eval(m, :(const page_width = $(() -> e.widest.value)))
   Core.eval(m, :(const page_width! = $(width -> page_width!(e, width))))
-  # ... and what the count at the top right counts: `page_count()` gives "Words", "Characters" or "Reading time"
-  Core.eval(m, :(const page_count = $(() -> (reads!(e, :stat); STAT_NAMES[findfirst(==(e.stat), STATS)]))))
-  Core.eval(m, :(const page_count! = $(name -> stat!(e, STATS[something(findfirst(==(String(name)), STAT_NAMES), 1)]))))
   # ... and whether the page checks its spelling
   Core.eval(m, :(const page_spelling = $(() -> (reads!(e, :spelling); e.spelling))))
   Core.eval(m, :(const page_spelling! = $(on -> spelling!(e, Bool(on)))))
@@ -3881,7 +3849,7 @@ end
 
 """
 Note that the live block that's running now asked for a setting of the page:
-`:theme`, `:zoom`, `:font` or `:stat`. Such a block is run again when the setting changes, so
+`:theme`, `:zoom` or `:font`. Such a block is run again when the setting changes, so
 what it shows stays true.
 """
 reads!(e, setting::Symbol) = begin
@@ -24445,13 +24413,6 @@ after(list, x) = list[mod1(findfirst(==(x), list) + 1, length(list))]
 
 const THEME_ORDER = (:sepia, :paper, :night)
 
-const STATS = (:words, :chars, :minutes)
-const STAT_NAMES = ("Words", "Characters", "Reading time")   # what the settings page calls them
-
-"Make the count at the top right count `stat`: one of `STATS`"
-stat!(e, stat::Symbol) = (e.stat = stat; save_settings!(e); rerun!(e, :stat); e)
-next_stat!(e) = stat!(e, after(STATS, e.stat))
-
 const SLIDE_TIME = 0.25   # seconds for the sidebar to slide in or out
 
 "Show the sidebar if it's hidden, or hide it. It slides from where it is now."
@@ -25780,7 +25741,7 @@ end
 # Each button in the top bar says what it does while the mouse is over it. A
 # click hides what it says until the mouse leaves the button.
 
-const Tipped = Union{ToolButton,Count,SendButton,Mode,CheckCount}
+const Tipped = Union{ToolButton,SendButton,Mode,CheckCount}
 const TIP_INK = colorant"rgb(240,240,240)"   # on the dark grey that every tooltip has
 
 "What a tooltip shows: `words`, with room around them"
@@ -25841,10 +25802,6 @@ tip(s::SendButton) = begin
   ws = agents(e)
   isempty(ws) ? "Nudged $(get(e.nodes, :agent, "the agent"))" : "Nudge $(first(ws).name) with what you changed" * hint(e, :run)
 end
-tip(c::Count) = begin
-  s = after(STATS, editor(c).stat)
-  s == :words ? "Count words" : s == :chars ? "Count characters" : "Show reading time"
-end
 
 draw(ctx, size, ui::ConcreteRect, b::Tipped) = (b.rect = (ui.left, ui.top, ui.width, ui.height); nothing)
 
@@ -25857,21 +25814,6 @@ end
 hush!(b::Tipped) = (b.quiet = true; hide_tooltip!(window_of(b)))
 
 commas(n::Int) = replace(string(n), r"(?<=\d)(?=(\d{3})+$)" => ",")
-
-describe(c::Count) = begin
-  e = editor(c)
-  b = e.buf
-  kinds(b)
-  s = e.stat == :words ? "$(commas(b.words)) $(b.words == 1 ? "word" : "words")" :
-      e.stat == :chars ? "$(commas(b.chars)) characters" : "$(max(1, round(Int, b.words / 230))) min read"
-  ishovered(c) || (c.quiet = false)
-  Box(height(28px), padding(8px, 0px), radius(6px), background(ishovered(c) ? colours.hover : clear),
-    label(s, 12px, color=colours.dim))
-end
-
-cursor(::Count) = :hand
-
-onkey(c::Count, ::KeyPress{Keys.mouse_left}) = (next_stat!(editor(c)); hush!(c))
 
 button(e, action, icon) = node!(() -> ToolButton(icon=icon, action=action), e, action)
 
@@ -26238,9 +26180,8 @@ describe(t::TopBar) = begin
                       # The app that the Mac uses for the file can change it, so a button opens the file there
                       button(e, :outside, "box-arrow-up-right")) :
                      (more..., job_part(e)..., agent_part(e)..., checks..., commit_part(e)..., mode...,
-                      # A page that's never changed says so where the count of its words would be
-                      b.fixed ? Box(height(28px), padding(8px, 0px), label("Read only", 12px, color=colours.dim)) :
-                                node!(Count, e, :count)))...))
+                      # A page that's never changed says so at the end
+                      (b.fixed ? (Box(height(28px), padding(8px, 0px), label("Read only", 12px, color=colours.dim)),) : ())...))...))
 end
 
 """
@@ -35477,7 +35418,7 @@ end
 # --- settings -----------------------------------------------------------------------------
 #
 # The settings are the page's colours, its font and the font's weight, the size
-# of its text, its width, what the count at the top right counts, how code
+# of its text, its width, how code
 # shows, the key bindings and how wide the sidebar is. ⌘, opens the settings in
 # a window of their own.
 # They're on the pages of one folder, each a Markdown file whose live blocks
@@ -35491,7 +35432,7 @@ end
 const pages_dir = Ref(joinpath(@__DIR__, "pages"))
 
 "The settings that every window has the same: each is a field of the editor"
-const SHARED = (:theme, :font, :weight, :zoom, :widest, :stat, :plain, :spelling, :updates, :autosave, :glide, :wrap, :numbers, :shade, :beside, :indent, :code_scale, :code_font, :code_weight, :guide, :bundle, :rebound, :side, :hidden)
+const SHARED = (:theme, :font, :weight, :zoom, :widest, :plain, :spelling, :updates, :autosave, :glide, :wrap, :numbers, :shade, :beside, :indent, :code_scale, :code_font, :code_weight, :guide, :bundle, :rebound, :side, :hidden)
 
 "The folder of the pages that have the settings"
 settings_dir() = joinpath(pages_dir[], "settings")
@@ -35604,7 +35545,7 @@ save_settings!(e) = begin
     mkpath(dirname(settings_file()))
     # After the bundle of key bindings comes a line for each command that has other keys than the bundle's, like key.save=ctrl+s
     changed = join(["key.$name=$(e.rebound[name])\n" for name in sort!(collect(keys(e.rebound)))])
-    write(settings_file(), "theme=$(e.theme)\nfont=$(e.font)\nweight=$(e.weight)\nzoom=$(e.zoom)\nwidth=$(e.widest.value)\ncount=$(e.stat)\nplain=$(e.plain)\nspelling=$(e.spelling)\nupdates=$(e.updates)\nautosave=$(e.autosave)\nglide=$(e.glide)\nwrap=$(e.wrap)\nnumbers=$(e.numbers)\nshade=$(e.shade)\nbeside=$(e.beside)\nindent=$(e.indent)\ncode=$(e.code_scale)\ncodefont=$(e.code_font)\ncodeweight=$(e.code_weight)\nguide=$(e.guide)\nsidebar=$(e.side.value)\nhidden=$(e.hidden)\nkeys=$(e.bundle)\n$changed")
+    write(settings_file(), "theme=$(e.theme)\nfont=$(e.font)\nweight=$(e.weight)\nzoom=$(e.zoom)\nwidth=$(e.widest.value)\nplain=$(e.plain)\nspelling=$(e.spelling)\nupdates=$(e.updates)\nautosave=$(e.autosave)\nglide=$(e.glide)\nwrap=$(e.wrap)\nnumbers=$(e.numbers)\nshade=$(e.shade)\nbeside=$(e.beside)\nindent=$(e.indent)\ncode=$(e.code_scale)\ncodefont=$(e.code_font)\ncodeweight=$(e.code_weight)\nguide=$(e.guide)\nsidebar=$(e.side.value)\nhidden=$(e.hidden)\nkeys=$(e.bundle)\n$changed")
   catch
     # A file that can't be written only means the settings last as long as the window
   end
@@ -35693,8 +35634,6 @@ load_settings!(e) = begin
     elseif name == "width"
       w = tryparse(Float64, value)
       w === nothing || (e.widest = px(clamp(w, NARROWEST, WIDEST)))
-    elseif name == "count" && Symbol(value) in STATS
-      e.stat = Symbol(value)
     elseif name == "plain"
       e.plain = value == "true"
     elseif name == "spelling"
@@ -36425,6 +36364,23 @@ add_command!(theme!, title="Use other colours for the page")
 add_command!(text_size!, title="Make the page's text a number of pixels tall")
 add_command!(key_bindings!, title="Use the keys of another editor")
 add_command!(spelling!, title="Turn the spelling check on or off")
+
+"""
+Say how many words the page has, how many characters, and how long it takes
+to read, under the top bar for a while. Front matter says things about a
+document, so the count leaves it out.
+"""
+word_count(e) = begin
+  b = e.buf
+  lines = view(b.lines, (b.view == :markdown ? front_matter(b.lines) : 0)+1:length(b.lines))
+  n, chars = words(lines), sum(length, lines, init=0)
+  said = "$(commas(n)) word$(n == 1 ? "" : "s")  ·  $(commas(chars)) character$(chars == 1 ? "" : "s")  ·  $(max(1, round(Int, n / 230))) min read"
+  e.nodes[:result] = (said, time())
+  redraw_in!(e, 0)
+  said
+end
+works_here(e, ::Val{:word_count}) = e.buf.view in (:markdown, :code)
+add_command!(word_count, title="Say how many words the page has, how many characters, and how long it takes to read", kind=:look)
 
 # --- the commands of a file and of a folder ---
 #

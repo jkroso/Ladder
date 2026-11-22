@@ -175,7 +175,7 @@ A function draws each thing in this window: a block, a button, a row of the list
 
 Try it on the bar of the block above. The window shows `progress.jl`, with the caret on the function `describe`. Change a colour or a size there, and press ⌘Return in the function. The bar is drawn the new way at once. ⌘S writes the change to the file.
 
-It works on Ladder's own parts too, like the count of words at the top right. Most of those are in one very long file. The window shows the whole of it, with the function at the top, and ⌘Return and ⌘S work there as they do in any file. The app that you installed writes its own files again each time it starts, so a change to one of its own parts lasts until you quit. To keep the change, put the caret in the function and run the command Keep This Change. It adds the function to your startup page, whose code runs each time Ladder starts.
+It works on Ladder's own parts too, like the file's name in the middle of the top bar. Most of those are in one very long file. The window shows the whole of it, with the function at the top, and ⌘Return and ⌘S work there as they do in any file. The app that you installed writes its own files again each time it starts, so a change to one of its own parts lasts until you quit. To keep the change, put the caret in the function and run the command Keep This Change. It adds the function to your startup page, whose code runs each time Ladder starts.
 
 In a line of text, the blue line goes round a link, **bold words** or `inline code` on its own. Its function is the one that gives it its look, like the colour of a link. Over plain words, the line goes round the whole paragraph.
 
@@ -926,8 +926,8 @@ A zip file shows what it holds, without being unpacked: its folders and files, e
 
 Right-click the page to cut, copy or paste. The menu's Insert item adds a new block where you clicked: a heading, a list, a to-do item, a table, a sheet, a spreadsheet, a diagram, a takeoff, a schedule, a chart, a board, a calendar, a sketch, a live block and more.
 
-A file can start with front matter: lines like `title: Notes` between two lines of `---`. Ladder shows it as a block of its own, and leaves it out of the word count.
+A file can start with front matter: lines like `title: Notes` between two lines of `---`. Ladder shows it as a block of its own. To see how many words a page has, press ⌘⇧P and run Word Count. It leaves the front matter out, and it also says how many characters the page has and how long it takes to read.
 
-Press ⌘, to open the settings in a window of their own: the colours, the font and its weight, the size of the text, the width of the page and what the count at the top right shows. A button there makes Ladder the app that opens your Markdown files. Links at the top of that page go to the other pages of the settings. Code editor has the settings for code: its font, its weight, its size, its indent, its line numbers and whether a long line wraps. Key bindings has the keys of each command. There you can choose the keys of VS Code, Sublime Text or Emacs, or click a command and press the keys you want for it.
+Press ⌘, to open the settings in a window of their own: the colours, the font and its weight, the size of the text and the width of the page. A button there makes Ladder the app that opens your Markdown files. Links at the top of that page go to the other pages of the settings. Code editor has the settings for code: its font, its weight, its size, its indent, its line numbers and whether a long line wraps. Key bindings has the keys of each command. There you can choose the keys of VS Code, Sublime Text or Emacs, or click a command and press the keys you want for it.
 
 The Ladder app updates itself. It gets a newer version while you work, and the new version takes the place of this one when you quit. A box at the end of the settings turns that off.

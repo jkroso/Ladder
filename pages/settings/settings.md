@@ -63,16 +63,6 @@ Slider(value=page_width(), min=400, max=1200, step=20, format=width -> round(Int
 
 The number is the width of the page in pixels, while the text is 17 pixels tall. Bigger text gets a wider page, so a line holds as many words as before. A window that is too narrow for the page shows it as wide as it can.
 
-## Word count
-
-```ui
-counts = ["Words", "Characters", "Reading time"]
-RadioGroup(labels=counts, selected=findfirst(==(page_count()), counts),
-           onchange=group -> page_count!(counts[group.selected]))
-```
-
-The top right of the window shows the one you choose. A click on it there changes it too.
-
 ## Spelling
 
 ```ui

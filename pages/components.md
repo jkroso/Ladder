@@ -23,7 +23,7 @@ A component can go in a line as well: here is a switch !`Toggle(on=true)` and th
 ```ui
 Column(Checkbox(label="Check the spelling", checked=true),
        Checkbox(label="Use smart quotes"),
-       Checkbox(label="Show the word count", checked=true))
+       Checkbox(label="Wrap long lines", checked=true))
 ```
 
 ```ui
