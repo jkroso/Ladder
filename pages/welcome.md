@@ -448,6 +448,10 @@ $$
 
 To change a formula in a line of text, put the caret in the line and press ⌘E: the line shows its TeX. To change a formula on lines of its own, hold ⌥ and click it, or move the caret onto it and press Return. A command that Ladder doesn't know shows as its name, in colour. In a page of HTML, each formula is MathML, which a browser shows as maths.
 
+## A cover picture
+
+A page can have a picture across its top, as a page in Notion does. Put a line like `cover: photos/1 footings.png` in the front matter: the lines between two lines of `---` at the very top of the file. The picture is as wide as the page's text, and its middle shows. The other lines of the front matter show under it. The picture can be a file, named from the page's folder, or an address on the web. To change it, hold ⌥ and click the picture, and the front matter shows its lines. A page that you save as HTML has the picture at its top too.
+
 ## Link cards
 
 Write the address of a web page as you would a picture's, on a line of its own, and the line shows the page as a card, with the page's title, its description and its picture:

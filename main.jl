@@ -23669,9 +23669,74 @@ matter_rows(lines, t) = begin
   rows
 end
 
-"The front matter that ends at line `t`, as a card, as the top of an email, or as what code from the startup page shows there"
+# --- a cover picture ---------------------------------------------------------------------------
+#
+# A key `cover` in the front matter names a picture, as a picture's line does:
+# a file, named from the page's folder, or an address on the web.
+#
+#     ---
+#     title: Kitchen
+#     cover: photos/kitchen.jpg
+#     ---
+#
+# The picture goes across the top of the page. It's as wide as the page's text,
+# a third as tall as that, and no taller than `COVER_MOST`. It fills that room:
+# its middle shows, and what's over the edges of the room is cut off. The card
+# of the front matter is under it, without the `cover` key. Front matter that
+# has only a cover shows only the picture. A click on the picture selects the
+# front matter, and ⌥-click shows its lines, where you change the cover. A
+# cover that isn't a picture, or isn't there, shows nothing, and the card shows
+# the key as it's written. A page as HTML has the picture at its top too.
+
+const COVER_MOST = 260px   # how tall a cover can be
+const COVER_GAP = 16px     # between the cover and the card under it
+
+"The cover picture across the top of the page, with the card of the front matter under it, or with no card"
+@def mutable struct CoverPicture <: SemanticUI
+  key::String = ""    # of the picture, for an Image
+  wide::px = 0px
+  tall::px = 0px
+  card::Any = nothing
+end
+
+"The key of the picture that the `cover` of the front matter names, or nothing. `rows` are the keys of the front matter."
+cover_key(e, rows) = begin
+  k = findfirst(r -> lowercase(r[2]) == "cover", rows)
+  k === nothing && return nothing
+  src = String(strip(rows[k][3], ['"', '\'', ' ']))
+  isempty(src) && return nothing
+  path = startswith(src, r"https?://") ? fetched(e, src) : abspath(docdir(e), expanduser(src))
+  path === nothing ? nothing : picture_key(path)
+end
+
+# The room at the top is empty, and `draw` paints the picture into it, as a gallery's square does
+describe(c::CoverPicture) = begin
+  picture = Box(fixed(c.wide), height(c.tall), radius(8px), background(colours.block), name="Cover")
+  Column(width(grow=grow), Alignment.Start, child_gap=COVER_GAP, picture, (c.card === nothing ? () : (geometry(c.card),))...)
+end
+
+"The part of a picture `w` by `h` pixels that fills a room `wide` by `tall`: its middle, as wide or as tall as it is, whichever fills the room"
+cover_part(w, h, wide, tall) = w / h > wide / tall ?
+  ((w - h * wide / tall) / 2, 0.0, h * wide / tall, Float64(h)) :
+  (0.0, (h - w * tall / wide) / 2, Float64(w), w * tall / wide)
+
+draw(ctx, size, ui::ConcreteRect, c::CoverPicture) = begin
+  image = try image_source(c.key) catch; nothing end
+  image === nothing && return
+  wide, tall = num(c.wide), num(c.tall)
+  with_round_clip(ctx, ui.left, ui.top, px(wide), px(tall), 8px) do
+    paint_picture(ctx, image.raw, cover_part(image.width, image.height, wide, tall), (num(ui.left), num(ui.top), wide, tall))
+  end
+end
+
+cursor(::CoverPicture) = :arrow
+onkey(c::CoverPicture, ev::KeyPress{Keys.mouse_left}) = click_page!(c, ev)
+
+"The front matter that ends at line `t`, as a card, as the top of an email, or as what code from the startup page shows there. A `cover` key puts a picture over it."
 matter_card(e, t) = begin
   rows = matter_rows(e.buf.lines, t)
+  cover = cover_key(e, rows)
+  cover === nothing || (rows = filter(r -> lowercase(r[2]) != "cover", rows))
   card = first_answer(MATTER_CARDS, e, rows)
   # A kind of folder can show the front matter of a page that it holds its own way, as a blog shows a book review's
   o = card === nothing ? text_object(e) : nothing
@@ -23681,6 +23746,13 @@ matter_card(e, t) = begin
     card = email_shows(e, Dict(lowercase(k) => v for (_, k, v) in rows)) ? email_head!(e) : node!(MatterCard, e, :matter)
     card.rows = rows
     card.size = body(e).size * 0.76
+  end
+  if cover !== nothing
+    c = node!(CoverPicture, e, :cover_picture)
+    c.key, c.wide, c.tall = cover, e.width, min(e.width / 3, COVER_MOST)
+    # Front matter with only a cover shows only the picture
+    c.card = card isa MatterCard && isempty(rows) ? nothing : own!(node!(Document, e, :document), card)
+    card = c
   end
   own!(node!(Document, e, :document), card)
   # Lay it out once to learn how tall it is

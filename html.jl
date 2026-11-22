@@ -137,7 +137,19 @@ sides(divider) = map(cells(divider)) do cell
   startswith(cell, ':') && endswith(cell, ':') ? "center" : endswith(cell, ':') ? "right" : ""
 end
 
+"The picture that the `cover` key of front matter, whose lines between its fences are `lines`, names, or nothing"
+matter_cover(lines) = begin
+  for l in lines
+    m = match(r"^cover\s*[:=]\s*(.*?)\s*$"i, l)
+    m === nothing && continue
+    src = strip(m[1], ['"', '\'', ' '])
+    return isempty(src) ? nothing : String(src)
+  end
+  nothing
+end
+
 const STYLE = """
+img.cover { display: block; width: 100%; height: 16em; object-fit: cover; border-radius: 8px; margin: 0 0 1.5em; }
 body { font: 17px/1.6 Charter, Georgia, serif; color: #2b2622; background: #fdfcf9; max-width: 44em; margin: 3em auto; padding: 0 1.5em; }
 h1, h2, h3, h4, h5, h6 { line-height: 1.25; margin: 1.6em 0 0.5em; }
 a { color: #9c5626; }
@@ -210,6 +222,9 @@ html(lines::AbstractVector{<:AbstractString}; title="", block=(lang, first, last
       t = something(findnext(j -> kinds[j].kind == Kind.fence && kinds[j].level == 1, i+1:n, 1), n - i + 1) + i
       t = min(t, n)
       # Front matter says things about the page, and a comment is for whoever writes it. Neither is part of the page.
+      # A cover that the front matter names is a picture at the top of the page.
+      cover = line.lang in (MATTER, TOML_MATTER) ? matter_cover(lines[i+1:t-1]) : nothing
+      cover === nothing || println(out, "<img class=\"cover\" src=\"", escape(replace(cover, " " => "%20")), "\" alt=\"\">")
       if !(line.lang in (MATTER, TOML_MATTER, COMMENT))
         tex = line.lang == MATH && kinds[t].kind == Kind.fence ? join(lines[i+1:t-1], "\n") : ""
         made = isempty(strip(tex)) ? block(line.lang, i, t) : mathml(tex, display=true)

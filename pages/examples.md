@@ -24,6 +24,7 @@ The block at the top of this page is front matter: lines at the very top of a fi
 - [Maths: formulas written in TeX](welcome.md#maths)
 - [Lists and to-do items](welcome.md#lists)
 - [A to-do item that repeats: tick it, and the next one goes under it](welcome.md#lists)
+- [A cover picture across the top of a page](welcome.md#a-cover-picture)
 - [Tables, and the keys that Ladder uses](welcome.md#tables)
 - [A table from a CSV file](welcome.md#tables-from-a-file)
 - [Columns: blocks of a page side by side](welcome.md#columns)
