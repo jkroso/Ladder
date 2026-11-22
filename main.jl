@@ -9724,13 +9724,16 @@ task_words(t) = task_days(t) * "  ·  " * Schedules.days_text(t.days)
 
 """
 Show every task: the days from the day before the first task starts to the
-day after the last one finishes. A short schedule's days are no wider than
-`DAY_USUAL` in the page, and no wider than `DAY_MOST` when it fills the window.
+day after the last one finishes. A task that repeats with a limit, like `every
+day for 3 days`, finishes with its last run. One that repeats for ever finishes
+with its first. A short schedule's days are no wider than `DAY_USUAL` in the
+page, and no wider than `DAY_MOST` when it fills the window.
 """
 fit!(v::ScheduleView) = begin
   ts = v.tasks
   today = Dates.today()
-  lo, hi = isempty(ts) ? (today, today + Day(13)) : (minimum(t -> t.start, ts), maximum(t -> t.finish, ts))
+  ends(t) = something(Schedules.last_day(t, v.data.weekends), t.finish)
+  lo, hi = isempty(ts) ? (today, today + Day(13)) : (minimum(t -> t.start, ts), maximum(ends, ts))
   days = daynum(hi) - daynum(lo) + 3.5
   v.zoom = clamp(max(v.box[3], 1.0) / days, DAY_LEAST, v.full ? DAY_MOST : DAY_USUAL)
   v.at = daynum(lo) - 1
@@ -22041,12 +22044,18 @@ another_day(e) = page_day(e) != calendar_today()
 
 """
 How the task `t` of a schedule stands on the page's day: `:done`, `:doing` or
-`:todo`. On another day than today, a task that repeats is never done, because
-its next run is still to come: it's `:doing` on the days of a run.
+`:todo`. On another day than today, a task that repeats isn't done while its
+next run is still to come: it's `:doing` on the days of a run. One with a limit,
+like `every day for 3 days`, is done after the last day of its last run.
 """
 standing(e, t::Schedules.Planned) = begin
   d, today = page_day(e), calendar_today()
-  d != today && Schedules.repeats(t.todo) !== nothing && return Schedules.running(t, d, calendar_tasks(e)[2]) ? :doing : :todo
+  if d != today && Schedules.repeats(t.todo) !== nothing
+    weekends = calendar_tasks(e)[2]
+    z = Schedules.last_day(t, weekends)
+    z !== nothing && d > z && return Days.stands(t.start, z, t.todo.done, d, today)
+    return Schedules.running(t, d, weekends) ? :doing : :todo
+  end
   Days.stands(t.start, t.finish, t.todo.done, d, today)
 end
 

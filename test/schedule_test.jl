@@ -114,6 +114,26 @@ end
   @test S.runs(hose, d(10), false) == [(d(2), d(3)), (d(4), d(7)), (d(8), d(9)), (d(10), d(11))]
   @test S.running(water, d(0), false) && S.running(water, d(7), false) && !S.running(water, d(5), false) && !S.running(water, d(9), false)
   @test S.running(hose, d(5), false) && !S.running(sweep, d(2), false)
+  @test S.last_day(water, false) === nothing && S.last_day(sweep, false) === nothing
+end
+
+@testset "a task that repeats for a while" begin
+  page = ["- [ ] Water the slab every day for 3 days", "- [ ] Hose it every 2 days for 2 weeks",
+          "- [ ] Mop every day 3 times", "- [ ] Dig the trench"]
+  s = S.schedule(["Mop every day 3 times | from 2026-11-20"])
+  slab, hose, mop, dig = S.plan!(s, S.todos(page), today=MON)
+  d(n) = MON + Day(n)
+  one(ns...) = [(d(n), d(n)) for n in ns]
+  # Three days in all: the first and two more
+  @test S.runs(slab, d(30), false) == one(1, 2) && S.last_day(slab, false) == d(2)
+  # Seven times in two weeks. The run that's due on Sunday 22 is on Monday 23, and Saturday 28 on Monday 30.
+  @test S.runs(hose, d(30), false) == one(2, 4, 7, 8, 10, 14) && S.last_day(hose, false) == d(14)
+  @test S.runs(hose, d(30), true) == one(2, 4, 6, 8, 10, 12)
+  # From a Friday, the runs that are due on Saturday and Sunday are one run on Monday. A run that's left out doesn't count, so there are still three.
+  @test (mop.start, S.runs(mop, d(30), false)) == (d(4), one(7, 8)) && S.last_day(mop, false) == d(8)
+  @test S.running(slab, d(2), false) && !S.running(slab, d(3), false)
+  # A task that doesn't repeat has no last day of its own
+  @test S.last_day(dig, false) === nothing
 end
 
 @testset "a task that was renamed" begin

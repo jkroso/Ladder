@@ -19,6 +19,14 @@
 # - a day of the week, like `every Monday`
 # - `every weekday`: each day from Monday to Friday
 #
+# After those words, a limit can say how long it repeats: `for 3 days`, `for a
+# week`, `for 6 months`, or how many times, `4 times` or `once`. So `Water the
+# slab every day for 3 days` is due on three days in all. A tick of an item
+# with a limit adds the next item with what's left of the limit: `for 2 days`,
+# then `for 1 day`, and a tick of that one adds nothing. With `for 2 weeks`
+# what's left is the time from the next item's day to two weeks after the
+# first, and `4 times` becomes `3 times`.
+#
 # The next day is the first of the item's days that's after today. So an item
 # that's ticked late doesn't come back due at once: it skips the days that it
 # missed. A month from the 31st of a month is the last day of a shorter month,
@@ -42,9 +50,14 @@ const UNITS = Dict("day" => Day(1), "week" => Week(1), "fortnight" => Week(2), "
 const ADVERBS = Dict("daily" => "day", "weekly" => "week", "fortnightly" => "fortnight", "monthly" => "month", "yearly" => "year")
 const WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
 
-"The words that say how often an item repeats"
+"""
+The words that say how often an item repeats, and how long: 1 to 4 say how
+often, and 5 is the limit after them, if any. 6 and 7 are the number and the
+unit of `for 3 days`, 8 is the number of `4 times`, and 9 is `once`.
+"""
 const HOW_OFTEN = Regex("\\b(?:every\\s+(?:(\\d+)\\s+)?(day|week|fortnight|month|year)s?|(daily|weekly|fortnightly|monthly|yearly)|every\\s+(" *
-                        join(WEEKDAYS, '|') * "|weekday))\\b", "i")
+                        join(WEEKDAYS, '|') * "|weekday))" *
+                        "(\\s+(?:for\\s+(a|an|\\d+)\\s+(day|week|fortnight|month|year)s?|(\\d+)\\s+times?|(once)))?\\b", "i")
 
 "What may follow the words that say how often: a day, and a full stop"
 const AFTER = r"^\s*(?:\d{4}-\d{1,2}-\d{1,2})?\s*[.!]?\s*$"
@@ -91,6 +104,68 @@ rule(text::AbstractString) = begin
   (first, k) -> first + Day(mod1(wanted - Dates.dayofweek(first), 7)) + Week(k - 1)
 end
 
+"""
+How long the limit of the match `m` of `HOW_OFTEN` says that an item repeats:
+a span of time like `Day(3)`, a number of times, or nothing when it has no limit.
+"""
+limit(m::RegexMatch) = begin
+  m[5] === nothing && return nothing
+  m[9] !== nothing && return 1
+  m[8] !== nothing && return parse(Int, m[8])
+  n = lowercase(m[6]) in ("a", "an") ? 1 : parse(Int, m[6])
+  UNITS[lowercase(m[7])] * n
+end
+
+"The day before which an item that repeats from the day `first` for the time `span` stops"
+stop(first::Date, span) = first + span
+
+"""
+How many times in all the words `text` say that an item is due, from the day
+`first`, counting that day: `every day for 3 days` is 3 and `every week 4 times`
+is 4. It's nothing when they say no limit, or don't say that it repeats.
+"""
+times(text::AbstractString, first::Date) = begin
+  m = how_often(text)
+  m === nothing && return nothing
+  span = limit(m)
+  span === nothing && return nothing
+  span isa Int && return max(span, 1)
+  next = rule(text)
+  next === nothing && return nothing
+  n = 1
+  while next(first, n) < stop(first, span)
+    n += 1
+  end
+  n
+end
+
+"The words for `n` of the unit `unit`, like `3 days` or `1 week`"
+how_many(n::Int, unit::AbstractString) = "$n $unit$(n == 1 ? "" : "s")"
+
+"""
+What's left of the limit of the match `m` of `HOW_OFTEN`, an item that repeats
+from the day `first`, when its next item is on the day `next`: words like
+` for 2 days` or ` 3 times`. It's nothing when nothing is left. A span that's
+left is in the limit's own unit when it can be, or else in weeks or in days.
+"""
+left_of(m::RegexMatch, first::Date, next::Date) = begin
+  span = limit(m)
+  if span isa Int
+    span <= 1 && return nothing
+    return span == 2 ? " once" : " $(span - 1) times"
+  end
+  z = stop(first, span)
+  next < z || return nothing
+  unit = lowercase(m[7])
+  for n in 1:10_000
+    d = next + UNITS[unit] * n
+    d == z && return " for " * how_many(n, unit)
+    d > z && break
+  end
+  days = Dates.value(z - next)
+  days % 7 == 0 ? " for " * how_many(days ÷ 7, "week") : " for " * how_many(days, "day")
+end
+
 "The first day in the words `text`, or nothing"
 day_in(text::AbstractString) = begin
   m = match(DAY, text)
@@ -126,11 +201,18 @@ repeated(line::AbstractString; today::Date=Dates.today()) = begin
   next === nothing && return nothing
   first = day_in(words)
   open = with_tick(line, false)
-  first !== nothing && return replace(open, DAY => string(next_day(next, first, today)), count=1)
-  # With no day, it repeats from today. The day goes in front of the words that say how often.
-  d = string(next_day(next, today, today))
+  d = next_day(next, something(first, today), today)
   m = how_often(open)
-  open[1:prevind(open, m.offset)] * d * " " * open[m.offset:end]
+  if m[5] !== nothing
+    # The new item has what's left of the limit, and none is left after the last time
+    rest = left_of(m, something(first, today), d)
+    rest === nothing && return nothing
+    a = m.offsets[5]
+    open = open[1:prevind(open, a)] * rest * open[a+ncodeunits(m[5]):end]
+  end
+  first !== nothing && return replace(open, DAY => string(d), count=1)
+  # With no day, it repeats from today. The day goes in front of the words that say how often.
+  open[1:prevind(open, m.offset)] * string(d) * " " * open[m.offset:end]
 end
 
 "How far the line `line` is indented"

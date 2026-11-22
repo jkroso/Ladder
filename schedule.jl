@@ -24,7 +24,8 @@
 #
 # A task whose item says how often it repeats, as `- [ ] Water the plants
 # every 2 days` does, runs again and again after its first run. repeats.jl
-# reads those words. Each run takes as many days as the first.
+# reads those words. Each run takes as many days as the first. A limit after
+# them, as in `every day for 3 days`, says how many runs it has in all.
 #
 # This file reads and writes those lines, finds the page's to-do items, and
 # works out the days of each task. It draws nothing.
@@ -380,14 +381,19 @@ up to the run that starts after `last`. The `k`th run is due on the `k`th day
 that the item's words give after the task's first day. A run that's due on a
 day with no work starts on the next working day. A run that would start before
 the run before it is finished is left out, as two runs of `every day` that are
-due on a Saturday and a Sunday are. There are `most` runs at the most.
+due on a Saturday and a Sunday are. An item with a limit, like `every day
+for 3 days`, has as many runs in all as `times` of repeats.jl gives from the
+task's first day, counting the first, so a run that's left out doesn't count.
+There are `most` runs at the most.
 """
 runs(t::Planned, last::Date, weekends::Bool; most::Int=1000) = begin
   out = Tuple{Date,Date}[]
   next = repeats(t.todo)
   next === nothing && return out
+  left = something(Repeats.times(t.todo.name, t.start), typemax(Int)) - 1
   finish = t.finish
   for k in 1:most
+    length(out) < left || break
     start = workday(next(t.start, k), weekends)
     start > last && break
     start > finish || continue
@@ -395,6 +401,17 @@ runs(t::Planned, last::Date, weekends::Bool; most::Int=1000) = begin
     push!(out, (start, finish))
   end
   out
+end
+
+"""
+The last day of the last run of the task `t`, when its item repeats with a
+limit like `every day for 3 days`, or nothing when it repeats for ever or not at all.
+"""
+last_day(t::Planned, weekends::Bool) = begin
+  repeats(t.todo) === nothing && return nothing
+  Repeats.times(t.todo.name, t.start) === nothing && return nothing
+  rs = runs(t, typemax(Date), weekends)
+  isempty(rs) ? t.finish : rs[end][2]
 end
 
 "True when the task `t` runs on the day `d`: in its first run, or in a run after it"

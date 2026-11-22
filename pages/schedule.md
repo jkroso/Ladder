@@ -53,6 +53,6 @@ A code block in the language `schedule` shows every to-do item of its page as a 
 
 Add a to-do item to the list, and the schedule has a bar for it. Change the words of an item, and its bar and its links stay with it.
 
-A to-do item that repeats, like `- [ ] Water the slab every 2 days`, has a bar for each time that it's due. A bar that's due on a day with no work moves to the next working day. Drag any of its bars to move them all. On another day of the slider, the bars before that day show as done, but the item stays open, because it's due again.
+A to-do item that repeats, like `- [ ] Water the slab every 2 days`, has a bar for each time that it's due. A bar that's due on a day with no work moves to the next working day. Drag any of its bars to move them all. On another day of the slider, the bars before that day show as done, but the item stays open, because it's due again. An item with a limit, like `- [ ] Water the slab every day for 3 days`, has that many bars in all. After its last bar, the slider shows it as done.
 
 Every change goes into the block's lines, so the file holds the whole schedule. To see the lines, hold ⌥ and click the block.

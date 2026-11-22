@@ -389,4 +389,45 @@ end
   K.calendar_day[] = nothing
 end
 
+@testset "a task that repeats for a while has a bar for each time, and is done after the last" begin
+  K.calendar_day[] = MON
+  job = joinpath(dir, "repeats-limit.md")
+  write(job, """
+  - [ ] Pour the slab
+  - [ ] Water the slab every day for 3 days
+
+  ```schedule
+  start: 2026-11-09
+
+  Water the slab every day for 3 days | after Pour the slab
+  ```
+
+  ```day
+  ```
+
+  The end.
+  """)
+  K.open!(e, job); frames()
+  u = e.nodes[(:schedule, job, 1)]
+  nov(n) = Date(2026, 11, n)
+  water = u.tasks[2]
+  # The first bar is on the 10th, after the pour, and two more are on the 11th and 12th, however many days show
+  @test (water.start, K.task_runs(u, 2)) == (nov(10), [(nov(11), nov(11)), (nov(12), nov(12))])
+  # The mouse over a run says its days, and the limit with how often
+  r = K.bar_box(u, 2, nov(12), nov(12))
+  spot = (r[1] + r[3] / 2, r[2] + r[4] / 2)
+  @test K.under(u, spot...) == (:run, 2, nov(12), nov(12))
+  at(spot)
+  @test any(p -> p.key == :tooltip, popups(w))
+  haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], "schedule-repeats-limit.png"), w)
+  u.zoom /= 4; frames()
+  @test length(K.task_runs(u, 2)) == 2
+  # On the day of the last run the task is being done, and after it the task is done
+  K.set_day!(K.block_view(e, K.DAY_BLOCK, 1), nov(12)); frames()
+  @test K.standing(e, water) == :doing && !K.finished(e, water)
+  K.set_day!(K.block_view(e, K.DAY_BLOCK, 1), nov(13)); frames()
+  @test K.standing(e, water) == :done && K.finished(e, water)
+  K.calendar_day[] = nothing
+end
+
 foreach(close, (w,))
