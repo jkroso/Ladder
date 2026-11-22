@@ -39939,6 +39939,8 @@ tool_input(t::CodePicker, w, ::KeyPress{Keys.mouse_left}) = begin
   # A click on its label does nothing. A click anywhere else takes its line away, and goes on to the window.
   if t.chosen !== nothing
     x, y = num(w.mouse[1]), num(w.mouse[2])
+    # A press on the handle of a block starts a drag of the block: see "move a block by its handle"
+    grab_block!(t, x, y) && (t.swallow = true; return true)
     k = findfirst(((_, (left, top, wide, tall)),) -> left <= x <= left + wide && top <= y <= top + tall, t.buttons)
     if k !== nothing
       t.swallow = true
@@ -40023,7 +40025,7 @@ shown_now(b::Block) = begin
   k === nothing ? nothing : parts[k]
 end
 
-tool_input(t::CodePicker, w, ::KeyRelease{Keys.mouse_left}) = (was = t.swallow; t.swallow = false; was)
+tool_input(t::CodePicker, w, ::KeyRelease{Keys.mouse_left}) = (dropped = drop_block!(t, w); was = t.swallow; t.swallow = false; was || dropped)
 # ⌘C copies the block that a click with ⌘ and ⌥ down chose, as a whole block
 tool_input(t::CodePicker, w, ::KeyPress{Keys.c}) = begin
   (t.chosen !== nothing && only_held(w, Keys.cmd)) || return false
@@ -40041,10 +40043,13 @@ tool_input(t::CodePicker, w, ::KeyPress{Keys.c}) = begin
   copy_text!(e, text)
   true
 end
-# Esc takes the line of a thing that a click with ⌘ and ⌥ down chose away, stops an agent that's working,
-# and takes the card of an agent's answer away, while no popup and no search shows
+# While a block is dragged by its handle, the mouse selects no text, and the line where the block would go follows it
+tool_input(t::CodePicker, w, ::MouseMove) = dragging(t) ? (redraw_in!(t.editor, 0); true) : false
+# Esc stops the drag of a block, takes the line of a thing that a click with ⌘ and ⌥ down chose away, stops an
+# agent that's working, and takes the card of an agent's answer away, while no popup and no search shows
 tool_input(t::CodePicker, w, ::KeyPress{Keys.escape}) = begin
   (unmodified(w) && t.editor.popup == :none && !finding(t.editor)) || return false
+  dragging(t) && (block_drag(t.editor).lines = nothing; redraw_in!(t.editor, 0); return true)
   t.chosen === nothing || (unchoose!(t); return true)
   isempty(working_agents(t.editor)) || (stop_agent!(t.editor); return true)
   # The values of Show Steps go: see "the steps of a check"
@@ -40098,6 +40103,7 @@ draw_tool(ctx, w, t::CodePicker, scene) = begin
     a.label = pick_mark(ctx, w, asked_rect(t.editor, isempty(a.places) ? nothing : first(a.places)), words; colour=a.failed ? PICK_FAILED : PICK_LINE)
   end
   draw_chosen(ctx, w, t)
+  draw_drag(ctx, w, t)
   picks(t, w) || return nothing
   redraw_in!(t.editor, 1/30)   # the line follows the mouse
   found = code_under(w)
@@ -40120,6 +40126,7 @@ shows loses its line.
 """
 draw_chosen(ctx, w, t::CodePicker) = begin
   empty!(t.buttons)
+  block_drag(t.editor).at = nothing
   t.chosen === nothing && return nothing
   node, m = t.chosen
   # A paragraph or a heading that the click chose was made by the frame before this one
@@ -40140,14 +40147,445 @@ draw_chosen(ctx, w, t::CodePicker) = begin
     push!(t.buttons, (action, (left, top, wide, tall)))
     left += wide + 4
   end
+  # A whole block of the page has a handle at the top left of its line, to drag it by: see "move a block by its handle"
+  whole_block(t.editor, node) === nothing || (block_drag(t.editor).at = draw_handle(ctx, w, r, dragging(t)))
   nothing
 end
 
-"A hand over a button on the line round the thing that a click with ⌘ and ⌥ down chose. Its label does nothing, so it has the arrow."
+"""
+A hand over a button on the line round the thing that a click with ⌘ and ⌥
+down chose, over the handle of a block, and while a block is dragged by its
+handle. The label does nothing, so it has the arrow.
+"""
 tool_cursor(t::CodePicker, w, pos) = begin
   x, y = num(pos[1]), num(pos[2])
-  over = any(((action, (left, top, wide, tall)),) -> action != :label && left <= x <= left + wide && top <= y <= top + tall, t.buttons)
-  over ? :hand : nothing
+  on(left, top, wide, tall) = left <= x <= left + wide && top <= y <= top + tall
+  over = any(((action, place),) -> action != :label && on(place...), t.buttons)
+  d = get(t.editor.nodes, :block_drag, nothing)
+  handle = d isa BlockDrag && (d.lines !== nothing || (d.at !== nothing && on(d.at...)))
+  over || handle ? :hand : nothing
+end
+
+# --- move a block by its handle ------------------------------------------------------------------
+#
+# The line round a block of the page that a click with ⌘ and ⌥ down chose has
+# a handle at its top left, in the margin beside the block's first line, as
+# Notion has: six dots. Drag the handle, and a blue line shows where the block
+# goes. The block goes there when the button comes up, and keeps its line. One
+# ⌘Z puts it back. Esc stops the drag, and the block stays where it was.
+#
+# A blue line across the page is a gap between two blocks: the block goes
+# there. A blue line down the side of a block makes columns, as in Notion.
+# Over the left or the right quarter of a block, the dragged block goes beside
+# it: the two become columns, with a `columns` block over them that says 2.
+# Beside a column of a group, the block is a new column there, and the group's
+# number grows by one. A column that's dragged out of its group leaves it, and
+# the number goes down by one. A group with one column left loses its
+# `columns` block. A gap between the blocks under a heading that's a column
+# puts the block in that column.
+#
+# Columns are what columns.jl reads: a column holds one block, or a heading and
+# the blocks under it. So a heading takes the blocks under it into a column
+# with it, and a column that starts with a heading moves with its blocks. A
+# place where the page couldn't hold what the drop asks for has no blue line,
+# like the right of a heading for a paragraph, which the heading's column
+# would take in.
+#
+# A block is what the line goes round: a paragraph, a heading, a whole list, a
+# quote, a table, a block of code, or a block that shows what it makes, like a
+# board or a chart. A run of text, like a link, has no handle. Nor has a part
+# of a block, like a card of a board, nor the front matter, nor a `columns`
+# block, nor a page that you can't change. The block goes to a place among the
+# blocks that show, so the wheel scrolls the page while the button is down, to
+# a place further away.
+#
+# Where the block meets the lines of another block, an empty line keeps them
+# apart, so a paragraph doesn't join the paragraph above it. Where it leaves
+# two empty lines together, one goes.
+
+"""
+The handle on the line round a block that a click with ⌘ and ⌥ down chose,
+and a drag of the block by it. `at` is where the handle was drawn in the last
+frame, or nothing when the chosen thing has none. While the block is dragged,
+`lines` are its first and last lines, and `node` and `method` are the chosen
+thing, which keeps its line in the block's new place. `lines` is nothing when
+there's no drag.
+"""
+@def mutable struct BlockDrag
+  at::Any = nothing
+  lines::Any = nothing
+  node::Any = nothing
+  method::Any = nothing
+end
+
+block_drag(e) = get!(() -> BlockDrag(), e.nodes, :block_drag)::BlockDrag
+
+"What each place that a drag of a block came over would make of the page, so that it's worked out once in a drag"
+drop_tried(e) = get!(() -> Dict{Any,Any}(), e.nodes, :drop_tried)::Dict{Any,Any}
+
+"True while a block of the page in the window of the picker `t` is dragged by its handle"
+dragging(t::CodePicker) = (d = get(t.editor.nodes, :block_drag, nothing); d isa BlockDrag && d.lines !== nothing)
+
+"""
+The block of the page in `e` that the thing `x` is, when a drag can move it:
+`x` itself when it's a block of the page's lines, or the block that shows it,
+when `x` is all that a block shows, like a board. It's nothing for a part of
+a block, for the front matter, for a `columns` block, and in a page that you
+can't change.
+"""
+whole_block(e, x) = begin
+  b = e.buf
+  (b.view == :markdown && !readonly(b) && !b.fixed && slideshow(e) === nothing && lowered(e) === nothing) || return nothing
+  found = x isa Block ? x : nothing
+  shows(it) = it.content isa Live && (it.content.node === x || (it.content.node isa FileBlock && it.content.node.value === x))
+  if found === nothing
+    for p in shown_parts(e)
+      p isa LiveBlock && any(shows, p.items) && (found = p; break)
+    end
+  end
+  (found === nothing || found.first <= front_matter(b.lines) || Columns.opens(kinds(b)[found.first])) && return nothing
+  found
+end
+
+const HANDLE_WIDE = 14.0
+const HANDLE_TALL = 18.0
+
+"""
+Draw the handle of a block at the left of the top of `r`, the place of the
+line round it: six dots, darker under the mouse and while it's `held`. It
+gives where the handle is, for a press on it.
+"""
+draw_handle(ctx, w, r, held::Bool) = begin
+  left, top = max(2.0, num(r.left) - HANDLE_WIDE - 4), num(r.top)
+  x, y = num(w.mouse[1]), num(w.mouse[2])
+  over = held || (left <= x <= left + HANDLE_WIDE && top <= y <= top + HANDLE_TALL)
+  colour = over ? PICK_LINE : RGBA(PICK_LINE.r, PICK_LINE.g, PICK_LINE.b, 0.55)
+  for across in (-1, 1), down in (-1, 0, 1)
+    disc(ctx, left + HANDLE_WIDE / 2 + across * 2.75, top + HANDLE_TALL / 2 + down * 5, 1.6, colour)
+  end
+  (left, top, HANDLE_WIDE, HANDLE_TALL)
+end
+
+"Start a drag of the block that a click with ⌘ and ⌥ down chose, when `(x, y)` is on its handle. It's true when it did."
+grab_block!(t::CodePicker, x, y) = begin
+  d = block_drag(t.editor)
+  (d.at !== nothing && t.chosen !== nothing) || return false
+  left, top, wide, tall = d.at
+  (left <= x <= left + wide && top <= y <= top + tall) || return false
+  node, m = t.chosen
+  block = whole_block(t.editor, shown_now(node))
+  block === nothing && return false
+  d.lines, d.node, d.method = (block.first, block.last), node, m
+  empty!(drop_tried(t.editor))
+  redraw_in!(t.editor, 0)
+  true
+end
+
+"""
+A place that a dragged block can go. `side` is :gap for a gap between two
+blocks: the block goes in front of line `line`, or after it when `after`.
+`inner` is true for a gap between the blocks under a heading that's a column,
+so the block goes into that column. `side` is :left or :right for beside the
+block or the column that starts on line `line`, to make a column of the block.
+`x`, `y` and `long` are where the blue line that shows it is: across from
+`(x, y)` and `long` wide for a gap, or down from `(x, y)` and `long` tall for a side.
+"""
+struct Drop
+  side::Symbol
+  line::Int
+  after::Bool
+  inner::Bool
+  x::Float64
+  y::Float64
+  long::Float64
+end
+
+"How far into a block the mouse has to be before its left quarter is a place beside it. The handle is just outside the block, so a drag straight down from it makes no columns."
+const SIDE_DEAD = 16.0
+
+"True when line `i` of `lines`, whose kinds are `ks`, is a block by itself, like a line that holds only a picture or a formula. `column_groups` asks the same of a page."
+alone_line(lines, ks, i) = ks[i].kind == Kind.paragraph && (
+  (occursin("![", lines[i]) && occursin(PICTURE_LINE, lines[i])) ||
+  (occursin("\$\$", lines[i]) && maths_text(lines[i]) !== nothing && Maths.available()))
+
+"The group of columns among `gs`, and the column of it, that line `i` is in, by their places. It's nothing for a line in no column."
+column_of(gs, i::Int) = begin
+  for (gi, g) in enumerate(gs), (k, span) in enumerate(g.spans)
+    i in span && return (gi, k)
+  end
+  nothing
+end
+
+"A line of the page as a move puts the lines in a new order: the line that it was, or 0 for a new line, and its text"
+const Moved = Pair{Int,String}
+
+empty_line(x::Moved) = isempty(strip(x.second))
+
+"Take the lines that were lines `span` of the page out of `doc`. Where that leaves two empty lines together, or one at the start or the end, one goes too."
+take_out!(doc::Vector{Moved}, span) = begin
+  p, q = findfirst(x -> x.first in span, doc), findlast(x -> x.first in span, doc)
+  p === nothing && return doc
+  deleteat!(doc, p:q)
+  if p <= length(doc) && empty_line(doc[p]) && (p == 1 || empty_line(doc[p-1]))
+    deleteat!(doc, p)
+  elseif p > length(doc) && p > 1 && empty_line(doc[p-1])
+    deleteat!(doc, p - 1)
+  end
+  doc
+end
+
+"Put the lines `chunk` into `doc` in front of place `p`, with an empty line between them and a line next to them that isn't empty"
+put_in!(doc::Vector{Moved}, p::Int, chunk) = begin
+  before = p > 1 && !empty_line(doc[p-1]) ? Moved[0 => ""] : Moved[]
+  after = p <= length(doc) && !empty_line(doc[p]) ? Moved[0 => ""] : Moved[]
+  splice!(doc, p:p-1, [before; chunk; after])
+  doc
+end
+
+"Where the line that was line `i` of the page is in `doc`, or nothing when it went"
+place_of(doc::Vector{Moved}, i::Int) = findfirst(x -> x.first == i, doc)
+
+"What a `columns` block says for columns with these shares of the width: how many there are, when they're all as wide"
+shares_text(shares) = all(==(first(shares)), shares) ? string(length(shares)) :
+  join((isinteger(x) ? string(Int(x)) : string(x) for x in shares), " ")
+
+"""
+The lines of the page `lines` after the block of lines `s` to `t` goes to
+`drop`, each with the line that it was. `ks` says what kind each line is, and
+`gs` is the page's groups of columns. It's nothing when the page would be the
+same, or when the columns that columns.jl reads from the new lines aren't the
+ones that the drop asks for. `check` false leaves that out, as for a gap on a
+page with no columns, where nothing can turn into a column.
+
+A block that starts a column moves with its column. A block that goes beside
+another takes the blocks under it, when it's a heading, and so does the block
+that it goes beside.
+"""
+rearranged(lines, ks, gs, s::Int, t::Int, drop::Drop; check=true) = begin
+  alone(i) = alone_line(lines, ks, i)
+  own = column_of(gs, s)
+  own !== nothing && first(gs[own[1]].spans[own[2]]) != s && (own = nothing)
+  unit = own !== nothing ? gs[own[1]].spans[own[2]] : drop.side == :gap ? (s:t) : (s:Columns.column_end(ks, s; alone))
+  drop.line in unit && return nothing
+  share(gi, k) = k <= length(gs[gi].shares) ? gs[gi].shares[k] : 1.0
+  # The shares of the width of the columns of each group that the drop changes, by the group's place in `gs`
+  shares = Dict{Int,Vector{Float64}}()
+  wants(gi) = get!(shares, gi) do
+    n = length(gs[gi].spans)
+    Float64[share(gi, k) for k in 1:n]
+  end
+  doc = Moved[i => lines[i] for i in eachindex(lines)]
+  chunk = Moved[i => lines[i] for i in unit]
+  own === nothing || deleteat!(wants(own[1]), own[2])
+  take_out!(doc, unit)
+  target, them = nothing, nothing
+  if drop.side == :gap
+    p = place_of(doc, drop.line)
+    p === nothing && return nothing
+    put_in!(doc, drop.after ? p + 1 : p, chunk)
+  elseif (target = column_of(gs, drop.line)) !== nothing
+    gi, k = target
+    span = gs[gi].spans[k]
+    # A column that left the same group from before this one leaves this one a place further up
+    at = own !== nothing && own[1] == gi && own[2] < k ? k - 1 : k
+    # A column keeps its width in its own group. A new one is as wide as the one it's beside.
+    insert!(wants(gi), drop.side == :left ? at : at + 1, own !== nothing && own[1] == gi ? share(own...) : share(gi, k))
+    p = drop.side == :left ? findfirst(x -> x.first in span, doc) : findlast(x -> x.first in span, doc) + 1
+    put_in!(doc, p, chunk)
+  else
+    them = drop.line:Columns.column_end(ks, drop.line; alone)
+    fence = Moved[0 => "```$COLUMN_BLOCK", 0 => "2", 0 => "```"]
+    p = place_of(doc, drop.line)
+    if drop.side == :left
+      put_in!(doc, p, [fence; Moved[0 => ""]; chunk])
+    else
+      put_in!(doc, p, fence)
+      put_in!(doc, findlast(x -> x.first in them, doc) + 1, chunk)
+    end
+  end
+  # Each group that the drop changed says its new number of columns, or loses its `columns` block when one or none is left
+  for (gi, sh) in shares
+    g = gs[gi]
+    if length(sh) <= 1
+      take_out!(doc, g.first:g.last)
+    else
+      p, q = place_of(doc, g.first), place_of(doc, g.last)
+      splice!(doc, p+1:q-1, Moved[0 => shares_text(sh)])
+    end
+  end
+  new = last.(doc)
+  new == lines && return nothing
+  check || return doc
+  # The columns that the drop asks for, each as the lines that it holds, by the line that each was
+  held(span) = Set(i for i in span if !isempty(strip(lines[i])))
+  want = Vector{Set{Int}}[held.(g.spans) for g in gs]
+  moved = held(unit)
+  own === nothing ? foreach(g -> foreach(c -> setdiff!(c, moved), g), want) : deleteat!(want[own[1]], own[2])
+  if drop.side == :gap
+    c = drop.inner ? column_of(gs, drop.line) : nothing
+    c === nothing || union!(want[c[1]][c[2]], moved)
+  elseif target !== nothing
+    gi, k = target
+    insert!(want[gi], drop.side == :left ? (own !== nothing && own[1] == gi && own[2] < k ? k - 1 : k) :
+                      (own !== nothing && own[1] == gi && own[2] < k ? k : k + 1), moved)
+  else
+    push!(want, drop.side == :left ? [moved, held(them)] : [held(them), moved])
+  end
+  wanted = Set(w for (gi, w) in enumerate(want) if !isempty(w) && !(haskey(shares, gi) && length(shares[gi]) <= 1))
+  # The columns that columns.jl reads from the new lines
+  newks = classify(new)
+  found = Columns.groups(new, newks, alone=i -> alone_line(new, newks, i))
+  got(span) = Set(doc[i].first for i in span if doc[i].first != 0 && !empty_line(doc[i]))
+  Set(got.(g.spans) for g in found if !isempty(g.spans)) == wanted ? doc : nothing
+end
+
+"""
+Where the lines `s` to `t` of the page in `e` go when a drag of them is at the
+point `(x, y)` of the window: a `Drop`, with the lines of the page after the
+move, or nothing when no place there takes them. Over the left or the right
+quarter of a block, or of a column, it's beside that block or column. Any
+other place is the nearest gap between two blocks: of the page, or between
+the blocks under a heading that's a column, when the mouse is in it.
+"""
+drop_target(e, (s, t), x, y) = begin
+  b = e.buf
+  ks, gs = kinds(b), column_groups(e)
+  shown = Tuple{Any,NTuple{4,Float64}}[]
+  for p in shown_parts(e)
+    p isa Block || continue
+    r = try rect(p) catch; nothing end
+    r === nothing || push!(shown, (p, (num(r.left), num(r.top), num(r.width), num(r.height))))
+  end
+  isempty(shown) && return nothing
+  # The room in the window of the blocks that start on lines `a` to `z`: its left, its top, its width and its height
+  room(a, z) = begin
+    rs = [r for (p, r) in shown if a <= p.first <= z]
+    isempty(rs) && return nothing
+    left, top = minimum(r -> r[1], rs), minimum(r -> r[2], rs)
+    (left, top, maximum(r -> r[1] + r[3], rs) - left, maximum(r -> r[2] + r[4], rs) - top)
+  end
+  tried(drop) = begin
+    key = (b.version, s, t, drop.side, drop.line, drop.after, drop.inner)
+    got = get!(() -> rearranged(b.lines, ks, gs, s, t, drop; check=!isempty(gs) || drop.side != :gap), drop_tried(e), key)
+    got === nothing ? nothing : (drop, got)
+  end
+  # Over the left or the right quarter of a block, or of the column that it's in, it goes beside that
+  for (p, r) in shown
+    (r[1] <= x <= r[1] + r[3] && r[2] <= y <= r[2] + r[4]) || continue
+    c = column_of(gs, p.first)
+    line = c === nothing ? p.first : first(gs[c[1]].spans[c[2]])
+    s <= line <= t && break
+    z = c === nothing ? Columns.column_end(ks, line; alone=i -> alone_line(b.lines, ks, i)) : last(gs[c[1]].spans[c[2]])
+    left, top, wide, tall = something(room(line, z), r)
+    side = left + SIDE_DEAD <= x < left + wide / 4 ? :left : x > left + wide * 3 / 4 ? :right : nothing
+    side === nothing && break
+    found = tried(Drop(side, line, false, false, side == :left ? left - 5 : left + wide + 5, top, tall))
+    found === nothing || return found
+    break
+  end
+  # The rows of the page: each block, or each group of columns. A gap is in front of each, and after the last.
+  rows = Tuple{Int,Int,Float64,Float64,Int}[]   # its first and last line, its top and bottom, and its group's place or 0
+  for (p, r) in shown
+    c = column_of(gs, p.first)
+    gi = c === nothing ? 0 : c[1]
+    if gi != 0 && !isempty(rows) && rows[end][5] == gi
+      a, z, top, bottom, _ = rows[end]
+      rows[end] = (a, z, min(top, r[2]), max(bottom, r[2] + r[4]), gi)
+    else
+      push!(rows, (gi == 0 ? p.first : gs[gi].first, gi == 0 ? p.last : last(gs[gi].spans[end]), r[2], r[2] + r[4], gi))
+    end
+  end
+  page_left = minimum(r[1] for (_, r) in shown)
+  page_wide = maximum(r[1] + r[3] for (_, r) in shown) - page_left
+  matter = front_matter(b.lines)
+  gaps = Drop[]
+  for (k, row) in enumerate(rows)
+    row[1] > matter || continue   # nothing goes in front of the front matter
+    push!(gaps, Drop(:gap, row[1], false, false, page_left, k == 1 ? row[3] - 4 : (rows[k-1][4] + row[3]) / 2, page_wide))
+  end
+  push!(gaps, Drop(:gap, rows[end][2], true, false, page_left, rows[end][4] + 4, page_wide))
+  # A column that starts with a heading has a gap between each two of its blocks, and after its last
+  for g in gs, span in g.spans
+    ks[first(span)].kind == Kind.heading || continue
+    area = room(first(span), last(span))
+    (area !== nothing && area[1] <= x <= area[1] + area[3] && area[2] <= y <= area[2] + area[4] + 20) || continue
+    under = [(p, r) for (p, r) in shown if first(span) <= p.first <= last(span)]
+    for k in 2:length(under)
+      p, r = under[k]
+      push!(gaps, Drop(:gap, p.first, false, true, area[1], (under[k-1][2][2] + under[k-1][2][4] + r[2]) / 2, area[3]))
+    end
+    p, r = under[end]
+    push!(gaps, Drop(:gap, p.last, true, true, area[1], r[2] + r[4] + 4, area[3]))
+  end
+  tried(gaps[argmin([abs(g.y - y) for g in gaps])])
+end
+
+"""
+End the drag of a block: the block goes to the place that the blue line
+shows, and keeps its line round it there. It's true when a block was dragged.
+"""
+drop_block!(t::CodePicker, w) = begin
+  d = block_drag(t.editor)
+  d.lines === nothing && return false
+  (s, l), node, m = d.lines, d.node, d.method
+  e = t.editor
+  found = drop_target(e, (s, l), num(w.mouse[1]), num(w.mouse[2]))
+  d.lines = d.node = d.method = nothing
+  empty!(drop_tried(e))
+  start = found === nothing ? nothing : rearrange!(e, found[2], s)
+  # A block of the page is the block that starts on the same line in each frame, so its line goes with it
+  if start !== nothing && node isa Block
+    node.first, node.last = start, start + l - s
+  end
+  t.chosen = (node, m)
+  redraw_in!(e, 0)
+  true
+end
+
+"""
+Give the page in `e` the lines of `doc`, which a move put in a new order, in
+one edit, so one ⌘Z puts them back. The caret and the other end of the
+selection stay with their text. It gives the line that was line `s` before.
+"""
+rearrange!(e, doc::Vector{Moved}, s::Int) = begin
+  b = e.buf
+  old, new = b.lines, last.(doc)
+  # Only the lines between those that are the same at the start and at the end change
+  lo = 1
+  while lo <= min(length(old), length(new)) && old[lo] == new[lo]
+    lo += 1
+  end
+  z, y = length(old), length(new)
+  while z >= lo && y >= lo && old[z] == new[y]
+    z -= 1; y -= 1
+  end
+  # An edit has a line to change at each end, so lines that only went in, or only went, take a line that stays with them
+  (z < lo || y < lo) && (lo > 1 ? (lo -= 1) : (z += 1; y += 1))
+  caret, anchor = b.caret, b.anchor
+  edit!(b, (lo, 0), line_end(b, z), join(new[lo:y], "\n"))
+  now = Dict(i => k for (k, (i, _)) in enumerate(doc) if i != 0)
+  # A line that went takes the caret to the end of the line before it
+  follow((i, col)) = begin
+    j = findlast(k -> haskey(now, k), 1:i)
+    j === nothing && return (1, 0)
+    at = now[j]
+    (at, j == i ? min(col, length(b.lines[at])) : length(b.lines[at]))
+  end
+  b.caret, b.anchor = follow(caret), follow(anchor)
+  redraw_in!(e, 0)
+  now[s]
+end
+
+"While a block is dragged by its handle, draw the blue line that shows where it would go: across the page for a gap, down the side of a block for a column"
+draw_drag(ctx, w, t::CodePicker) = begin
+  dragging(t) || return nothing
+  found = drop_target(t.editor, block_drag(t.editor).lines, num(w.mouse[1]), num(w.mouse[2]))
+  found === nothing && return nothing
+  drop = found[1]
+  drop.side == :gap ? round_box(ctx, drop.x, drop.y - 1.5, drop.long, 3, 1.5; fill=PICK_LINE) :
+                      round_box(ctx, drop.x - 1.5, drop.y, 3, drop.long, 1.5; fill=PICK_LINE)
+  disc(ctx, drop.x, drop.y, 3.5, PICK_LINE)
+  nothing
 end
 
 """

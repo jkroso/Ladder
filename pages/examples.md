@@ -26,6 +26,7 @@ The block at the top of this page is front matter: lines at the very top of a fi
 - [Tables, and the keys that Ladder uses](welcome.md#tables)
 - [A table from a CSV file](welcome.md#tables-from-a-file)
 - [Columns: blocks of a page side by side](welcome.md#columns)
+- [Move a block: drag the handle at the top left of its blue line to another place in the page, or beside another block to make columns](welcome.md#the-code-of-a-thing)
 - Columns that start with a heading: [one](welcome.md#copper-pipe) and [the next](welcome.md#plastic-pipe)
 - [Code in a block, with a colour for each part](welcome.md#code)
 - [The markup of a line, and how to show it](welcome.md)
