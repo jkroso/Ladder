@@ -30,6 +30,9 @@ write(other, "# Notes\n")
 git("add", "-A")
 git("commit", "-q", "-m", "The first commit")
 
+# Nothing here asks the real Claude for a message
+K.MESSAGE_COMMAND[] = `/usr/bin/false`
+
 const e = K.build_editor(page)
 const w = Window(e, size=(1000px, 700px))
 frames(n=3) = foreach(_ -> Base.invokelatest(frame, w), 1:n)
@@ -61,8 +64,10 @@ end
   K.refresh!(e.buf)
   again()
   @test K.commit_change(e, page) == :changed && button() !== nothing
-  @test K.tip(button()) == "Commit Readme.md"
-  # The click opens the palette with Commit taken, and the keyboard in its words
+  @test K.tip(button()) == "Commit Readme.md, with a message that Claude writes"
+  # With the switch "Write the message myself" on, the click opens the palette with Commit taken, and the keyboard
+  # in its words. With it off, Claude writes the message: see commit_menu_test.jl.
+  e.own = true
   click(rect(button()))
   p = K.palette(e)
   @test e.popup == :commands && p.command.name == :commit && [K.chip_name(c) for c in K.palette_chips(p)] == ["Message"] && p.at == 1

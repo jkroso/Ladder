@@ -199,6 +199,54 @@ ask(root, args) = begin
   end
 end
 
+"""
+Run git in the folder `root` with the text `input` on its stdin, and with the
+variables `env` too, like an index file of its own. It gives what git printed,
+or nothing when git failed. It waits for git.
+"""
+ask_with(root, args; input="", env=Dict{String,String}()) = begin
+  try
+    read(pipeline(setenv(`$(program[]) -C $root $args`, merge(ENV, Dict("LC_ALL" => "C"), env)), stdin=IOBuffer(input), stderr=devnull), String)
+  catch
+    nothing
+  end
+end
+
+"""
+Commit the text `text` as the file at `rel` in the repository at `root`, with
+the message `message`. The commit is the last commit with that one file
+changed. The file on the disk and every other file stay as they are. The
+index gets the file's new text too, so the changes of the file that the
+commit didn't take show as changes that aren't staged. It gives true and "",
+or false and why.
+"""
+commit_text(root, rel, text, message) = begin
+  head = strip(something(ask_with(root, `rev-parse --verify --quiet HEAD`), ""))
+  blob = strip(something(ask_with(root, `hash-object -w --stdin`; input=text), ""))
+  isempty(blob) && return (false, "git couldn't keep the text of $rel")
+  # A file keeps its mode, like one that runs as a program. A new file is a plain file.
+  listed = split(something(ask_with(root, `ls-files -s -- $rel`), ""))
+  mode = isempty(listed) ? "100644" : listed[1]
+  index = tempname()
+  env = Dict("GIT_INDEX_FILE" => index)
+  try
+    ask_with(root, isempty(head) ? `read-tree --empty` : `read-tree $head`; env) === nothing && return (false, "git couldn't read the last commit")
+    ask_with(root, `update-index --add --cacheinfo $mode,$blob,$rel`; env) === nothing && return (false, "git couldn't take $rel")
+    tree = strip(something(ask_with(root, `write-tree`; env), ""))
+    isempty(tree) && return (false, "git couldn't make the commit")
+    parent = isempty(head) ? String[] : ["-p", head]
+    commit = strip(something(ask_with(root, `commit-tree $tree $parent -F -`; input=message), ""))
+    isempty(commit) && return (false, "git couldn't make the commit")
+    # The branch moves only if no other commit came in the meantime
+    moved = ask_with(root, isempty(head) ? `update-ref HEAD $commit` : `update-ref HEAD $commit $head`)
+    moved === nothing && return (false, "another commit came first")
+    ask_with(root, `update-index --add --cacheinfo $mode,$blob,$rel`)
+    (true, "")
+  finally
+    rm(index, force=true)
+  end
+end
+
 "How many gits run at once, at the most. A folder can list many repositories, and the rest wait for a later frame."
 const MOST = 4
 

@@ -1175,6 +1175,7 @@ end
   side::px = PANEL_W                    # how wide the sidebar is. Drag its right edge to change it.
   hidden::Bool = false                  # the sidebar lists the hidden files and folders too: the ones whose names start with a dot
   right::Bool = true                    # a page that has a panel at the right shows it, as a repository's page has git's panel. See `page_side`.
+  own::Bool = false                     # you write the message of each commit, and Claude doesn't. See "Claude writes the commit's message".
   theme::Symbol = :sepia
   look::Symbol = :own                   # :site on a page of a blog, which looks as the blog's site does. See `page_look`.
   applied::Symbol = :none               # the theme the window was last told about
@@ -25781,8 +25782,11 @@ describe(b::ToolButton) = begin
   ishovered(b) || (b.quiet = false)
   on = (b.action == :panel && e.panel) || (b.action == :marks && marking(e)) || (b.action == :hidden && e.hidden) ||
        (haskey(BUTTONS, b.action) && get(BUTTONS[b.action], :on, _ -> false)(e))
+  # A button whose work takes a while, like a commit while Claude writes its message, spins until it's done
+  busy = haskey(BUTTONS, b.action) && get(BUTTONS[b.action], :busy, _ -> false)(e)
   box = Box(width(30px), height(28px), radius(6px), Alignment.Center, name="Button",
             background(on ? colours.active : ishovered(b) && !off(b) ? colours.hover : clear),
+          busy ? Spinner(size=15px) :
           Icon(b.icon, size=15px, color=off(b) ? colours.faint : haskey(BUTTONS, b.action) && BUTTONS[b.action].strong ? colours.accent : colours.dim))
   # While the sidebar is closed, a dot beside its button says that an agent waits for a page that isn't showing
   (b.action == :panel && waiting_dot(e)) || return box
@@ -35807,7 +35811,7 @@ end
 const pages_dir = Ref(joinpath(@__DIR__, "pages"))
 
 "The settings that every window has the same: each is a field of the editor"
-const SHARED = (:theme, :font, :weight, :zoom, :widest, :plain, :spelling, :updates, :autosave, :glide, :wrap, :numbers, :shade, :beside, :indent, :code_scale, :code_font, :code_weight, :guide, :bundle, :rebound, :side, :hidden, :right)
+const SHARED = (:theme, :font, :weight, :zoom, :widest, :plain, :spelling, :updates, :autosave, :glide, :wrap, :numbers, :shade, :beside, :indent, :code_scale, :code_font, :code_weight, :guide, :bundle, :rebound, :side, :hidden, :right, :own)
 
 "The folder of the pages that have the settings"
 settings_dir() = joinpath(pages_dir[], "settings")
@@ -35920,7 +35924,7 @@ save_settings!(e) = begin
     mkpath(dirname(settings_file()))
     # After the bundle of key bindings comes a line for each command that has other keys than the bundle's, like key.save=ctrl+s
     changed = join(["key.$name=$(e.rebound[name])\n" for name in sort!(collect(keys(e.rebound)))])
-    write(settings_file(), "theme=$(e.theme)\nfont=$(e.font)\nweight=$(e.weight)\nzoom=$(e.zoom)\nwidth=$(e.widest.value)\nplain=$(e.plain)\nspelling=$(e.spelling)\nupdates=$(e.updates)\nautosave=$(e.autosave)\nglide=$(e.glide)\nwrap=$(e.wrap)\nnumbers=$(e.numbers)\nshade=$(e.shade)\nbeside=$(e.beside)\nindent=$(e.indent)\ncode=$(e.code_scale)\ncodefont=$(e.code_font)\ncodeweight=$(e.code_weight)\nguide=$(e.guide)\nsidebar=$(e.side.value)\nhidden=$(e.hidden)\nright=$(e.right)\nkeys=$(e.bundle)\n$changed")
+    write(settings_file(), "theme=$(e.theme)\nfont=$(e.font)\nweight=$(e.weight)\nzoom=$(e.zoom)\nwidth=$(e.widest.value)\nplain=$(e.plain)\nspelling=$(e.spelling)\nupdates=$(e.updates)\nautosave=$(e.autosave)\nglide=$(e.glide)\nwrap=$(e.wrap)\nnumbers=$(e.numbers)\nshade=$(e.shade)\nbeside=$(e.beside)\nindent=$(e.indent)\ncode=$(e.code_scale)\ncodefont=$(e.code_font)\ncodeweight=$(e.code_weight)\nguide=$(e.guide)\nsidebar=$(e.side.value)\nhidden=$(e.hidden)\nright=$(e.right)\nownmessage=$(e.own)\nkeys=$(e.bundle)\n$changed")
   catch
     # A file that can't be written only means the settings last as long as the window
   end
@@ -36050,6 +36054,8 @@ load_settings!(e) = begin
       (value == "true") == e.hidden || (e.hidden = !e.hidden; list_files!(e))
     elseif name == "right"
       e.right = value != "false"
+    elseif name == "ownmessage"
+      e.own = value == "true"
     elseif name == "keys"
       any(b -> first(b) == value, BUNDLES) && (e.bundle = String(value))
     elseif startswith(name, "key.")
@@ -36093,7 +36099,8 @@ with `button(e, action, icon)`, by its action: `(run=f(e), tip=f(e), off=f(e),
 strong=true or false)`. `tip` gives the words of its tooltip. `off` is true
 while the button does nothing. A `strong` button has the colour that says do this.
 A button that turns something on and off can have `on=f(e)`, which is true
-while that's on: the button is shaded then, as the sidebar's button is.
+while that's on: the button is shaded then, as the sidebar's button is. A
+button whose work takes a while can have `busy=f(e)`: it spins while that's true.
 """
 const BUTTONS = Dict{Symbol,Any}()
 "What the top bar calls the page that shows: `f(e)` gives the words, or nothing to leave the file's name"
@@ -37485,6 +37492,14 @@ end
 # startup page, in a block of code that runs each time Ladder starts. See
 # "the startup page".
 
+"Where the command `claude` of Claude Code is. An app that the Finder opened doesn't have the terminal's PATH, so the usual places are tried too."
+claude_path() = begin
+  places = (joinpath(homedir(), ".local", "bin", "claude"), "/opt/homebrew/bin/claude", "/usr/local/bin/claude", joinpath(homedir(), ".claude", "local", "claude"))
+  found = something(Sys.which("claude"), Some(get(filter(isfile, collect(places)), 1, nothing)))
+  found === nothing && error("Ladder can't find the command `claude`. Install Claude Code, and ask again.")
+  found
+end
+
 "The command that changes code when it's asked to in words. Nothing means the command `claude` of Claude Code. A test puts a command of its own here."
 const AGENT_COMMAND = Ref{Any}(nothing)
 
@@ -37495,10 +37510,7 @@ them, for a question.
 """
 agent_command(; changes=true) = begin
   AGENT_COMMAND[] === nothing || return AGENT_COMMAND[]
-  # An app that the Finder opened doesn't have the terminal's PATH, so the usual places are tried too
-  places = (joinpath(homedir(), ".local", "bin", "claude"), "/opt/homebrew/bin/claude", "/usr/local/bin/claude", joinpath(homedir(), ".claude", "local", "claude"))
-  found = something(Sys.which("claude"), Some(get(filter(isfile, collect(places)), 1, nothing)))
-  found === nothing && error("Ladder can't find the command `claude`. Install Claude Code, and ask again.")
+  found = claude_path()
   # The words go straight after -p. An option that takes a list, like --allowedTools, would take them as part of its list.
   # The agent prints each step as a line of JSON, so the window can say what it's doing: see `agent_step`.
   steps = `--output-format stream-json --verbose`
@@ -39976,8 +39988,9 @@ cursor(::GitPanel) = :arrow
 # --- a commit of the file that shows ---------------------------------------------------------
 #
 # While the window shows a file that git keeps, and the file has changes since
-# the last commit, the top bar has a button with git's mark. A click opens the
-# palette with Commit taken, for the words of the commit. Run commits that
+# the last commit, the top bar has a button with git's mark. A click commits
+# the file with a message that Claude writes: see "Claude writes the commit's
+# message". The palette's Commit takes words that you write. Run commits that
 # file alone, as the window has it. The other files with changes stay as they
 # are, and so does what git was given for the next commit of them.
 
@@ -40041,12 +40054,497 @@ wide_words(::Val{:commit}) = true
 
 add_command!(commit_file!, name=:commit, title="Commit the file to its git repository, with words that say what changed")
 
-"The button of the top bar that commits the file that shows, while it has a change to commit: see `commit_change`"
-commit_part(e) = commit_change(e, e.buf.path) === nothing ? () : (button(e, :commit, "git"),)
+"""
+The button of the top bar that commits the file that shows, while it has a
+change to commit, and the chevron beside it: see `commit_change`. While the
+list under the chevron shows, the two are on the list's colour, as one tab of
+the list's envelope: see `commit_envelope`.
+"""
+commit_part(e) = begin
+  !haskey(e.nodes, :writing) && commit_change(e, e.buf.path) === nothing && return ()
+  open = commit_list_open(e)
+  (Row(Alignment.Center, name="Commit", radius(px(COMMIT_ROUND), px(COMMIT_ROUND), 0px, 0px), background(open ? found_colours().frame : clear),
+       button(e, :commit, "git"), node!(CommitMore, e, :commit_more)),)
+end
 
-# The keyboard goes to the page first, so the file that shows is the one in focus, not a row of the sidebar
-BUTTONS[:commit] = (run=e -> (focus(e); open_palette!(e, COMMANDS[:commit])), tip=e -> "Commit $(basename(e.buf.path))",
-                    off=e -> false, strong=false)
+# A click commits the file with a message that Claude writes, or that you write when the setting says so. While
+# ticked changes are chosen, it commits only those.
+BUTTONS[:commit] = (run=e -> commit_scope!(e, choosing(e) ? :part : :file), off=e -> choosing(e) && isempty(ticked(e)), strong=false,
+                    busy=e -> haskey(e.nodes, :writing),
+                    tip=e -> haskey(e.nodes, :writing) ? "Claude is writing the commit message…" :
+                             (!choosing(e) ? "Commit $(basename(e.buf.path))" :
+                              (n = length(ticked(e)); n == 0 ? "Tick the changes to commit" : n == 1 ? "Commit the ticked change" : "Commit the $n ticked changes")) *
+                             (choosing(e) && isempty(ticked(e)) ? "" : e.own ? ", with a message that you write" : ", with a message that Claude writes"))
+
+# --- Claude writes the commit's message --------------------------------------------------------
+#
+# A click on the Commit button saves the window's changes to the file, and
+# gives the file's diff since the last commit to Claude, which writes the
+# message as the repository's last messages are written. Then Ladder commits
+# the file, and says so under the top bar. The button spins while Claude
+# writes. When Claude can't write it, the words under the top bar say why, and
+# the palette opens with Commit, for a message that you write.
+#
+# The chevron beside the button opens a list of the three ways to commit:
+#
+#   - Commit this file, as the button does.
+#   - Commit part of this file shows what changed in the file itself, with a
+#     tick box on each change. The Commit button then commits only the ticked
+#     changes. The file stays as it is, so the changes that weren't ticked are
+#     still changes after the commit.
+#   - Commit all changed files commits every file that git's panel lists.
+#
+# Under them, a switch says who writes the message of each way: Claude, or
+# you. With it on, a commit opens the palette for your words. It's a setting,
+# so it stays as you leave it.
+
+"The command that writes a commit's message from the diff that it reads on its stdin. Nothing means `claude` of Claude Code. A test puts a command of its own here."
+const MESSAGE_COMMAND = Ref{Any}(nothing)
+
+"The most of a diff that Claude reads for a message. A longer diff is cut short, and says so."
+const MOST_DIFF = 60_000
+
+"The command that writes a commit's message, with the words that ask for it"
+message_command(prompt) =
+  MESSAGE_COMMAND[] !== nothing ? `$(MESSAGE_COMMAND[]) $prompt` :
+  # Haiku writes it in a few seconds. Safe mode starts with no plugins, MCP servers or hooks, so it starts quickly.
+  `$(claude_path()) --model haiku --output-format text --safe-mode --no-session-persistence -p $prompt`
+
+"The last commit messages of the repository at `root`, the newest first, with no lines that say who helped"
+recent_messages(root, n=5) = begin
+  log = something(Git.ask(root, `log -$n --format=%B%x1e`), "")
+  messages = String[]
+  for m in split(log, '\x1e')
+    lines = filter(l -> !occursin(r"^(Co-Authored-By|Claude-Session|Signed-off-by):"i, l), split(strip(m), '\n'))
+    text = strip(join(lines, "\n"))
+    isempty(text) || push!(messages, text)
+  end
+  messages
+end
+
+"What Claude is asked, for the message of a commit of the repository at `root`"
+message_prompt(root) = begin
+  examples = recent_messages(root)
+  "Write the git commit message for the change in the diff that you read on stdin. " *
+  "Write it as the recent messages of this repository are written: a first line of less than 72 characters " *
+  "that says what the change does, and then a blank line and a short body only when the change needs one. " *
+  "Reply with the message alone, with no quotes and no code fence." *
+  (isempty(examples) ? "" : "\n\nThe recent messages, newest first:\n\n" * join(examples, "\n\n---\n\n"))
+end
+
+"The message that the command `cmd` wrote from `diff`, with no code fence and no blank lines round it. It fails with what the command said when it fails."
+read_message(cmd, diff) = begin
+  said = IOBuffer()
+  out = try
+    read(pipeline(cmd, stdin=IOBuffer(diff), stderr=said), String)
+  catch
+    why = strip(String(take!(said)))
+    error(isempty(why) ? "Claude didn't write a message." : "Claude didn't write a message: " * first(split(why, '\n')))
+  end
+  text = strip(replace(strip(out), r"^```[a-z]*\n" => "", r"\n```$" => ""))
+  # Claude adds a line that says it wrote the commit with you. It wrote the message, not the change, so the line goes.
+  text = strip(join(filter(l -> !occursin(r"^(Co-Authored-By|Claude-Session):"i, l), split(text, '\n')), "\n"))
+  isempty(text) && error("Claude wrote an empty message.")
+  String(text)
+end
+
+"The diff of `rel` from the text `was` to the text `now`, as git writes it"
+text_diff(rel, was, now) = join(change_diff(rel, was, now), "\n")
+
+"The text of the file at `rel` in the last commit of the repository at `root`, or \"\" for a file that it hasn't got"
+committed_text(root, rel) = something(Git.at_commit(root, "HEAD", rel), "")
+
+"The lines `old` with the changes `chosen` made, each a run of old lines and the new lines that take their place"
+with_changes(old, new, chosen) = begin
+  out = copy(old)
+  # From the bottom, so that the changes above keep their places
+  for (o, n) in sort(chosen, by=c -> -first(c[1]))
+    splice!(out, o, new[n])
+  end
+  out
+end
+
+"""
+Start a commit of the window's file with a message that Claude writes: of the
+whole file with `:file`, of every changed file of its repository with
+`:all`, or of the ticked changes of the file with `:part`. Changes that
+aren't saved are saved first. Claude writes while the window goes on, and
+`commit_tick!` commits when the message comes.
+"""
+commit_now!(e, what::Symbol) = begin
+  haskey(e.nodes, :writing) && return e   # one at a time
+  try
+    path = e.buf.path
+    root = git_top(dirname(path))
+    isempty(root) && error("git doesn't keep $(basename(path))")
+    save_for_commit!(e, root, path, what)
+    rel = relpath(realpath(path), realpath(root))
+    part = nothing
+    diff = if what == :all
+      tracked = something(Git.ask(root, `diff HEAD`), "")
+      fresh = split(something(Git.ask(root, `ls-files --others --exclude-standard`), ""), '\n', keepempty=false)
+      # A file that git doesn't keep yet has no diff of its own, so its lines are the diff
+      join([tracked; [text_diff(f, "", try read(joinpath(root, f), String) catch; "" end) for f in first(fresh, 20)]], "\n")
+    elseif what == :part
+      part, diff = ticked_text(e, rel)
+      diff
+    else
+      text_diff(rel, committed_text(root, rel), read(path, String))
+    end
+    isempty(strip(diff)) && error("$(what == :all ? basename(root) : basename(path)) has no change to commit.")
+    length(diff) > MOST_DIFF && (diff = first(diff, MOST_DIFF) * "\n… (the diff goes on)")
+    cmd = message_command(message_prompt(root))
+    task = Threads.@spawn read_message(cmd, diff)
+    e.nodes[:writing] = (task=task, what=what, root=root, path=path, rel=rel, part=part)
+    redraw_in!(e, 0.05)
+  catch err
+    say_result!(e, trouble(err))
+  end
+  e
+end
+
+"Save the windows' changes that a commit of `what` takes: those of the file at `path`, or with `:all` those of every file of the repository at `root`"
+save_for_commit!(e, root, path, what) = begin
+  for o in with_windows(e)
+    b = o.buf
+    what == :all ? (startswith(b.path, root * "/") && dirty(b) && writes(b) && save!(b)) : (unsaved_in(o, path) && save!(b))
+  end
+  Git.forget!()   # git is asked again, since what it said can be from before the save
+end
+
+"The text of the window's file at `rel` with only its ticked changes, as a commit of them has it, and the diff of that from the last commit"
+ticked_text(e, rel) = begin
+  d = diff_now(e)
+  chosen = d === nothing ? [] : [d.changes[k] for k in ticked(e)]
+  isempty(chosen) && error("Tick the changes to commit.")
+  part = join(with_changes(d.old, e.buf.lines, chosen), "\n")
+  (part, text_diff(rel, join(d.old, "\n"), part))
+end
+
+"""
+Commit the window's file with `:file`, its ticked changes with `:part`, or
+every changed file of its repository with `:all`. Claude writes the message,
+unless the setting says that you write it. Then the palette asks for it.
+"""
+commit_scope!(e, what::Symbol) = begin
+  e.own || return commit_now!(e, what)
+  # The keyboard goes to the page first, so the file that shows is the one in focus, not a row of the sidebar
+  focus(e)
+  open_palette!(e, COMMANDS[what == :file ? :commit : what == :all ? :commit_all : :commit_ticked])
+  e
+end
+
+"Commit every file of the repository that has a change, with words that say what changed"
+commit_all_files!(e, message::String) = begin
+  words = strip(message)
+  isempty(words) && error("Write what the commit changes")
+  root = git_top(dirname(e.buf.path))
+  isempty(root) && error("git doesn't keep $(basename(e.buf.path))")
+  save_for_commit!(e, root, e.buf.path, :all)
+  commit_all!(e, root, String(words))
+  say_result!(e, "Committed all changed files")
+  nothing
+end
+
+"Commit the ticked changes of the file, with words that say what they change. The file keeps the changes that aren't ticked."
+commit_ticked!(e, message::String) = begin
+  words = strip(message)
+  isempty(words) && error("Write what the commit changes")
+  path = e.buf.path
+  root = git_top(dirname(path))
+  isempty(root) && error("git doesn't keep $(basename(path))")
+  save_for_commit!(e, root, path, :part)
+  rel = relpath(realpath(path), realpath(root))
+  part, _ = ticked_text(e, rel)
+  commit_text!(e, root, rel, part, String(words))
+  say_result!(e, "Committed the ticked changes of $(basename(path))")
+  nothing
+end
+
+# The palette lists these while they have something to commit
+works_here(e, ::Val{:commit_all}) = !isempty(e.buf.path) && (root = git_top(dirname(e.buf.path)); !isempty(root) && !isempty(watch_git!(e, root).changes))
+works_here(e, ::Val{:commit_ticked}) = choosing(e) && !isempty(ticked(e))
+wide_words(::Val{:commit_all}) = true
+wide_words(::Val{:commit_ticked}) = true
+add_command!(commit_all_files!, name=:commit_all, title="Commit every changed file of the repository, with words that say what changed")
+add_command!(commit_ticked!, name=:commit_ticked, title="Commit the ticked changes of the file, with words that say what they change")
+
+"Say `words` under the top bar for a while"
+say_result!(e, words) = (e.nodes[:result] = (String(words), time()); redraw_in!(e, 0); e)
+
+"Commit what `commit_now!` started, once Claude has written its message. Each window does this in each frame."
+commit_tick!(e) = begin
+  w = get(e.nodes, :writing, nothing)
+  w === nothing && return
+  istaskdone(w.task) || return (yield(); redraw_in!(e, 0.05))   # the button spins, and the task that reads Claude gets its turn
+  delete!(e.nodes, :writing)
+  message = try
+    fetch(w.task)
+  catch err
+    err = err isa TaskFailedException ? err.task.exception : err
+    say_result!(e, trouble(err))
+    # A message that you write commits the whole file, as the button did before
+    w.what == :file && (focus(e); open_palette!(e, COMMANDS[:commit]))
+    return
+  end
+  try
+    w.what == :file ? commit_file!(e, FS.File(w.path), message) :
+    w.what == :all ? commit_all!(e, w.root, message) : commit_text!(e, w.root, w.rel, w.part, message)
+    say_result!(e, "Committed $(w.what == :all ? "all changed files" : basename(w.path)): $(first(split(message, '\n')))")
+  catch err
+    say_result!(e, trouble(err))
+  end
+  nothing
+end
+
+EACH_FRAME[:commit_message] = commit_tick!
+
+"Commit every file of the repository at `root` that has a change, with the message `message`"
+commit_all!(e, root, message) = begin
+  done, why = Git.act(root, `add -A`)
+  done && ((done, why) = Git.act(root, `commit -m $message`))
+  Git.forget!()
+  redraw_in!(e, 0)
+  done || error("git didn't commit them: " * String(first(split(isempty(strip(why)) ? "it gave no reason" : strip(why), '\n'))))
+  nothing
+end
+
+"Commit the text `text` as the file at `rel` of the repository at `root`, and leave the file as it is. The window stops choosing changes."
+commit_text!(e, root, rel, text, message) = begin
+  done, why = Git.commit_text(root, rel, text, message)
+  Git.forget!()
+  delete!(e.nodes, :choosing)
+  redraw_in!(e, 0)
+  done || error("git didn't commit it: " * why)
+  nothing
+end
+
+# --- choosing the changes to commit ---
+
+"True while the window shows a tick box on each change of its file, for a commit of the ticked ones"
+choosing(e) = (c = get(e.nodes, :choosing, nothing); c !== nothing && c.path == e.buf.path && diffing(e))
+
+"Show what changed in the file, with a tick box on each change, or stop"
+choose_changes!(e) = begin
+  if choosing(e)
+    delete!(e.nodes, :choosing)
+  else
+    e.nodes[:diffing] = e.buf.path
+    e.nodes[:choosing] = (path=e.buf.path, ticked=Set{Any}())
+  end
+  redraw_in!(e, 0)
+  e
+end
+
+"What keeps the tick of change `k` of the file: its old lines and its new lines, so the tick stays with the change while the lines above it move"
+tick_key(e, d, k) = ((o, n) = d.changes[k]; (d.old[o], e.buf.lines[n]))
+
+"The numbers of the changes of the file that are ticked, from the top"
+ticked(e) = begin
+  choosing(e) || return Int[]
+  d = diff_now(e)
+  d === nothing && return Int[]
+  set = e.nodes[:choosing].ticked
+  [k for k in eachindex(d.changes) if tick_key(e, d, k) in set]
+end
+
+"A tick box over the page beside one change of the file, while the window chooses the changes to commit"
+@def mutable struct TickChange <: SemanticUI
+  k::Int = 0   # which change of the file, from the top
+end
+
+describe(t::TickChange) = begin
+  e = editor(t)
+  on = t.k in ticked(e)
+  Box(height(20px), padding(7px, 0px), radius(5px), name="Tick", background(ishovered(t) ? colours.active : colours.hover),
+    Row(child_gap=4px, Icon(on ? "check2-square" : "square", size=11px, color=on ? colours.accent : colours.dim),
+        Box(label("Commit", 11px, color=colours.dim))))
+end
+
+cursor(::TickChange) = :hand
+onkey(t::TickChange, ::KeyPress{Keys.mouse_left}) = begin
+  e = editor(t)
+  d = diff_now(e)
+  (d === nothing || !choosing(e) || t.k > length(d.changes)) && return handled
+  key = tick_key(e, d, t.k)
+  set = e.nodes[:choosing].ticked
+  key in set ? delete!(set, key) : push!(set, key)
+  redraw_in!(e, 0)
+  handled
+end
+
+# --- the list under the chevron beside the Commit button ---
+#
+# It has the colours of the other lists that float beside what they're for,
+# like the list of a filter's tables: see `float_list`. One outline goes round
+# the list, curves in at its top and goes round the Commit button and the
+# chevron, so the buttons are a tab of the list, as Centient's lists wrap the
+# button that opened them. A click on a way commits that way. Commit part of
+# this file shows the tick boxes, and the Commit button commits the ticked
+# changes. The switch under them stays open for another click.
+
+"The chevron beside the Commit button: a click shows the list of the ways to commit"
+@def mutable struct CommitMore <: SemanticUI end
+
+describe(c::CommitMore) =
+  Box(width(16px), height(28px), radius(6px), Alignment.Center, name="CommitMore", background(ishovered(c) ? colours.hover : clear),
+    Icon("chevron-down", size=10px, color=colours.dim))
+
+cursor(::CommitMore) = :hand
+
+onkey(c::CommitMore, ev::KeyPress{Keys.mouse_left}) = (open_commit_list!(editor(c), ev.window); handled)
+
+const COMMIT_LIST = :commit_list   # the key of the list's popup
+const COMMIT_WAYS = (:file, :part, :all)
+const COMMIT_LIST_W = 280px        # how wide the list is
+const COMMIT_GAP = 6.0             # px between the buttons and the list, where the outline curves in to the buttons
+const COMMIT_ROUND = 6.0           # px: how round the top corners of the buttons' tab are
+
+"The list under the chevron: the three ways to commit, and the switch that says who writes the message"
+@def mutable struct CommitList <: SemanticUI
+  side::Symbol = :bottom   # where it is beside the chevron, for its caret
+end
+
+"A row of the list under the chevron, that commits one way"
+@def mutable struct CommitWay <: SemanticUI
+  way::Symbol = :file
+end
+
+"The row of the list with the switch. On, you write the message of each commit. Off, Claude does."
+@def mutable struct OwnMessage <: SemanticUI end
+
+"True while the list of the ways to commit shows under the chevron"
+commit_list_open(e) = (w = window_of(e); w !== nothing && any(p -> p.key == COMMIT_LIST, popups(w)))
+
+"Where the Commit button and its chevron are in the window, as one rectangle in px, or nothing before both are drawn"
+commit_target(e) = begin
+  b, c = get(e.nodes, :commit, nothing), get(e.nodes, :commit_more, nothing)
+  (b === nothing || c === nothing) && return nothing
+  rb, rc = rect(b), rect(c)
+  (rb === nothing || rc === nothing) && return nothing
+  (x=num(rb.left), y=num(rb.top), w=num(rc.left + rc.width - rb.left), h=num(rb.height))
+end
+
+"Show the list of the ways to commit under the chevron, or take it away when it shows"
+open_commit_list!(e, w) = begin
+  commit_list_open(e) && return (close_popup!(w, COMMIT_LIST); handled)
+  t = commit_target(e)
+  t === nothing && return handled
+  list = node!(CommitList, e, :commit_list)
+  # The list's right edge is in line with the chevron's, so the outline goes straight down that side
+  anchor = (px(t.x + t.w) - COMMIT_LIST_W, px(t.y), COMMIT_LIST_W, px(t.h))
+  popup!(w, list, anchor=anchor, placement=:below, gap=px(COMMIT_GAP), width=COMMIT_LIST_W, key=COMMIT_LIST, theme=component_theme(e.zoom))
+  redraw_in!(e, 0)   # the buttons take the list's colour
+  handled
+end
+
+describe(l::CommitList) = begin
+  e = editor(l)
+  c = found_colours()
+  ways = [node!(() -> CommitWay(way=w), e, (:commit_way, w)) for w in COMMIT_WAYS]
+  # The envelope is under the rows, with its colour, its line and its shadow
+  Stack(width(grow=grow), Alignment.Start, name="CommitList",
+    node!(CommitEnvelope, e, :commit_envelope),
+    Box(width(grow=grow), padding(6px),
+      Column(width(grow=grow), Alignment.Start, child_gap=2px,
+        ways...,
+        Box(width(grow=grow), padding(8px, 4px), Box(width(grow=grow), height(1px), background(c.rule))),
+        node!(OwnMessage, e, :own_message))))
+end
+
+"What draws the envelope of the list under the chevron, under the list's rows. It's as big as the list."
+@def mutable struct CommitEnvelope <: SemanticUI end
+describe(::CommitEnvelope) = Box(width(grow=grow), height(grow=grow), name="Envelope")
+
+placed!(l::CommitList, side) = (l.side = side; nothing)
+
+"""
+The outline of the list `frame` under the buttons `target`, as the places
+along it, and the outline of what has the list's colour. It goes round the
+list, curves in to the buttons' sides and goes round their top, so the list
+and the buttons are one shape. It's the shape of the palette's list over a
+chip, upside down: see `lens_shapes`.
+"""
+commit_envelope(frame, target) = begin
+  flip(p) = (p[1], -p[2])
+  f = (x=frame.x, y=-(frame.y + frame.h), w=frame.w, h=frame.h)
+  t = (x=target.x, y=-(target.y + target.h), w=target.w, h=target.h)
+  outline, inside, closed = lens_shapes((frame=f, target=t, kind=:chip, round=COMMIT_ROUND))
+  (map(flip, outline), map(flip, inside), closed)
+end
+
+draw(ctx, size, ui::ConcreteRect, l::CommitEnvelope) = begin
+  e = editor(l)
+  t = commit_target(e)
+  t === nothing && return
+  c = found_colours()
+  f = (x=num(ui.left), y=num(ui.top), w=num(ui.width), h=num(ui.height))
+  outline, inside, closed = commit_envelope(f, t)
+  # The list's shadow, which doesn't fall on the top bar
+  with_clip(ctx, 0px, px(t.y + t.h), px(f.x + f.w + 40), px(f.y + f.h + 40)) do
+    shade = ink(RGBA(0, 0, 0, dark_page() ? 0.5 : 0.14))
+    blur = Skia.sk_maskfilter_new_blur_with_flags(Skia.SK_BLUR_STYLE_NORMAL, 9f0, true)
+    Skia.sk_paint_set_maskfilter(shade, blur)
+    shape = path_through([(f.x, f.y + 4); (f.x + f.w, f.y + 4); (f.x + f.w, f.y + f.h + 4); (f.x, f.y + f.h + 4)], true)
+    Skia.sk_canvas_draw_path(ctx, shape, shade)
+    Skia.sk_path_delete(shape)
+    Skia.sk_maskfilter_unref(blur)
+    Skia.sk_paint_delete(shade)
+  end
+  paint = ink(c.frame)
+  shape = path_through(inside, true)
+  Skia.sk_canvas_draw_path(ctx, shape, paint)
+  Skia.sk_path_delete(shape)
+  Skia.sk_paint_delete(paint)
+  trace(ctx, outline, c.line, 1; closed)
+end
+
+"What the row of the way `way` says, and the word at its right"
+way_words(e, way) = begin
+  way == :file && return ("Commit this file", basename(e.buf.path))
+  if way == :part
+    choosing(e) || return ("Commit part of this file", "")
+    n = length(ticked(e))
+    return ("Stop choosing changes", n == 0 ? "none ticked" : "$n ticked")
+  end
+  root = git_top(dirname(e.buf.path))
+  n = isempty(root) ? 0 : length(watch_git!(e, root).changes)
+  ("Commit all changed files", n == 1 ? "1 file" : "$n files")
+end
+
+describe(r::CommitWay) = begin
+  words, note = way_words(editor(r), r.way)
+  float_row(words, note, picked=ishovered(r))
+end
+cursor(::CommitWay) = :hand
+
+onkey(r::CommitWay, ev::KeyPress{Keys.mouse_left}) = begin
+  e = editor(r)
+  close_popup!(ev.window, COMMIT_LIST)
+  haskey(e.nodes, :writing) && return handled   # Claude is writing a message
+  r.way == :part ? choose_changes!(e) : commit_scope!(e, r.way)
+  handled
+end
+
+"A switch, on or off, as a `Toggle` of UI.jl looks"
+switch_look(on) =
+  Row(width(30px), height(18px), radius(9px), padding(2px), Alignment.Center, justify=on ? Alignment.End : Alignment.Start,
+      background(on ? colours.accent : found_colours().line),
+    Box(width(14px), height(14px), radius(7px), background(colorant"white")))
+
+describe(o::OwnMessage) = begin
+  e = editor(o)
+  c = found_colours()
+  Row(width(grow=grow), height(FLOAT_ROW), padding(8px, 0px), radius(6px), child_gap=8px, Alignment.Center,
+      background(ishovered(o) ? c.pick : c.frame),
+    Row(width(grow=grow), height(grow=grow), Alignment.Center, clip=true, label("Write the message myself", 13px, color=c.ink)),
+    switch_look(e.own))
+end
+
+cursor(::OwnMessage) = :hand
+onkey(o::OwnMessage, ::KeyPress{Keys.mouse_left}) = (e = editor(o); e.own = !e.own; save_settings!(e); redraw_in!(e, 0); handled)
+
+push!(BLOCK_ICONS, "chevron-down", "square", "check2-square")
 
 # --- what changed in the file that shows ------------------------------------------------------
 #
@@ -40279,8 +40777,10 @@ put_back_over(e) = begin
   for (k, y) in enumerate(gone.tops)
     y = TOPBAR_H + page_top(e) + y - e.scroll.offset + 1px
     TOPBAR_H <= y <= h - 20px || continue
+    # While the window chooses the changes to commit, each has a tick box too
+    tick = choosing(e) ? (node!(() -> TickChange(k=k), e, (:tick_change, k)),) : ()
     push!(out, Row(width(grow=grow), height(grow=grow), Alignment.Start, justify=Alignment.End, padding(y, max(w - right, 0px), 0px, 0px),
-                   node!(() -> PutBack(k=k), e, (:put_back, k))))
+                   child_gap=6px, tick..., node!(() -> PutBack(k=k), e, (:put_back, k))))
   end
   out
 end
