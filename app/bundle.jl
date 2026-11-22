@@ -236,14 +236,18 @@ the app and its developer, so each new build is the same app to them. A build
 signed with `-` is known only by its own contents, so each one is a new app.
 """
 sign(app) = begin
-  signer == "-" && return run(`codesign --force --deep --sign - $app`)
+  # Every build has the entitlements, not only a release. JavaScriptCore compiles a page's scripts only in an app
+  # that has com.apple.security.cs.allow-jit. Without it, it only interprets them, many times slower, and the
+  # first run of a big page's scripts, like a three.js city, runs out of time.
+  entitlements = joinpath(@__DIR__, "entitlements.plist")
+  signer == "-" && return run(`codesign --force --deep --entitlements $entitlements --sign - $app`)
   # Pruning deletes libraries and leaves the links that pointed to them. codesign refuses an app with a link to nothing.
   for (dir, _, names) in walkdir(app), name in names
     link = joinpath(dir, name)
     islink(link) && !ispath(link) && rm(link)
   end
-  how = releasing ? `--force --timestamp --options runtime --entitlements $(joinpath(@__DIR__, "entitlements.plist")) --sign $signer` :
-                    `--force --timestamp=none --sign $signer`
+  how = releasing ? `--force --timestamp --options runtime --entitlements $entitlements --sign $signer` :
+                    `--force --timestamp=none --entitlements $entitlements --sign $signer`
   parts = filter(compiled, files_in(joinpath(app, "Contents")))
   println("Signing ", length(parts), " programs and libraries as ", signer)
   # The deepest first, since a folder's signature covers what's in it
