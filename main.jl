@@ -40001,7 +40001,18 @@ describe(p::GitPanel) = begin
      [change(rel, kind) for (rel, kind) in changes])...,
     Box(height(14px)),
     page_heading("Last commits"),
-    (isempty(log) ? (page_note(s.known ? "This repository has no commit yet." : "Asking git…"),) : [commit_line(e, p.path, c) for c in log])...))
+    (isempty(log) ? (page_note(s.known ? "This repository has no commit yet." : "Asking git…"),) : tree_of_commits(e, p.path, s, log))...))
+end
+
+"""
+The lines of git's panel for the commits `log` of the repository at `root`,
+with the tree that they make at their left: see `CommitLine`. `s` is what git
+says of the repository, for the branch that's checked out.
+"""
+tree_of_commits(e, root, s, log) = begin
+  rows = Git.tree(log)
+  lanes = maximum(r -> r.lanes, rows)
+  [commit_line(e, root, c, r, lanes, s.branch) for (c, r) in zip(log, rows)]
 end
 
 cursor(::GitPanel) = :arrow
@@ -40064,27 +40075,126 @@ page_back!(e, d::GitDirectory) = close_commit!(e, string(d.path))
 """
 A commit in git's panel. A click shows what it holds in the page, and a click
 on the commit that shows shows the repository's files again.
+
+At its left is its part of the tree that the commits make, as `git log
+--graph` draws it: a dot for the commit, in the lane of its branch, and the
+lines that go down from it to the commits that it was made on. A merge has a
+smaller dot, and the commit that's checked out has a ring round its dot. Each
+branch has a colour of its own. The branches and the tags that are at the
+commit are over its first line, in its colour: a branch here is filled in, and
+a branch of another copy, like origin/main, has a line round it.
 """
 @def mutable struct CommitLine <: SemanticUI
   root::String = ""
   commit::Git.Commit = Git.Commit()
+  row::Git.TreeRow = Git.TreeRow()   # its row of the tree
+  lanes::Int = 1                     # how many lanes the tree of the panel's commits has, so each commit's words start at one place
+  branch::String = ""                # the branch that's checked out
+end
+
+"How far apart the lanes of the tree of commits are, in px"
+const LANE_W = 14.0
+"How far the middle of the first lane of the tree is from the left edge of a commit's line, in px"
+const TREE_X = 12.0
+"How far down a commit's line its dot is, in px: level with the middle of its first line of words"
+const TREE_DOT_Y = 15.0
+
+"The colour of the branch `k` in the tree of commits: the colours of a chart's columns, in turn"
+tree_colour(k) = (c = series_colours(); c[mod1(k, length(c))])
+
+"The branches and the tags at the commit of `l`, as little boxes in a row"
+ref_boxes(l::CommitLine) = begin
+  colour = tree_colour(l.row.hue)
+  box(r) = begin
+    kind = Git.ref_kind(r)
+    name = Git.ref_name(r)
+    words = label(name, 11px, color=colour, weight=kind == :branch && name == l.branch ? "Bold" : "Semibold")
+    kind == :branch ? Box(height(18px), padding(6px, 0px), radius(4px), background(tint(colour, 0.16)), words) :
+    kind == :tag ? Row(height(18px), padding(6px, 0px), radius(4px), child_gap=3px, border(1px, :solid, tint(colour, 0.45)),
+                       Icon("tag", size=10px, color=colour), words) :
+    Box(height(18px), padding(6px, 0px), radius(4px), border(1px, :solid, tint(colour, 0.45)), words)
+  end
+  Row(width(grow=grow), clip=true, child_gap=4px, Alignment.Center, map(box, l.commit.refs)...)
 end
 
 describe(l::CommitLine) = begin
   c = l.commit
   on = shown_commit(editor(l), l.root) == c.hash
-  # Its first line can be long, so it wraps in the panel's width
-  Column(width(grow=grow), padding(8px, 6px), radius(6px), child_gap=4px, Alignment.Start, name="Commit",
+  # The words start right of the tree's last lane. The first line can be long, so it wraps in the panel's width.
+  left = px(TREE_X + LANE_W * (l.lanes - 0.5) + 8)
+  Column(width(grow=grow), padding(6px, 8px, 6px, left), radius(6px), child_gap=4px, Alignment.Start, name="Commit",
          background(on ? colours.active : ishovered(l) ? colours.hover : clear),
+    (isempty(c.refs) ? () : (ref_boxes(l),))...,
     Box(width(grow=grow), Alignment.Start, Text(c.subject, size=13px, family=SANS, color=colours.ink, wrap=WrapMode.words)),
     Box(label(c.hash * "  ·  " * c.author * "  ·  " * Git.ago(c.time), 11px, color=colours.faint)))
+end
+
+"""
+Draw a line through the corners `ps`, with each corner rounded by `r` px at
+the most: the tree of commits draws a line that goes to another lane this way
+"""
+bent_line(ctx, ps, colour, wide; r=6.0) = begin
+  shape = Skia.sk_path_new()
+  Skia.sk_path_move_to(shape, Float32(ps[1][1]), Float32(ps[1][2]))
+  for k in 2:length(ps)-1
+    before, corner, after = ps[k-1], ps[k], ps[k+1]
+    d1, d2 = hypot((corner .- before)...), hypot((after .- corner)...)
+    round = min(r, d1, d2)
+    a = corner .+ (before .- corner) .* (round / max(d1, 1e-6))
+    b = corner .+ (after .- corner) .* (round / max(d2, 1e-6))
+    Skia.sk_path_line_to(shape, Float32(a[1]), Float32(a[2]))
+    # A conic with this weight is a quarter of a circle
+    Skia.sk_path_conic_to(shape, Float32(corner[1]), Float32(corner[2]), Float32(b[1]), Float32(b[2]), Float32(sqrt(0.5)))
+  end
+  Skia.sk_path_line_to(shape, Float32(ps[end][1]), Float32(ps[end][2]))
+  paint = ink(colour, wide)
+  Skia.sk_canvas_draw_path(ctx, shape, paint)
+  Skia.sk_paint_delete(paint)
+  Skia.sk_path_delete(shape)
+end
+
+# The commit's part of the tree, over its line's background. Each line of the tree
+# meets the same line in the rows over and under it, at the rows' edges.
+draw(ctx, size, ui::ConcreteRect, l::CommitLine) = begin
+  r = l.row
+  top, bottom = num(ui.top), num(ui.top) + num(ui.height)
+  y = top + TREE_DOT_Y
+  x(lane) = num(ui.left) + TREE_X + LANE_W * (lane - 1)
+  with_clip(ctx, ui.left, ui.top, ui.width, ui.height) do
+    # A line from the top that goes to the dot comes down its lane, then turns to the dot
+    for (a, b, k) in r.above
+      bent_line(ctx, a == b ? [(x(a), top), (x(a), y)] : [(x(a), top), (x(a), y), (x(b), y)], tree_colour(k), 1.5)
+    end
+    # A line from the dot to another lane goes across, then turns down
+    for (a, b, k) in r.below
+      bent_line(ctx, a == b ? [(x(a), y), (x(a), bottom)] : [(x(a), y), (x(b), y), (x(b), bottom)], tree_colour(k), 1.5)
+    end
+    colour = tree_colour(r.hue)
+    paint = ink(colour)
+    Skia.sk_canvas_draw_circle(ctx, Float32(x(r.lane)), Float32(y), Float32(length(l.commit.parents) > 1 ? 2.5 : 4.0), paint)
+    Skia.sk_paint_delete(paint)
+    if l.commit.head
+      paint = ink(colour, 1.5)
+      Skia.sk_canvas_draw_circle(ctx, Float32(x(r.lane)), Float32(y), Float32(6.5), paint)
+      Skia.sk_paint_delete(paint)
+    end
+  end
+  nothing
 end
 
 cursor(::CommitLine) = :hand
 onkey(l::CommitLine, ::KeyPress{Keys.mouse_left}) = (show_commit!(editor(l), l.root, l.commit.hash); handled)
 
-"The line of git's panel for the commit `c` of the repository at `root`"
-commit_line(e, root, c) = (l = node!(() -> CommitLine(root=root), e, (:commit_line, root, c.hash)); l.commit = c; l)
+"""
+The line of git's panel for the commit `c` of the repository at `root`, with
+its row `row` of the tree of `lanes` lanes. `branch` is the branch that's
+checked out.
+"""
+commit_line(e, root, c, row=Git.TreeRow(), lanes=1, branch="") = begin
+  l = node!(() -> CommitLine(root=root), e, (:commit_line, root, c.hash))
+  l.commit, l.row, l.lanes, l.branch = c, row, lanes, branch
+  l
+end
 
 "How wide the lines of the changes of `v` are, as the commit's page `p` lays them out: as wide as its column, less the line at each side"
 diff_wide(p::CommitView, v::ChangesView) = p.wide - 2

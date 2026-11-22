@@ -49,12 +49,19 @@ const MARKS = (:changed, :added, :new, :deleted, :renamed, :clash, :inside)
   head::String = ""                    # the whole hash of the last commit, or "(initial)" before the first
 end
 
-"One commit: the start of its hash, its first line, who made it and when"
+"""
+One commit: the start of its hash, its first line, who made it and when, the
+commits that it was made on, and the branches and the tags that are at it
+"""
 @def struct Commit
   hash::String = ""
   subject::String = ""
   author::String = ""
   time::Float64 = 0.0
+  id::String = ""                      # its whole hash
+  parents::Vector{String} = String[]   # the whole hash of each commit that it was made on, the first one first. A merge has two or more.
+  refs::Vector{String} = String[]      # the whole name of each branch and tag at it, like "refs/heads/main" and "refs/remotes/origin/main"
+  head::Bool = false                   # it's the commit that's checked out
 end
 
 """
@@ -139,19 +146,116 @@ read_status(text::AbstractString) = begin
   State(known=true; branch, follows, ahead, behind, changes, staged, folders, head=hash)
 end
 
+"""
+Read the branches and the tags that `git log --decorate=full` names with
+`%D`, like "HEAD -> refs/heads/main, refs/remotes/origin/main,
+refs/remotes/origin/HEAD, tag: refs/tags/v1.0". It gives their whole names, and
+whether the commit is the one that's checked out. `origin/HEAD` only says
+which branch of `origin` is its main one, so it's left out. `ref_kind` and
+`ref_name` say what each one is.
+"""
+read_refs(text::AbstractString) = begin
+  refs, head = String[], false
+  for r in split(text, ", ", keepempty=false)
+    startswith(r, "HEAD") && (head = true)
+    r = startswith(r, "HEAD -> ") ? r[9:end] : startswith(r, "tag: ") ? r[6:end] : r
+    ref_kind(r) === nothing || (ref_kind(r) == :remote && endswith(r, "/HEAD")) || push!(refs, String(r))
+  end
+  (refs, head)
+end
+
+"What the whole name `r` of a ref is: `:branch` for a branch here, `:remote` for a branch of another copy, like origin/main, `:tag`, or nothing"
+ref_kind(r::AbstractString) =
+  startswith(r, "refs/heads/") ? :branch : startswith(r, "refs/remotes/") ? :remote : startswith(r, "refs/tags/") ? :tag : nothing
+
+"The name of the ref `r` as people say it: main, origin/main or v1.0"
+ref_name(r::AbstractString) = (k = ref_kind(r); k === nothing ? String(r) : String(r[length(k == :branch ? "refs/heads/" : k == :remote ? "refs/remotes/" : "refs/tags/")+1:end]))
+
 "Read what `git log` printed with `LOG_FORMAT`"
 read_log(text::AbstractString) = begin
   found = Commit[]
   for entry in split(text, '\x1e', keepempty=false)
     f = split(strip(entry, ['\n', '\r']), '\x1f')
-    length(f) == 4 || continue
-    push!(found, Commit(hash=String(f[1]), subject=String(f[2]), author=String(f[3]), time=something(tryparse(Float64, f[4]), 0.0)))
+    length(f) == 7 || continue
+    refs, head = read_refs(f[7])
+    push!(found, Commit(hash=String(f[1]), subject=String(f[2]), author=String(f[3]), time=something(tryparse(Float64, f[4]), 0.0),
+                        id=String(f[5]), parents=String.(split(f[6], ' ', keepempty=false)), refs=refs, head=head))
   end
   found
 end
 
-"How `commits` asks git to write each commit: four fields with the byte 1f between them, and 1e after the last"
-const LOG_FORMAT = "%h%x1f%s%x1f%an%x1f%ct%x1e"
+"How `commits` asks git to write each commit: seven fields with the byte 1f between them, and 1e after the last"
+const LOG_FORMAT = "%h%x1f%s%x1f%an%x1f%ct%x1f%H%x1f%P%x1f%D%x1e"
+
+# --- the tree of commits ------------------------------------------------------------------
+#
+# Commits branch and merge, so they make a tree, as `git log --graph` draws it.
+# Each line of the tree has a lane: the commits of one branch sit one under the
+# other in the same lane, and a line goes down from each commit to the commits
+# that it was made on. `tree` works out where each commit's dot goes, and the
+# lines that go through its row, so each row can be drawn by itself.
+#
+#     tree(commits(root))   # [TreeRow(lane=1, above=[...], below=[(1, 1, 1)]), ...]
+
+"A line through one half of a row of the tree: from lane `from` at one end to lane `to` at the other, in the colour `hue`"
+const Line = Tuple{Int,Int,Int}
+
+"""
+One commit's row of the tree: the lane of its dot, its colour, the lines from
+the top of the row down to the dot's height (`above`), and the lines from
+there down to the bottom of the row (`below`). A line in `above` goes from its
+lane at the top to its lane at the dot's height, and one in `below` from its
+lane at the dot's height to its lane at the bottom. The colours count up
+from 1, a new one for each branch.
+"""
+@def struct TreeRow
+  lane::Int = 1
+  hue::Int = 1
+  above::Vector{Line} = Line[]
+  below::Vector{Line} = Line[]
+  lanes::Int = 1   # how many lanes the row uses
+end
+
+"""
+Where each of the commits `cs` goes in the tree, in the same order. `cs` is
+newest first, and a commit comes before the commits that it was made on, as
+`git log` gives them. A commit that's made on one that's not in `cs` has a
+line to the bottom of its row, and on down the rows under it.
+"""
+tree(cs::AbstractVector{Commit}) = begin
+  wants = String[]   # the commit that each lane goes down to, or "" for a lane that's free
+  hues = Int[]       # each lane's colour
+  hue = 0
+  free(from) = (i = findnext(isempty, wants, from); i === nothing ? (push!(wants, ""); push!(hues, 0); length(wants)) : i)
+  rows = TreeRow[]
+  for c in cs
+    mine = findall(==(c.id), wants)
+    # A commit that no lane goes down to starts a branch, in the first free lane
+    lane = isempty(mine) ? free(1) : mine[1]
+    colour = isempty(mine) ? (hue += 1) : hues[lane]
+    passing = [(i, i, hues[i]) for i in eachindex(wants) if !isempty(wants[i]) && !(i in mine)]
+    above = vcat(passing, [(i, lane, hues[i]) for i in mine])
+    width = length(wants)
+    foreach(i -> wants[i] = "", mine)
+    below = copy(passing)
+    if !isempty(c.parents)
+      wants[lane], hues[lane] = c.parents[1], colour
+      push!(below, (lane, lane, colour))
+      # The other commits that a merge was made on: a lane that goes to it already, or a free one at the right
+      for p in c.parents[2:end]
+        j = findfirst(==(p), wants)
+        j === nothing && (j = free(lane + 1); wants[j] = p; hues[j] = (hue += 1))
+        push!(below, (lane, j, hues[j]))
+      end
+    end
+    width = max(width, length(wants), lane)
+    while !isempty(wants) && isempty(wants[end])
+      pop!(wants); pop!(hues)
+    end
+    push!(rows, TreeRow(; lane, hue=colour, above, below, lanes=width))
+  end
+  rows
+end
 
 """
 The change of the file or the folder at `rel`, a path from the repository's
@@ -277,9 +381,14 @@ end
 state(root::AbstractString; fresh=FRESH) =
   kept(read_status, STATES, String(root), root, `status --porcelain=v2 --branch -z`, State(); fresh)
 
-"The last `n` commits of the repository whose top folder is `root`, the newest first, as git last gave them"
+"""
+The last `n` commits of the repository whose top folder is `root`, the newest
+first, as git last gave them. They're the commits of every branch, the ones
+that git has from other copies too, like `origin/main`. A commit always comes
+before the commits that it was made on.
+"""
 commits(root::AbstractString, n::Integer=30) =
-  kept(read_log, LOGS, (String(root), Int(n)), root, `log -n $n --pretty=format:$LOG_FORMAT`, Commit[])
+  kept(read_log, LOGS, (String(root), Int(n)), root, `log -n $n --date-order --decorate=full --branches --remotes HEAD --pretty=format:$LOG_FORMAT`, Commit[])
 
 "How many gits that were started here still run"
 running() = count(a -> a.running, values(STATES)) + count(a -> a.running, values(LOGS)) + count(a -> a.running, values(SHOWS))

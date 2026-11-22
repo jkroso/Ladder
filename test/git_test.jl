@@ -80,6 +80,11 @@ end
   @test [c.subject for c in found] == ["A second commit, with a longer line", "The first commit"]
   @test found[1].author == "Test" && length(found[1].hash) >= 7
   @test abs(found[1].time - time()) < 120
+  # Each commit knows the commits that it was made on, by their whole hash, and the branches at it
+  @test length(found[1].id) == 40 && startswith(found[1].id, found[1].hash)
+  @test found[1].parents == [found[2].id] && isempty(found[2].parents)
+  @test found[1].refs == ["refs/heads/main"] && found[1].head
+  @test isempty(found[2].refs) && !found[2].head
   @test isempty(now_state().changes)
 end
 
@@ -117,4 +122,43 @@ end
   @test G.ago(now - 7200, now) == "2 h ago"
   @test G.ago(now - 86400, now) == "yesterday"
   @test G.ago(now - 5 * 86400, now) == "5 days ago"
+end
+
+@testset "the branches and the tags that git names at a commit" begin
+  @test G.read_refs("HEAD -> refs/heads/main, refs/remotes/origin/main, refs/remotes/origin/HEAD, tag: refs/tags/v1.0") ==
+        (["refs/heads/main", "refs/remotes/origin/main", "refs/tags/v1.0"], true)
+  @test G.read_refs("HEAD") == (String[], true)   # a commit with no branch, checked out
+  @test G.read_refs("") == (String[], false)
+  @test G.ref_kind.(["refs/heads/a/b", "refs/remotes/origin/main", "refs/tags/v1", "refs/stash"]) == [:branch, :remote, :tag, nothing]
+  @test G.ref_name.(["refs/heads/a/b", "refs/remotes/origin/main", "refs/tags/v1"]) == ["a/b", "origin/main", "v1"]
+end
+
+@testset "the tree that commits make" begin
+  c(id, parents...) = G.Commit(id=id, parents=collect(String, parents))
+  # Commits one after another sit in one lane, with a line down from each to the next
+  rows = G.tree([c("c", "b"), c("b", "a"), c("a")])
+  @test [r.lane for r in rows] == [1, 1, 1] && [r.lanes for r in rows] == [1, 1, 1]
+  @test isempty(rows[1].above) && rows[1].below == [(1, 1, 1)]
+  @test rows[2].above == [(1, 1, 1)] && rows[2].below == [(1, 1, 1)]
+  @test rows[3].above == [(1, 1, 1)] && isempty(rows[3].below)
+  # A merge: a line goes from it to a second lane, and the two lanes meet again at the commit that both were made on
+  rows = G.tree([c("m", "a", "b"), c("a", "r"), c("b", "r"), c("r")])
+  @test [r.lane for r in rows] == [1, 1, 2, 1]
+  @test [r.hue for r in rows] == [1, 1, 2, 1]
+  @test rows[1].below == [(1, 1, 1), (1, 2, 2)]
+  @test rows[2].above == [(2, 2, 2), (1, 1, 1)] && rows[2].below == [(2, 2, 2), (1, 1, 1)]
+  @test rows[3].above == [(1, 1, 1), (2, 2, 2)] && rows[3].below == [(1, 1, 1), (2, 2, 2)]
+  @test rows[4].above == [(1, 1, 1), (2, 1, 2)] && isempty(rows[4].below)
+  @test all(r -> r.lanes == 2, rows)
+  # Two branches that no commit merged: the second one starts a lane of its own
+  rows = G.tree([c("x", "r"), c("y", "r"), c("r")])
+  @test [r.lane for r in rows] == [1, 2, 1] && [r.hue for r in rows] == [1, 2, 1]
+  @test isempty(rows[2].above[2:end]) && rows[2].above == [(1, 1, 1)]
+  @test rows[3].above == [(1, 1, 1), (2, 1, 2)]
+  # A lane that's free again is used by the next branch, so the tree stays narrow
+  rows = G.tree([c("x", "r"), c("y", "r"), c("r", "q"), c("z", "q"), c("q")])
+  @test [r.lane for r in rows] == [1, 2, 1, 2, 1] && rows[4].lanes == 2
+  # A commit whose parent isn't in the list has a line down to the bottom of its row
+  @test G.tree([c("a", "elsewhere")])[1].below == [(1, 1, 1)]
+  @test G.tree(G.Commit[]) == G.TreeRow[]
 end
