@@ -138,10 +138,11 @@ end
   # Going back shows the folder again
   K.go_back!(e); K.go_back!(e); frames()
   @test e.buf.path == notes && page() == ["The notes of notes"]
-  # A link to a folder does what a click on the folder does: this kind's `open!` shows it in the sidebar
+  # A link to a folder does what a click on the folder does. This kind's `open!` only lists it in the
+  # sidebar, so the page shows the folder too.
   empty!(clicks)
   K.open!(e, joinpath(dir, "page.md")); K.follow!(e, notes); frames()
-  @test clicks == ["notes"] && e.folder == notes && e.buf.path == joinpath(dir, "page.md")
+  @test clicks == ["notes"] && e.folder == notes && e.buf.path == notes
   # A folder with no kind that's opened as a page shows what's in it
   K.open!(e, joinpath(dir, "plain")); frames()
   @test page()[1] == "plain" && "list.csv" in page()

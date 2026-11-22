@@ -405,10 +405,12 @@ end
   click(middle(rect(thumb(5, x))))
   @test e.buf.path == joinpath(mixed, "e notes.md") && K.zooming(e) === nothing
   K.open!(e, page); show_gallery()
-  # A click on a folder shows it in the sidebar, and the page stays
+  # A click on a folder shows it in the page, and the sidebar stays closed
+  e.panel && K.toggle_panel!(e)
   click(middle(rect(thumb(7, x))))
-  @test realpath(e.folder) == realpath(joinpath(mixed, "inner")) && e.buf.path == page
-  K.go_folder!(e, dir); e.panel && K.toggle_panel!(e)
+  @test realpath(e.folder) == realpath(joinpath(mixed, "inner")) && realpath(e.buf.path) == realpath(joinpath(mixed, "inner"))
+  @test !e.panel
+  K.open!(e, page); K.go_folder!(e, dir)
   e.scroll.offset = 0px; settle()
 end
 

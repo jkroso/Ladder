@@ -1421,17 +1421,22 @@ build_editor(path) = begin
   load_site_font()
   e.nodes[:input] = own!(e, TextInput(placeholder="Find a file", font_family=SANS, font_size=15px,
                                       look=(_, text) -> Row(width(grow=grow), height(grow=grow), clip=true, text)))
-  if isdir(path)
-    e.folder = path
-    e.panel = true
-    list_files!(e)
-    isempty(e.files) || open!(e, e.files[1])
-    # A folder of a kind that shows in the page, like a desktop, shows there: see `show_opened!`
-    e.nodes[:opened_on] = (path, e.buf.path)
-    show_opened!(e)
-  else
-    open!(e, path)
-  end
+  isdir(path) ? open_on_folder!(e, path) : open!(e, path)
+  e
+end
+
+"""
+Show the folder at `path` in a window that's opened on it: its first Markdown
+file, or the folder's own page when it has no Markdown file. A folder of a
+kind that shows in the page, like a desktop, shows there: see `show_opened!`.
+The sidebar lists the folder, and it stays closed until you open it.
+"""
+open_on_folder!(e, path) = begin
+  e.folder = path
+  list_files!(e)
+  isempty(e.files) ? show_beside!(e, path) : open!(e, e.files[1])
+  e.nodes[:opened_on] = (path, e.buf.path)
+  show_opened!(e)
   e
 end
 
@@ -4412,9 +4417,9 @@ onkey(b::OpenButton, ev::KeyPress{Keys.mouse_left}) = begin
 end
 
 """
-Show the file at `path` in the window, or the folder at `path` in the sidebar,
-as a link to it does. The breadcrumb `l` holds the path. When it's in a line
-of text, its list closes first.
+Show the file or the folder at `path` in the window, as a link to it does.
+The breadcrumb `l` holds the path. When it's in a line of text, its list
+closes first.
 """
 show_crumb!(l::Breadcrumb, path, window) = begin
   l.inline && l.open && (l.open = false; list!(l, window))
@@ -26310,9 +26315,8 @@ end
 
 """
 Open a link. A file on the Mac shows in this editor, like a page, or a file
-that came with an email. A folder on the Mac shows in the sidebar, which opens
-if it's closed, and the page stays, unless the folder is of a kind that shows
-in the page. Anything else opens in the app that the Mac uses for it. A path can start at the home folder, like `~/Mail`.
+that came with an email. A folder on the Mac shows in the page, and the
+sidebar lists it. Anything else opens in the app that the Mac uses for it. A path can start at the home folder, like `~/Mail`.
 """
 follow!(e, url) = begin
   startswith(url, '^') && return follow_note!(e, url[2:end])
@@ -26324,29 +26328,36 @@ follow!(e, url) = begin
 end
 
 """
-Show the file at `path` in the window, or the folder at `path` in the sidebar,
-as a link to it does. A folder of a kind that shows in the page shows there.
-A folder that the Finder shows as one file, like an app, opens as that file does.
+Show the file or the folder at `path` in the window, as a link to it does.
+The sidebar lists the folder, and it stays as it was: open or closed. Only
+you open it. A folder that the Finder shows as one file, like an app, opens as
+that file does.
 """
 show_path!(e, path) = begin
   hosted(e) === nothing || return show_path!(top_editor(e), path)   # a link in a part of another page shows in the window
   isfile(path) && return open!(e, path)
   (isdir(path) && !ispackage(path)) || return open_url(path)
-  # A folder does what a click on it in the sidebar does. A folder of no kind shows in the sidebar, and a kind can show in the page too.
   path = String(rstrip(path, '/'))
   # The folder's own page says its kind, and loads the code of the kind. It runs now if it hasn't, and
   # the rest goes on with that code.
   folder_pages!(path)
   Base.invokelatest(follow_folder!, e, path)
-  e.panel || toggle_panel!(e)
   e
 end
 
-"Do what a click on the folder at `path` does in the sidebar"
+"""
+Do what a click on the folder at `path` does in the sidebar. A kind of folder
+can show a page of its own, like a blog's Readme. When the click only lists the
+folder in the sidebar, the page shows the folder too, so you see it with the
+sidebar closed.
+"""
 follow_folder!(e, path) = begin
   folder_pages_tick!(e)   # the sidebar can have listed the folder before its page ran
+  was = e.buf.path
   o = try object(e, path) catch; nothing end
   o isa AbstractDirectory ? open!(e, o) : go_folder!(e, path)
+  e.buf.path == was && show_beside!(e, path)
+  e
 end
 
 drag!(e, pos) = begin
@@ -34710,14 +34721,7 @@ receive!(e) = begin
   end
   path = pop!(files)
   empty!(files)
-  if isdir(path)
-    e.folder = path
-    e.panel = true
-    list_files!(e)
-    isempty(e.files) || open!(e, e.files[1])
-  elseif isfile(path)
-    open!(e, path)
-  end
+  isdir(path) ? open_on_folder!(e, path) : isfile(path) && open!(e, path)
   touch!(e)
 end
 

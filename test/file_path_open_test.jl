@@ -81,7 +81,7 @@ end
   @test !l.open
 end
 
-@testset "a click with ⌘ held on a name shows that file or folder" begin
+@testset "a click with ⌘ held on a name shows that file or folder in the window" begin
   l = crumb(notes)
   cmd_click(middle(rect(l.crumbs[notes])))
   @test e.buf.path == notes
@@ -89,7 +89,8 @@ end
   K.go_folder!(e, homedir())
   cmd_click(middle(rect(crumb(notes).crumbs[dir])))
   @test e.folder == dir
-  @test e.buf.path == page
+  @test e.buf.path == dir
+  back!()
 end
 
 @testset "a click with ⌘ held on a line of the list shows that file" begin
@@ -110,7 +111,7 @@ end
   @test e.buf.path == page
 end
 
-@testset "the Open button of a folder shows it in the sidebar" begin
+@testset "the Open button of a folder shows the folder's page in the window" begin
   K.go_folder!(e, homedir())
   # The path in the last test went to the file in the folder. A click on the folder's name takes it back.
   l = crumb(inner)
@@ -118,8 +119,8 @@ end
   @test l.at == sub
   click(middle(rect(l.button)))
   @test e.folder == sub
-  @test e.panel
-  @test e.buf.path == page
+  @test e.buf.path == sub
+  back!()
 end
 
 @testset "a path in a line of text has no Open button, and a click with ⌘ held on its name shows the file" begin
@@ -138,5 +139,6 @@ end
   K.go_folder!(e, homedir())
   K.follow!(e, "sub")
   @test e.folder == sub
-  @test e.buf.path == page
+  @test e.buf.path == sub && !e.panel   # the page shows the folder, and the sidebar stays closed
+  back!()
 end

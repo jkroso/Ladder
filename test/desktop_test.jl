@@ -115,6 +115,8 @@ end
 
 @testset "a folder whose page says so shows as a desktop" begin
   K.follow!(e, "Desk")
+  @test !e.panel   # a link never opens the sidebar
+  K.toggle_panel!(e)   # these tests have the sidebar open
   sleep(K.SLIDE_TIME + 0.05)   # the sidebar slides open
   frames()
   @test e.buf.path == desk
@@ -363,10 +365,10 @@ end
   foreach(_ -> Base.invokelatest(frame, w2), 1:4)
   @test e2.buf.path == desk
   @test Base.invokelatest(K.page_covered, e2)
-  @test e2.folder == desk
-  # A folder of no kind shows its first page, as before
+  @test e2.folder == desk && !e2.panel
+  # A folder of no kind with no page in it shows what it holds, and the sidebar stays closed
   e3 = K.build_editor(joinpath(desk, "Projects"))
-  @test e3.buf.path != joinpath(desk, "Projects")
+  @test e3.buf.path == joinpath(desk, "Projects") && e3.buf.view == :file && !e3.panel
   close(w2)
 end
 

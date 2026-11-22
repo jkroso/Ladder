@@ -1,4 +1,5 @@
-# Tests for a link to a folder: it shows the folder in the sidebar. See
+# Tests for a link to a folder: it shows the folder in the page, and the
+# sidebar stays closed. See
 # `follow!` in main.jl. Run them with
 # `julia -O0 --project=. test/folder_link_test.jl`. They click in a window that
 # isn't on the screen.
@@ -24,17 +25,37 @@ const w = Window(e, size=(900px, 700px))
 frames(n=3) = foreach(_ -> frame(w), 1:n)
 frames()
 
-@testset "a link to a folder shows the folder in the sidebar, and the page stays" begin
+@testset "a link to a folder shows the folder in the page, and the sidebar stays closed" begin
   @test !e.panel
   K.follow!(e, "../My%20mail"); frames()
-  @test e.panel && e.folder == joinpath(dir, "My mail") && e.buf.path == joinpath(dir, "pages", "home.md")
+  @test !e.panel && e.folder == joinpath(dir, "My mail") && e.buf.path == joinpath(dir, "My mail")
   @test basename.(e.listed) == ["Inbox"]
-  # A folder's path can end with a /, and the sidebar stays open
-  K.follow!(e, "../My%20mail/Inbox/"); frames()
-  @test e.panel && e.folder == joinpath(dir, "My mail", "Inbox") && basename.(e.listed) == ["note.md"]
+  # A folder's path can end with a /. A folder's page follows links from the folder that it's in.
+  K.follow!(e, "My%20mail/Inbox/"); frames()
+  @test !e.panel && e.folder == joinpath(dir, "My mail", "Inbox") && e.buf.path == joinpath(dir, "My mail", "Inbox")
+  @test basename.(e.listed) == ["note.md"]
+  # Back shows the folder before
+  @test K.go_back!(e); frames()
+  @test e.buf.path == joinpath(dir, "My mail")
   # A link to a file still shows the file
-  K.follow!(e, "other.md"); frames()
+  K.follow!(e, "pages/other.md"); frames()
   @test e.buf.path == joinpath(dir, "pages", "other.md")
+end
+
+@testset "an open sidebar stays open, and lists the folder that the page shows" begin
+  K.open!(e, joinpath(dir, "pages", "home.md"))
+  e.panel = true; frames()
+  K.follow!(e, "../My%20mail"); frames()
+  @test e.panel && e.folder == joinpath(dir, "My mail") && e.buf.path == joinpath(dir, "My mail")
+  e.panel = false; frames()
+end
+
+@testset "a window opened on a folder leaves the sidebar closed" begin
+  e2 = K.build_editor(joinpath(dir, "pages"))
+  @test !e2.panel && e2.buf.path == joinpath(dir, "pages", "home.md") && e2.folder == joinpath(dir, "pages")
+  # A folder with no Markdown file shows its own page
+  e3 = K.build_editor(joinpath(dir, "My mail"))
+  @test !e3.panel && e3.buf.path == joinpath(dir, "My mail") && e3.folder == joinpath(dir, "My mail")
 end
 
 @testset "a path can start at the home folder" begin
