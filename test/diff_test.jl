@@ -201,6 +201,27 @@ end
   @test all(it -> K.num(it.top) ≈ plain[it.first], e.layout)
 end
 
+"The button with an eye that shows the agent's changes, while the top bar shows it, or nothing"
+eye() = (b = get(e.nodes, :marks, nothing); b === nothing || rect(b) === nothing ? nothing : b)
+
+@testset "the button that shows the agent's changes is there only while what changed shows" begin
+  # The file changed on the disk earlier, as if an agent changed it
+  @test !isempty(K.theirs(e))
+  @test eye() === nothing
+  click(rect(button()))
+  frames()
+  b = eye()
+  @test b !== nothing
+  # It's just before the diff button
+  @test K.num(rect(b).left + rect(b).width) <= K.num(rect(button()).left) <= K.num(rect(b).left + rect(b).width) + 6
+  click(rect(b))
+  @test K.marking(e)
+  # Hiding what changed hides the button, and the bars beside the agent's changes
+  click(rect(button()))
+  frames()
+  @test eye() === nothing && !K.marking(e)
+end
+
 @testset "lines that went from over the first line show over it" begin
   over = joinpath(repo, "over.md")
   write(over, COMMITTED)

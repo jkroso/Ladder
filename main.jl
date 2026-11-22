@@ -184,8 +184,9 @@
 #     folder). While it waits, a button at the top right sends it the lines that
 #     you changed. ⌘Return does the same. The agent can change the file while
 #     you type, and the page keeps both. A bar shows for a few seconds beside
-#     each line that the agent changed, and a button with an eye in the
-#     top bar shows those bars again. The list of files has a dot beside
+#     each line that the agent changed. While the file's changes since the
+#     last commit show, a button with an eye in the top bar shows those bars
+#     again. The list of files has a dot beside
 #     a page that an agent waits for. While the list is hidden, the dot is
 #     beside the button that shows it.
 #   - The command Word Count says how many words the page has, how many
@@ -26012,22 +26013,24 @@ send!(e) = begin
   nothing
 end
 
-"What the top bar shows of the agent: a button while one waits, and a few words after you sent the page"
+"""
+What the top bar shows of the agent: a button while one waits, and a few
+words after you sent the page. The button that shows the agent's changes is
+beside the diff button (see `diff_part`).
+"""
 agent_part(e) = begin
   b = e.buf
   ws = agents(e)
   sent = get(e.nodes, :sent, nothing)
-  # A button shows the agent's changes again, for as long as there are some
-  marks = isempty(theirs(e)) ? () : (button(e, :marks, "eye"), Box(width(4px)))
   if !isempty(ws)
     delete!(e.nodes, :sent)
     e.nodes[:agent] = first(ws).name
-    (marks..., node!(SendButton, e, :send))
+    (node!(SendButton, e, :send),)
   elseif sent !== nothing && sent[1] == b.path && sent[2] == b.version
     # The button shows that the page was sent, until the agent waits again or the text changes
-    (marks..., node!(SendButton, e, :send))
+    (node!(SendButton, e, :send),)
   else
-    marks
+    ()
   end
 end
 
@@ -32385,9 +32388,10 @@ end
 #
 # When something else changes the file, like an agent, a bar shows for a few
 # seconds in the margin beside each line that it changed or added, and fades.
-# A button with an eye in the top bar shows the bars again, beside every
-# line that was changed since you last sent the page. They stay until you click
-# the button again.
+# While the diff button shows the file's changes since the last commit, a
+# button with an eye beside it shows the bars again, beside every line that
+# was changed since you last sent the page. They stay until you click the
+# button again, or hide the changes.
 
 const FRESH = 4.0        # how many seconds a bar shows
 const FRESH_FADE = 1.5   # how many of them it takes to fade
@@ -41161,8 +41165,12 @@ push!(BLOCK_ICONS, "chevron-down", "square", "check2-square")
 "True while the window shows what changed in its file since the last commit, in the file itself"
 diffing(e) = !isempty(e.buf.path) && get(e.nodes, :diffing, "") == e.buf.path
 
-"Show what changed in the file since the last commit, in the file itself, or hide it again"
-toggle_diff!(e) = (diffing(e) ? delete!(e.nodes, :diffing) : (e.nodes[:diffing] = e.buf.path); redraw_in!(e, 0); e)
+"""
+Show what changed in the file since the last commit, in the file itself, or
+hide it again. Hiding it hides the bars beside the agent's changes too, since
+their button goes with it.
+"""
+toggle_diff!(e) = (diffing(e) ? (delete!(e.nodes, :diffing); delete!(e.nodes, :marking)) : (e.nodes[:diffing] = e.buf.path); redraw_in!(e, 0); e)
 
 """
 Show the file at `path` with what changed in it since the last commit marked
@@ -41454,11 +41462,16 @@ end
 """
 The button of the top bar that shows what changed in the file since the last
 commit, while it has a change to commit. While what changed shows, the
-chevrons beside it go to the change before the caret and the next one.
+chevrons beside it go to the change before the caret and the next one, and
+if an agent changed the page, a button with an eye before it shows the
+agent's changes.
 """
-diff_part(e) = commit_change(e, e.buf.path) === nothing ? () :
-  (Row(Alignment.Center, name="Diff", button(e, :diff, "file-diff"),
-       (diffing(e) ? (Column(Alignment.Center, button(e, :previous_change, "chevron-up"), button(e, :next_change, "chevron-down")),) : ())...),)
+diff_part(e) = commit_change(e, e.buf.path) === nothing ? () : begin
+  on = diffing(e)
+  marks = on && !isempty(theirs(e)) ? (button(e, :marks, "eye"), Box(width(4px))) : ()
+  (Row(Alignment.Center, name="Diff", marks..., button(e, :diff, "file-diff"),
+       (on ? (Column(Alignment.Center, button(e, :previous_change, "chevron-up"), button(e, :next_change, "chevron-down")),) : ())...),)
+end
 
 BUTTONS[:diff] = (run=toggle_diff!, off=e -> false, strong=false, on=diffing,
                   tip=e -> (diffing(e) ? "Hide what changed in " : "Show what changed in ") * basename(e.buf.path) * " since the last commit")
