@@ -171,7 +171,7 @@ Open [progress.jl](progress.jl) to see how a kind of block is written in a Julia
 
 ## The code of a thing
 
-A function draws each thing in this window: a block, a button, a row of the list of files. To find that function, hold ⌘ and ⌥ and move the mouse. A blue line goes round the thing under the mouse. A label on the line has the name of the thing's kind, and the file and the line of its function. Click, and the blue line stays round the thing, with buttons on its top edge. Click Show Code, and a window opens beside this one with the function in it. Click Ask For Change… to ask Claude Code to change the thing, or Ask About… to ask it a question about the thing. The next section says how. To take the line away, press Esc or click anywhere else.
+A function draws each thing in this window: a block, a button, a row of the list of files. To find that function, hold ⌘ and ⌥ and move the mouse. A blue line goes round the thing under the mouse. A label on the line has the name of the thing's kind, and the file and the line of its function. Click, and the blue line stays round the thing, with buttons on its top edge. Click Show Code, and a window opens beside this one with the function in it. Click Change to ask Claude Code to change the thing, or Explain to ask it a question about the thing. The next section says how. To take the line away, press Esc or click anywhere else.
 
 Try it on the bar of the block above. The window shows `progress.jl`, with the caret on the function `describe`. Change a colour or a size there, and press ⌘Return in the function. The bar is drawn the new way at once. ⌘S writes the change to the file.
 
@@ -195,7 +195,7 @@ To ask for a change:
 
 Claude Code changes the function, and the thing is drawn the new way. While it works, a label on the thing says what it's doing, like `Reading progress.jl`. The label then says what changed.
 
-To start from the thing itself, hold ⌘ and ⌥, click it, and click the button Ask For Change… on its blue line. The A is already round the thing, so type what you want and press Return.
+To start from the thing itself, hold ⌘ and ⌥, click it, and click the button Change on its blue line. The A is already round the thing, so type what you want and press Return.
 
 Before you press Return, you can choose more:
 
@@ -208,7 +208,7 @@ After you press Return:
 - Click the label after the change to see what Claude Code changed. The page lists each change since Ladder started, the newest first. Each part has a Reject button that takes it out again, and Reject all takes out the whole change.
 - The command Undo Change puts back all of the newest change. Run it again to put back the one before.
 
-To ask a question in place of a change, run Ask About, and choose the thing in the same way. Or hold ⌘ and ⌥, click the thing, and click the button Ask About… on its blue line. Type a question like `why is this bar red?` and press Return. Claude Code reads the code and changes nothing. Its answer shows in a card beside the thing. Click Ask More on the card for another question about the same thing, or Change It to ask for a change to it. Claude Code gets your earlier questions and its answers with your new words. Click anywhere else, or press Esc, to close the card.
+To ask a question in place of a change, run Ask About, and choose the thing in the same way. Or hold ⌘ and ⌥, click the thing, and click the button Explain on its blue line. Type a question like `why is this bar red?` and press Return. Claude Code reads the code and changes nothing. Its answer shows in a card beside the thing. Click Ask More on the card for another question about the same thing, or Change It to ask for a change to it. Claude Code gets your earlier questions and its answers with your new words. Click anywhere else, or press Esc, to close the card.
 
 In a file of code, Fix It and Ask For Checks give Claude Code one check or one function. The next section says how.
 

@@ -1,8 +1,8 @@
 # Tests for the code of a thing, in main.jl: a click with ⌘ and ⌥ down keeps
 # a line round the thing, with buttons on its top edge. Show Code there, or
 # Show Code in the palette with the thing as its node, shows the method of
-# `describe` that draws the thing, in a window beside this one. Ask For
-# Change… and Ask About… there open the palette with the thing. Code that
+# `describe` that draws the thing, in a window beside this one. Change and
+# Explain there open the palette with the thing. Code that
 # runs in that window runs in the module that the file made, so a new method
 # draws the thing at once. Run them with
 # `julia -O0 --project=. test/show_code_test.jl`.
@@ -12,7 +12,7 @@
 @use Test: @test, @testset
 @use "../main" => K
 @use "github.com/jkroso/MiniFB.jl" Window KeyPress KeyRelease MouseMove Keys onkey onmouse Typed ontype
-@use "github.com/jkroso/UI.jl/Interface/draw" frame rect window_tool
+@use "github.com/jkroso/UI.jl/Interface/draw" frame rect window_tool _cursor_shape
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
 @use GeometryBasics: Vec2
 const px = K.px
@@ -94,6 +94,13 @@ press_button(action) = begin
   onkey(w, KeyRelease{Keys.mouse_left}(0, w))
   frames()
 end
+"The cursor that the window shows with the mouse at the middle of the place `(left, top, wide, tall)`"
+cursor_at((left, top, wide, tall)) = begin
+  x, y = px(left + wide / 2), px(top + tall / 2)
+  w.mouse = typeof(w.mouse)(x, y)
+  onmouse(w, MouseMove(Vec2{px}(x, y), w))
+  get(_cursor_shape, objectid(w), :arrow)
+end
 "The editors of the windows that show the file of code"
 code_windows() = filter(o -> o !== e && o.buf.path == realpath(source), K.editors)
 const first_line = findfirst(startswith("describe(g::Gauge)"), readlines(source))
@@ -148,12 +155,17 @@ end
   label = button(:label)
   @test label[2] == K.num(r.top) - 18 && all(b -> last(b)[2] == label[2], picker().buttons)
   @test label[1] + label[3] < button(:show_code)[1] < button(:ask_for_change)[1] < button(:ask_about)[1]
+  # The cursor is a hand over each button, and not over the label, which does nothing
+  @test all(a -> cursor_at(button(a)) == :hand, buttons())
+  @test cursor_at(label) != :hand
+  gone = button(:ask_about)
   # A click on the label does nothing
   press_button(:label)
   @test picker().chosen !== nothing && isempty(code_windows()) && node().clicks == n
   # Esc takes the line and its buttons away
   onkey(w, KeyPress{Keys.escape}(0, w)); frames()
   @test picker().chosen === nothing && isempty(picker().buttons) && isempty(code_windows()) && e.popup == :none
+  @test cursor_at(gone) != :hand
   # So does a click anywhere else, and the click goes on to what it's on
   click(Keys.cmd, Keys.opt)
   @test picker().chosen !== nothing
@@ -174,7 +186,7 @@ end
   @test length(code_windows()) == 1
 end
 
-@testset "Ask For Change… and Ask About… on the line open the palette with the thing as A" for command in (:ask_for_change, :ask_about)
+@testset "Change and Explain on the line open the palette with the thing as A" for command in (:ask_for_change, :ask_about)
   n = node().clicks
   click(Keys.cmd, Keys.opt)
   press_button(command)

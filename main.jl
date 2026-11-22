@@ -246,8 +246,8 @@
 #     row of the sidebar. Buttons show on the blue line round it. Show Code
 #     opens a window beside this one with the function that draws that
 #     thing. Change the function there and press ⌘Return in it, and the
-#     thing is drawn the new way at once. Ask For Change… asks an agent to
-#     change the thing, in words that you type, and Ask About… asks it a
+#     thing is drawn the new way at once. Change asks an agent to
+#     change the thing, in words that you type, and Explain asks it a
 #     question. Show Code in the command
 #     palette does the same for the next thing that you click. See "the code
 #     of a thing".
@@ -377,7 +377,7 @@
 @use "./blog" => Blogs
 @use "github.com/jkroso/UI.jl/Interface/draw" Bubble
 @use "github.com/jkroso/UI.jl/Interface/draw" popups sync_mouse!
-@use "github.com/jkroso/UI.jl/Interface/draw" set_tool! window_tool draw_tool tool_input invalidate_layout!
+@use "github.com/jkroso/UI.jl/Interface/draw" set_tool! window_tool draw_tool tool_input tool_cursor invalidate_layout!
 @use "github.com/jkroso/URI.jl/FSPath" FSPath
 @use "github.com/jkroso/URI.jl/FS" => FS FSObject AbstractDirectory
 @use Colors: @colorant_str, RGBA, Colorant
@@ -37048,8 +37048,8 @@ page_title(e) = something(first_answer(PAGE_TITLES, e), email_title(e), Some(not
 # A function draws each thing that a window shows: the method of `describe`
 # for the thing's type. Hold ⌘ and ⌥ and click a thing, and its line stays,
 # with buttons on its top edge after its label. Show Code shows that method in
-# a window beside this one. Ask For Change… and Ask About… open the command
-# palette with that command, with the thing as its A, ready for the words of
+# a window beside this one. Change and Explain open the command
+# palette with Ask For Change or Ask About, with the thing as its A, ready for the words of
 # the change or the question. A click anywhere else, or Esc, takes the line
 # and its buttons away. While ⌘ and ⌥ are down, a line
 # goes round the thing under the mouse, with a label: the name of its type,
@@ -37338,7 +37338,7 @@ tool_input(t::CodePicker, w, ::KeyPress{Keys.mouse_left}) = begin
 end
 
 "The buttons on the top edge of the line round a thing that a click with ⌘ and ⌥ down chose: what each does, and its words"
-const CODE_BUTTONS = ((:show_code, "Show Code"), (:ask_for_change, "Ask For Change…"), (:ask_about, "Ask About…"))
+const CODE_BUTTONS = ((:show_code, "Show Code"), (:ask_for_change, "Change"), (:ask_about, "Explain"))
 
 "Take the line and the buttons of the thing that a click with ⌘ and ⌥ down chose away"
 unchoose!(t::CodePicker) = (t.chosen = nothing; empty!(t.buttons); redraw_in!(t.editor, 0); nothing)
@@ -37474,6 +37474,13 @@ draw_chosen(ctx, w, t::CodePicker) = begin
     left += wide + 4
   end
   nothing
+end
+
+"A hand over a button on the line round the thing that a click with ⌘ and ⌥ down chose. Its label does nothing, so it has the arrow."
+tool_cursor(t::CodePicker, w, pos) = begin
+  x, y = num(pos[1]), num(pos[2])
+  over = any(((action, (left, top, wide, tall)),) -> action != :label && left <= x <= left + wide && top <= y <= top + tall, t.buttons)
+  over ? :hand : nothing
 end
 
 """
@@ -38249,7 +38256,7 @@ end
 """
 Open the palette with the command `command`, Ask For Change or Ask About, with
 the part `x` of the window as its thing, and the keyboard in the words. The
-buttons Ask For Change… and Ask About… on the line round a thing that a click
+buttons Change and Explain on the line round a thing that a click
 with ⌘ and ⌥ down chose do this.
 """
 ask_with!(e, command::Symbol, x) = begin
