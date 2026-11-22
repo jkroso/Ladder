@@ -44699,8 +44699,16 @@ end
 const LANE_W = 14.0
 "How far the middle of the first lane of the tree is from the left edge of a commit's line, in px"
 const TREE_X = 12.0
-"How far down a commit's line its dot is, in px: level with the middle of its first line of words"
-const TREE_DOT_Y = 15.0
+"How much room a commit's line has over and under its words, in px. The lines of one commit's words are closer together than two commits are."
+const COMMIT_PAD = 10.0
+"How tall the box of a branch or a tag over a commit's first line is, in px"
+const REF_H = 18.0
+
+"""
+How far down the line of `l` its dot is, in px: level with the middle of the
+boxes of its branches, or with the middle of its first line of words
+"""
+dot_y(l::CommitLine) = COMMIT_PAD + (isempty(l.commit.refs) ? num(skia_cap_height(label("A", 13px))) / 2 : REF_H / 2)
 
 "The colour of the branch `k` in the tree of commits: the colours of a chart's columns, in turn"
 tree_colour(k) = (c = series_colours(); c[mod1(k, length(c))])
@@ -44712,10 +44720,10 @@ ref_boxes(l::CommitLine) = begin
     kind = Git.ref_kind(r)
     name = Git.ref_name(r)
     words = label(name, 11px, color=colour, weight=kind == :branch && name == l.branch ? "Bold" : "Semibold")
-    kind == :branch ? Box(height(18px), padding(6px, 0px), radius(4px), background(tint(colour, 0.16)), words) :
-    kind == :tag ? Row(height(18px), padding(6px, 0px), radius(4px), child_gap=3px, border(1px, :solid, tint(colour, 0.45)),
+    kind == :branch ? Box(height(REF_H * px), padding(6px, 0px), radius(4px), background(tint(colour, 0.16)), words) :
+    kind == :tag ? Row(height(REF_H * px), padding(6px, 0px), radius(4px), child_gap=3px, border(1px, :solid, tint(colour, 0.45)),
                        Icon("tag", size=10px, color=colour), words) :
-    Box(height(18px), padding(6px, 0px), radius(4px), border(1px, :solid, tint(colour, 0.45)), words)
+    Box(height(REF_H * px), padding(6px, 0px), radius(4px), border(1px, :solid, tint(colour, 0.45)), words)
   end
   Row(width(grow=grow), clip=true, child_gap=4px, Alignment.Center, map(box, l.commit.refs)...)
 end
@@ -44725,11 +44733,13 @@ describe(l::CommitLine) = begin
   on = shown_commit(editor(l), l.root) == c.hash
   # The words start right of the tree's last lane. The first line can be long, so it wraps in the panel's width.
   left = px(TREE_X + LANE_W * (l.lanes - 0.5) + 8)
-  Column(width(grow=grow), padding(6px, 8px, 6px, left), radius(6px), child_gap=4px, Alignment.Start, name="Commit",
+  # A Text's box ends at the foot of its last line's capitals, so the line under the
+  # words is 8px lower than that, or the tails of g and y would touch it
+  Column(width(grow=grow), padding(COMMIT_PAD * px, 8px, COMMIT_PAD * px, left), radius(6px), child_gap=5px, Alignment.Start, name="Commit",
          background(on ? colours.active : ishovered(l) ? colours.hover : clear),
     (isempty(c.refs) ? () : (ref_boxes(l),))...,
     Box(width(grow=grow), Alignment.Start, Text(c.subject, size=13px, family=SANS, color=colours.ink, wrap=WrapMode.words)),
-    Box(label(c.hash * "  ·  " * c.author * "  ·  " * Git.ago(c.time), 11px, color=colours.faint)))
+    Box(padding(3px, 0px, 0px, 0px), label(c.hash * "  ·  " * c.author * "  ·  " * Git.ago(c.time), 11px, color=colours.faint)))
 end
 
 """
@@ -44761,7 +44771,7 @@ end
 draw(ctx, size, ui::ConcreteRect, l::CommitLine) = begin
   r = l.row
   top, bottom = num(ui.top), num(ui.top) + num(ui.height)
-  y = top + TREE_DOT_Y
+  y = top + dot_y(l)
   x(lane) = num(ui.left) + TREE_X + LANE_W * (lane - 1)
   with_clip(ctx, ui.left, ui.top, ui.width, ui.height) do
     # A line from the top that goes to the dot comes down its lane, then turns to the dot
