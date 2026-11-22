@@ -44112,11 +44112,15 @@ page_button!(v, key, act; icon="", words="", off=false) = begin
   b
 end
 
-"The name of a folder at the top of its own page, with an icon before it and a line of words under it"
+"""
+The name of a folder at the top of its own page, with an icon before it and a
+line of words under it, like what it holds. The path to the folder is in the
+top bar, so it isn't under the name. With no words, there's no line.
+"""
 page_title(icon, name, about) =
   Column(width(grow=grow), Alignment.Start, padding(8px, 0px, 14px, 8px), child_gap=6px,
     Row(child_gap=10px, Icon(icon, size=22px, color=colours.dim), Box(label(name, 24px, weight="Bold"))),
-    Box(label(about, 13px, color=colours.dim)))
+    (isempty(about) ? () : (Box(label(about, 13px, color=colours.dim)),))...)
 
 # --- a folder with a git repository in it ----------------------------------------------------
 #
@@ -47430,10 +47434,15 @@ end
   path::String = ""
 end
 
-describe(v::FolderPage) =
+# Under the folder's name is what it holds, as a repository's page has it
+describe(v::FolderPage) = begin
+  e = editor(v)
+  t = folder_table!(e, v, v.path)
+  folder_items!(e, t)
   Column(width(grow=grow), Alignment.Start, name="Folder",
-    page_title("folder", basename(v.path), tilde(dirname(v.path))),
-    folder_table!(editor(v), v, v.path))
+    page_title("folder", basename(v.path), holds_words(t)),
+    t)
+end
 
 cursor(::FolderPage) = :arrow
 
@@ -47619,7 +47628,7 @@ describe(v::HomeView) = begin
   # The page's one button lists the projects that you hid. The eye is open while it lists them.
   buttons = isempty(hid) ? () : (page_button!(v, :hidden, _ -> (v.hidden = !v.hidden; nothing), icon=v.hidden ? "eye" : "eye-slash",
                                               words="Hidden Projects · $(length(hid))"),)
-  about = join(filter(!isempty, [tilde(v.path), favourites_words(length(v.order)),
+  about = join(filter(!isempty, [favourites_words(length(v.order)),
                                  Home.found() ? (length(work) == 1 ? "1 recent project" : "$(length(work)) recent projects") : ""]), "  ·  ")
   Column(width(grow=grow), Alignment.Start, name="Home",
     page_title("house", "Home", about),

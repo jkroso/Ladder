@@ -333,6 +333,8 @@ end
   @test e.buf.path == code && e.nodes[(:folder_page, code)] isa K.FolderPage
   t = e.nodes[(:folder_table, code)]
   @test [basename(it.path) for it in t.items] == ["app"]
+  # Under its name is what it holds. Its path is in the top bar, not there.
+  @test K.holds_words(t) == "1 folder"
   @test t.sort == :when && t.desc
   @test rect(t.rows[(:item, app)]) !== nothing && rect(t.heads[:when]) !== nothing
   shot("folder-table")
