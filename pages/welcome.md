@@ -57,7 +57,7 @@ To play a video or a sound faster or slower, move the mouse over its player, and
 | ⌘⇧E | Saves the page as a page of HTML, for a website |
 | ⌘Return | Sends the page to an agent that waits for it |
 | ⌘, | Opens the settings in a window of their own. Press it again to close that window. |
-| ⌘W | Closes the file. In a window with no file, it closes the window. |
+| ⌘W | Closes the file and shows its folder. On a folder, it closes the folder. In a window with no file, it closes the window. |
 | ⌘\ | Shows and hides the list of files |
 | ⌘⇧\ | Gives the list of files the keyboard. Press esc to go back to the text. |
 | ⌘⇧. | Shows the hidden files in the list of files, or leaves them out again |

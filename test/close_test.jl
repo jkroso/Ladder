@@ -1,4 +1,5 @@
-# Tests for ⌘W: it closes the file, and the window stays open with no file in it.
+# Tests for ⌘W: it closes the file, and the window shows the file's folder.
+# ⌘W on a folder's page closes it, and the window stays open with no file in it.
 # ⌘W in a window with no file closes the window. See "closing a file" in main.jl.
 # Run them with `julia -O0 --project=. test/close_test.jl`. They press keys in
 # windows that aren't on the screen.
@@ -41,9 +42,23 @@ texts(node, out=String[]) = begin
 end
 shot(w, name) = haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], name), w)
 
-@testset "⌘W closes the file, and the window stays open" begin
+@testset "⌘W closes the file and shows its folder" begin
   e, w, folder = window("a.md", "b.md")
   @test K.caps(first(K.bundle_keys("Ladder")[:close])) == "⌘W"
+  press(w, Keys.w, cmd)
+  @test e in K.editors
+  # The page shows the folder, and the sidebar lists it, as a click on the folder in the sidebar's trail does
+  @test e.buf.path == folder && !K.nofile(e)
+  @test e.folder == folder
+  @test basename.(e.back) == ["a.md"]
+  shot(w, "close-folder.png")
+  close(w)
+end
+
+@testset "⌘W on a folder's page closes it, and the window stays open" begin
+  e, w, folder = window("a.md", "b.md")
+  press(w, Keys.w, cmd)
+  @test e.buf.path == folder
   press(w, Keys.w, cmd)
   @test e in K.editors
   @test K.nofile(e) && isempty(e.buf.path)
@@ -64,9 +79,23 @@ end
 @testset "⌘W in a window with no file closes the window" begin
   e, w, _ = window("a.md")
   press(w, Keys.w, cmd)
-  @test e in K.editors
+  press(w, Keys.w, cmd)
+  @test e in K.editors && K.nofile(e)
   press(w, Keys.w, cmd)
   @test !(e in K.editors)
+end
+
+@testset "a page with no folder to show closes to no file" begin
+  # A file in a folder that the Finder shows as one file, like an app, doesn't show that folder
+  e, w, folder = window("a.md")
+  app = joinpath(folder, "Tool.app")
+  mkdir(app)
+  write(joinpath(app, "read me.md"), "# Read me\n")
+  K.open!(e, joinpath(app, "read me.md")); frames(w)
+  @test K.closes_to(e) === nothing
+  press(w, Keys.w, cmd)
+  @test K.nofile(e) && e in K.editors
+  close(w)
 end
 
 @testset "a file that closes keeps its changes, and ⌘⌥← shows it again" begin
@@ -75,7 +104,7 @@ end
   @test K.dirty(e.buf)
   lines = copy(e.buf.lines)
   press(w, Keys.w, cmd)
-  @test K.nofile(e) && basename.(e.back) == ["a.md"]
+  @test e.buf.path == dirname(e.back[end]) && basename.(e.back) == ["a.md"]
   press(w, Keys.left, cmd, opt)
   @test basename(e.buf.path) == "a.md" && e.buf.lines == lines && K.dirty(e.buf)
   close(w)

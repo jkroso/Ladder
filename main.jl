@@ -1683,20 +1683,38 @@ end
 
 # --- closing a file ----------------------------------------------------------------------
 #
-# ⌘W closes the file that the window shows, and the window stays open with no
-# file in it. ⌘W in a window that shows no file closes the window, and Ladder
-# quits when its last window closes. The settings window closes at once while
-# it shows a page of the settings. A file that closes keeps its changes, and
-# ⌘⌥← shows it again.
+# ⌘W closes the file that the window shows, and the window shows the folder
+# that the file is in, as a click on that folder in the sidebar's trail does.
+# ⌘W on a folder's page closes it, and the window stays open with no file in
+# it. ⌘W in a window that shows no file closes the window, and Ladder quits
+# when its last window closes. So three presses of ⌘W close a file's window:
+# the file, its folder, then the window. The settings window closes at once
+# while it shows a page of the settings. A file that closes keeps its changes,
+# and ⌘⌥← shows it again.
 
-"True when the window shows no file, because ⌘W closed the file that it showed"
+"True when the window shows no file, because ⌘W closed the page that it showed"
 nofile(e) = isempty(e.buf.path) && e.buf.fixed
 
 """
-Close the file that the window shows. The window then shows no file. The
-file's page keeps its changes, and goes on the list that `go_back!` reads.
+The folder that the window shows when ⌘W closes its file, or nothing. A
+folder's own page, a page that isn't a file on the Mac, and a file in a
+folder that the Finder shows as one file, like an app, have none.
+"""
+closes_to(e) = begin
+  path = e.buf.path
+  (isabspath(path) && !isdir(path)) || return nothing
+  folder = dirname(path)
+  isdir(folder) && !ispackage(folder) ? folder : nothing
+end
+
+"""
+Close the file that the window shows, and show the folder that it's in. A
+page with no such folder closes to no file. The page keeps its changes, and
+goes on the list that `go_back!` reads.
 """
 close_file!(e) = begin
+  folder = closes_to(e)
+  folder === nothing || return open_folder!(e, folder)
   leave_page!(e, "")
   e.buf = Buffer(fixed=true)   # an empty page that nothing can be typed in
   e.scroll.offset = 0px
