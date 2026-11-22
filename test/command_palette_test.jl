@@ -217,7 +217,7 @@ end
   @test list.frame.w == plan.bar.w - 2 * 87 && list.frame.x - plan.bar.x == plan.bar.x + plan.bar.w - (list.frame.x + list.frame.w)
   shot(w, "omni-open.png")
   # It lists every command that makes sense here, in the order of their names
-  @test names(e) == sort(names(e)) && first(names(e)) == "Ask About"
+  @test names(e) == sort(names(e)) && first(names(e)) == "Add To Favourites" && "Ask About" in names(e)
   @test "Save" in names(e) && "Theme" in names(e) && "Insert" in names(e) && "Go To" in names(e)
   @test !("Left" in names(e)) && !("Commands" in names(e)) && !("Erase Back" in names(e))
   # ⌘⇧P again closes it. It stays in the window while it slides down.

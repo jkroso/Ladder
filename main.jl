@@ -373,6 +373,7 @@
 @use "./notes" => Notes
 @use "./zip" => Zips
 @use "./macfolders" => Mac
+@use "./home" => Home
 @use "./blog" => Blogs
 @use "github.com/jkroso/UI.jl/Interface/draw" Bubble
 @use "github.com/jkroso/UI.jl/Interface/draw" popups sync_mouse!
@@ -4152,9 +4153,8 @@ const MOST_FILES = 100
 
 entry(l::Breadcrumb, path) = get!(() -> own!(l, FileEntry(path=path)), l.entries, path)
 
-"The name and the path of each step on the way to `path`. The home folder is one step, named ~."
-steps(path) = begin
-  home = homedir()
+"The name and the path of each step on the way to `path`. The home folder `home` is one step, named ~."
+steps(path, home=homedir()) = begin
   inside = path == home || startswith(path, home * "/")
   at = inside ? home : "/"
   out = [(inside ? "~" : "/", at)]
@@ -6197,7 +6197,8 @@ describe(v::FileView) = begin
   o = e.buf.path == v.path ? page_object(e) : object(e, v.path)
   own = o === nothing ? nothing : with_theme(() -> page_view(e, o), component_theme(e.zoom))
   own === nothing || return Box(width(grow=grow), Alignment.Start, own)
-  isdir(v.path) && return words((Icon("folder", size=34px, color=colours.faint), label(basename(v.path), 15px)))
+  # A folder with no page of its own shows its folders and files as the sidebar does
+  isdir(v.path) && return Box(width(grow=grow), Alignment.Start, node!(() -> FolderPage(path=v.path), e, (:folder_page, v.path)))
   isfile(v.path) || return words((label("$(basename(v.path)) isn't there any more", 15px),))
   about = bytes(filesize(v.path)) * "  ·  Changed " * Libc.strftime("%-d %b %Y, %H:%M", mtime(v.path))
   filesize(v.path) == 0 && return words((label("$(basename(v.path)) is empty", 15px), label(about, 12px, color=colours.dim)))
@@ -25044,6 +25045,7 @@ const COMMAND_GROUPS = [
   "Files and windows" => [
     Command(:save, "Save the file", :window, "cmd+s", (e, w, _) -> save_page!(e)),
     Command(:open, "Find a file by name", :window, "cmd+o", (e, w, _) -> open_finder!(e)),
+    Command(:home, "Show the home folder's page: your favourite folders, and what you worked on in the last 7 days", :window, "cmd+shift+h", (e, w, _) -> go_home!(e)),
     Command(:commands, "Show the command palette, to run a command by its name", :window, "cmd+shift+p", (e, w, _) -> toggle_palette!(e)),
     Command(:back, "Go back to the line or the file that showed before", :window, "cmd+opt+left", (e, w, _) -> go_back!(e)),
     Command(:forward, "Go forward again, to the line or the file that you went back from", :window, "cmd+opt+right", (e, w, _) -> go_forward!(e)),
@@ -27109,6 +27111,7 @@ onkey(t::TopBar, ::KeyPress{Keys.mouse_left}) = drag_window!(window_of(t))
 describe(t::Title) = begin
   e = editor(t)
   b = e.buf
+  title_trail!(e, t)   # the path shows over the bar while the mouse is over the name
   nofile(e) && return Box()   # a window with no file has no name to show
   if !isempty(b.path) && renaming(e, :title) == b.path
     # The field grows as the name gets longer
@@ -27127,6 +27130,271 @@ onkey(t::Title, ::KeyPress{Keys.mouse_right}) = begin
   e = editor(t)
   isempty(e.buf.path) || file_menu!(e, window_of(t), e.buf.path; at=:title)
   handled
+end
+
+# --- the path in the top bar -----------------------------------------------------------------
+#
+# Hold the mouse over the file's name in the top bar, and the name grows into
+# its path: the name of each folder on the way to the file, like
+# `~ › Desktop › Canon › Quotes.md`. The file's name stays where it was, and
+# the folders come in to its left. The path floats over the rest of the bar,
+# so nothing in the bar moves. When the window is too narrow for every name,
+# the folders furthest from the file shrink to their first letter, as in the
+# sidebar. The path goes when the mouse leaves it.
+#
+#   - A click on a folder opens it in the page: its own page, like the home
+#     folder's or a desktop's, or a list of what's in it.
+#   - A click on a › shows the menu of what's in the folder before it.
+#   - In a menu, each folder opens a menu of what's in it. Choose a file to
+#     show it. "Go to …" at the top of a folder's menu does what a click on
+#     the folder's name does.
+#   - A right-click on a name shows the menu of that folder or file.
+#
+# So you can go anywhere from the top bar, with the sidebar hidden.
+
+"The path of the file that the top bar shows, as names to click"
+@def mutable struct TitleTrail <: SemanticUI
+  path::String = ""
+  steps::Vector{Tuple{String,String}} = Tuple{String,String}[]   # the name and the path of each step, as they show. "…" has no path.
+  size::Any = nothing                                            # how big the window was when the path was put in place
+  crumbs::Dict{String,Any} = Dict{String,Any}()                  # the TitleCrumb of each step, by its path
+  arrows::Dict{String,Any} = Dict{String,Any}()                  # the TitleArrow after each folder, by the folder's path
+end
+
+"One name of the path in the top bar: a folder, or the file at the end"
+@def mutable struct TitleCrumb <: SemanticUI
+  path::String = ""
+  name::String = ""
+  last::Bool = false
+end
+
+"The › after a folder's name in the top bar. A click shows a menu of what's in the folder."
+@def mutable struct TitleArrow <: SemanticUI
+  path::String = ""
+end
+
+const TT_H = 26px       # how tall the path is
+const TT_PAD = 7px      # inside a name, on each side
+const TT_ARROW = 14px   # how wide a › is
+const TT_EDGE = 4px     # inside the path, at each end
+const TT_WAIT = 0.15    # how many seconds the mouse is over the name before the path shows
+const TT_MOST = 80      # the most things that a menu of a folder lists
+
+"How wide each name of `steps` is in the top bar. The file's name is a little bolder."
+title_widths(steps) = [measure(Face(SANS, i == length(steps) ? "Medium" : "", 13px, colours.ink, false), n) + 2TT_PAD
+                       for (i, (n, _)) in enumerate(steps)]
+
+"How wide the path of `steps` is, from edge to edge"
+title_wide(steps) = sum(title_widths(steps)) + TT_ARROW * (length(steps) - 1) + 2TT_EDGE + 2px
+
+"""
+The steps of `all` that fit in `room`. The names furthest from the file shrink
+to their first letter, from the left, as the sidebar's trail does. If that
+still doesn't fit, an … takes the place of names after the first, and last of
+all the file's own name loses its middle.
+"""
+title_steps(all, room) = begin
+  short = copy(all)
+  initial(n) = startswith(n, '.') ? first(n, 2) : first(n, 1)
+  for i in 2:length(short)-1
+    title_wide(short) <= room && return short
+    short[i] = (initial(short[i][1]), short[i][2])
+  end
+  while title_wide(short) > room && length(short) > 2 && short[2][1] != "…"
+    deleteat!(short, 2)
+    length(short) > 2 ? (short[2] = ("…", "")) : insert!(short, 2, ("…", ""))
+  end
+  while title_wide(short) > room && length(short) > 3
+    deleteat!(short, 3)
+  end
+  name, at = short[end]
+  k = length(name) ÷ 2
+  while title_wide(short) > room && k > 2
+    k -= 1
+    short[end] = (first(name, k) * "…" * last(name, k), at)
+  end
+  short
+end
+
+"""
+Show the path of the file over the top bar while the mouse is over the file's
+name, once it has been there for a moment, and take it away when the mouse
+leaves the name and the path.
+"""
+title_trail!(e, t) = begin
+  w = window_of(t)
+  w === nothing && return
+  path = e.buf.path
+  open = any(p -> p.key == :title_trail, popups(w))
+  if !(ishovered(t) && !nofile(e) && isabspath(path) && isdir(dirname(path)) && renaming(e, :title) != path && e.popup == :none)
+    delete!(e.nodes, :title_hover)
+    open && close_popup!(w, :title_trail)
+    return
+  end
+  since = get!(e.nodes, :title_hover, time())
+  time() - since < TT_WAIT && return redraw_in!(e, TT_WAIT)
+  kept = get(e.nodes, :title_trail, nothing)
+  (open && kept isa TitleTrail && kept.path == path && kept.size == window_size(e)) || show_title_trail!(e, t, w, path)
+  # A window hears nothing when the mouse leaves it, so the path looks for itself
+  isempty(w.glfw) || (sync_mouse!(w); redraw_in!(e, 0.2))
+  nothing
+end
+
+"Put the path to `path` over the top bar, with the file's name where the bar shows it"
+show_title_trail!(e, t, w, path) = begin
+  r = rect(t)
+  r === nothing && return
+  wide = window_size(e)[1]
+  # The Mac draws its close, minimise and zoom buttons over the window, so the path starts after them
+  start = mac_buttons_room(e) + 4px
+  all = steps(path, home_folder())
+  all[end] = (something(page_title(e), name(e.buf)), path)   # the file's name as the bar shows it
+  shown = title_steps(all, wide - 8px - start)
+  v = get!(() -> own!(t, TitleTrail()), e.nodes, :title_trail)
+  v.path == path || (empty!(v.crumbs); empty!(v.arrows))
+  v.path, v.steps, v.size = path, shown, window_size(e)
+  widths = title_widths(shown)
+  total = title_wide(shown)
+  # How far the file's name is from the path's left edge
+  before = sum(widths[1:end-1], init=0px) + TT_ARROW * (length(shown) - 1) + TT_EDGE + 1px + TT_PAD
+  x = clamp(r.left - before, start, max(start, wide - 8px - total))
+  popup!(w, v, anchor=(x, (TOPBAR_H - TT_H) / 2), placement=:below, gap=0px, width=total, key=:title_trail,
+         modal=false, theme=menu_theme())
+  nothing
+end
+
+describe(v::TitleTrail) = begin
+  # The path goes when the bar stops showing the file's name: as slides, as an app, or under a video that fills the screen
+  e = editor(v)
+  (slideshow(e) !== nothing || as_app(e) || screening(e) || nofile(e)) && (w = window_of(v); w === nothing || close_popup!(w, :title_trail))
+  arrow() = Box(width(TT_ARROW), height(grow=grow), Alignment.Center, justify=Alignment.Center,
+                Icon("chevron-right", size=8px, color=colours.faint))
+  parts = Any[]
+  n = length(v.steps)
+  for (i, (name, path)) in enumerate(v.steps)
+    if i > 1
+      # The › after a folder lists what's in it. The one after an … stands for folders that aren't shown.
+      before = v.steps[i-1][2]
+      push!(parts, isempty(before) ? arrow() : get!(() -> own!(v, TitleArrow(path=before)), v.arrows, before))
+    end
+    if isempty(path)
+      push!(parts, Box(height(grow=grow), padding(TT_PAD, 0px), Alignment.Center, justify=Alignment.Center, label(name, 13px, color=colours.faint)))
+    else
+      c = get!(() -> own!(v, TitleCrumb(path=path)), v.crumbs, path)
+      c.name, c.last = name, i == n
+      push!(parts, c)
+    end
+  end
+  # Each name fills the height inside the border and 1px more, so its hover box has as much room above it as below
+  Row(width(grow=grow), height(TT_H), padding(TT_EDGE, 1px), radius(7px), Alignment.Center, name="Path",
+      background(colours.bg), border(1px, :solid, colours.line), lifted, parts...)
+end
+
+describe(c::TitleCrumb) =
+  Box(height(grow=grow), padding(TT_PAD, 0px), radius(5px), Alignment.Center, justify=Alignment.Center, name="Step",
+      background(!c.last && ishovered(c) ? colours.hover : clear),
+    label(c.name, 13px, color=c.last ? colours.ink : colours.dim, weight=c.last ? "Medium" : ""))
+
+describe(a::TitleArrow) =
+  Box(width(TT_ARROW), height(grow=grow), radius(4px), Alignment.Center, justify=Alignment.Center, name="Arrow",
+      background(ishovered(a) ? colours.hover : clear),
+    Icon("chevron-right", size=8px, color=colours.faint))
+
+cursor(c::TitleCrumb) = c.last ? :arrow : :hand
+cursor(::TitleArrow) = :hand
+
+"Where a menu that drops down from `node` in the top bar starts: under its left end"
+drop_at(node, w) = (r = rect(node); r === nothing ? (w.mouse[1], w.mouse[2]) : (r.left, r.top + r.height + 4px))
+
+onkey(c::TitleCrumb, ev::KeyPress{Keys.mouse_left}) = (c.last || title_go!(editor(c), ev.window, c.path; at=drop_at(c, ev.window)); handled)
+onkey(a::TitleArrow, ev::KeyPress{Keys.mouse_left}) = (folder_menu!(editor(a), ev.window, a.path; at=drop_at(a, ev.window)); handled)
+
+# A right-click on a name shows the menu of its folder or file, as in the sidebar. Only the file's own name can be renamed in the bar.
+onkey(c::TitleCrumb, ev::KeyPress{Keys.mouse_right}) = begin
+  e = editor(c)
+  c.last ? file_menu!(e, ev.window, c.path; at=:title) : file_menu!(e, ev.window, c.path; items=filter(!=("Rename"), file_menu(c.path)))
+  handled
+end
+
+"Do what a choice of the folder or the file at `path` in the top bar does: a file shows, and a folder opens in the page"
+title_go!(e, w, path; at) = (close_popup!(w, :title_trail); open_folder!(e, path); nothing)
+
+"What's in the folder `dir`, by name, its folders first, or nothing when it can't be read. Hidden ones show while the sidebar shows them."
+title_listing(e, dir) = begin
+  names = try readdir(dir) catch; return nothing end
+  filter!(n -> n != ".DS_Store" && (e.hidden || !startswith(n, '.')), names)
+  folder(n) = (p = joinpath(dir, n); isdir(p) && !ispackage(p))
+  kinds = Dict(n => folder(n) for n in names)
+  sort!(names, by=n -> (!kinds[n], lowercase(n)))
+  (names, kinds)
+end
+
+"""
+The menu of what's in the folder `dir`, as `system_menu` takes it, and the
+path of each item, at the same places. With `deep`, each folder in it opens a
+menu of what's in that folder, which starts with an item that goes to it.
+"""
+folder_menu_items(e, dir; deep=true) = begin
+  found = title_listing(e, dir)
+  found === nothing && return (Any["Ladder can't read this folder"], Any[nothing])
+  names, kinds = found
+  isempty(names) && return (Any["This folder is empty"], Any[nothing])
+  shown = first(names, TT_MOST)
+  items, paths = Any[], Any[]
+  for n in shown
+    p = joinpath(dir, n)
+    if kinds[n] && deep
+      inner, inner_paths = folder_menu_items(e, p; deep=false)
+      push!(items, n => Any["Go to $n", "-", inner...])
+      push!(paths, Any[p, nothing, inner_paths...])
+    else
+      push!(items, n)
+      push!(paths, p)
+    end
+    # A line between the folders and the files
+    kinds[n] && n != last(shown) && !kinds[shown[findfirst(==(n), shown)+1]] && (push!(items, "-"); push!(paths, nothing))
+  end
+  length(names) > length(shown) && (push!(items, "-", "$(length(names) - length(shown)) more"); push!(paths, nothing, nothing))
+  (items, paths)
+end
+
+"The path at `place` of the paths that `folder_menu_items` gives, or nothing"
+place_path(paths, place) = begin
+  p = get(paths, place[1], nothing)
+  length(place) == 1 ? (p isa String ? p : nothing) : (p isa Vector ? get(p, place[2], nothing) : nothing)
+end
+
+"""
+Show the menu of what's in the folder `dir` at `at`. What's on the way to the
+file that shows has a tick. Choose a file to show it, or a folder to go to it.
+"""
+folder_menu!(e, w, dir; at=(w.mouse[1], w.mouse[2])) = begin
+  items, paths = folder_menu_items(e, dir)
+  off, ticked = Any[], Any[]
+  for (i, entry) in enumerate(items)
+    if entry isa Pair
+      for (j, x) in enumerate(last(entry))
+        x != "-" && paths[i][j] === nothing && push!(off, (i, j))
+        # The first item goes to the folder itself, and has no tick
+        j > 1 && paths[i][j] isa String && inside_path(e.buf.path, paths[i][j]) && push!(ticked, (i, j))
+      end
+      inside_path(e.buf.path, paths[i][1]) && push!(ticked, (i,))
+    else
+      entry != "-" && paths[i] === nothing && push!(off, (i,))
+      paths[i] isa String && inside_path(e.buf.path, paths[i]) && push!(ticked, (i,))
+    end
+  end
+  # The Mac's menu calls `pick` before it closes. What's chosen happens after it has closed.
+  chosen, closed = Ref{Any}(nothing), Ref(false)
+  pick(place...) = (p = place_path(paths, place); p === nothing ? nothing : closed[] ? title_go!(e, w, p; at) : (chosen[] = p); nothing)
+  if system_menu(w, items, pick; at, off, ticked)
+    closed[] = true
+    chosen[] === nothing || title_go!(e, w, chosen[]; at)
+  else
+    closed[] = true
+    drawn_menu!(w, items, pick; off, ticked, at)
+  end
+  nothing
 end
 
 # --- the sidebar --------------------------------------------------------------------------
@@ -27525,7 +27793,7 @@ takes them. "-" is a line between two groups. A file has an item that opens it
 in the app that the Mac uses for it, unless that's Ladder.
 """
 file_menu(path) = begin
-  isdir(path) && return ["New Page", "New Folder", "-", "Open in New Window", "-", "Rename", "Duplicate", "-",
+  isdir(path) && return ["New Page", "New Folder", "-", "Open in New Window", favourite_item(path), "-", "Rename", "Duplicate", "-",
                          "Copy Path", "Show in Finder", "-", "Move to Trash"]
   app = opener(path)
   outside = isempty(app) || app_name(app) == "Ladder" ? String[] : ["Open in $(app_name(app))"]
@@ -27564,6 +27832,8 @@ file_act!(e, path, name; at=:sidebar) =
   name == "Copy Path" ? clipboard(path) :
   name == "Copy Link" ? clipboard(wiki_link(path)) :
   name == "Show in Finder" ? show_in_finder(path) :
+  name == "Add to Favourites" ? Home.favourite!(path) :
+  name == "Remove from Favourites" ? Home.unfavourite!(path) :
   name == "Move to Trash" ? trash!(e, path) : nothing
 
 "Open a Finder window on the folder of the file at `path`, with the file selected"
@@ -27581,7 +27851,7 @@ file_menu!(e, w) = begin
   if item === nothing
     (w.mouse[2] > TOPBAR_H && isdir(e.folder) && ishovered(node!(Sidebar, e, :sidebar)) &&
      folder_view(e, directory(e)).list === nothing) || return
-    return file_menu!(e, w, e.folder, items=FOLDER_MENU)
+    return file_menu!(e, w, e.folder, items=[FOLDER_MENU; "-"; favourite_item(e.folder)])
   end
   item.firstchild isa FileLabel || return
   path = item.firstchild.path
@@ -27937,7 +28207,14 @@ folder_trail(e, room) = begin
   parts
 end
 
-goes(t::TrailName) = !t.last && !isempty(t.path)
+"""
+True when a click on the name `t` goes somewhere: to a folder further up, or,
+for the sidebar's own folder, to that folder while the window shows another page.
+"""
+goes(t::TrailName) = !isempty(t.path) && (!t.last || page_elsewhere(editor(t)))
+
+"True when the window shows another page than the sidebar's own folder"
+page_elsewhere(e) = (d = directory(e); d isa AbstractDirectory && e.buf.path != string(d.path))
 
 describe(t::TrailName) =
   Box(padding(TRAIL_PAD, 1px), radius(4px), background(goes(t) && ishovered(t) ? colours.hover : clear),
@@ -27945,7 +28222,22 @@ describe(t::TrailName) =
 
 cursor(t::TrailName) = goes(t) ? :hand : :arrow
 
-onkey(t::TrailName, ::KeyPress{Keys.mouse_left}) = goes(t) ? (go_folder!(editor(t), t.path); handled) : nothing
+onkey(t::TrailName, ::KeyPress{Keys.mouse_left}) = goes(t) ? (open_folder!(editor(t), t.path); handled) : nothing
+
+"""
+Open the folder at `path` in the page: its own page, like the home folder's or
+a desktop's, or else a list of what's in it. The sidebar lists the folder, and
+a sidebar that's hidden stays hidden. The trail at the top of the sidebar, the
+path in the top bar and the home folder's page open a folder this way.
+"""
+open_folder!(e, path) = begin
+  (isdir(path) && !ispackage(path)) || return show_path!(e, path)
+  # The folder's own page says its kind, and loads the code of the kind. It runs now if it hasn't.
+  folder_pages!(path)
+  Base.invokelatest(show_folder!, e, path)
+end
+
+show_folder!(e, path) = (go_folder!(e, path); show_beside!(e, path); e)
 
 floating(children...; w) =
   Column(fixed(w), radius(9px), Alignment.Start, background(colours.float), border(1px, :solid, colours.line), lifted, children...)
@@ -40000,6 +40292,7 @@ end
 mac_kind(path::AbstractString) = begin
   Sys.isapple() || return nothing
   home = homedir()
+  path == home ? HomeDirectory :
   path == joinpath(home, "Downloads") ? DownloadsDirectory :
   path == joinpath(home, "Pictures") ? PicturesDirectory :
   path == Mac.trash() ? TrashDirectory :
@@ -40174,7 +40467,7 @@ end
 cursor(::FileList) = :arrow
 
 "Show the things of the list `v` that are called `names`, as a link to each would"
-filelist_open!(v::FileList, names) = (e = editor(v); foreach(n -> show_path!(e, joinpath(v.path, n)), names); nothing)
+filelist_open!(v::FileList, names) = (e = editor(v); foreach(n -> open_folder!(e, joinpath(v.path, n)), names); nothing)
 
 "Move the things of the list `v` that are called `names` to the Trash, and keep the keyboard on the list"
 filelist_trash!(v::FileList, names) = begin
@@ -40796,6 +41089,360 @@ onkey(v::TilesView, ev::KeyPress{K}) where K = begin
   end
   redraw_in!(v, 0)
   handled
+end
+
+# --- the home folder ---------------------------------------------------------------------------
+#
+# The home folder has a page of its own, as Downloads has. It shows the
+# folders that you chose as favourites, and what you worked on in the last 7
+# days, as a project for each folder. home.jl keeps the favourites and finds
+# the work with Spotlight.
+#
+#   - ⌘⇧H shows the home folder's page, as it shows the home folder in the
+#     Finder. A click on the home folder's name in the trail at the top of the
+#     sidebar shows it too.
+#   - A favourite is a folder. The folder's menu in the sidebar has Add to
+#     Favourites, and Remove from Favourites once it's one. The palette's
+#     command Go To Favourite goes to one from any page.
+#   - A click on a favourite opens its folder in the page, and leaves the
+#     sidebar as it is. Drag a favourite to put it in another place in the
+#     list. A right-click shows its menu.
+#   - Under the projects is the tree of what's in the folder, as the sidebar
+#     shows it, and as a plain folder shows in the page.
+#   - A project is a git repository. Its line says how many of its files
+#     changed, and when the last one did. A click on it opens its folder. A
+#     project's menu has Hide from This Page. The button Hidden Projects lists the hidden ones,
+#     and a click on one shows it on the page again.
+#
+# Any other folder shows the same way with a page of its own that ends with
+# `Ladder.HomeDirectory`. Its work is then what changed in that folder.
+
+"The home folder: its page shows the favourite folders, and the work of the last 7 days by project"
+@def struct HomeDirectory <: AbstractDirectory end
+
+# What's in the home folder is a folder or a file like any other
+FS.kind(::HomeDirectory, path::FSPath) = folder_kind(path)
+
+push!(BLOCK_ICONS, "house", "folder-x", "eye-slash")
+entry_icon(::HomeDirectory) = "house"
+
+"The home folder that ⌘⇧H shows: the Mac's, unless a test names one of its own"
+const HOME = Ref("")
+home_folder() = isempty(HOME[]) ? homedir() : HOME[]
+
+"Show the home folder's page. The sidebar lists the home folder, and a sidebar that's hidden stays hidden."
+go_home!(e) = open_folder!(e, home_folder())
+
+"A click on the home folder in the sidebar shows its page, and the sidebar lists what it holds"
+open!(e, d::HomeDirectory; record=true) = (open!(e, string(d.path); record); go_folder!(e, string(d.path)))
+page_view(e, d::HomeDirectory) = (path = string(d.path); node!(() -> HomeView(path=path), e, (:home, path)))
+
+"How many favourites there are, in words"
+favourites_words(n) = n == 1 ? "1 favourite" : "$n favourites"
+
+"How many files there are, in words"
+files_words(n) = n == 1 ? "1 file" : "$(commas(n)) files"
+
+"The item of a folder's menu that makes it a favourite, or takes it off the favourites"
+favourite_item(path) = Home.isfavourite(path) ? "Remove from Favourites" : "Add to Favourites"
+
+# --- a folder in the page ---------------------------------------------------------------------
+#
+# A folder that has no page of its own shows in the page as the tree of its
+# folders and files, as the sidebar shows them: the same rows, icons and
+# marks, its folders first, then its files, each by name. The home folder's
+# page ends with the same tree. A click on a folder opens it in the page, and
+# a click on a file shows it. A right-click shows the menu of the folder or
+# the file. The folder is read again each second, so a new file gets its row.
+
+"What the page shows of a folder that has no page of its own: its name, and the tree of what's in it"
+@def mutable struct FolderPage <: SemanticUI
+  path::String = ""
+end
+
+"The colours of a folder's tree in the page: the sidebar's, on the page's own colour"
+page_tree_theme() = Theme(size=Tree.LABEL_SIZE, surface=colours.bg, text=colours.ink, dim=colours.dim, line=colours.line,
+                          hover=colours.hover, select=colours.active, family=SANS)
+
+"""
+The tree of the folders and files in the folder at `path`, as the sidebar has
+it, for a part of a page that `owner` draws. A click on a folder opens it in
+the page, and a click on a file shows it.
+"""
+folder_tree!(e, owner, path) = begin
+  t = get!(e.nodes, (:folder_tree, path)) do
+    own!(owner, Tree.ListTree(guides=SIDEBAR_GUIDES, frame=false, arrows=false,
+                              onchoose=item -> (l = item.firstchild; l isa FileLabel && open_folder!(e, l.path); nothing)))
+  end
+  if time() - get(e.nodes, (:folder_tree_read, path), 0.0) >= 1
+    e.nodes[(:folder_tree_read, path)] = time()
+    d = try object(e, path) catch; nothing end
+    found = d isa AbstractDirectory ? entries(e, d) : FSObject[]
+    paths = String[joinpath(path, o.path.name) for o in found]
+    if String[c.firstchild.path for c in t.children] != paths
+      foreach(detach!, collect(t.children))
+      foreach(p -> add_child!(t, Tree.Item(FileLabel(path=p))), paths)
+    end
+  end
+  redraw_in!(e, 1)
+  # A row has the colour of a chosen one only while the tree has the keyboard
+  w = window_of(e)
+  (w === nothing || w.focus !== t) && (t.focused = nothing)
+  t
+end
+
+"The tree of the folder at `path`, drawn for `owner`, a part of the page. Its icons are in line with the icons of a folder's own page, like the home folder's projects."
+folder_tree_part(e, owner, path) =
+  Column(width(grow=grow), Alignment.Start, padding(0px, 0px, 12px, 5.5px), with_theme(() -> describe!(folder_tree!(e, owner, path)), page_tree_theme()))
+
+"Show the menu of the folder or the file under the mouse in the tree of the folder at `path` in the page. It's nothing when the mouse is over no row."
+folder_tree_menu!(e, w, path) = begin
+  t = get(e.nodes, (:folder_tree, path), nothing)
+  item = t isa Tree.ListTree ? Tree.item_under(t, w) : nothing
+  (item !== nothing && item.firstchild isa FileLabel) || return nothing
+  # The name is typed where it shows in the sidebar, so the tree in the page has no Rename
+  p = item.firstchild.path
+  file_menu!(e, w, p; items=filter(!=("Rename"), file_menu(p)))
+  handled
+end
+
+describe(v::FolderPage) =
+  Column(width(grow=grow), Alignment.Start, name="Folder",
+    page_title("folder", basename(v.path), tilde(dirname(v.path))),
+    folder_tree_part(editor(v), v, v.path))
+
+cursor(::FolderPage) = :arrow
+onkey(v::FolderPage, ev::KeyPress{Keys.mouse_right}) = folder_tree_menu!(editor(v), ev.window, v.path)
+
+"What the page shows of the home folder: the favourite folders, and the work of the last 7 days"
+@def mutable struct HomeView <: SemanticUI
+  path::String = ""
+  rows::Dict{Any,PageRow} = Dict{Any,PageRow}()
+  buttons::Dict{Any,PageButton} = Dict{Any,PageButton}()
+  cards::Dict{String,Any} = Dict{String,Any}()   # the card of each favourite, by its folder
+  order::Vector{String} = String[]               # the favourites in the order that their cards show
+  cols::Int = 1                                  # how many cards there are in a row
+  all::Bool = false                              # it shows every project, not only the newest few
+  hidden::Bool = false                           # it lists the projects that you hid
+  press::Any = nothing                           # the favourite that the mouse went down on, and where
+  drag::Any = nothing                            # the favourite that's dragged, and the place in the list that it would go to
+  shown::Vector{String} = String[]               # the folders of the projects that show, from the top
+end
+
+"A favourite folder on the home folder's page"
+@def mutable struct FavouriteCard <: SemanticUI
+  path::String = ""
+  view::Any = nothing     # the HomeView that it's on
+  wide::Float64 = 200.0   # how wide it is
+  icon::Any = nothing     # the Finder's icon of the folder, or nothing until it's made
+end
+
+const CARD_H = 56.0       # how tall a favourite's card is
+const CARD_LEAST = 190.0  # how narrow a card can be before a row has one card fewer
+const CARD_GAP = 10.0     # between two cards
+"How many projects the page shows before the button that shows them all"
+const PROJECTS_FIRST = 8
+
+describe(c::FavouriteCard) = begin
+  v = c.view
+  dragged = v isa HomeView && v.drag !== nothing && v.drag[1] == c.path
+  there = isdir(c.path)
+  picture = c.icon === nothing ? Icon(there ? "folder" : "folder-x", size=22px, color=colours.dim) : Image(c.icon, fixed(32px), height(32px))
+  Row(fixed(px(c.wide)), height(px(CARD_H)), padding(12px, 0px), radius(8px), child_gap=10px, clip=true, name="Favourite",
+      background(dragged ? colours.active : ishovered(c) && v.drag === nothing ? colours.hover : colours.panel),
+      border(1px, :solid, colours.line),
+    Box(width(32px), picture),
+    # As tall as the card, so the clip that keeps a long name off the edge doesn't cut the bottoms of letters
+    Column(width(grow=grow), height(grow=grow), Alignment.Start, justify=Alignment.Center, child_gap=3px, clip=true,
+      Box(label(basename(c.path), 13px, weight="Semibold", color=there ? colours.ink : colours.faint)),
+      Box(label(there ? tilde(dirname(c.path)) : "This folder isn't there now", 11px, color=colours.faint))))
+end
+
+cursor(c::FavouriteCard) = :hand
+
+# The mouse going down only gets the card ready. Letting it go shows the folder, unless the card was dragged.
+# UI.jl gives the button's release to the part that has the keyboard, so the page takes the keyboard.
+onkey(c::FavouriteCard, ev::KeyPress{Keys.mouse_left}) = begin
+  v = c.view
+  focus(v)
+  v.press = (path=c.path, at=(num(ev.window.mouse[1]), num(ev.window.mouse[2])))
+  v.drag = nothing
+  handled
+end
+
+onkey(c::FavouriteCard, ev::KeyPress{Keys.mouse_right}) = (favourite_menu!(c.view, ev.window, c.path); handled)
+
+"The favourites of the page `v`, in the order that they show: with the one that's dragged in the place that it would go to"
+home_order(v::HomeView) = begin
+  order = filter(!=(""), copy(Home.favourites()))
+  d = v.drag
+  (d === nothing || !(d[1] in order)) && return order
+  filter!(!=(d[1]), order)
+  insert!(order, clamp(d[2], 1, length(order) + 1), d[1])
+  order
+end
+
+"The place in the list of favourites that a card dropped at `(x, y)` in the window goes to, from the places of the cards in the last frame"
+home_slot(v::HomeView, x, y) = begin
+  isempty(v.order) && return 1
+  r = rect(get(v.cards, v.order[1], nothing))
+  r === nothing && return 1
+  left, top, wide = num(r.left), num(r.top), num(r.width)
+  col = clamp(floor(Int, (x - left + CARD_GAP / 2) / (wide + CARD_GAP)), 0, v.cols - 1)
+  row = max(0, floor(Int, (y - top + CARD_GAP / 2) / (CARD_H + CARD_GAP)))
+  clamp(row * v.cols + col + 1, 1, length(v.order))
+end
+
+# Each move of a drag that started on a card comes here, from the card
+onmouse(v::HomeView, ev::MouseMove) = begin
+  p = v.press
+  # UI.jl sends a move just before the button's release, when the button is already up. The release ends the drag.
+  (p === nothing || !(Keys.mouse_left in ev.window.keys)) && return nothing
+  x, y = num(ev.position[1]), num(ev.position[2])
+  # A move of a few pixels is still a click
+  v.drag === nothing && hypot(x - p.at[1], y - p.at[2]) <= 4 && return handled
+  v.drag = (p.path, home_slot(v, x, y))
+  redraw_in!(v, 0)
+  handled
+end
+
+onkey(v::HomeView, ev::KeyRelease{Keys.mouse_left}) = begin
+  p, d = v.press, v.drag
+  v.press, v.drag = nothing, nothing
+  p === nothing && return nothing
+  d === nothing ? open_folder!(editor(v), p.path) : Home.move_favourite!(d...)
+  redraw_in!(v, 0)
+  handled
+end
+
+"Show the menu of the favourite at `path` on the page `v`"
+favourite_menu!(v::HomeView, w, path) = begin
+  e = editor(v)
+  items = ["Open in New Window", "Show in Finder", "Copy Path", "-", "Remove from Favourites"]
+  act(i) = (file_act!(e, path, get(items, i, "")); nothing)
+  off = isdir(path) ? Int[] : [1, 2]
+  system_menu(w, items, act; off) || drawn_menu!(w, items, act; off)
+  nothing
+end
+
+"Show the menu of the project of the folder at `path` on the page `v`"
+project_menu!(v::HomeView, w, path) = begin
+  e = editor(v)
+  items = ["Show in Finder", "Copy Path", favourite_item(path), "-", "Hide from This Page"]
+  act(i) = begin
+    item = get(items, i, "")
+    item == "Hide from This Page" ? Home.hide!(path) : file_act!(e, path, item)
+    redraw_in!(v, 0)
+    nothing
+  end
+  system_menu(w, items, act) || drawn_menu!(w, items, act)
+  nothing
+end
+
+# A right-click on a project shows its menu, and one on a row of the tree shows the menu of its folder or file
+onkey(v::HomeView, ev::KeyPress{Keys.mouse_right}) = begin
+  for (key, r) in v.rows
+    key isa Tuple && key[1] == :project && ishovered(r) && (project_menu!(v, ev.window, key[2]); return handled)
+  end
+  folder_tree_menu!(editor(v), ev.window, v.path)
+end
+
+"The line of the project `p` on the page `v`: its name, its folder, how many of its files changed, and when the last one did"
+project_line(v::HomeView, e, p::Home.Project) =
+  page_row!(v, (:project, p.path), _ -> (open_folder!(e, p.path); nothing),
+    Box(fixed(14px), Icon("git", size=13px, color=colours.dim)),
+    Box(label(p.path == v.path ? "Home" : basename(p.path), 13px, weight="Semibold")),
+    (p.path == v.path ? () : (Box(label(tilde(dirname(p.path)), 12px, color=colours.faint)),))...,
+    Box(width(grow=grow)),
+    Box(label(files_words(p.count) * "  ·  " * Git.ago(p.when), 12px, color=colours.dim)))
+
+describe(v::HomeView) = begin
+  e = editor(v)
+  # The button came up over another part of the window, so the page never heard it: the drag ends with no drop
+  w = window_of(v)
+  w !== nothing && !(Keys.mouse_left in w.keys) && ((v.press, v.drag) = (nothing, nothing))
+  hid = Home.hidden()
+  work = filter(p -> !(p.path in hid), Home.recent(v.path))
+  # While Spotlight is asked, the page looks again soon. After that, the times of the work stay right to the minute.
+  redraw_in!(e, Home.busy() || !Home.found() ? 0.5 : 30)
+  # The favourites, in rows of as many cards as fit
+  r = rect(v)
+  wide = (r === nothing ? num(e.width) : num(r.width)) - 16
+  v.cols = max(1, floor(Int, (wide + CARD_GAP) / (CARD_LEAST + CARD_GAP)))
+  card_w = floor((wide - CARD_GAP * (v.cols - 1)) / v.cols)
+  v.order = home_order(v)
+  budget = Ref(4)
+  cards = map(v.order) do path
+    c = get!(() -> own!(v, FavouriteCard(path=path, view=v)), v.cards, path)
+    c.wide = card_w
+    c.icon === nothing && (c.icon = filelist_icon(e, path, budget))
+    c
+  end
+  length(v.cards) > length(v.order) + 50 && filter!(kv -> kv[1] in v.order, v.cards)
+  grid = isempty(cards) ?
+    (page_note("No favourites yet. Right-click a folder in the sidebar and choose Add to Favourites."),) :
+    (Column(width(grow=grow), Alignment.Start, padding(8px, 0px), child_gap=px(CARD_GAP),
+            [Row(child_gap=px(CARD_GAP), cards[i:min(i + v.cols - 1, end)]...) for i in 1:v.cols:length(cards)]...),)
+  # The work, the newest project first
+  shown = v.all ? work : work[1:min(PROJECTS_FIRST, end)]
+  v.shown = [p.path for p in shown]
+  more = length(work) - length(shown)
+  lines = Any[]
+  !Home.found() && push!(lines, page_note("Looking for what changed…"))
+  Home.found() && isempty(work) && push!(lines, page_note("No git repository in this folder changed in the last 7 days."))
+  foreach(p -> push!(lines, project_line(v, e, p)), shown)
+  # The page's one button lists the projects that you hid. The eye is open while it lists them.
+  buttons = isempty(hid) ? () : (page_button!(v, :hidden, _ -> (v.hidden = !v.hidden; nothing), icon=v.hidden ? "eye" : "eye-slash",
+                                              words="Hidden Projects · $(length(hid))"),)
+  about = join(filter(!isempty, [tilde(v.path), favourites_words(length(v.order)),
+                                 Home.found() ? (length(work) == 1 ? "1 recent project" : "$(length(work)) recent projects") : ""]), "  ·  ")
+  Column(width(grow=grow), Alignment.Start, name="Home",
+    page_title("house", "Home", about),
+    (isempty(buttons) ? () : (Row(padding(8px, 0px), child_gap=8px, buttons...),))...,
+    Box(height(18px)),
+    page_heading("Favourites"),
+    grid...,
+    Box(height(18px)),
+    page_heading("Worked on in the last 7 days"),
+    lines...,
+    (more > 0 ? (Row(padding(8px, 8px), page_button!(v, :more, _ -> (v.all = true; nothing), words="Show $more More")),) :
+     v.all && length(work) > PROJECTS_FIRST ? (Row(padding(8px, 8px), page_button!(v, :more, _ -> (v.all = false; nothing), words="Show Fewer")),) : ())...,
+    (v.hidden && !isempty(hid) ?
+      (Box(height(18px)), page_heading("Hidden projects"),
+       [page_row!(v, (:hidden, path), _ -> (Home.unhide!(path); nothing),
+          Box(fixed(14px), Icon("eye-slash", size=12px, color=colours.faint)),
+          Box(label(basename(path), 13px, color=colours.dim)),
+          Box(label(tilde(dirname(path)), 12px, color=colours.faint)),
+          Box(width(grow=grow)),
+          Box(label("Show on This Page", 12px, color=colours.accent))) for path in hid]...) : ())...,
+    # Last, what's in the folder, as the sidebar shows it
+    Box(height(18px)),
+    page_heading("Folders and files"),
+    folder_tree_part(e, v, v.path))
+end
+
+cursor(::HomeView) = :arrow
+
+"A favourite folder, for a command to take"
+struct Favourite
+  path::String
+end
+choices_for(::Type{Favourite}, e) = [Favourite(p) for p in Home.favourites()]
+worded(f::Favourite) = basename(f.path)
+sidenote(f::Favourite) = tilde(dirname(f.path))
+runs_at_once(::Val{:go_to_favourite}) = true
+
+"Open one of your favourite folders in the page"
+go_to_favourite!(e, favourite::Favourite) = (open_folder!(e, favourite.path); nothing)
+add_command!(go_to_favourite!, title="Go to one of the folders that you made a favourite")
+
+"Make the folder `d` a favourite, so the home folder's page shows it"
+add_to_favourites!(d::AbstractDirectory) = (Home.favourite!(path_of(d)); nothing)
+"Take the folder `d` off the favourites of the home folder's page"
+remove_from_favourites!(d::AbstractDirectory) = (Home.unfavourite!(path_of(d)); nothing)
+let group = "The file or the folder in focus"
+  add_command!(add_to_favourites!; group, title="Make the folder a favourite, so the home folder's page shows it")
+  add_command!(remove_from_favourites!; group, title="Take the folder off the favourites of the home folder's page")
 end
 
 # --- a folder that's a blog ------------------------------------------------------------------

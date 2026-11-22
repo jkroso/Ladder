@@ -59,7 +59,7 @@ folder_menu(name, item) = (right_click(middle(rect(row(name)))); choose(item))
   right_click(middle(rect(row("Projects"))))
   @test menu() !== nothing
   # The Finder can show a folder, so Show in Finder isn't grey
-  @test menu().items == ["New Page", "New Folder", "Open in New Window", "Rename", "Duplicate", "Copy Path", "Show in Finder", "Move to Trash"]
+  @test menu().items == ["New Page", "New Folder", "Open in New Window", "Add to Favourites", "Rename", "Duplicate", "Copy Path", "Show in Finder", "Move to Trash"]
   key(Keys.escape)
   @test menu() === nothing
 end
@@ -172,7 +172,7 @@ under_files() = right_click((100, 600))
   @test e.folder == v2 && isempty(listed())
   under_files()
   @test menu() !== nothing
-  @test menu().items == ["New Page", "New Folder", "Copy Path", "Show in Finder"]
+  @test menu().items == ["New Page", "New Folder", "Copy Path", "Show in Finder", "Add to Favourites"]
   key(Keys.escape)
   # The top bar over the sidebar has no such menu
   right_click((100, 20))

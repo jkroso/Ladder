@@ -142,9 +142,9 @@ end
   empty!(clicks)
   K.open!(e, joinpath(dir, "page.md")); K.follow!(e, notes); frames()
   @test clicks == ["notes"] && e.folder == notes && e.buf.path == joinpath(dir, "page.md")
-  # A folder with no kind that's opened as a page says what it is
+  # A folder with no kind that's opened as a page shows what's in it
   K.open!(e, joinpath(dir, "plain")); frames()
-  @test page() == ["plain"]
+  @test page()[1] == "plain" && "list.csv" in page()
   K.go_folder!(e, dir); K.open!(e, joinpath(dir, "page.md")); frames()
 end
 
