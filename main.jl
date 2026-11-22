@@ -29990,7 +29990,7 @@ end
 #     leaves it, and while you open folders from it, until a second click on
 #     the name. A pinned path is in the middle of the bar, where the file's
 #     name is, and has no border or shadow, since it's part of the bar. Its
-#     file's name is shaded.
+#     file's name isn't shaded, as no name is until the mouse is over it.
 #
 # After the file's name come the headings over the caret, from the biggest,
 # and the component that the caret is on: `welcome.md › H2 › Sheet`. A heading
@@ -30250,10 +30250,10 @@ describe(v::TitleTrail) = begin
       background(colours.bg), border(1px, :solid, pinned ? clear : colours.line), (pinned ? () : (lifted,))..., parts...)
 end
 
-# The file's name is shaded while the path is pinned, as it is under the mouse
+# A name is shaded only while the mouse is over it, so a pinned path doesn't look as if its file were chosen
 describe(c::TitleCrumb) =
   Box(height(grow=grow), padding(TT_PAD, 0px), radius(5px), Alignment.Center, justify=Alignment.Center, name="Step",
-      background(ishovered(c) || c.last && trail_pinned(editor(c)) ? colours.hover : clear),
+      background(ishovered(c) ? colours.hover : clear),
     label(c.name, 13px, color=c.last ? colours.ink : colours.dim, weight=c.last ? "Medium" : ""))
 
 describe(a::TitleArrow) = begin

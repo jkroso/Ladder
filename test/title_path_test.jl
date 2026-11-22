@@ -10,6 +10,7 @@
 @use "github.com/jkroso/MiniFB.jl" Window KeyPress KeyRelease MouseMove Keys onkey onmouse Typed ontype
 @use "github.com/jkroso/UI.jl/Interface/draw" frame rect popups
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
+@use "github.com/jkroso/UI.jl/Interface/testing" pixels
 @use GeometryBasics: Vec2
 
 const px = K.px
@@ -231,6 +232,15 @@ end
 path_box() = rect(only(p for p in popups(w) if p.key == :title_trail).content)
 "How far the middle of the path is from the middle of the file's name in the bar"
 off_middle() = (r = path_box(); t = rect(e.nodes[:title]); abs(K.num(r.left + r.width / 2) - K.num(t.left + t.width / 2)))
+"The colour of the window just inside the left side of the name `c`, as the window draws it now"
+shade(c) = begin
+  file = joinpath(dir, "shade.png")
+  save_png(file, w)
+  p = pixels(file)
+  s = size(p, 2) / 1100   # the picture can have more than one pixel for each point
+  r = rect(c)
+  p[round(Int, K.num(r.top + r.height / 2) * s), round(Int, (K.num(r.left) + 2) * s)]
+end
 
 @testset "a click on the file's name pins the path open, in the middle of the bar, and a second click lets it go" begin
   at((550, 400)); @test !showing()
@@ -238,9 +248,11 @@ off_middle() = (r = path_box(); t = rect(e.nodes[:title]); abs(K.num(r.left + r.
   @test off_middle() > 20   # while it only shows under the mouse, the name stays where the bar has it, and the folders go to its left
   click(middle(crumb(a)))
   @test K.trail_pinned(e)
+  @test shade(crumb(a)) != shade(crumb(plain))   # the name under the mouse is shaded
   at((550, 400))
   @test showing()   # it stays when the mouse leaves it
   @test off_middle() <= 2
+  @test shade(crumb(a)) == shade(crumb(plain))   # and isn't when the mouse leaves it, so it doesn't look chosen
   shot("pinned")
   # It stays while you go from folder to folder with it
   click(middle(crumb(plain)))
