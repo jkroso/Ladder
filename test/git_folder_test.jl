@@ -147,9 +147,37 @@ end
   p = e.nodes[(:git_panel, repo)]
   click(middle(p.rows[(:change, "notes.md")]))
   @test e.buf.path == joinpath(repo, "notes.md")
+  # What changed in it is marked, as the diff button marks it, and the caret is at its first change
+  @test K.diffing(e)
+  d = K.diff_now(e)
+  @test d !== nothing && length(d.changes) == 1
+  @test e.buf.caret == (3, 0)   # "More." is the new line
   # The arrow that goes back shows the repository's page again
   K.go_back!(e)
   settle()
+  @test e.buf.path == repo
+  # A file that git doesn't keep yet is new from its first line
+  click(middle(p.rows[(:change, "new.md")]))
+  @test e.buf.path == joinpath(repo, "new.md")
+  @test K.diffing(e) && e.buf.caret[1] == 1   # at the start of the heading's words, after its #
+  K.go_back!(e)
+  settle()
+  # A change far down a long file is in sight
+  write(joinpath(repo, "story.md"), join(["Line $i." for i in 1:300], "\n\n") * "\n")
+  git("add", "story.md")
+  git("commit", "-m", "A long page", "--", "story.md")
+  write(joinpath(repo, "story.md"), join([i == 200 ? "Line 200, changed." : "Line $i." for i in 1:300], "\n\n") * "\n")
+  again()
+  click(middle(p.rows[(:change, "story.md")]))
+  @test e.buf.path == joinpath(repo, "story.md")
+  @test e.buf.caret == (399, 0)   # line 200 of the text is line 399 of the file, with an empty line after each
+  frames()
+  y = K.num(K.PAGE_TOP + K.item(e, 399).top - e.scroll.offset)
+  @test 0 < y < 300   # near the top of the window, so the lines under it show too
+  shot("file-changes")
+  K.go_back!(e)
+  git("checkout", "--", "story.md")   # the tests after this count the files with changes
+  again()
   @test e.buf.path == repo
   # A file in a folder shows too, and the sidebar lists its folder
   click(middle(p.rows[(:change, "src/deep/b.jl")]))

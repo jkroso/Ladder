@@ -39943,7 +39943,8 @@ cursor(::RepoView) = :arrow
 #
 # Beside the page of a repository, the panel at the right of the window has
 # what git says: the branch and the branch that it follows, the files that
-# have changes, and the last commits. A click on a file shows it. The button
+# have changes, and the last commits. A click on a file shows it, with what
+# changed in it marked as the diff button marks it, from its first change. The button
 # at the right end of the top bar hides the panel: see "the panel at the right".
 
 "What git's panel beside the page of a repository shows: the branch, the files that have changes, and the last commits"
@@ -39973,8 +39974,8 @@ describe(p::GitPanel) = begin
   change(rel, kind) = begin
     path = joinpath(p.path, rel)
     dir = dirname(rel)
-    # A file that's gone has nothing to show
-    act = ispath(path) ? (_ -> (show_path!(e, path); nothing)) : nothing
+    # A file shows with what changed in it marked. A file that's gone has nothing to show.
+    act = ispath(path) ? (_ -> (show_changes!(e, path); nothing)) : nothing
     page_row!(p, (:change, rel), act,
       Box(width(14px), label(GIT_LETTERS[kind], 12px, color=git_colour(kind), weight="Semibold")),
       Row(width(grow=grow), height(grow=grow), clip=true, child_gap=6px,
@@ -40708,6 +40709,10 @@ end
 describe(::CommitEnvelope) = Box(width(grow=grow), height(grow=grow), name="Envelope")
 
 placed!(l::CommitList, side) = (l.side = side; nothing)
+# The list draws nothing itself: its envelope is drawn under its rows, by `CommitEnvelope`. A node's own `draw`
+# comes after its rows, so an envelope drawn here would hide them. A window that loaded the code when the list drew
+# its envelope itself still has that method until this one takes its place.
+draw(ctx, size, ui::ConcreteRect, ::CommitList) = nothing
 
 """
 The outline of the list `frame` under the buttons `target`, as the places
@@ -40825,6 +40830,29 @@ diffing(e) = !isempty(e.buf.path) && get(e.nodes, :diffing, "") == e.buf.path
 
 "Show what changed in the file since the last commit, in the file itself, or hide it again"
 toggle_diff!(e) = (diffing(e) ? delete!(e.nodes, :diffing) : (e.nodes[:diffing] = e.buf.path); redraw_in!(e, 0); e)
+
+"""
+Show the file at `path` with what changed in it since the last commit marked
+in it, as the diff button marks it, and put the caret at the start of its
+first change, so the change is in sight. A click on a file in git's panel
+does this. A folder, or a file that Ladder shows only in a viewer, just shows.
+"""
+show_changes!(e, path) = begin
+  show_path!(e, path)
+  e.buf.path == path || return e
+  e.nodes[:diffing] = path
+  d = diff_now(e)
+  (d === nothing || isempty(d.changes)) && return e
+  b = e.buf
+  # A change that only took lines away has none of the file's lines, so the line after them shows it
+  i = clamp(first(d.changes[1][2]), 1, length(b.lines))
+  b.caret = b.anchor = (i, 0)
+  touch!(e)
+  # The change is near the top of the window, with a few lines over it, so the lines under it show too
+  e.nodes[:hold] = (max(i - 3, 1), 24px - PAGE_TOP)
+  redraw_in!(e, 0)
+  e
+end
 
 "The lines of each file in a commit, by the repository's top folder, the file's place in it and the commit's hash. A file that the commit hasn't got has none."
 const COMMITTED = Dict{Tuple{String,String,String},Vector{String}}()
