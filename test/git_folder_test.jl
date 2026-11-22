@@ -29,7 +29,8 @@ write(joinpath(repo, "notes.md"), "# Notes\n")
 write(joinpath(repo, "src", "a.jl"), "a = 1\n")
 write(joinpath(repo, "src", "deep", "b.jl"), "b = 2\n")
 git("add", "-A")
-git("commit", "-m", "The first commit")
+# A first line this long has to wrap in git's panel
+git("commit", "-m", "The first commit, with a first line that is long enough to need a second line in git's panel")
 write(joinpath(repo, "notes.md"), "# Notes\n\nMore.\n")
 write(joinpath(repo, "src", "deep", "b.jl"), "b = 3\n")
 write(joinpath(repo, "new.md"), "# New\n")
@@ -52,6 +53,10 @@ click(place) = begin
   w.keys ⊻= Keys.mouse_left; onkey(w, KeyRelease{Keys.mouse_left}(0, w)); frames(2)
 end
 middle(node) = (r = rect(node); (K.num(r.left) + K.num(r.width) / 2, K.num(r.top) + K.num(r.height) / 2))
+"The name in the trail at the top of the sidebar of the folder at `path`"
+trail_name(path) = only(n for n in values(e.nodes) if n isa K.TrailName && n.path == path && rect(n) !== nothing)
+"The words of every Text in the geometry `g`"
+texts(g) = g isa K.Text ? [String(g.content)] : reduce(vcat, map(texts, try collect(g.children) catch; Any[] end), init=String[])
 "The words of what follows the name of the folder or the file at `path` in the sidebar"
 marks(path) = [m.children[1] isa K.Text ? m.children[1].content : "dot" for m in K.entry_marks(e, K.object(e, path))]
 
@@ -71,47 +76,131 @@ end
   shot("sidebar")
 end
 
-@testset "the line over the list has the branch and how many files have changes" begin
-  bar = e.nodes[:git_bar]
-  @test bar.root == repo
-  @test rect(bar) !== nothing
-  @test K.changes_words(length(G.state(repo).changes)) == "3 changes"
-  # A file that's saved shows in the count when git is asked again
+@testset "the sidebar has no line of git's over its list, and a saved file gets its letter" begin
+  # Git's panel beside the repository's page says what that line said
+  @test K.folder_view(e, K.directory(e)).bar === nothing
+  @test !haskey(e.nodes, :git_bar)
+  @test length(G.state(repo).changes) == 3
+  # A file that's saved gets its letter when git is asked again
   write(joinpath(repo, "Readme.md"), "# Work\n\nWhat this is now.\n")
   again()
   @test marks(joinpath(repo, "Readme.md")) == ["M"]
   @test length(G.state(repo).changes) == 4
 end
 
-@testset "a click on the line shows the repository's page, and the sidebar stays" begin
-  click(middle(e.nodes[:git_bar]))
+@testset "a click on the repository's name in the sidebar shows its page, with git's panel at the right" begin
+  # The name is the last of the trail at the top of the sidebar, and a click on it shows the folder's page
+  t = trail_name(repo)
+  @test K.goes(t)
+  click(middle(t))
   @test e.buf.path == repo
   @test e.folder == repo
   v = e.nodes[(:repo, repo)]
   @test v isa K.RepoView
   @test rect(v) !== nothing
-  @test sort!([k[2] for k in keys(v.rows) if k[1] == :change]) == ["Readme.md", "new.md", "notes.md", "src/deep/b.jl"]
-  @test count(k -> k[1] == :commit, keys(v.rows)) == 1
-  @test K.branch_words(G.state(repo)) == "On the branch main"
+  # The page lists the folders and the files of the top folder, the folders first, as the sidebar does
+  @test [basename(string(o.path)) for o in v.listed] == ["src", "new.md", "notes.md", "Readme.md"]
+  @test K.holds_words(v) == "1 folder  ·  3 files"
+  @test sort!([k[2] for k in keys(v.rows) if k[1] == :entry]) == sort!(joinpath.(repo, ["Readme.md", "new.md", "notes.md", "src"]))
+  # Each line has git's mark, as the sidebar has
+  line(name) = v.rows[(:entry, joinpath(repo, name))]
+  words(r) = reduce(vcat, map(texts, collect(r.parts)), init=String[])
+  @test "M" in words(line("notes.md"))
+  @test "U" in words(line("new.md"))
+  # git's panel is at the right of the window, beside the list, and has what git says
+  p = e.nodes[(:git_panel, repo)]
+  @test p isa K.GitPanel
+  r, q = rect(v), rect(p)
+  @test q !== nothing
+  @test K.num(q.left) >= K.num(r.left) + K.num(r.width) - 1
+  @test K.num(q.left) + K.num(q.width) ≈ 1100 atol=1
+  @test sort!([k[2] for k in keys(p.rows) if k[1] == :change]) == ["Readme.md", "new.md", "notes.md", "src/deep/b.jl"]
+  # The long first line of the commit wraps, so it doesn't push the lines of the panel past its edge
+  @test all(x -> K.num(rect(x).left) + K.num(rect(x).width) <= K.num(q.left) + K.num(q.width) + 0.5, values(p.rows))
+  @test K.follow_words(G.state(repo)) == "Follows no other branch"
+  @test K.change_words(:changed, true) == "In the next commit"
+  # The file's name in the top bar is over the middle of the list, not of the space beside the sidebar
+  t = rect(e.nodes[:title])
+  @test K.num(t.left) + K.num(t.width) / 2 ≈ K.num(r.left) + K.num(r.width) / 2 atol=40
   shot("page")
 end
 
-@testset "a click on a file of the repository's page shows the file" begin
+@testset "a click on a line of the repository's page shows its file, or lists its folder" begin
   v = e.nodes[(:repo, repo)]
-  click(middle(v.rows[(:change, "notes.md")]))
+  click(middle(v.rows[(:entry, joinpath(repo, "notes.md"))]))
   @test e.buf.path == joinpath(repo, "notes.md")
-  # The arrow that goes back shows the repository's page again
+  # git's panel and its button are only beside the page of the repository
+  @test K.right_view(e) === nothing
+  @test K.right_part(e) == ()
   K.go_back!(e)
   frames()
   @test e.buf.path == repo
+  @test K.right_part(e) != ()
+  click(middle(v.rows[(:entry, joinpath(repo, "src"))]))
+  @test e.folder == joinpath(repo, "src")   # the sidebar lists the folder
+  @test e.buf.path == repo                  # and the page stays
+  K.go_folder!(e, repo)
+  settle()
+end
+
+@testset "a click on a file in git's panel shows the file" begin
+  p = e.nodes[(:git_panel, repo)]
+  click(middle(p.rows[(:change, "notes.md")]))
+  @test e.buf.path == joinpath(repo, "notes.md")
+  # The arrow that goes back shows the repository's page again
+  K.go_back!(e)
+  settle()
+  @test e.buf.path == repo
   # A file in a folder shows too, and the sidebar lists its folder
-  click(middle(v.rows[(:change, "src/deep/b.jl")]))
+  click(middle(p.rows[(:change, "src/deep/b.jl")]))
   @test e.buf.path == joinpath(repo, "src", "deep", "b.jl")
   @test e.folder == joinpath(repo, "src", "deep")
   settle()
   @test K.directory(e) isa K.GitDirectory
-  @test e.nodes[:git_bar].root == repo   # the line is over the list of a folder in the repository too
+  @test K.folder_view(e, K.directory(e)).bar === nothing   # nor over the list of a folder in the repository
+  # The repository's name in the trail shows its page from there too, and the sidebar lists the repository
+  click(middle(trail_name(repo)))
+  @test e.buf.path == repo && e.folder == repo
   @test marks(joinpath(repo, "src", "deep", "b.jl")) == ["M"]
+end
+
+@testset "the button at the right end of the top bar hides git's panel, and shows it again" begin
+  K.go_folder!(e, repo)
+  K.show_beside!(e, repo)
+  settle()
+  b = e.nodes[:right_panel]
+  @test rect(b) !== nothing
+  @test K.num(rect(b).left) > 1000   # at the right end
+  @test K.tip(b) == "Hide git's panel"
+  wide = K.num(rect(e.nodes[(:repo, repo)]).width)
+  click(middle(b))
+  @test !e.right
+  sleep(K.SLIDE_TIME)
+  frames()
+  @test K.right_panel(e) == ()
+  @test rect(e.nodes[(:git_panel, repo)]) === nothing
+  # The list has the room that the panel had
+  @test K.num(rect(e.nodes[(:repo, repo)]).width) > wide + 200
+  @test K.tip(b) == "Show git's panel"
+  shot("panel-hidden")
+  # The palette has the command too
+  @test K.works_here(e, Val(:right_panel))
+  click(middle(b))
+  @test e.right
+  sleep(K.SLIDE_TIME)
+  frames()
+  @test rect(e.nodes[(:git_panel, repo)]) !== nothing
+end
+
+@testset "the settings keep whether git's panel shows" begin
+  f = K.Editor()
+  write(K.settings_file(), "right=false\n")
+  K.load_settings!(f)
+  @test !f.right
+  write(K.settings_file(), "right=true\n")
+  K.load_settings!(f)
+  @test f.right
+  rm(K.settings_file())
 end
 
 @testset "a repository in the list of the folder that it's in has its branch and its changes" begin

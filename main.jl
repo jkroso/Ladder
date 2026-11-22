@@ -1174,6 +1174,7 @@ end
   screened_from::Float64 = 0.0          # how far the top bar's buttons had slid into the room of the close, minimise and zoom buttons then, from 0 to 1
   side::px = PANEL_W                    # how wide the sidebar is. Drag its right edge to change it.
   hidden::Bool = false                  # the sidebar lists the hidden files and folders too: the ones whose names start with a dot
+  right::Bool = true                    # a page that has a panel at the right shows it, as a repository's page has git's panel. See `page_side`.
   theme::Symbol = :sepia
   look::Symbol = :own                   # :site on a page of a blog, which looks as the blog's site does. See `page_look`.
   applied::Symbol = :none               # the theme the window was last told about
@@ -1563,6 +1564,15 @@ the bottom. It has no space round it, and the page doesn't scroll. A desktop
 covers the page so, with its wallpaper.
 """
 page_covers(e, o) = false
+
+"""
+What shows in a panel at the right of the window, beside what `page_view`
+gives for `o`: a node, or nothing for no panel. The page of a repository has
+git's panel there. The panel runs from the top of the window to the bottom, as
+the sidebar does, and the top bar's button at its right end hides it. It's for
+a page that covers the page's space (see `page_covers`), which leaves it room.
+"""
+page_side(e, o) = nothing
 
 """
 What shows under the text of the page `o`, which the directory `d` holds: a
@@ -24432,6 +24442,66 @@ end
 "How far the sidebar is open, from 0 to 1"
 opened(e) = eased(e.slid_from, e.panel ? 1.0 : 0.0, e.slid)
 
+# --- the panel at the right ---------------------------------------------------------------
+#
+# A page of a kind that has one shows a panel at the right of the window, as
+# the page of a repository shows what git says beside the repository's files:
+# see `page_side`. The button at the right end of the top bar hides the panel,
+# and shows it again. It slides as the sidebar does. Whether it shows is a
+# setting: each window shows it or none does, and so does the next window.
+
+const RIGHT_W = 340px   # how wide the panel at the right is, in a window that has room for it
+
+"When the panel at the right last started to slide in or out, and how far open it was then, from 0 to 1"
+right_slid(e) = get(e.nodes, :right_slid, (1.0, 0.0))
+
+"How far the panel at the right is open, from 0 to 1"
+right_opened(e) = ((from, at) = right_slid(e); eased(from, e.right ? 1.0 : 0.0, at))
+
+right_sliding(e) = time() - right_slid(e)[2] < SLIDE_TIME
+
+"Show or hide the panel at the right of the page, like git's panel beside a repository's files. Each window does the same."
+toggle_right!(e) = (e.nodes[:right_slid] = (right_opened(e), time()); e.right = !e.right; save_settings!(e); e)
+
+"How wide the panel at the right is when it's open. A narrow window makes it narrower, so the page keeps room beside it."
+right_w(e) = begin
+  w, _ = window_size(e)
+  left = lowered(e) === nothing ? panel_w(e) * opened(e) : 0px
+  px(round(num(clamp((w - left) * 0.4, 200px, RIGHT_W))))
+end
+
+"What the panel at the right shows for the page, or nothing when the page has no panel: see `page_side`"
+right_view(e) = begin
+  (filled(e) || as_app(e) || nofile(e)) && return nothing
+  o = page_object(e)
+  o === nothing ? nothing : page_side(e, o)
+end
+
+"""
+The panel at the right of the window, while the page has one. It keeps its
+width as it slides in and out from the right edge, so only its left part
+shows while it's partly out.
+"""
+right_panel(e) = begin
+  shows = right_opened(e)
+  shows > 0 || return ()
+  own = right_view(e)
+  own === nothing && return ()
+  right_sliding(e) && redraw_in!(e, 0)
+  wide = right_w(e)
+  (Row(fixed(wide * shows), height(grow=grow), Alignment.Start, clip=true,
+     Column(fixed(wide), height(grow=grow), Alignment.Start, background(colours.panel), name="Side",
+            border(1px, :solid, colours.line)[:left],
+       Box(width(grow=grow), height(TOPBAR_H)),   # under the top bar
+       own)),)
+end
+
+"What the button that hides the panel at the right calls the panel of `o`"
+side_name(e, o) = "the panel"
+
+"The button at the right end of the top bar that hides the panel at the right and shows it, while the page has a panel"
+right_part(e) = right_view(e) === nothing ? () : (button(e, :right_panel, "layout-sidebar-reverse"),)
+
 """
 Notice when the window starts or stops filling a screen of its own, as the
 green button makes it do. macOS hides the close, minimise and zoom buttons
@@ -25707,7 +25777,8 @@ end
 describe(b::ToolButton) = begin
   e = editor(b)
   ishovered(b) || (b.quiet = false)
-  on = (b.action == :panel && e.panel) || (b.action == :marks && marking(e)) || (b.action == :hidden && e.hidden)
+  on = (b.action == :panel && e.panel) || (b.action == :marks && marking(e)) || (b.action == :hidden && e.hidden) ||
+       (haskey(BUTTONS, b.action) && get(BUTTONS[b.action], :on, _ -> false)(e))
   box = Box(width(30px), height(28px), radius(6px), Alignment.Center, name="Button",
             background(on ? colours.active : ishovered(b) && !off(b) ? colours.hover : clear),
           Icon(b.icon, size=15px, color=off(b) ? colours.faint : haskey(BUTTONS, b.action) && BUTTONS[b.action].strong ? colours.accent : colours.dim))
@@ -26141,6 +26212,12 @@ describe(t::TopBar) = begin
   # sidebar hidden, the left end keeps the room of its own two buttons. It always keeps the room that its
   # buttons need past the sidebar: while the sidebar slides open, it's narrower than its buttons.
   wide, _ = window_size(e)
+  # Beside a panel at the right, the name is in the middle of the space between the sidebar and the panel. The
+  # right end's buttons lie over the panel, so the right end needs room past the panel only for what the panel
+  # can't hold, and then as much as the left end has.
+  beside = right_view(e) === nothing ? 0px : right_w(e) * right_opened(e)
+  wide -= beside
+  side = max(side - beside, 0px)
   # While something fills the window, the sidebar isn't there. The bar has none of the sidebar's buttons
   # then, not the one that shows it either, and the file's name is in the middle of the window.
   full = filled(e)
@@ -26157,6 +26234,7 @@ describe(t::TopBar) = begin
   # The slider never pushes the right end out of a narrow window, so the ladder stays under the mouse. The words
   # before the slider lose their start then: see `said_part`.
   side = min(side, max(side - grown, wide - panel_w(e) * showing - left))
+  beside > 0px && (side = max(side, min(left, wide - panel_w(e) * showing - left)))
   e.nodes[:title_room] = wide - panel_w(e) * showing - left - side   # the name is cut short to fit in it
   # The top bar lies over the top of the sidebar. The file's name is in the
   # middle of the space beside the sidebar, so it moves as the sidebar slides.
@@ -26166,7 +26244,7 @@ describe(t::TopBar) = begin
       Row(fixed(over), height(grow=grow), padding(0px, 8px, 0px, mac_buttons_room(e)), child_gap=2px,
         buttons..., Box(width(grow=grow)), arrows...)),
     Box(width(grow=grow), height(grow=grow), clip=true, node!(Title, e, :title)),
-    Row(fixed(side), height(grow=grow), justify=Alignment.End, padding(0px, 10px, 0px, 0px),
+    Row(fixed(side + beside), height(grow=grow), justify=Alignment.End, padding(0px, 10px, 0px, 0px),
       # A file that's only shown has no words to count. The bar says that it's only shown. A file with levels
       # has the snake or the ladder too. It's after the words, which are longer at one level than at another,
       # so that it stays where it is, under the mouse, when a click on its slider changes the level. The
@@ -26175,7 +26253,8 @@ describe(t::TopBar) = begin
       # What covers the page's whole space, like a desktop, is no file that's only shown, so the bar says nothing of it.
       # Nor does it say anything when the window shows no file.
       # A folder of a blog that shows only its list has the blog's buttons in place of the words
-      (page_covered(e) || nofile(e) ? () :
+      # A page that has a panel at the right has the button that hides it, at the end
+      (page_covered(e) || nofile(e) ? right_part(e) :
        readonly(b) && page_object(e) isa BlogFolder ? (more..., mode..., button(e, :outside, "box-arrow-up-right")) :
        readonly(b) ? (said_part(isempty(b.about) ? "Read only" : b.about * "  ·  Read only", side - 40px - (isempty(mode) ? 0px : MODE_W + grown)),
                       mode...,
@@ -35655,7 +35734,8 @@ describe_window(e::Editor) = begin
     (opened(e) > 0 && lowered(e) === nothing && !as_app(e) ? (node!(Sidebar, e, :sidebar),) : ())...,
     Column(width(grow=grow), height(grow=grow), Alignment.Start,
       Box(width(grow=grow), height(TOPBAR_H)),   # under the top bar
-      node!(Page, e, :page)))
+      node!(Page, e, :page)),
+    right_panel(e)...)
   # The command palette has nothing behind it that dims the page, and it shows while it slides down after it closes
   popup = palette_shows(e) ? (palette(e),) : e.popup == :none ? () : (node!(Backdrop, e, :backdrop), finder(e))
   Stack(width(grow=grow), height(grow=grow), Alignment.Start, name="Editor",
@@ -35724,7 +35804,7 @@ end
 const pages_dir = Ref(joinpath(@__DIR__, "pages"))
 
 "The settings that every window has the same: each is a field of the editor"
-const SHARED = (:theme, :font, :weight, :zoom, :widest, :plain, :spelling, :updates, :autosave, :glide, :wrap, :numbers, :shade, :beside, :indent, :code_scale, :code_font, :code_weight, :guide, :bundle, :rebound, :side, :hidden)
+const SHARED = (:theme, :font, :weight, :zoom, :widest, :plain, :spelling, :updates, :autosave, :glide, :wrap, :numbers, :shade, :beside, :indent, :code_scale, :code_font, :code_weight, :guide, :bundle, :rebound, :side, :hidden, :right)
 
 "The folder of the pages that have the settings"
 settings_dir() = joinpath(pages_dir[], "settings")
@@ -35837,7 +35917,7 @@ save_settings!(e) = begin
     mkpath(dirname(settings_file()))
     # After the bundle of key bindings comes a line for each command that has other keys than the bundle's, like key.save=ctrl+s
     changed = join(["key.$name=$(e.rebound[name])\n" for name in sort!(collect(keys(e.rebound)))])
-    write(settings_file(), "theme=$(e.theme)\nfont=$(e.font)\nweight=$(e.weight)\nzoom=$(e.zoom)\nwidth=$(e.widest.value)\nplain=$(e.plain)\nspelling=$(e.spelling)\nupdates=$(e.updates)\nautosave=$(e.autosave)\nglide=$(e.glide)\nwrap=$(e.wrap)\nnumbers=$(e.numbers)\nshade=$(e.shade)\nbeside=$(e.beside)\nindent=$(e.indent)\ncode=$(e.code_scale)\ncodefont=$(e.code_font)\ncodeweight=$(e.code_weight)\nguide=$(e.guide)\nsidebar=$(e.side.value)\nhidden=$(e.hidden)\nkeys=$(e.bundle)\n$changed")
+    write(settings_file(), "theme=$(e.theme)\nfont=$(e.font)\nweight=$(e.weight)\nzoom=$(e.zoom)\nwidth=$(e.widest.value)\nplain=$(e.plain)\nspelling=$(e.spelling)\nupdates=$(e.updates)\nautosave=$(e.autosave)\nglide=$(e.glide)\nwrap=$(e.wrap)\nnumbers=$(e.numbers)\nshade=$(e.shade)\nbeside=$(e.beside)\nindent=$(e.indent)\ncode=$(e.code_scale)\ncodefont=$(e.code_font)\ncodeweight=$(e.code_weight)\nguide=$(e.guide)\nsidebar=$(e.side.value)\nhidden=$(e.hidden)\nright=$(e.right)\nkeys=$(e.bundle)\n$changed")
   catch
     # A file that can't be written only means the settings last as long as the window
   end
@@ -35965,6 +36045,8 @@ load_settings!(e) = begin
     elseif name == "hidden"
       # The sidebar listed its folder before the settings were read
       (value == "true") == e.hidden || (e.hidden = !e.hidden; list_files!(e))
+    elseif name == "right"
+      e.right = value != "false"
     elseif name == "keys"
       any(b -> first(b) == value, BUNDLES) && (e.bundle = String(value))
     elseif startswith(name, "key.")
@@ -36007,6 +36089,8 @@ What a button of the top bar does, when code from the startup page made it
 with `button(e, action, icon)`, by its action: `(run=f(e), tip=f(e), off=f(e),
 strong=true or false)`. `tip` gives the words of its tooltip. `off` is true
 while the button does nothing. A `strong` button has the colour that says do this.
+A button that turns something on and off can have `on=f(e)`, which is true
+while that's on: the button is shaded then, as the sidebar's button is.
 """
 const BUTTONS = Dict{Symbol,Any}()
 "What the top bar calls the page that shows: `f(e)` gives the words, or nothing to leave the file's name"
@@ -39622,11 +39706,13 @@ page_title(icon, name, about) =
 #     commit adds, U for a file that git doesn't keep yet, R for a new name,
 #     and ! for a file that a merge left in two forms. A folder with such a
 #     file in it has a dot.
-#   - A line over the sidebar's list has the branch, how many commits it has
-#     to push and to pull, and how many files have changes. A click on the
-#     line shows the repository's page.
-#   - The repository's page lists the files that have changes, and the last
-#     commits. A click on a file shows it.
+#   - A click on the repository's name in the trail at the top of the
+#     sidebar shows the repository's page.
+#   - The repository's page lists the folders and the files in its top
+#     folder, each with its mark. Git's panel at the right of the window has
+#     the branch, the files that have changes, and the last commits. A click
+#     on a folder or a file shows it. The button at the right end of the top
+#     bar hides git's panel, and shows it again.
 #   - In the list of a folder that holds repositories, each one has its
 #     branch after its name, and how many of its files have changes.
 
@@ -39700,17 +39786,13 @@ end
 entry_marks(e, o::GitDirectory) = git_marks(e, o)
 entry_marks(e, ::GitDirectory, o::FSObject) = git_marks(e, o)
 
-"The line over the sidebar's list, when the sidebar's folder is in a repository"
+"""
+A line over the sidebar's list with the branch of a repository, under the
+line of a folder of notes that git keeps. A folder of a repository has none:
+git's panel beside the repository's page says it.
+"""
 @def mutable struct GitBar <: SemanticUI
   root::String = ""
-end
-
-folder_view(e, d::GitDirectory) = begin
-  root = git_top(string(d.path))
-  isempty(root) && return (list=nothing, bar=nothing)
-  bar = node!(GitBar, e, :git_bar)
-  bar.root = root
-  (list=nothing, bar=bar)
 end
 
 "How many files of a repository have changes, in words"
@@ -39741,59 +39823,152 @@ show_beside!(e, path) = begin
   e
 end
 
-"What the page shows of the top folder of a repository: the files that have changes, and the last commits"
+"""
+What the page shows of the top folder of a repository: the folders and the
+files in it, as the sidebar lists them, each with git's mark. What git says
+of the repository is in git's panel at the right of the window: see `GitPanel`.
+"""
 @def mutable struct RepoView <: SemanticUI
   path::String = ""
   rows::Dict{Any,PageRow} = Dict{Any,PageRow}()
+  listed::Vector{FSObject} = FSObject[]   # the folders and the files in it, as it was last read
+  read::Float64 = 0.0                     # when it was read
+  hidden::Bool = false                    # it listed the hidden files and folders then
+  scroll::Scroll = Scroll(width(grow=grow), height(grow=grow))
 end
 
 page_view(e, d::GitDirectory) = (path = string(d.path); Git.istop(path) ? node!(() -> RepoView(path=path), e, (:repo, path)) : nothing)
+# The page of a repository covers the page's space, so git's panel has the room at its right
+page_fills(e, d::GitDirectory) = Git.istop(string(d.path))
+page_covers(e, d::GitDirectory) = Git.istop(string(d.path))
+page_side(e, d::GitDirectory) = (path = string(d.path); Git.istop(path) ? node!(() -> GitPanel(path=path), e, (:git_panel, path)) : nothing)
+side_name(e, ::GitDirectory) = "git's panel"
 # A window that's opened on a repository shows its first page of text, which is often its Readme
 page_first(e, ::GitDirectory) = false
 
-"What the repository's page says about the branch, in words"
-branch_words(s) = begin
+push!(BLOCK_ICONS, "layout-sidebar-reverse")
+BUTTONS[:right_panel] = (run=toggle_right!, tip=e -> (e.right ? "Hide " : "Show ") * side_name(e, page_object(e)),
+                         off=e -> false, strong=false, on=e -> e.right)
+add_command!(toggle_right!, name=:right_panel, title="Show or hide the panel at the right of the page, like git's panel beside a repository's files")
+works_here(e, ::Val{:right_panel}) = right_view(e) !== nothing
+
+const REPO_HEAD_H = 84.0   # how tall the part over the list of a repository's page is: the folder's name, and what it holds
+
+"Read the folder of the repository's page `v` again: a second after it was last read, or at once when the sidebar starts or stops listing hidden files"
+repo_read!(e, v::RepoView) = begin
+  time() - v.read < 1 && v.hidden == e.hidden && return
+  v.read, v.hidden = time(), e.hidden
+  d = try object(e, v.path) catch; nothing end
+  v.listed = d isa AbstractDirectory ? entries(e, d) : FSObject[]
+  nothing
+end
+
+"How many folders and files the repository's page `v` lists, in words"
+holds_words(v::RepoView) = begin
+  folders = count(o -> o isa AbstractDirectory, v.listed)
+  files = length(v.listed) - folders
+  parts = String[]
+  folders > 0 && push!(parts, folders == 1 ? "1 folder" : "$(commas(folders)) folders")
+  files > 0 && push!(parts, files == 1 ? "1 file" : "$(commas(files)) files")
+  isempty(parts) ? "Empty" : join(parts, "  ·  ")
+end
+
+"The line of the repository's page `v` for the folder or the file `o`. A click shows it, as a click on it in the sidebar does."
+repo_line(v::RepoView, e, o::FSObject) = begin
+  path = string(o.path)
+  st = try stat(path) catch; nothing end
+  folder = o isa AbstractDirectory
+  when = st === nothing ? "" : Git.ago(st.mtime)
+  size = folder || st === nothing ? "" : Zips.size_words(Int(st.size))
+  page_row!(v, (:entry, path), _ -> (show_path!(e, path); nothing),
+    Box(width(16px), Icon(entry_icon(o), size=14px, color=colours.dim)),
+    Row(width(grow=grow), height(grow=grow), clip=true, child_gap=8px,
+      Box(label(entry_name(o), 13px)), entry_marks(e, o)...),
+    Box(label(size, 12px, color=colours.faint)),
+    Box(width(84px), Alignment.End, label(when, 12px, color=colours.faint)))
+end
+
+describe(v::RepoView) = begin
+  e = editor(v)
+  repo_read!(e, v)
+  redraw_in!(e, 1)   # the folder is read again each second, so a new file gets its line
+  n = length(v.listed)
+  row = num(PAGE_ROW_H)
+  _, high = window_size(e)
+  # Only the lines that are in the window are made, and a few more above and below
+  lo = clamp(floor(Int, (num(v.scroll.offset) - num(PAGE_TOP) - REPO_HEAD_H) / row) - 6, 0, n)
+  hi = min(n, lo + ceil(Int, num(high) / row) + 12)
+  reuse!(v.scroll, Row(width(grow=grow), Alignment.Start, justify=Alignment.Center, padding(PAGE_TOP, PAGE_X, PAGE_BOTTOM, PAGE_X),
+    Column(width(grow=grow, max=e.widest * e.zoom), Alignment.Start, name="Repository",
+      Column(width(grow=grow), height(px(REPO_HEAD_H)), Alignment.Start, clip=true,
+        page_title("git", basename(v.path), holds_words(v))),
+      spacer(PAGE_ROW_H * lo), [repo_line(v, e, v.listed[i]) for i in lo+1:hi]..., spacer(PAGE_ROW_H * (n - hi)))))
+end
+
+cursor(::RepoView) = :arrow
+
+# --- git's panel ---------------------------------------------------------------------------
+#
+# Beside the page of a repository, the panel at the right of the window has
+# what git says: the branch and the branch that it follows, the files that
+# have changes, and the last commits. A click on a file shows it. The button
+# at the right end of the top bar hides the panel: see "the panel at the right".
+
+"What git's panel beside the page of a repository shows: the branch, the files that have changes, and the last commits"
+@def mutable struct GitPanel <: SemanticUI
+  path::String = ""
+  rows::Dict{Any,PageRow} = Dict{Any,PageRow}()
+  scroll::Scroll = Scroll(width(grow=grow), height(grow=grow))
+end
+
+"What git's panel says under the branch's name, in words: the branch that it follows, and how many commits there are to push and to pull"
+follow_words(s) = begin
   s.known || return "Asking git…"
-  parts = ["On the branch $(s.branch)"]
-  isempty(s.follows) || push!(parts, "follows $(s.follows)")
+  parts = String[isempty(s.follows) ? "Follows no other branch" : "Follows $(s.follows)"]
   s.ahead > 0 && push!(parts, s.ahead == 1 ? "1 commit to push" : "$(s.ahead) commits to push")
   s.behind > 0 && push!(parts, s.behind == 1 ? "1 commit to pull" : "$(s.behind) commits to pull")
   join(parts, "  ·  ")
 end
 
-describe(v::RepoView) = begin
-  e = editor(v)
-  s = watch_git!(e, v.path)
-  log = Git.commits(v.path, 30)
+"What git's panel calls the change `kind` of a file. A change that git has for the next commit says so, as the letter can't."
+change_words(kind, staged) = staged ? "In the next commit" : GIT_WORDS[kind]
+
+describe(p::GitPanel) = begin
+  e = editor(p)
+  s = watch_git!(e, p.path)
+  log = Git.commits(p.path, 30)
   changes = Git.changed(s)
   change(rel, kind) = begin
-    path = joinpath(v.path, rel)
+    path = joinpath(p.path, rel)
     dir = dirname(rel)
     # A file that's gone has nothing to show
     act = ispath(path) ? (_ -> (show_path!(e, path); nothing)) : nothing
-    page_row!(v, (:change, rel), act,
+    page_row!(p, (:change, rel), act,
       Box(width(14px), label(GIT_LETTERS[kind], 12px, color=git_colour(kind), weight="Semibold")),
-      Box(label(basename(rel), 13px)),
-      (isempty(dir) ? () : (Box(label(dir, 12px, color=colours.faint)),))...,
-      Box(width(grow=grow)),
-      Box(label(GIT_WORDS[kind] * ("$rel" in s.staged ? ", in the next commit" : ""), 12px, color=colours.dim)))
+      Row(width(grow=grow), height(grow=grow), clip=true, child_gap=6px,
+        Box(label(basename(rel), 13px)), (isempty(dir) ? () : (Box(label(dir, 12px, color=colours.faint)),))...),
+      Box(label(change_words(kind, rel in s.staged), 12px, color=colours.faint)))
   end
-  commit(c) = page_row!(v, (:commit, c.hash), nothing,
-    Box(width(62px), Alignment.Start, label(c.hash, 12px, color=colours.faint)),
-    Box(width(grow=grow), Alignment.Start, clip=true, height(PAGE_ROW_H), Row(height(grow=grow), Box(label(c.subject, 13px)))),
-    Box(label(c.author * "  ·  " * Git.ago(c.time), 12px, color=colours.dim)))
-  Column(width(grow=grow), Alignment.Start, name="Repository",
-    page_title("git", basename(v.path), branch_words(s)),
+  # A commit's first line can be long, so it wraps in the panel's width
+  commit(c) = Column(width(grow=grow), padding(8px, 6px), child_gap=4px, Alignment.Start, name="Commit",
+    Box(width(grow=grow), Alignment.Start, Text(c.subject, size=13px, family=SANS, color=colours.ink, wrap=WrapMode.words)),
+    Box(label(c.hash * "  ·  " * c.author * "  ·  " * Git.ago(c.time), 11px, color=colours.faint)))
+  # Nothing in the panel makes it wider than its column: a name that's too long is cut off at its edge
+  reuse!(p.scroll, Column(width(grow=grow), Alignment.Start, padding(2px, 10px, 24px, 10px), clip_x=true, name="Git",
+    Column(width(grow=grow), Alignment.Start, padding(8px, 4px, 12px, 8px), child_gap=4px,
+      Row(child_gap=8px, Icon("git", size=15px, color=colours.dim),
+        Box(label(s.known ? s.branch : "…", 15px, weight="Semibold"))),
+      Box(width(grow=grow), Alignment.Start, Text(follow_words(s), size=12px, family=SANS, color=colours.dim, wrap=WrapMode.words))),
     page_heading(isempty(changes) ? "Changes" : "Changes  ·  $(length(changes))"),
     (!s.known ? (page_note("Asking git…"),) :
      isempty(changes) ? (page_note("No file has changed since the last commit."),) :
      [change(rel, kind) for (rel, kind) in changes])...,
     Box(height(14px)),
     page_heading("Last commits"),
-    (isempty(log) ? (page_note(s.known ? "This repository has no commit yet." : "Asking git…"),) : map(commit, log))...)
+    (isempty(log) ? (page_note(s.known ? "This repository has no commit yet." : "Asking git…"),) : map(commit, log))...))
 end
 
-cursor(::RepoView) = :arrow
+cursor(::GitPanel) = :arrow
 
 # --- a commit of the file that shows ---------------------------------------------------------
 #
