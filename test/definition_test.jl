@@ -212,12 +212,29 @@ end
   w.keys |= Keys.cmd
   frames(1)
   @test !e.nodes[:peek].shown && !any(x -> x.key == :tooltip, popups(w))
-  e.nodes[:peek] = (words=e.nodes[:peek].words, since=time() - 1, shown=false)
+  # A mouse that hasn't moved since ⌘ went down shows no card, however long it rests: the ⌘ was likely for a key like ⌘S
+  rested() = (e.nodes[:peek] = (words=e.nodes[:peek].words, since=time() - 1, shown=false))
+  rested()
+  frames(1)
+  @test !e.nodes[:peek].shown && !any(x -> x.key == :tooltip, popups(w))
+  # A move along the name starts the rest, and the card shows after it
+  w.mouse = typeof(w.mouse)(point(p)[1] + 1px, point(p)[2])
+  frames(1)
+  @test !e.nodes[:peek].shown && time() - e.nodes[:peek].since < K.PEEK_WAIT
+  rested()
   frames(1)
   @test e.nodes[:peek].shown && any(x -> x.key == :tooltip, popups(w))
   w.keys ⊻= Keys.cmd
   frames(1)
-  @test !haskey(e.nodes, :peek) && !any(x -> x.key == :tooltip, popups(w))
+  @test !haskey(e.nodes, :peek) && !haskey(e.nodes, :cmd_mouse) && !any(x -> x.key == :tooltip, popups(w))
+  # The next time ⌘ goes down, the mouse must move again
+  w.keys |= Keys.cmd
+  frames(1)
+  rested()
+  frames(1)
+  @test !e.nodes[:peek].shown && !any(x -> x.key == :tooltip, popups(w))
+  w.keys ⊻= Keys.cmd
+  frames(1)
 end
 
 @testset "Rename In Code gives a name another name, wherever it means the same thing" begin

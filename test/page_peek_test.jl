@@ -167,6 +167,9 @@ end
   w.keys |= Keys.cmd
   frames(1)
   @test !e.nodes[:peek].shown && !any(x -> x.key == :tooltip, popups(w))
+  # The card waits for the mouse to move after ⌘ goes down
+  w.mouse = typeof(w.mouse)(point(p)[1] + 1px, point(p)[2])
+  frames(1)
   e.nodes[:peek] = (words=e.nodes[:peek].words, since=time() - 1, shown=false)
   frames(1)
   tip = only(filter(x -> x.key == :tooltip, popups(w)))

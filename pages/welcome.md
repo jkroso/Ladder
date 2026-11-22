@@ -23,7 +23,7 @@ You can write in **bold**, in *italic* or in ***both***. Use backticks for `code
 
 Two square brackets around a page's name make a wiki link, as in Obsidian: [[schedule]] links to the page schedule.md. Ladder finds the page wherever it is in the project, so the link still works when the page moves to another folder. The project is the nearest folder above the page that has a `.git` or `.obsidian` folder in it. To show other words, write them after a |, like [[schedule|the plan of a driveway]]. [[schedule#Tasks]] goes to a heading of the page, and [[#Tables]] to a heading of this page. A link to a page that isn't there yet opens a new empty page, and Ladder makes its file when you write in it. While you type a name after [[, a list under it shows the pages whose names fit. Press ↑ and ↓ to choose one, and Return or Tab to finish the link. Esc hides the list.
 
-Hold ⌘ and rest the mouse on a link to a page, like [[schedule#Tasks]]. A card under the link shows the start of that page, so you can read it without leaving this one. A link to a heading shows the part under that heading. To turn the card off, press ⌘, and untick "Show a page when I hold ⌘ over its link".
+Hold ⌘, move the mouse to a link to a page, like [[schedule#Tasks]], and rest it there. A card under the link shows the start of that page, so you can read it without leaving this one. A link to a heading shows the part under that heading. To turn the card off, press ⌘, and untick "Show a page when I hold ⌘ over its link".
 
 > A line that starts with > is a quote.
 > It can run over several lines.
@@ -276,7 +276,7 @@ Ladder opens a Julia file as code that you change, however long the file is. The
 - Hold ⌘ and move the mouse over a name. A name that has a place to go to is marked, as a link is. Click it, and the caret goes to where the name is defined. A function with several methods goes to the first. A name from another file shows in a window beside this one. The command Go To Definition does the same for the name at the caret.
 - Hold ⌘ and click a name where the code makes it, or run Find Uses. The palette lists each place that uses the name, with the other Julia files of a git folder too. As ↓ goes down the list, the window shows each place, and Esc puts the window back. Return goes to the place.
 - After Go To, Go To Definition or Find Uses takes you to another line, ⌘⌥← takes you back to the line where you were. ⌘⌥→ goes to the other line again.
-- Hold ⌘ and rest the mouse on a marked name for a moment. A card shows its documentation and its first lines.
+- Hold ⌘, move the mouse to a marked name, and rest it there for a moment. A card shows its documentation and its first lines. The card shows only after the mouse moves, so a ⌘ for a key like ⌘S shows no card.
 - Press ⌘⇧P and run Rename In Code to give the name at the caret another name. It changes the name wherever it means the same thing, and not in strings or comments. In a git folder, a name of the whole file changes in the folder's other Julia files too. ⌘Z takes all of it back.
 - Click the number of a line, in a file that git keeps. Ladder shows the commit that last changed the line: its day, who made it, its first line, and what the file had there before.
 - Press ⌘⇧P and run Run All. Ladder runs all the file's code from the top, and shows what each piece comes to in a box after it. A piece that fails doesn't stop the pieces under it. Then the window goes to the first piece that failed.

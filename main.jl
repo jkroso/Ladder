@@ -22488,6 +22488,7 @@ mark_clickable(ctx, e, ui) = begin
   if !(w !== nothing && only_held(w, Keys.cmd) && e.popup == :none && e.buf.view != :file && slideshow(e) === nothing)
     # The card of a name goes when ⌘ comes up
     w === nothing || pop!(e.nodes, :peek, nothing) === nothing || hide_tooltip!(w)
+    delete!(e.nodes, :cmd_mouse)
     return
   end
   redraw_in!(e, 1/30)   # the mark follows the mouse, and goes when ⌘ comes up
@@ -22520,6 +22521,9 @@ end
 # name's documentation and the first lines of its code, from the page or from
 # another file. A link's card has where it goes. The card goes when the mouse
 # moves, and comes again when the mouse rests.
+#
+# No card shows until the mouse moves after ⌘ goes down. ⌘ is often pressed
+# for a key like ⌘S, and what is under a mouse that didn't move is chance.
 
 const PEEK_WAIT = 0.6   # seconds that the mouse rests on a name before its card shows
 const PEEK_LINES = 8    # the most lines of code that a card shows
@@ -22603,8 +22607,12 @@ end
 """
 Show the card of the words `found` when the mouse has rested on them for a
 moment while ⌘ is held, and take it away when the mouse is on other words.
+The mouse must move after ⌘ goes down before a card shows.
 """
 peek!(e, w, found) = begin
+  # Where the mouse was when ⌘ went down, or :moved once it has moved from there
+  still = get!(e.nodes, :cmd_mouse, w.mouse)
+  still === :moved || w.mouse == still || (e.nodes[:cmd_mouse] = still = :moved)
   was = get(e.nodes, :peek, nothing)
   if found === nothing || was === nothing || was.words != found
     was === nothing || !was.shown || hide_tooltip!(w)
@@ -22616,6 +22624,8 @@ peek!(e, w, found) = begin
     any(p -> p.key == :tooltip, popups(w)) || (e.nodes[:peek] = (words=found, since=time(), shown=false))
     return
   end
+  # The moment of rest starts when the mouse first moves
+  still === :moved || (e.nodes[:peek] = (words=found, since=time(), shown=false); return)
   time() - was.since < PEEK_WAIT && return
   card = peek_card(e, found)
   e.nodes[:peek] = (words=found, since=was.since, shown=true)
