@@ -8,7 +8,7 @@
 
 @use Test: @test, @testset
 @use "../main" => K
-@use "github.com/jkroso/MiniFB.jl" Window KeyPress Keys onkey Typed ontype MouseMove onmouse
+@use "github.com/jkroso/MiniFB.jl" Window KeyPress Keys onkey Typed ontype MouseMove onmouse onscroll
 @use GeometryBasics: Vec2
 @use "github.com/jkroso/UI.jl/Interface/draw" frame rect popups
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
@@ -302,6 +302,22 @@ end
   w.keys |= Keys.mouse_left; onkey(w, KeyPress{Keys.mouse_left}(0, w)); w.keys ⊻= Keys.mouse_left
   frames(w)
   @test e.popup == :none
+  close(w)
+end
+
+@testset "the wheel over the list scrolls the list, never the page under it" begin
+  # A long page, scrolled part way, so it could move up or down
+  e, w = window(join(("Line $n.\n" for n in 1:300), "\n"))
+  e.scroll.offset = 400px; frames(w)
+  open_palette(w)
+  p = K.palette(e)
+  over(w, e.nodes[(:palette_row, 2)])
+  wheel(dy) = (onscroll(w, Vec2{px}(0px, dy)); frames(w))
+  wheel(-1px)
+  @test p.scroll.offset > 0px && e.scroll.offset == 400px
+  sleep(0.25)                                         # a new run of the wheel
+  foreach(_ -> wheel(5px), 1:3)                      # up past the top of the list
+  @test p.scroll.offset == 0px && e.scroll.offset == 400px
   close(w)
 end
 
