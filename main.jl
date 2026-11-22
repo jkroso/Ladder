@@ -25773,7 +25773,8 @@ onkey(b::ToolButton, ::KeyPress{Keys.mouse_left}) = begin
   b.action in BLOG_ACTIONS && blog_act!(e, b.action)
   haskey(BUTTONS, b.action) && BUTTONS[b.action].run(e)
   hush!(b)
-  focus(e)
+  # A button that opened the palette, like Commit's, leaves the keyboard in it
+  e.popup == :commands || focus(e)
 end
 
 # Each button in the top bar says what it does while the mouse is over it. A
@@ -26236,7 +26237,7 @@ describe(t::TopBar) = begin
                       mode...,
                       # The app that the Mac uses for the file can change it, so a button opens the file there
                       button(e, :outside, "box-arrow-up-right")) :
-                     (more..., job_part(e)..., agent_part(e)..., checks..., mode...,
+                     (more..., job_part(e)..., agent_part(e)..., checks..., commit_part(e)..., mode...,
                       # A page that's never changed says so where the count of its words would be
                       b.fixed ? Box(height(28px), padding(8px, 0px), label("Read only", 12px, color=colours.dim)) :
                                 node!(Count, e, :count)))...))
@@ -28522,11 +28523,11 @@ Wanted(names, types, optional) = Wanted(names, types, optional, false)
   had::Any = nothing                                     # what had the keyboard when the palette opened. It gets the keyboard back.
   inner::Vector{Any} = Any[]                             # what ⌥↑ made a chip bigger from, the last last, for ⌥↓ to go back to
   before::Any = nothing                                  # how the window looked before it showed a row of the list, for Esc to put back: see `preview!`
+  pointed::Bool = false                                  # true once the mouse chose a row of the chip's list, for Return and Tab to take: see `palette_say!`
 end
 "What takes a click outside the palette"
 @def mutable struct PaletteCatch <: SemanticUI end
 "The outline round a list and what it hangs over, drawn as one shape"
-  pointed::Bool = false                                  # true once the mouse chose a row of the chip's list, for Return and Tab to take: see `palette_say!`
 @def mutable struct PaletteLens <: SemanticUI end
 "What blurs the page under the strip that the bar is in, as frosted glass does. The blur fades out above the bar."
 @def mutable struct PaletteFrost <: SemanticUI end
@@ -29397,13 +29398,13 @@ mark_chips(ctx, w, e) = begin
     r = shown_at(e, l.thing)
     r === nothing || pick_mark(ctx, w, r, l.letter; colour=l.colour)
   end
+  k = click_chip(e, p)
+  k === nothing && return nothing
+  redraw_in!(e, 1/30)   # the line follows the mouse
   on_palette(p, num(w.mouse[1]), num(w.mouse[2])) && return nothing
   x = clicked_thing(e, p, w, k)
   (x === nothing || any(l -> l.thing == x, letters)) && return nothing
   r = shown_at(e, x)
-  k = click_chip(e, p)
-  k === nothing && return nothing
-  redraw_in!(e, 1/30)   # the line follows the mouse
   r === nothing && return nothing
   # With ⇧ held, a click adds the thing, in the colour that it would have
   adds = only_held(w, Keys.shft) && adds_things(chips[k]) && chip_value(p, chips, k) !== UNSAID
@@ -29577,12 +29578,12 @@ what the chip had. So the things that clicks on the window chose stay.
 palette_say!(e, p::CommandPalette) = begin
   rows = palette_rows(e, p)
   isempty(rows) && return
+  chips = palette_chips(p)
+  chip_value(p, chips, p.at) === UNSAID || p.pointed || return
   empty!(p.inner)
   say!(p, chips, p.at, rows[clamp(p.pick, 1, length(rows))].value)
   nothing
 end
-  chips = palette_chips(p)
-  chip_value(p, chips, p.at) === UNSAID || p.pointed || return
 
 """
 What ↑ and ↓ do in a chip with a list: choose the row before or after, and
@@ -30179,11 +30180,11 @@ onkey(r::PaletteRow, ev::KeyPress{Keys.mouse_left}) = begin
   p = palette(e)
   r.k <= length(p.rows) || return handled
   p.pick = p.shown = r.k
+  p.pointed = true
   palette_take!(e, ev.window, p)
   handled
 end
 
-  p.pointed = true
 "The field with the rest of a name after its text, in a fainter colour. `size` is the size of the field's text."
 omni_field(e, p::CommandPalette, size) = begin
   i = input(e)
@@ -37564,7 +37565,9 @@ nothing when the window shows neither.
 """
 asked_rect(e, c::ToChange) = begin
   if c.node !== nothing
-    return try rect(c.node) catch; nothing end
+    # A paragraph or a heading of the page is made again on each frame, so it's this frame's one that shows
+    node = shown_now(c.node)
+    return node === nothing ? nothing : try rect(node) catch; nothing end
   end
   b = e.buf
   (!isempty(b.path) && page_key(b.path) == c.file && !isempty(e.layout) && c.first <= c.last <= length(b.lines)) || return nothing
@@ -39363,8 +39366,8 @@ page_title(icon, name, about) =
 # --- a folder with a git repository in it ----------------------------------------------------
 #
 # A folder with a `.git` in it is the top folder of a repository, and Ladder
-# asks git about it (see git.jl). Nothing here changes the repository: Ladder
-# only reads from it.
+# asks git about it (see git.jl). Ladder only reads from it, apart from the
+# commit of the file that shows (see "a commit of the file that shows").
 #
 #   - In the sidebar, each file that has changes since the last commit has a
 #     letter after its name: M for changed lines, A for a file that the next
@@ -39543,6 +39546,81 @@ describe(v::RepoView) = begin
 end
 
 cursor(::RepoView) = :arrow
+
+# --- a commit of the file that shows ---------------------------------------------------------
+#
+# While the window shows a file that git keeps, and the file has changes since
+# the last commit, the top bar has a button with git's mark. A click opens the
+# palette with Commit taken, for the words of the commit. Run commits that
+# file alone, as the window has it. The other files with changes stay as they
+# are, and so does what git was given for the next commit of them.
+
+"""
+The change since the last commit of the file at `path`, as git said it last,
+that a commit of the file alone can take: `:changed`, `:added` or `:new`. A
+window with changes to the file that aren't saved makes it `:changed` too.
+It's nothing for a file that git doesn't keep, one with no change, one with a
+new name, and one that a merge left in two forms.
+"""
+commit_change(e, path::AbstractString) = begin
+  (isempty(path) || !isfile(path)) && return nothing
+  root = git_top(dirname(path))
+  isempty(root) && return nothing
+  kind = Git.mark(watch_git!(e, root), relpath(path, root))
+  kind in (:changed, :added, :new) && return kind
+  kind === nothing && any(o -> unsaved_in(o, path), with_windows(e)) ? :changed : nothing
+end
+
+"True when the window of `o` shows the file at `path`, with changes that aren't saved yet"
+unsaved_in(o, path) = !isempty(o.buf.path) && dirty(o.buf) && writes(o.buf) && page_key(o.buf.path) == page_key(path)
+
+"The editor `e` and the editor of each other window"
+with_windows(e) = e in editors ? editors : Editor[e; editors]
+
+"""
+Commit the file `file` to its git repository, with the words `message`. The
+commit holds that file alone, as its windows have it: changes that aren't
+saved are saved first.
+"""
+commit_file!(e, file::FS.File, message::String) = begin
+  path = path_of(file)
+  words = strip(message)
+  isempty(words) && error("Write what the commit changes")
+  root = git_top(dirname(path))
+  isempty(root) && error("git doesn't keep $(basename(path))")
+  for o in with_windows(e)
+    unsaved_in(o, path) && save!(o.buf)
+  end
+  # git is asked about the file now, not what it said some seconds ago, which can be from before a commit
+  rel = relpath(path, root)
+  kind = Git.mark(Git.read_status(something(Git.ask(root, `status --porcelain=v2 -z -- $rel`), "")), rel)
+  kind in (:changed, :added, :new) || error("$(basename(path)) has no change to commit")
+  # A file that git doesn't keep yet is added first. When the commit fails, git forgets it again.
+  done, why = kind == :new ? Git.act(root, `add -- $rel`) : (true, "")
+  done && ((done, why) = Git.act(root, `commit -m $words -- $rel`))
+  !done && kind == :new && Git.act(root, `rm --cached -q -- $rel`)
+  Git.forget!()
+  redraw_in!(e, 0)
+  done || error("git didn't commit it: " * String(first(split(isempty(strip(why)) ? "it gave no reason" : strip(why), '\n'))))
+  nothing
+end
+
+# The palette lists Commit only while the file in focus has a change to commit
+works_here(e, ::Val{:commit}) = begin
+  focus = in_focus(e)
+  k = findfirst(x -> x isa FS.File, focus)
+  k !== nothing && commit_change(e, path_of(focus[k])) !== nothing
+end
+wide_words(::Val{:commit}) = true
+
+add_command!(commit_file!, name=:commit, title="Commit the file to its git repository, with words that say what changed")
+
+"The button of the top bar that commits the file that shows, while it has a change to commit: see `commit_change`"
+commit_part(e) = commit_change(e, e.buf.path) === nothing ? () : (button(e, :commit, "git"),)
+
+# The keyboard goes to the page first, so the file that shows is the one in focus, not a row of the sidebar
+BUTTONS[:commit] = (run=e -> (focus(e); open_palette!(e, COMMANDS[:commit])), tip=e -> "Commit $(basename(e.buf.path))",
+                    off=e -> false, strong=false)
 
 # --- a folder of notes -------------------------------------------------------------------------
 #

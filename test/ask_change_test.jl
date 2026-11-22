@@ -417,6 +417,25 @@ end
   @test process_exited(process)
 end
 
+@testset "a paragraph that an agent works on keeps its line while the agent works" begin
+  # The page makes its paragraphs again on each frame, so the line goes round this frame's paragraph
+  w.mouse = typeof(w.mouse)(on_line(e, 7)...)
+  frames(w, 2)
+  para = K.chip_click(K.ToChange, e, w)
+  @test para isa K.ToChange && para.node isa K.Paragraph
+  frames(w, 2)
+  r = K.asked_rect(e, para)
+  @test r !== nothing && K.num(r.top) > 100 && r.height < 60px
+  K.AGENT_COMMAND[] = `sh -c "exec sleep 30"`
+  K.ask_for_change!(e, para, "make it bigger")
+  frames(w, 3)
+  # The label of what was asked is on the paragraph's top edge, not under the top bar where a thing that doesn't show has it
+  @test picker().asked.ended == 0 && picker().asked.label[2] == K.num(K.asked_rect(e, para).top) - 18
+  K.stop_agent!(e)
+  finish()
+  picker().asked = nothing
+end
+
 @testset "Ask About shows the agent's answer in a card beside the thing, and changes nothing" begin
   level = first(offered(e, (3, 0)))
   answers = agent("answers.sh", "true", "The bar is blue because describe(l::Level) gives it a steelblue background.", "", "It is 12 pixels tall.")
