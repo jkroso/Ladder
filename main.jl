@@ -44956,7 +44956,9 @@ describe(p::GitPanel) = begin
       Box(label(GIT_WORDS[kind], 12px, color=colours.faint)))
   end
   # Nothing in the panel makes it wider than its column: a name that's too long is cut off at its edge
-  reuse!(p.scroll, Column(width(grow=grow), Alignment.Start, padding(2px, 10px, 24px, 10px), clip_x=true, name="Git",
+  # The panel fills its height, and the last commits take what the parts over them leave, so most of the time
+  # only they scroll. When the changes leave the commits less than `LOG_LEAST`, the whole panel scrolls too.
+  reuse!(p.scroll, Column(width(grow=grow), height(grow=grow), Alignment.Start, padding(2px, 10px, 6px, 10px), clip_x=true, name="Git",
     Column(width(grow=grow), Alignment.Start, padding(8px, 4px, 12px, 8px), child_gap=4px,
       Row(width(grow=grow), child_gap=8px, Icon("git", size=15px, color=colours.dim),
         Row(width(grow=grow), clip=true, Box(label(s.known ? s.branch : "…", 15px, weight="Semibold"))),
@@ -44970,8 +44972,13 @@ describe(p::GitPanel) = begin
      [change(rel, kind) for (rel, kind) in changes])...,
     Box(height(14px)),
     page_heading("Last commits"),
-    (isempty(log) ? (page_note(s.known ? "This repository has no commit yet." : "Asking git…"),) : tree_of_commits(e, p.path, s, log))...))
+    isempty(log) ? page_note(s.known ? "This repository has no commit yet." : "Asking git…") :
+      Scroll(width(grow=grow), height(preferred=LOG_LEAST, grow=grow), key=:git_log, name="Log",
+        Column(width(grow=grow), Alignment.Start, tree_of_commits(e, p.path, s, log)...))))
 end
+
+"How tall the last commits of git's panel are at the least, in their own scroll. The panel scrolls when its other parts leave them less."
+const LOG_LEAST = 300px
 
 """
 The lines of git's panel for the commits `log` of the repository at `root`,

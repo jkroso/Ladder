@@ -8,8 +8,9 @@
 
 @use Test: @test, @testset
 @use "../main" => K
-@use "github.com/jkroso/MiniFB.jl" Window
-@use "github.com/jkroso/UI.jl/Interface/draw" frame rect
+@use "github.com/jkroso/MiniFB.jl" Window MouseMove onmouse
+@use "github.com/jkroso/UI.jl/Interface/draw" frame rect onscroll
+@use GeometryBasics: Vec2
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
 
 const px = K.px
@@ -106,4 +107,49 @@ end
   one = only(l for l in ls if l.commit.subject == "One")
   @test isempty(one.commit.refs) && length(collect(K.describe(one).children)) == 2
   shot("one-lane")
+end
+
+@testset "the last commits have a scroll of their own, so the panel needs none" begin
+  long = joinpath(dir, "long")
+  mkpath(long)
+  run(pipeline(`git -C $long init -b main`, stdout=devnull, stderr=devnull))
+  for k in 1:40
+    run(pipeline(setenv(`git -C $long -c user.name=Test -c user.email=test@example.com -c commit.gpgsign=false commit --allow-empty -m "Commit number $k, with words enough to wrap onto a second line in the panel"`,
+                        merge(ENV, Dict("GIT_CONFIG_GLOBAL" => "/dev/null"))), stdout=devnull, stderr=devnull))
+  end
+  K.show_beside!(e, long)
+  settle()
+  p = e.nodes[(:git_panel, long)]
+  "The scroll of the last commits, as the last frame laid it out"
+  log_of(r) = begin
+    r.from isa K.Scroll && r.from.name == "Log" && return r
+    for c in (try r.children catch; () end)
+      found = log_of(c)
+      found === nothing || return found
+    end
+    nothing
+  end
+  newest = e.nodes[(:commit_line, long, strip(read(`git -C $long rev-parse --short HEAD`, String)))]
+  oldest = e.nodes[(:commit_line, long, last(G.commits(long, 30)).hash)]
+  # The panel has nothing to scroll: the commits fill the rest of its height, and go on past the window's foot
+  @test p.scroll.content_height <= p.scroll.viewport + 0.5px
+  # It goes down to the foot of the window, less the panel's padding
+  @test K.num(log_of(rect(p)).top) + K.num(log_of(rect(p)).height) ≈ 700 atol=8
+  @test K.num(rect(newest).top) < 400 && K.num(rect(oldest).top) > 700
+  shot("long")
+  # The wheel over the commits scrolls them, and the parts over them stay
+  top = K.num(rect(newest).top)
+  x, y = K.num(rect(newest).left) + 40, K.num(rect(newest).top) + 10
+  w.mouse = typeof(w.mouse)(px(x), px(y)); onmouse(w, MouseMove(Vec2{px}(px(x), px(y)), w)); frames(1)
+  onscroll(w, Vec2{px}(0px, -4px), false)
+  frames(2)
+  @test K.num(rect(newest).top) < top - 50
+  @test p.scroll.offset == 0px
+  # With so many changes that the commits would have less than their least room, the panel scrolls too
+  foreach(k -> write(joinpath(long, "new-$k.md"), "New\n"), 1:20)
+  G.forget!()
+  settle()
+  @test p.scroll.content_height > p.scroll.viewport
+  # The commits keep their least room, under the changes
+  @test log_of(rect(p)).height == K.LOG_LEAST
 end
