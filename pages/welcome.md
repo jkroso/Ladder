@@ -911,6 +911,8 @@ A Markdown page or a file of code that your Mac marks as read-only shows as it a
 
 Right-click a file or a folder in the list to rename it, duplicate it, copy its path, show it in the Finder or move it to the Trash. A folder goes to the Trash with everything in it. A folder's menu also makes a new page or a new folder in it, and opens it in a new window. A file's menu also opens it in a new window or in the Mac's app for it. Its Copy Link item copies a wiki link to the file, like `[[examples]]`. Right-click under the list to make a new page or folder in the folder that the list shows. Right-click the file's name at the top of the window for the file's menu.
 
+When you rename a file or a folder, or move it to another folder, Ladder changes the links to it in the other pages of the project, as Obsidian does. So `[[Ideas]]` becomes `[[Thoughts]]`, and `[see](Ideas.md)` becomes `[see](Thoughts.md)`. A link keeps its words after the | and its heading after the #. Ladder doesn't change a link in a code block. A note under the top bar says how many links changed.
+
 A folder can show as a desktop: an icon for each folder and file in it, on your Mac's wallpaper. The icons have the size and the order that the Finder gives the icons of your Mac's desktop. To make a folder a desktop, put a file called `.ladder` in it that ends with this block, and click the folder in the list.
 
 ````markdown
