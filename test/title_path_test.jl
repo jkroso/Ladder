@@ -75,8 +75,9 @@ bar_places() = Dict(k => place(n) for (k, n) in e.nodes if n isa K.ToolButton &&
   sleep(K.TT_WAIT + 0.05); frames()
   @test showing()
   @test trail().steps == [("~", dir), ("top", top), ("Plain", plain), ("a.md", a)]
-  # The file's name stays where the bar had it, and the folders come in to its left
-  @test abs(K.num(rect(crumb(a)).left) + K.num(K.TT_PAD) - K.num(title_at[1])) <= 2
+  # The file's name stays where the bar had it, and the folders come in to its left. The bar keeps room
+  # before the name as wide as the heading after it, so the name stays in the middle.
+  @test abs(K.num(rect(crumb(a)).left) + K.num(K.TT_PAD) - K.num(title_at[1]) - K.num(get(e.nodes, :title_lead, 0px))) <= 2
   @test K.num(rect(crumb(plain)).left) < K.num(rect(crumb(a)).left)
   # The bar's own parts are where they were
   @test place(e.nodes[:title]) == title_at && bar_places() == places

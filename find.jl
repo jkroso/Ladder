@@ -266,6 +266,57 @@ matches(q::Query, path::AbstractString, lines, kinds=classify(lines)) = begin
   out
 end
 
+"What the line `text` is, as the kinds of line name it: :todo, :done, :heading, :bullet, :ordered, :blockquote, :table, :paragraph, or :line for any other"
+sort_of(text::AbstractString, l::Line) = begin
+  k = line_kind(text, l)
+  k != :line ? k :
+  l.kind == Kind.bullet ? :bullet : l.kind == Kind.ordered ? :ordered : l.kind == Kind.blockquote ? :blockquote :
+  l.kind == Kind.table ? :table : l.kind == Kind.paragraph ? :paragraph : :line
+end
+
+"""
+What a search of many kinds at once finds in the page at `path`: each line and
+each block that is of one of the kinds `wants` and has every one of `words`.
+Each comes with the kind that it shows as, like :bullet for a line of a list
+of `lines`. A line of the kind `link` shows as a link. With no kinds, it's any
+line of text and any block, and a block then needs the words in its own lines:
+the heading over it is a line of its own.
+
+The search at the top of the window uses this. A `find` block lists one kind,
+with `matches`.
+"""
+search(wants, words, path::AbstractString, lines, kinds=classify(lines)) = begin
+  words = lowercase.(words)
+  every = isempty(wants)
+  has(hay) = all(w -> occursin(w, hay), words)
+  out = Tuple{Match,Symbol}[]
+  for (i, l) in enumerate(kinds)
+    is = block_at(kinds, i)
+    if is !== nothing
+      (every || is in wants) || continue
+      text = block_words(lines, kinds, i, is)
+      if !isempty(words)
+        own = lowercase(join(view(lines, block_span(kinds, i)), "\n"))
+        has(every ? own : lowercase(text) * "\n" * own) || continue
+      end
+      push!(out, (Match(String(path), i, text, is), is))
+      continue
+    end
+    l.kind in (Kind.blank, Kind.fence, Kind.code, Kind.rule) && continue
+    line = lines[i]
+    fit = every || :line in wants ? sort_of(line, l) : findfirst(k -> !isblock(k) && fits(k, line, l), wants)
+    fit === nothing && continue
+    as = fit isa Symbol ? fit : wants[fit]
+    # A line that hasn't the words as it's written hasn't them as it reads, and is quick to rule out
+    isempty(words) || has(lowercase(line)) || continue
+    text = line_words(line, l)
+    isempty(text) && continue
+    isempty(words) || has(lowercase(text)) || continue
+    push!(out, (Match(String(path), i, text, line_kind(line, l)), as))
+  end
+  out
+end
+
 "True when the list of `q` counts `m` as one of its own. A list of to-do items doesn't count an item that was ticked in it, though it still shows it."
 counted(q::Query, m::Match) = !(kind(q) in (:todo, :done)) || m.kind == kind(q)
 

@@ -29928,10 +29928,40 @@ describe(t::Title) = begin
   edited = dirty(b) || any(dirty, shown_buffers(e))
   # A name that's too long for its room in the bar ends in …, so that its start still shows
   room = get(e.nodes, :title_room, 10_000px) - (edited ? 70px : 16px)
-  Row(child_gap=6px,
-    label(elide(something(page_title(e), name(b)), 13px, max(room, 40px)), 13px, color=colours.dim),
-    (edited ? (label("— edited", 13px, color=colours.faint),) : ())...)
+  named = something(page_title(e), name(b))
+  # The headings over the caret and the component that it's on follow the name, as the path does. The name
+  # stays in the middle while they change, so as much room as they take is empty before it. When there's
+  # too little room, the biggest headings go first.
+  parts = focus_parts(e)
+  face = Face(SANS, "", 13px, colours.ink, false)
+  while !isempty(parts) && measure(face, named) + 2parts_wide(parts) > room
+    popfirst!(parts)
+  end
+  after = parts_wide(parts)
+  e.nodes[:title_lead] = isempty(parts) ? 0px : after + 6px   # how far the name is from the left of the title, for the path
+  Row(child_gap=6px, Alignment.Center,
+    (isempty(parts) ? () : (Box(width(after)),))...,
+    label(elide(named, 13px, max(room - 2after, 40px)), 13px, color=colours.dim),
+    (edited ? (label("— edited", 13px, color=colours.faint),) : ())...,
+    (isempty(parts) ? () : (title_parts(parts),))...)
 end
+
+"""
+The headings and the component after the file's name in the top bar, each
+after a ›, with the sizes that the path gives them. A heading shows only its
+mark, like H2, so that the path stays short. A component's name is its kind,
+like Sheet.
+"""
+title_parts(parts) =
+  Row(Alignment.Center, name="Parts",
+    # The room round each piece is a Box of its own: a label in a Row with padding is at the Row's top, not in its middle
+    (Row(Alignment.Center,
+       Box(width(TT_ARROW), height(16px), Alignment.Center, justify=Alignment.Center, Icon("chevron-right", size=8px, color=colours.faint)),
+       Box(width(TT_PAD)),
+       (x.level < 7 ? (heading_mark(x, colours.dim),) :
+        (Icon(x.icon, size=11px, color=colours.faint), Box(width(4px)), label(elide(x.title, 13px, TT_PART), 13px, color=colours.dim)))...,
+       Box(width(TT_PAD)))
+     for x in parts)...)
 
 onkey(t::Title, ::KeyPress{Keys.mouse_right}) = begin
   e = editor(t)
@@ -29957,6 +29987,18 @@ end
 #     See "the list of a folder, under a › of the path".
 #   - A right-click on a name shows the menu of that folder or file.
 #
+# After the file's name come the headings over the caret, from the biggest,
+# and the component that the caret is on: `welcome.md › H2 › Sheet`. A heading
+# shows only its mark, so the path stays short, and a component its icon and
+# the name of its kind, as the sidebar has them. The bar shows them
+# after the name all the time, and the path shows them too. A click on a
+# heading of the path puts the caret on it. A page that's only read has no
+# caret, and so none.
+#
+# A › follows the file's name and each heading of the path, as one follows
+# each folder. A click on it shows a search of what's in the file, or under
+# the heading: see "a search of a page's parts".
+#
 # So you can go anywhere from the top bar, with the sidebar hidden.
 
 "The path of the file that the top bar shows, as names to click"
@@ -29966,6 +30008,19 @@ end
   size::Any = nothing                                            # how big the window was when the path was put in place
   crumbs::Dict{String,Any} = Dict{String,Any}()                  # the TitleCrumb of each step, by its path
   arrows::Dict{String,Any} = Dict{String,Any}()                  # the TitleArrow after each folder, by the folder's path
+  parts::Vector{Entry} = Entry[]                                 # the headings over the caret and the component that it's on, after the file's name
+  marks::Dict{Int,Any} = Dict{Int,Any}()                         # the TitlePart of each of those
+  drops::Dict{Int,Any} = Dict{Int,Any}()                         # the PartArrow after the file's name (0) and after each heading, by its place in `parts`
+end
+
+"A heading over the caret, or the component that the caret is on, after the file's name in the path"
+@def mutable struct TitlePart <: SemanticUI
+  k::Int = 0   # which of the path's parts it is
+end
+
+"The › after the file's name, or after a heading, in the path. A click shows a search of what's in the file, or under the heading."
+@def mutable struct PartArrow <: SemanticUI
+  k::Int = 0   # 0 after the file's name, or the place in the path's parts of the heading that it's after
 end
 
 "One name of the path in the top bar: a folder, or the file at the end"
@@ -29986,6 +30041,8 @@ const TT_ARROW = 14px   # how wide a › is
 const TT_EDGE = 4px     # inside the path, at each end
 const TT_WAIT = 0.15    # how many seconds the mouse is over the name before the path shows
 const TT_MOST = 80      # the most things that a list of a folder shows
+const TT_PART = 180px   # how wide the name of a component in the path can be
+const TT_MARK = 14px    # how big a heading's mark is in the path, like H2
 
 "How wide each name of `steps` is in the top bar. The file's name is a little bolder."
 title_widths(steps) = [measure(Face(SANS, i == length(steps) ? "Medium" : "", 13px, colours.ink, false), n) + 2TT_PAD
@@ -29993,6 +30050,58 @@ title_widths(steps) = [measure(Face(SANS, i == length(steps) ? "Medium" : "", 13
 
 "How wide the path of `steps` is, from edge to edge"
 title_wide(steps) = sum(title_widths(steps)) + TT_ARROW * (length(steps) - 1) + 2TT_EDGE + 2px
+
+"""
+The mark of the heading `x` in the path, like H2. The letters of the mark sit
+high in its icon, so it's 1px lower than the middle, to stand on the line of
+the names beside it.
+"""
+heading_mark(x::Entry, color) = Box(padding(1px, 0px, 0px, 0px), Icon(x.icon, size=TT_MARK, color=color))
+
+"How wide the heading or the component `x` is in the path: a heading's mark, or a component's icon and name"
+part_width(x::Entry) = (x.level < 7 ? TT_MARK : measure(Face(SANS, "", 13px, colours.ink, false), elide(x.title, 13px, TT_PART)) + 15px) + 2TT_PAD
+
+"How wide the headings and the component after the file's name are, with a › before each"
+parts_wide(parts) = sum((part_width(x) + TT_ARROW for x in parts), init=0px)
+
+"True when the path has a › after the file's name, to search the file: a Markdown page"
+searchable(e) = e.buf.view == :markdown && isfile(e.buf.path)
+
+"How wide the path's parts after the file's name are: each heading and the component, with the › before each, and the › after the last heading"
+trail_parts_wide(e, parts) = searchable(e) ? parts_wide(parts) + (isempty(parts) || parts[end].level < 7 ? TT_ARROW : 0px) : 0px
+
+"""
+The headings over the caret, from the biggest, then the component that the
+caret is on, if it's on one, as the sidebar names them. The path in the top
+bar shows them after the file's name. A page with no caret has none: one
+that's only read, one that Ladder only shows, and one that isn't Markdown.
+"""
+focus_parts(e) = begin
+  b = e.buf
+  (b.view == :markdown && !caretless(b)) || return Entry[]
+  line = b.caret[1]
+  ks = kinds(b)
+  # The bar asks in every frame, and a code block in a language of its own makes `outline` look for a file, so it's kept until the text changes
+  kept = get(e.nodes, :focus_outline, nothing)
+  found = kept !== nothing && kept[1] === b && kept[2] == b.version ? kept[3] : (e.nodes[:focus_outline] = (b, b.version, outline(b)))[3]
+  heads, on = Entry[], nothing
+  for x in found
+    x.line > line && break
+    if x.level < 7
+      # A heading takes the place of the last one of its size or smaller
+      while !isempty(heads) && heads[end].level >= x.level
+        pop!(heads)
+      end
+      push!(heads, x)
+      on = nothing
+    else
+      # The caret is on a component from the line that opens its block to the one that closes it
+      close = something(findnext(k -> k.kind == Kind.fence, ks, x.line + 1), length(b.lines))
+      on = line <= close ? x : nothing
+    end
+  end
+  on === nothing ? heads : push!(heads, on)
+end
 
 """
 The steps of `all` that fit in `room`. The names furthest from the file shrink
@@ -30033,18 +30142,20 @@ title_trail!(e, t) = begin
   w === nothing && return
   path = e.buf.path
   open = any(p -> p.key == :title_trail, popups(w))
-  # A list of a folder under a › keeps the path, until a click or Esc takes the list away
-  listing = any(p -> p.content isa FolderList, popups(w))
+  # A list of a folder under a ›, or a search under one, keeps the path, until a click or Esc takes it away
+  searching = any(p -> p.key == TS_KEY, popups(w))
+  listing = searching || any(p -> p.content isa FolderList, popups(w))
   if !((ishovered(t) || listing) && !nofile(e) && isabspath(path) && isdir(dirname(path)) && renaming(e, :title) != path && e.popup == :none)
     delete!(e.nodes, :title_hover)
-    listing && close_folder_lists!(e, w)
+    listing && (close_folder_lists!(e, w); close_title_search!(e, w))
     open && close_popup!(w, :title_trail)
     return
   end
+  searching && search_tick!(e, w)
   since = get!(e.nodes, :title_hover, time())
   time() - since < TT_WAIT && return redraw_in!(e, TT_WAIT)
   kept = get(e.nodes, :title_trail, nothing)
-  (open && kept isa TitleTrail && kept.path == path && kept.size == window_size(e)) || show_title_trail!(e, t, w, path)
+  (open && kept isa TitleTrail && kept.path == path && kept.size == window_size(e) && kept.parts == focus_parts(e)) || show_title_trail!(e, t, w, path)
   # A window hears nothing when the mouse leaves it, so the path looks for itself
   isempty(w.glfw) || (sync_mouse!(w); redraw_in!(e, 0.2))
   nothing
@@ -30054,21 +30165,24 @@ end
 show_title_trail!(e, t, w, path) = begin
   r = rect(t)
   r === nothing && return
-  close_folder_lists!(e, w)   # the path moves, so a list under one of its › would point at nothing
+  # The path moves, so a list or a search under one of its › would point at nothing
+  close_folder_lists!(e, w)
+  any(p -> p.key == TS_KEY, popups(w)) && close_title_search!(e, w)
   wide = window_size(e)[1]
   # The Mac draws its close, minimise and zoom buttons over the window, so the path starts after them
   start = mac_buttons_room(e) + 4px
   all = steps(path, home_folder())
   all[end] = (something(page_title(e), name(e.buf)), path)   # the file's name as the bar shows it
-  shown = title_steps(all, wide - 8px - start)
+  parts = focus_parts(e)
+  shown = title_steps(all, wide - 8px - start - trail_parts_wide(e, parts))
   v = get!(() -> own!(t, TitleTrail()), e.nodes, :title_trail)
   v.path == path || (empty!(v.crumbs); empty!(v.arrows))
-  v.path, v.steps, v.size = path, shown, window_size(e)
+  v.path, v.steps, v.size, v.parts = path, shown, window_size(e), parts
   widths = title_widths(shown)
-  total = title_wide(shown)
+  total = title_wide(shown) + trail_parts_wide(e, parts)
   # How far the file's name is from the path's left edge
   before = sum(widths[1:end-1], init=0px) + TT_ARROW * (length(shown) - 1) + TT_EDGE + 1px + TT_PAD
-  x = clamp(r.left - before, start, max(start, wide - 8px - total))
+  x = clamp(r.left + get(e.nodes, :title_lead, 0px) - before, start, max(start, wide - 8px - total))
   popup!(w, v, anchor=(x, (TOPBAR_H - TT_H) / 2), placement=:below, gap=0px, width=total, key=:title_trail,
          modal=false, theme=menu_theme())
   nothing
@@ -30096,6 +30210,15 @@ describe(v::TitleTrail) = begin
       push!(parts, c)
     end
   end
+  # The headings over the caret and the component that it's on. A › follows the file's name and each heading.
+  if searchable(e)
+    drop(k) = get!(() -> own!(v, PartArrow(k=k)), v.drops, k)
+    push!(parts, drop(0))
+    for k in eachindex(v.parts)
+      push!(parts, get!(() -> own!(v, TitlePart(k=k)), v.marks, k))
+      v.parts[k].level < 7 && push!(parts, drop(k))
+    end
+  end
   # Each name fills the height inside the border and 1px more, so its hover box has as much room above it as below
   Row(width(grow=grow), height(TT_H), padding(TT_EDGE, 1px), radius(7px), Alignment.Center, name="Path",
       background(colours.bg), border(1px, :solid, colours.line), lifted, parts...)
@@ -30115,7 +30238,39 @@ describe(a::TitleArrow) = begin
     Icon("chevron-right", size=8px, color=colours.faint))
 end
 
+describe(p::TitlePart) = begin
+  v = p.parent
+  p.k in eachindex(v.parts) || return Box(width(0px))
+  x = v.parts[p.k]
+  last = p.k == length(v.parts)
+  # A heading shows only its mark, like H2, and a component its icon and its kind
+  Row(height(grow=grow), padding(TT_PAD, 0px), radius(5px), child_gap=4px, Alignment.Center, name="Part",
+      background(!last && ishovered(p) ? colours.hover : clear),
+    (x.level < 7 ? (heading_mark(x, last ? colours.ink : colours.dim),) :
+     (Icon(x.icon, size=11px, color=colours.faint), label(elide(x.title, 13px, TT_PART), 13px, color=last ? colours.ink : colours.dim)))...)
+end
+
+describe(a::PartArrow) = begin
+  # It's shaded while its search shows under it
+  w = window_of(a)
+  dropped = w !== nothing && any(p -> p.content isa TitleSearch && p.content.arrow === a, popups(w))
+  Box(width(TT_ARROW), height(grow=grow), radius(4px), Alignment.Center, justify=Alignment.Center, name="Arrow",
+      background(ishovered(a) || dropped ? colours.hover : clear),
+    Icon("chevron-right", size=8px, color=colours.faint))
+end
+
 cursor(c::TitleCrumb) = c.last ? :arrow : :hand
+cursor(p::TitlePart) = p.k == length(p.parent.parts) ? :arrow : :hand
+cursor(::PartArrow) = :hand
+
+# A click on a heading puts the caret on it, as a click on it in the sidebar does. The last part is where the caret is already.
+onkey(p::TitlePart, ev::KeyPress{Keys.mouse_left}) = begin
+  v = p.parent
+  e = editor(p)
+  p.k in eachindex(v.parts) && p.k < length(v.parts) && (focus(e); go_entry!(e, v.parts[p.k].line, v.parts[p.k].caret))
+  handled
+end
+onkey(a::PartArrow, ev::KeyPress{Keys.mouse_left}) = open_title_search!(editor(a), ev.window, a)
 cursor(::TitleArrow) = :hand
 
 onkey(c::TitleCrumb, ev::KeyPress{Keys.mouse_left}) = (c.last || title_go!(editor(c), ev.window, c.path); handled)
@@ -30368,6 +30523,540 @@ onkey(l::FolderList, ev::KeyPress{Keys.right}) =
   unmodified(ev) && l.pick in eachindex(l.names) && l.names[l.pick] in l.folders ? (open_beside!(l, l.pick; keys=true); handled) : nothing
 onkey(l::FolderList, ev::KeyPress{Keys.left}) = unmodified(ev) && l.level > 1 ? (close_folder_lists!(l.of, ev.window, l.level - 1); handled) : nothing
 onkey(l::FolderList, ev::KeyPress{Keys.escape}) = unmodified(ev) ? (close_folder_lists!(l.of, ev.window); handled) : nothing
+
+# --- a search of a page's parts, from a › of the path in the top bar ---
+#
+# In the path in the top bar, a › follows the file's name and each heading. A
+# click on it shows a search of what's in the file, or under the heading. It
+# floats under the ›, as the list of a folder does under a folder's ›, and the
+# path stays while it shows.
+#
+#   - With nothing typed and no kinds chosen, it lists the headings and the
+#     components there, as the sidebar does. A click on one goes to it.
+#   - The kinds are those of a `find` block (find.jl): to-do items, headings,
+#     table rows, code blocks, sheets, sketches and the rest. In a folder,
+#     Pages is a kind too: a page whose name has the words. The Kinds button
+#     lists them, with a tick beside each kind that's chosen. A click on a row
+#     ticks it or takes its tick away, and the list stays for more. Each kind
+#     that's chosen shows in the field as a chip. A click on a chip takes it away.
+#   - Kinds and words go together, and either can be left out. Kinds with no
+#     words list every thing of those kinds. Words with no kinds find any line,
+#     and any block that has them in its own lines.
+#   - The button at the right of the field says where the search looks. It
+#     chooses a place further up the path: a heading of the path, the whole
+#     file, or a folder on the way to the file, with the folders in it.
+#   - The up and down arrows pick a row, and Return or a click shows it. Tab
+#     opens the list of kinds. Backspace in an empty field takes the last kind
+#     away. Esc, or a click somewhere else, closes the search.
+
+const TS_KEY = :title_search          # the key of the search's popup
+const TS_MENU = :title_search_menu    # and of the list that a button of the search opens
+const TS_WIDE = 480px                 # how wide the search is, at most
+const TS_MOST = 200                   # the most rows that its list shows
+const TS_ROWS = 12                    # the rows that show before the list scrolls
+
+"A search of what's in a page, or under one of its headings, or in a folder's pages, under a › of the path in the top bar"
+@def mutable struct TitleSearch <: SemanticUI
+  of::Any = nothing                     # the window's Editor
+  arrow::Any = nothing                  # the › that it hangs from
+  page::String = ""                     # the file that the path ends with
+  under::Int = 0                        # the line of the heading that it looks under, or 0 for the whole file
+  folder::String = ""                   # the folder that it looks in instead, with the folders in that one, or "" for the file
+  wants::Vector{Symbol} = Symbol[]      # the kinds of thing that it finds, in the order they were chosen. :page is a page by its name.
+  wide::Any = TS_WIDE                   # how wide it is
+  key::Any = nothing                    # what the rows were worked out for
+  rows::Vector{Any} = Any[]             # what it shows: a page, a thing that was found, or a heading or component that's there
+  things::Int = 0                       # how many things it found, and in how many pages
+  pages::Int = 0
+  total::Int = 0                        # how many rows its list would have with no limit
+  whole::Bool = true                    # it read every page of the folder
+  cache::Dict{String,Any} = Dict{String,Any}()   # what was found in each page, with the mark of the page's text then
+  pick::Int = 0                         # the row that Return shows
+  shown::Int = 0                        # the row that the list last scrolled to
+  side::Symbol = :below                 # the side of the › that it's on, for its caret
+  parts::Dict{Any,Any} = Dict{Any,Any}()   # its field, its chips, its buttons, its scroll and its rows
+end
+
+"A kind that the search finds, in its field. A click takes it away."
+@def mutable struct SearchChip <: SemanticUI
+  of::Any = nothing
+  kind::Symbol = :page
+end
+
+"A button at the right of the search's field: :kinds chooses the kinds of thing to find, and :scope where to look"
+@def mutable struct SearchButton <: SemanticUI
+  of::Any = nothing
+  what::Symbol = :kinds
+end
+
+"A row of the search's list"
+@def mutable struct SearchFound <: SemanticUI
+  of::Any = nothing
+  k::Int = 0
+end
+
+"The list under a button of the search, with a field at its top that filters it"
+@def mutable struct SearchMenu <: SemanticUI
+  of::Any = nothing                       # the search
+  what::Symbol = :kinds                   # :kinds or :scope
+  button::Any = nothing                   # the button that it's under
+  rows::Vector{Any} = Any[]               # the rows that have the words in its field
+  typed::String = ""                      # the words in its field when the rows were chosen
+  pick::Int = 1                           # the row that Return takes
+  shown::Int = 0                          # the row that the list last scrolled to
+  side::Symbol = :bottom                  # the side of the button that it's on
+  parts::Dict{Any,Any} = Dict{Any,Any}()  # its field, its scroll and its rows
+end
+
+"A row of that list: a kind of thing, or a place to look"
+@def mutable struct SearchOption <: SemanticUI
+  of::Any = nothing
+  k::Int = 0
+end
+
+"The field of the search, where the words go"
+search_field(s::TitleSearch) = s.parts[:field]
+
+"A text field of the search or of a list under its button"
+search_box(placeholder) = begin
+  f = TextInput(placeholder=placeholder, font_family=SANS, font_size=13px,
+                look=(_, text) -> Row(width(grow=grow), height(grow=grow), clip=true, text))
+  f.color, f.placeholder_color = colours.ink, colours.faint
+  f
+end
+
+"The icon of a kind of thing that the search finds. A kind of block has the icon that the sidebar shows beside such a block."
+search_icon(k::Symbol) =
+  k == :page ? "file-earmark-text" : k == :todo ? "square" : k == :done ? "check-square" : k == :heading ? "type-h1" :
+  k == :paragraph ? "text-paragraph" : k == :bullet ? "list-ul" : k == :ordered ? "list-ol" : k == :blockquote ? "quote" :
+  k == :table ? "table" : k == :link ? "link-45deg" : k == :picture ? "image" : Searches.isblock(k) ? block_icon(k) : "text-left"
+
+"What the search calls things of the kind `k` in its list of kinds and its chips: To-do items"
+search_kinds_name(k::Symbol) = k == :page ? "Pages" : Searches.title(k)
+
+"What the search calls one thing of the kind `k`, at the right of its row: To-do item"
+search_kind_name(k::Symbol) = k == :page ? "Page" : uppercasefirst(Searches.WHATS[k].one)
+
+"The heading that the search looks under, as the sidebar has it, or nothing"
+search_heading(s::TitleSearch) = s.under == 0 ? nothing : (i = findfirst(x -> x.line == s.under, outline(s.of, s.page)); i === nothing ? nothing : outline(s.of, s.page)[i])
+
+"The name of the place where the search looks: its folder, as the path names it, its heading, or its file"
+search_place(s::TitleSearch) =
+  !isempty(s.folder) ? steps(s.folder, home_folder())[end][1] :
+  s.under > 0 ? (h = search_heading(s); h === nothing ? basename(s.page) : h.title) : basename(s.page)
+
+"Where the search looks, as a choice of the list of places: (:folder, path), (:under, line) or (:file, 0)"
+search_scope(s::TitleSearch) = !isempty(s.folder) ? (:folder, s.folder) : s.under > 0 ? (:under, s.under) : (:file, 0)
+
+"The name of the page at `path` in the search's list: where it is in the folder that the search looks in, without the end of its file's name"
+search_page_name(s::TitleSearch, path) = splitext(relpath(path, s.folder))[1]
+
+"The lines of the page that are under the heading on line `under`: up to the next heading as big as it or bigger. With 0, every line."
+under_lines(ks, under) = begin
+  (0 < under <= length(ks) && ks[under].kind == Kind.heading) || return 1:length(ks)
+  stop = findnext(l -> l.kind == Kind.heading && l.level <= ks[under].level, ks, under + 1)
+  under:(stop === nothing ? length(ks) : stop - 1)
+end
+
+"""
+Show a search of what's in the file, or under the heading, that the › `a` of
+the path follows, under the ›, with the keyboard in its field. A second click
+on the › takes it away.
+"""
+open_title_search!(e, w, a::PartArrow) = begin
+  was = [p.content for p in popups(w) if p.key == TS_KEY]
+  close_title_search!(e, w)
+  !isempty(was) && only(was).arrow === a && return handled
+  close_folder_lists!(e, w)
+  v = a.parent
+  r = rect(a)
+  r === nothing && return handled
+  under = a.k in eachindex(v.parts) ? v.parts[a.k].line : 0
+  s = TitleSearch(of=e, arrow=a, page=e.buf.path, under=under)
+  s.parts[:field] = own!(s, search_box(""))
+  s.wide = min(TS_WIDE, window_size(e)[1] - 16px)
+  e.nodes[:title_search] = s
+  # The caret at the top of the search points at the middle of the ›
+  popup!(w, s, anchor=(r.left + r.width / 2 - TT_AIM, r.top, 0px, r.height), placement=:below, gap=8px, width=s.wide,
+         key=TS_KEY, theme=component_theme(), onclose=() -> (close_popup!(w, TS_MENU); left_search!(e, w)))
+  focus(search_field(s))
+  redraw_in!(e, 0)   # the › stays shaded while its search shows
+  handled
+end
+
+placed!(s::TitleSearch, side) = (s.side = side; nothing)
+draw(ctx, size, ui::ConcreteRect, s::TitleSearch) = caret(ctx, ui, s.side, rect(s.arrow))
+
+"Take the search away, with the list under one of its buttons. The keyboard goes back to the page."
+close_title_search!(e, w) = (close_popup!(w, TS_MENU); close_popup!(w, TS_KEY); left_search!(e, w))
+
+"Give the keyboard back to the page when a field of the search, which has gone, has it"
+left_search!(e, w) = begin
+  s = get(e.nodes, :title_search, nothing)
+  f = w.focus
+  s isa TitleSearch && (f === search_field(s) || (f isa SemanticUI && f.parent isa SearchMenu)) && focus(e)
+  nothing
+end
+
+"""
+What happens to the search in each frame, before the window is laid out: the
+list under one of its buttons goes when a click somewhere else took the
+keyboard from the list's field.
+"""
+search_tick!(e, w) = begin
+  for p in popups(w)
+    p.key == TS_MENU && w.focus !== p.content.parts[:field] && close_popup!(w, TS_MENU)
+  end
+  nothing
+end
+
+"""
+Work out what the search shows, when its words, its kinds or its place have
+changed, when a page has changed in Ladder, or when the folder was read again.
+In a folder, only the pages that changed are looked through again.
+"""
+search_rows!(s::TitleSearch) = begin
+  e = s.of
+  words = String.(split(lowercase(search_field(s).text)))
+  listed = isempty(s.folder) || !isdir(s.folder) ? nothing : folder_pages(s.folder)
+  asked = (search_scope(s), copy(s.wants), words)
+  # ⌘Z gives a page the version that it had before, so the version of each open page is looked at, not only the newest one
+  key = (asked, listed === nothing ? 0.0 : listed.read, hash([b.version for b in values(e.buffers)]))
+  key == s.key && return s
+  (s.key === nothing || s.key[1] != asked) && empty!(s.cache)
+  s.key = key
+  rows, things, pages, total = Any[], 0, 0, 0
+  s.whole = listed === nothing || listed.whole
+  sorts = filter(!=(:page), s.wants)
+  if isempty(s.folder)
+    # One page, or the part of it under a heading. Pages aren't a kind of thing in a page.
+    at = isfile(s.page) ? mtime(s.page) : 0.0
+    lines, ks, _ = page_text(e, s.page, at)
+    span = under_lines(ks, s.under)
+    if isempty(words) && isempty(sorts)
+      # Nothing asked: the headings and the components there, each in the heading over it, as the sidebar has them
+      over = Int[]
+      for x in outline(e, s.page)
+        x.line in span && x.line != s.under || continue
+        while !isempty(over) && over[end] >= x.level
+          pop!(over)
+        end
+        push!(rows, (kind=:entry, path=s.page, x=x, depth=length(over)))
+        x.level < 7 && push!(over, x.level)
+      end
+      total = length(rows)
+    else
+      for (m, as) in Searches.search(sorts, words, s.page, lines, ks)
+        m.line in span || continue
+        things += 1
+        length(rows) < TS_MOST && push!(rows, (kind=:thing, path=s.page, m=m, as=as))
+      end
+      pages, total = things > 0 ? 1 : 0, things
+    end
+  elseif listed !== nothing && !(isempty(words) && isempty(s.wants))
+    names = isempty(s.wants) || :page in s.wants
+    look = isempty(s.wants) || !isempty(sorts)   # pages alone are found by their names, without reading them
+    for (path, at) in listed.pages
+      named = names && all(w -> occursin(w, lowercase(search_page_name(s, path))), words)
+      ms = Tuple{Searches.Match,Symbol}[]
+      if look
+        lines, ks, mark = page_text(e, path, at)
+        had = get(s.cache, path, nothing)
+        ms = had !== nothing && had[1] == mark ? had[2] : (s.cache[path] = (mark, Searches.search(sorts, words, path, lines, ks)))[2]
+      end
+      (named || !isempty(ms)) || continue
+      pages += 1
+      things += length(ms) + named
+      total += 1 + length(ms)
+      length(rows) < TS_MOST && push!(rows, (kind=:page, path=path, named=named))
+      for (m, as) in ms
+        length(rows) < TS_MOST || break
+        push!(rows, (kind=:thing, path=path, m=m, as=as))
+      end
+    end
+  end
+  s.rows, s.things, s.pages, s.total = rows, things, pages, total
+  # The first row that was found is picked: a thing, or a page by its name
+  s.pick = isempty(rows) ? 0 : something(findfirst(r -> r.kind != :page || r.named, rows), 1)
+  s.shown = 0
+  s
+end
+
+"True when the search shows what's there, because nothing is asked"
+listing_parts(s::TitleSearch) = !isempty(s.rows) && s.rows[1].kind == :entry
+
+"What the foot of the search's list says: how many things it found, and where"
+search_summary(s::TitleSearch) = begin
+  place = search_place(s)
+  part = s.whole ? "" : " Ladder read only part of this folder."
+  where = isempty(s.folder) && s.under > 0 ? "under $place" : "in $place"
+  s.things == 0 && return "Nothing found $where.$part"
+  page = s.pages == 1 ? "1 page" : "$(s.pages) pages"
+  found = s.wants == [:page] && !isempty(s.folder) ? "$page in $place." :
+    "$(s.things == 1 ? "1 thing" : "$(s.things) things") $(isempty(s.folder) ? where : "in $page of $place")."
+  more = s.total > length(s.rows) ? " The list shows the first $(length(s.rows)) rows." : ""
+  found * more * part
+end
+
+"Show what row `k` of the search has, and close the search: a heading or a component goes to it, a thing shows in its page, and a page opens"
+search_go!(s::TitleSearch, w, k) = begin
+  k in eachindex(s.rows) || return handled
+  row = s.rows[k]
+  e = s.of
+  close_title_search!(e, w)
+  if row.kind == :entry
+    row.path == e.buf.path || open!(e, row.path)
+    focus(e)
+    go_entry!(e, row.x.line, row.x.caret)
+  else
+    row.kind == :page ? visit!(e, row.path) : visit!(e, row.path, row.m)
+  end
+  handled
+end
+
+describe(s::TitleSearch) = begin
+  field = search_field(s)
+  place = search_place(s)
+  field.placeholder = isempty(s.folder) && s.under > 0 ? "Search under " * place : "Search " * place
+  search_rows!(s)
+  c = found_colours()
+  chips = [get!(() -> own!(s, SearchChip(of=s, kind=k)), s.parts, (:chip, k)) for k in s.wants]
+  button(what) = get!(() -> own!(s, SearchButton(of=s, what=what)), s.parts, what)
+  top = Row(width(grow=grow), height(grow=grow), child_gap=5px, Alignment.Center,
+    Icon("search", size=12px, color=c.dim), chips...,
+    Box(width(grow=grow), height(grow=grow), field),
+    button(:kinds), button(:scope))
+  float_list(top, Column(width(grow=grow), Alignment.Start, search_list(s)...), name="Search")
+end
+
+"The rows under the search's field, and the line under them that says what was found"
+search_list(s::TitleSearch) = begin
+  c = found_colours()
+  n, high = length(s.rows), FLOAT_ROW
+  if n == 0
+    asked = !isempty(split(search_field(s).text)) || !isempty(s.wants)
+    return (float_none(asked ? search_summary(s) : isempty(s.folder) ? "There are no headings or components here" :
+                       "Type words to find, or choose kinds of thing"),)
+  end
+  scroll = get!(() -> Scroll(width(grow=grow)), s.parts, :scroll)
+  # Half a row at the bottom says that the list goes on
+  scroll.height = height(n <= TS_ROWS ? n * high : TS_ROWS * high - high / 2)
+  s.shown == s.pick || (s.shown = s.pick; s.pick > 0 && scroll_into_view!(scroll, high * (s.pick - 1), high * s.pick))
+  reuse!(scroll, Column(width(grow=grow), Alignment.Start, [get!(() -> own!(s, SearchFound(of=s, k=k)), s.parts, (:row, k)) for k in 1:n]...))
+  listing_parts(s) && return (scroll,)
+  (scroll, Box(width(grow=grow), height(1px), background(c.rule)), float_none(search_summary(s)))
+end
+
+describe(r::SearchFound) = begin
+  s = r.of
+  r.k in eachindex(s.rows) || return Box(height(0px))
+  row = s.rows[r.k]
+  c = found_colours()
+  back = background(s.pick == r.k ? c.pick : c.frame)
+  if row.kind == :entry
+    # A heading or a component, under the heading over it, as in the sidebar
+    x = row.x
+    return Row(width(grow=grow), height(FLOAT_ROW), padding(0px, 8px, 0px, 8px + 14px * row.depth), radius(6px), child_gap=8px,
+               Alignment.Center, name="Part", back,
+      Icon(x.icon, size=12px, color=c.dim),
+      Row(width(grow=grow), height(grow=grow), Alignment.Center, clip=true,
+        label(elide(x.title, 13px, s.wide - 60px - 14px * row.depth), 13px, color=c.ink)))
+  elseif row.kind == :page
+    # A page, over the things found in it. One whose name has the words says so at its right.
+    return Row(width(grow=grow), height(FLOAT_ROW), padding(8px, 0px), radius(6px), child_gap=8px, Alignment.Center, name="Page", back,
+      Icon("file-earmark-text", size=13px, color=c.dim),
+      Row(width(grow=grow), height(grow=grow), Alignment.Center, clip=true,
+        label(elide(search_page_name(s, row.path), 13px, s.wide - 100px), 13px, color=c.ink, weight="Semibold")),
+      (row.named ? (Box(label("Page", 12px, color=c.dim)),) : ())...)
+  end
+  m, as = row.m, row.as
+  kind = search_kind_name(as)
+  room = s.wide - 120px - measure(Face(SANS, "", 12px, c.ink, false), kind)
+  # Under a page's name in a folder, a thing is further in
+  Row(width(grow=grow), height(FLOAT_ROW), padding(0px, 8px, 0px, isempty(s.folder) ? 8px : 29px), radius(6px), child_gap=8px,
+      Alignment.Center, name="Thing", back,
+    Icon(search_icon(as), size=12px, color=c.dim),
+    Row(width(grow=grow), height(grow=grow), Alignment.Center, clip=true,
+      label(elide(m.text, 13px, room), 13px, color=m.kind == :done ? c.dim : c.ink, weight=as == :heading ? "Semibold" : "")),
+    Box(label(kind, 12px, color=c.dim)))
+end
+
+describe(c::SearchChip) = begin
+  f = found_colours()
+  Row(height(20px), padding(0px, 4px, 0px, 6px), radius(5px), child_gap=4px, Alignment.Center, name="Kind",
+      background(ishovered(c) ? f.line : f.pick),
+    Icon(search_icon(c.kind), size=11px, color=f.dim),
+    label(search_kinds_name(c.kind), 12px, color=f.ink),
+    Icon("x", size=12px, color=f.dim))
+end
+
+describe(b::SearchButton) = begin
+  s = b.of
+  c = found_colours()
+  w = window_of(b)
+  dropped = w !== nothing && any(p -> p.content isa SearchMenu && p.content.button === b, popups(w))
+  scope = search_scope(s)
+  icon = b.what == :kinds ? "funnel" : scope[1] == :folder ? "folder" : scope[1] == :file ? file_icon(s.page) :
+         (h = search_heading(s); h === nothing ? "type-h1" : h.icon)
+  words = b.what == :kinds ? (isempty(s.wants) ? "Any kind" : "Kinds") : search_place(s)
+  Row(height(20px), padding(6px, 0px), radius(5px), child_gap=4px, Alignment.Center, name=b.what == :kinds ? "Kinds" : "Place",
+      background(ishovered(b) || dropped ? c.pick : clear),
+    Icon(icon, size=11px, color=c.dim),
+    label(elide(words, 12px, 110px), 12px, color=c.dim),
+    Icon("chevron-down", size=8px, color=c.dim))
+end
+
+cursor(::Union{SearchFound,SearchChip,SearchButton,SearchOption}) = :hand
+
+# The mouse picks the row that it's over, as the arrow keys do. It's in sight already, so the list doesn't scroll to it.
+onmouse(r::SearchFound, ::MouseMove) = (s = r.of; s.pick = s.shown = r.k; handled)
+onkey(r::SearchFound, ev::KeyPress{Keys.mouse_left}) = search_go!(r.of, ev.window, r.k)
+onkey(c::SearchChip, ev::KeyPress{Keys.mouse_left}) = (s = c.of; filter!(!=(c.kind), s.wants); focus(search_field(s)); handled)
+onkey(b::SearchButton, ev::KeyPress{Keys.mouse_left}) = open_search_menu!(b.of, ev.window, b.what)
+
+# The search sees a key before its field does
+onkey(s::TitleSearch, ev::KeyPress{Keys.down}) = unmodified(ev) ? (isempty(s.rows) || (s.pick = min(s.pick + 1, length(s.rows))); handled) : nothing
+onkey(s::TitleSearch, ev::KeyPress{Keys.up}) = unmodified(ev) ? (isempty(s.rows) || (s.pick = max(s.pick - 1, 1)); handled) : nothing
+onkey(s::TitleSearch, ev::KeyPress{Keys.enter}) = unmodified(ev) ? search_go!(s, ev.window, s.pick) : nothing
+onkey(s::TitleSearch, ev::KeyPress{Keys.escape}) = unmodified(ev) ? (close_title_search!(s.of, ev.window); handled) : nothing
+onkey(s::TitleSearch, ev::KeyPress{Keys.tab}) = unmodified(ev) ? open_search_menu!(s, ev.window, :kinds) : nothing
+# Backspace in an empty field takes the last kind away
+onkey(s::TitleSearch, ev::KeyPress{Keys.backspace}) =
+  unmodified(ev) && isempty(search_field(s).text) && !isempty(s.wants) ? (pop!(s.wants); handled) : nothing
+
+# --- the list under a button of the search ---
+
+"""
+The rows of the list of kinds: any kind, then each kind of a `find` block,
+and pages by their names when the search looks in a folder. A row is found by
+any name that a `find` block knows its kind by.
+"""
+kind_options(s::TitleSearch) =
+  Any[(key=nothing, name="Any kind", icon="asterisk", words=["any kind", "all", "every"]);
+      (isempty(s.folder) ? [] : [(key=:page, name=search_kinds_name(:page), icon=search_icon(:page), words=["pages", "page", "files", "names"])]);
+      [(key=k, name=search_kinds_name(k), icon=search_icon(k), words=[Searches.WHATS[k].names..., Searches.WHATS[k].langs...])
+       for k in keys(Searches.WHATS)]]
+
+"""
+The rows of the list of places to look, from the nearest: each heading of the
+path, the file, and each folder on the way to the file
+"""
+scope_options(s::TitleSearch) = begin
+  v = s.arrow === nothing ? nothing : s.arrow.parent
+  heads = v isa TitleTrail ? [x for x in v.parts if x.level < 7] : Entry[]
+  out = Any[(key=(:under, x.line), name=x.title, icon=x.icon, words=[x.title]) for x in reverse(heads)]
+  push!(out, (key=(:file, 0), name=basename(s.page), icon=file_icon(s.page), words=[basename(s.page)]))
+  for (n, p) in reverse(steps(dirname(s.page), home_folder()))
+    push!(out, (key=(:folder, p), name=n, icon="folder", words=[n]))
+  end
+  out
+end
+
+"Make the rows of the list `m` those that have every word of `typed`. The first whose name starts with them is picked."
+menu_rows!(m::SearchMenu, typed) = begin
+  every = m.what == :kinds ? kind_options(m.of) : scope_options(m.of)
+  m.typed = typed
+  m.rows = filter(r -> choice_matches(r, typed), every)
+  m.pick = isempty(m.rows) ? 0 : something(findfirst(r -> startswith(lowercase(r.name), lowercase(typed)), m.rows), 1)
+  m
+end
+
+"""
+Show the list under the button for `what` of the search: the kinds of thing
+to find, or the places to look. The keyboard goes to the field at its top. A
+second click on the button takes the list away.
+"""
+open_search_menu!(s::TitleSearch, w, what) = begin
+  was = [p.content for p in popups(w) if p.key == TS_MENU]
+  close_search_menu!(s, w)
+  !isempty(was) && only(was).what == what && return handled
+  b = s.parts[what]
+  r = rect(b)
+  r === nothing && return handled
+  m = SearchMenu(of=s, what=what, button=b)
+  m.parts[:field] = own!(m, search_box("Filter…"))
+  menu_rows!(m, "")
+  what == :scope && (m.pick = something(findfirst(o -> o.key == search_scope(s), m.rows), 1))
+  # A button in a popup is anchored by where it is: a popup anchored at a node follows it in the window's own parts, and this one isn't there
+  popup!(w, m, anchor=(r.left, r.top, r.width, r.height), placement=:bottom, gap=9px, width=what == :kinds ? 250px : 230px,
+         key=TS_MENU, theme=component_theme(), onclose=() -> left_search!(s.of, w))
+  focus(m.parts[:field])
+  handled
+end
+
+"Take the list under a button of the search away. The keyboard goes back to the search's field."
+close_search_menu!(s::TitleSearch, w) = begin
+  f = w.focus
+  close_popup!(w, TS_MENU)
+  f isa SemanticUI && f.parent isa SearchMenu && focus(search_field(s))
+  handled
+end
+
+"""
+Take row `k` of the list `m`. A kind is chosen, or its choice is taken back,
+and the list stays, so that more can be chosen. Any kind takes every choice
+back. A place is where the search looks from now on, and the list goes.
+"""
+take_option!(m::SearchMenu, w, k) = begin
+  k in eachindex(m.rows) || return handled
+  s, key = m.of, m.rows[k].key
+  if m.what == :kinds
+    key === nothing ? empty!(s.wants) : key in s.wants ? filter!(!=(key), s.wants) : push!(s.wants, key)
+  else
+    s.folder = key[1] == :folder ? key[2] : ""
+    s.under = key[1] == :under ? key[2] : 0
+    # A page isn't a kind of thing in a page
+    isempty(s.folder) && filter!(!=(:page), s.wants)
+    close_search_menu!(s, w)
+  end
+  handled
+end
+
+describe(m::SearchMenu) = begin
+  f = m.parts[:field]
+  typed = String(strip(f.text))
+  typed == m.typed || menu_rows!(m, typed)
+  n, high = length(m.rows), FLOAT_ROW
+  body = if n == 0
+    float_none(m.what == :scope ? "No place has that name" : "Nothing has that name")
+  else
+    scroll = get!(() -> Scroll(width(grow=grow)), m.parts, :scroll)
+    # Half a row at the bottom says that the list goes on
+    most = MOST_CHOICES + 3
+    scroll.height = height(n <= most ? n * high : most * high - high / 2)
+    m.shown == m.pick || (m.shown = m.pick; m.pick > 0 && scroll_into_view!(scroll, high * (m.pick - 1), high * m.pick))
+    reuse!(scroll, Column(width(grow=grow), Alignment.Start, [get!(() -> own!(m, SearchOption(of=m, k=k)), m.parts, (:row, k)) for k in 1:n]...))
+  end
+  float_list(f, body, name=m.what == :kinds ? "Kinds" : "Places")
+end
+
+placed!(m::SearchMenu, side) = (m.side = side; nothing)
+draw(ctx, size, ui::ConcreteRect, m::SearchMenu) = caret(ctx, ui, m.side, rect(m.button))
+
+describe(o::SearchOption) = begin
+  m = o.of
+  o.k in eachindex(m.rows) || return Box(height(0px))
+  r = m.rows[o.k]
+  s = m.of
+  c = found_colours()
+  # A kind that's chosen, or the place where the search looks, has a tick
+  on = m.what == :kinds ? (r.key === nothing ? isempty(s.wants) : r.key in s.wants) : r.key == search_scope(s)
+  Row(width(grow=grow), height(FLOAT_ROW), padding(8px, 0px), radius(6px), child_gap=8px, Alignment.Center, name="Option",
+      background(m.pick == o.k ? c.pick : c.frame),
+    Icon(r.icon, size=13px, color=c.dim),
+    Row(width(grow=grow), height(grow=grow), Alignment.Center, clip=true, label(r.name, 13px, color=c.ink, weight=on ? "Semibold" : "")),
+    (on ? (Icon("check2", size=13px, color=c.ink),) : ())...)
+end
+
+onmouse(o::SearchOption, ::MouseMove) = (m = o.of; m.pick = m.shown = o.k; handled)
+onkey(o::SearchOption, ev::KeyPress{Keys.mouse_left}) = take_option!(o.of, ev.window, o.k)
+
+# The list sees a key before its field does. Return takes a row, and Esc or Tab goes back to the search's field.
+onkey(m::SearchMenu, ev::KeyPress{Keys.down}) = unmodified(ev) ? (isempty(m.rows) || (m.pick = min(m.pick + 1, length(m.rows))); handled) : nothing
+onkey(m::SearchMenu, ev::KeyPress{Keys.up}) = unmodified(ev) ? (isempty(m.rows) || (m.pick = max(m.pick - 1, 1)); handled) : nothing
+onkey(m::SearchMenu, ev::KeyPress{Keys.enter}) = unmodified(ev) ? take_option!(m, ev.window, m.pick) : nothing
+onkey(m::SearchMenu, ev::KeyPress{Keys.escape}) = unmodified(ev) ? close_search_menu!(m.of, ev.window) : nothing
+onkey(m::SearchMenu, ev::KeyPress{Keys.tab}) = unmodified(ev) ? close_search_menu!(m.of, ev.window) : nothing
 
 # --- the sidebar --------------------------------------------------------------------------
 
@@ -30631,15 +31320,23 @@ choose!(e, item) = begin
   focus(e)
   chose!(e)
   (l isa EntryLabel && l.line > 0) || return
+  go_entry!(e, l.line, l.caret)
+end
+
+"""
+Put the caret on line `caret` of the page that shows, for the heading or the
+component that starts on `line`, with that line near the top of the window.
+"""
+go_entry!(e, line, caret) = begin
   b = e.buf
   b.reading = false
-  line = clamp(l.caret, 1, length(b.lines))
-  b.caret = b.anchor = settle(b, (line, length(b.lines[line])))
+  at = clamp(caret, 1, length(b.lines))
+  b.caret = b.anchor = settle(b, (at, length(b.lines[at])))
   # The caret stays in a `columns` block that takes no room, so that the block shows its lines
-  column_fold(b, line) === nothing || (b.caret = b.anchor = b.stood = line_end(b, line))
+  column_fold(b, at) === nothing || (b.caret = b.anchor = b.stood = line_end(b, at))
   # Put its first line near the top of the window rather than just on screen.
   # The next frame does it, once it has laid out the file that's showing.
-  e.nodes[:hold] = (clamp(l.line, 1, length(b.lines)), 24px - PAGE_TOP)
+  e.nodes[:hold] = (clamp(line, 1, length(b.lines)), 24px - PAGE_TOP)
   e.blink = time()
 end
 
