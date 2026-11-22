@@ -68,6 +68,7 @@ The block at the top of this page is front matter: lines at the very top of a fi
 - [A diagram: a flowchart, a sequence and three more kinds](welcome.md#diagrams)
 - [A mind map, an entity relationship diagram, a Gantt chart and a timeline](welcome.md#diagrams)
 - [A sketch that you draw](welcome.md#sketches)
+- [A canvas: a board of notes, pictures and pages, like Muse, that also makes a mind map](welcome.md#canvases)
 - [A signature: a box that a person signs in](welcome.md#signatures)
 - [A contact: the card of a person or a company](welcome.md#contacts)
 - [The map of a place](welcome.md#maps)

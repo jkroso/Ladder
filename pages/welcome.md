@@ -623,6 +623,21 @@ text red 458,84 The door opens in
 
 Each shape is a line of the block, so ⌘Z takes back the last thing you drew.
 
+## Canvases
+
+A code block in the language `canvas` is a board of cards that you put anywhere, as in the app Muse. In the page it shows the whole board, small. Click it, and it fills the window. There, click twice on an empty place to write a note. Return starts a new line in it, and Esc ends the typing. Press Tab for a new note to the right of the one you're in, joined to it by a line, as in a mind map. ⇧Return makes a note under it. Drag a card to move it, and drag the circle on its corner to make it wider. The circle beside its right side draws a line from it to another card. Two fingers on the trackpad move round the board, and a pinch makes it bigger or smaller.
+
+```canvas
+text size 28 0,0 The bathroom
+note 0,60 Tiles to the ceiling
+note 300,60 Grey tiles on the walls
+note 300,140 White grout
+join 2 3
+join 2 4
+```
+
+Paste a picture, a web address or a wiki link like `[[Ideas]]` onto the board, and it becomes a card. You can drop pictures and pages from the Finder onto it too. A card of a page shows the page's own board, when it has one. Click the card twice to go into that board, and Back comes out again. The text tool writes words straight on the board, with no card round them, and the pen draws by hand. Each card is a line of the block, so ⌘Z takes back the last change.
+
 ## Signatures
 
 A code block in the language `signature` is a place to sign the page. Press in the box and drag, with the mouse or the trackpad, to draw your signature. Each stroke is a line of the block, so ⌘Z takes back the last one. The first stroke writes the day and the time, and the block then says who signed and when. While the mouse is over a signed block, a Clear button under the box takes the signature away.
@@ -929,7 +944,7 @@ You can write the file `.ladder` yourself too. It ends with a block like the one
 
 A zip file shows what it holds, without being unpacked: its folders and files, each file with its size and when it changed. Click a folder to open it, and click a file to see that one file. Ladder doesn't change a file that it shows from a zip file. Click Unpack to unpack the whole file beside itself, as two clicks in the Finder do.
 
-Right-click the page to cut, copy or paste. The menu's Insert item adds a new block where you clicked: a heading, a list, a to-do item, a table, a sheet, a spreadsheet, a diagram, a takeoff, a schedule, a chart, a board, a calendar, a sketch, a live block and more.
+Right-click the page to cut, copy or paste. The menu's Insert item adds a new block where you clicked: a heading, a list, a to-do item, a table, a sheet, a spreadsheet, a diagram, a takeoff, a schedule, a chart, a board, a calendar, a sketch, a canvas, a live block and more.
 
 A file can start with front matter: lines like `title: Notes` between two lines of `---`. Ladder shows it as a block of its own. To see how many words a page has, press ⌘⇧P and run Word Count. It leaves the front matter out, and it also says how many characters the page has and how long it takes to read.
 

@@ -75,6 +75,7 @@ const WHATS = (todo=what_is("to-do items", "to-dos", "todos", "todo", "to-do", "
                day=what_is("day sliders", "day slider", "day blocks", one="day slider", langs=("day",)),
                columns=what_is("columns", "column", one="set of columns", many="sets of columns", langs=("columns", "column")),
                sketch=what_is("sketches", "sketch", "drawings", one="sketch", langs=("sketch",)),
+               canvas=what_is("canvases", "canvas", "mind maps", one="canvas", langs=("canvas",)),
                signature=what_is("signatures", "signature", one="signature", langs=("signature",)),
                contact=what_is("contacts", "contact", "people", one="block of contacts", many="blocks of contacts", langs=("contact",)),
                gallery=what_is("galleries", "gallery", one="gallery", langs=("gallery",)),
