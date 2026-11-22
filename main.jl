@@ -31122,18 +31122,26 @@ onkey(m::SearchMenu, ev::KeyPress{Keys.tab}) = unmodified(ev) ? close_search_men
 
 title(path) = splitext(basename(path))[1]
 
+# A row of the file finder's list looks like a row of the command palette's
 describe(r::FileRow) = begin
   e = editor(r)
-  picked = r.finder == e.picked
+  c = omni(e)
+  on = r.finder == e.picked
+  # A line is between two rows, but not at an edge of the row that's chosen
+  ruled = r.finder > 1 && !on && e.picked != r.finder - 1
   changed = haskey(e.buffers, r.path) && dirty(e.buffers[r.path])
-  Row(width(grow=grow), height(28px), padding(0px, 10px), radius(6px), child_gap=8px, clip=true, name="File",
-      background(picked ? colours.active : ishovered(r) ? colours.hover : clear),
-    Icon("file-earmark-text", size=13px, color=colours.dim),
-    Box(width(grow=grow), Alignment.Start, label(basename(r.path), weight=picked ? "Semibold" : "")),
-    (changed ? (Box(width(6px), height(6px), radius(3px), background(colours.dim)),) : ())...)
+  # The letters that were typed are in bold where the name has them
+  parts = [Box(omni_label(text, 14, c.ink, weight=typed ? OMNI_MATCH : OMNI_NAME)) for (text, typed) in letter_runs(basename(r.path), input(e).text)]
+  Row(width(grow=grow), height(px(OMNI_ROW_ONE)), padding(14px, 0px), child_gap=10px, name="File",
+      background(on ? c.selected : c.drop), border(1px, :solid, ruled ? c.rule : clear)[:top],
+    Box(width(grow=grow), Alignment.Start, clip_x=true, Row(parts...)),
+    # A page with changes that aren't saved says so at the right, faint
+    (changed ? (Box(omni_label("Not saved", 12, on ? c.ink2 : c.muted)),) : ())...)
 end
 
 cursor(::FileRow) = :hand
+# The mouse over a row chooses it, as it does in the command palette
+onmouse(r::FileRow, ::MouseMove) = (editor(r).picked = r.finder; handled)
 
 onkey(r::FileRow, ::KeyPress{Keys.mouse_left}) = open!(editor(r), r.path)
 
@@ -32267,11 +32275,9 @@ end
 
 show_folder!(e, path) = (go_folder!(e, path); show_beside!(e, path); e)
 
-floating(children...; w) =
-  Column(fixed(w), radius(9px), Alignment.Start, background(colours.float), border(1px, :solid, colours.line), lifted, children...)
-
-# The backdrop dims the window behind the file finder
-describe(b::Backdrop) = Box(width(grow=grow), height(grow=grow), background(colours.shade))
+# The backdrop is behind the file finder, and a click on it closes the finder. It doesn't
+# dim the page, as the command palette doesn't.
+describe(b::Backdrop) = Box(width(grow=grow), height(grow=grow))
 onkey(b::Backdrop, ::KeyPress) = (e = editor(b); e.popup = :none; focus(e))
 
 # --- the menu of the page ------------------------------------------------------------------
@@ -32516,6 +32522,13 @@ context_menu!(e, w) = begin
 end
 
 # --- the file finder -----------------------------------------------------------------------
+#
+# ⌘O opens the file finder: a bar near the top of the window, with a list of
+# the folder's pages hanging under it. Type some letters of a page's name, in
+# order, and the list keeps the pages that have them. ↑ and ↓ choose a page,
+# Return opens it and Esc closes the finder. It has the command palette's
+# colours, its font and its rows. The list is in the same box as the field, so
+# the two are as wide as each other.
 
 open_finder!(e) = begin
   e.popup = :finder
@@ -32524,7 +32537,7 @@ open_finder!(e) = begin
   i.text = ""
   i.cursor = i.anchor = 0
   # The command palette has the same field, with other words in it and smaller text beside a chip
-  i.placeholder, i.font_size, i.font_family = "Find a file", 15px, SANS
+  i.placeholder, i.font_size, i.font_family = "Find a file", 15px, omni_font()
   list_files!(e)
   focus(i)
 end
@@ -32542,8 +32555,35 @@ matches(e) = begin
   end
 end
 
+"""
+The parts of `name`, each with true when its letters are ones that `typed`
+has. They're the letters that `matches` finds: the first of each, in order.
+"""
+letter_runs(name::AbstractString, typed::AbstractString) = begin
+  want = collect(lowercase(typed))
+  runs = Tuple{String,Bool}[]
+  j = 1
+  for c in name
+    hit = j <= length(want) && lowercase(c) == want[j]
+    hit && (j += 1)
+    !isempty(runs) && last(runs)[2] == hit ? (runs[end] = (last(runs)[1] * c, hit)) : push!(runs, (string(c), hit))
+  end
+  runs
+end
+
+const FINDER_TOP = 90.0     # how far the finder's bar is from the top of the window
+const FINDER_WIDE = 600.0   # how wide its bar is, when the window has room for it
+const FINDER_MOST = 9       # the most rows that its list shows
+
+"The files that the finder's list shows: as many as fit in the window, up to `FINDER_MOST`"
+finder_shown(e) = begin
+  # Besides the rows, the box has the field, 4 lines and 6px under the card. The window keeps 24px under the box.
+  room = num(window_size(e)[2]) - FINDER_TOP - OMNI_FIELD_H - 4 - 6 - 24
+  first(matches(e), clamp(floor(Int, room / OMNI_ROW_ONE), 1, FINDER_MOST))
+end
+
 finder_key!(e, K) = begin
-  found = matches(e)
+  found = finder_shown(e)
   # Esc, Return, ↓ and ↑ do what they do here only by themselves
   stepping = K in (Keys.escape, Keys.enter, Keys.down, Keys.up)
   stepping && !unmodified(e) && return nothing
@@ -32562,26 +32602,35 @@ finder_key!(e, K) = begin
   nothing
 end
 
-describe(f::FinderInput) = begin
-  e = editor(f)
-  Row(width(grow=grow), height(44px), padding(14px, 0px), child_gap=10px,
-    Icon("search", size=14px, color=colours.dim), input(e))
+"Where the finder's box is in the window: its left side, its top and its width. It's centred beside the sidebar."
+finder_place(e) = begin
+  W = num(window_size(e)[1])
+  left = lowered(e) === nothing ? num(panel_w(e)) * opened(e) : 0.0
+  room = W - left
+  wide = min(FINDER_WIDE, room - OMNI_LEFT - OMNI_RIGHT)
+  (x=left + round((room - wide) / 2), y=FINDER_TOP, w=wide)
 end
+
+# The text typed starts where the names of the files under it do: 6px to the card, its line, and 14px in the row
+describe(f::FinderInput) = Row(width(grow=grow), height(grow=grow), padding(0px, px(OMNI_BAR_X), 0px, 21px), name="File field", input(editor(f)))
 onkey(f::FinderInput, ::KeyPress{Keys.mouse_left}) = focus(input(editor(f)))
 cursor(::FinderInput) = :ibeam
 
 finder(e) = begin
+  c = omni(e)
   i = input(e)
-  i.color, i.placeholder_color = colours.ink, colours.faint
-  found = first(matches(e), 9)
-  picks = [node!(() -> FileRow(path=p, finder=n), e, (:pick, n, p)) for (n, p) in enumerate(found)]
-  list = isempty(picks) ?
-    Box(width(grow=grow), height(40px), label("No file has that name", color=colours.dim)) :
-    Column(width(grow=grow), Alignment.Start, padding(6px), child_gap=1px, picks...)
-  Row(width(grow=grow), height(grow=grow), Alignment.Start, justify=Alignment.Center, padding(90px, 0px, 0px, 0px),
-    floating(node!(FinderInput, e, :finder_input),
-             Box(width(grow=grow), height(1px), background(colours.line)),
-             list, w=460px))
+  i.color, i.placeholder_color, i.font_size, i.font_family = c.ink, c.muted, 15px, omni_font()
+  found = finder_shown(e)
+  rows = isempty(found) ?
+    Row(width(grow=grow), height(px(OMNI_ROW_ONE)), padding(14px, 0px), Box(omni_label("No file has that name", 14, c.ink, weight=OMNI_NAME))) :
+    Column(width(grow=grow), Alignment.Start, [node!(() -> FileRow(path=p, finder=n), e, (:pick, n, p)) for (n, p) in enumerate(found)]...)
+  at = finder_place(e)
+  # The field is at the top of the box, and the rows are under it on a card with a line round it, 6px inside the box
+  omni_at(at.x, at.y, Column(fixed(px(at.w)), Alignment.Start, radius(6px), background(c.drop), border(1px, :solid, c.drop_line),
+                             shadow(0, 4, 18, RGBA(0, 0, 0, e.theme == :night ? 0.5 : 0.14)), name="File finder",
+    Box(width(grow=grow), height(px(OMNI_FIELD_H)), node!(FinderInput, e, :finder_input)),
+    Box(width(grow=grow), padding(0px, 6px, 6px, 6px),
+      Column(width(grow=grow), Alignment.Start, radius(4px), clip=true, background(c.drop), border(1px, :solid, c.drop_line), rows))))
 end
 
 # --- the command palette --------------------------------------------------------------------
