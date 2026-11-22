@@ -36740,8 +36740,28 @@ that command, with the part as its A and the keyboard in the words.
 """
 code_act!(e, action::Symbol, node, m) = action == :show_code ? show_code!(e, m) : ask_with!(e, action, node)
 
-"True when `a` and `b` are the same thing of the window. A run of text is made again each time, so it's the same when it's the same columns of the same line."
-same_thing(a, b) = a === b || (a isa TextRun && b isa TextRun && (a.line, a.from, a.to) == (b.line, b.from, b.to))
+"""
+True when `a` and `b` are the same thing of the window. A run of text is made
+again each time, so it's the same when it's the same columns of the same line.
+A paragraph, a heading and each other block of the page is made again on each
+frame too, so it's the same when it's the same kind of block from the same line.
+"""
+same_thing(a, b) = a === b
+same_thing(a::TextRun, b::TextRun) = (a.line, a.from, a.to) == (b.line, b.from, b.to)
+same_thing(a::Block, b::Block) = a === b || (typeof(a) === typeof(b) && a.first == b.first && editor(a) === editor(b))
+
+"""
+The part of the window that is `x` in this frame. A block of the page is made
+again on each frame, so it's the block of this frame that's the same thing.
+It's nothing when the page doesn't show that block now.
+"""
+shown_now(x) = x
+shown_now(b::Block) = begin
+  parts = shown_parts(editor(b))
+  k = findfirst(p -> p isa Block && same_thing(p, b), parts)
+  k === nothing ? nothing : parts[k]
+end
+
 tool_input(t::CodePicker, w, ::KeyRelease{Keys.mouse_left}) = (was = t.swallow; t.swallow = false; was)
 # Esc takes the line of a thing that a click with ⌘ and ⌥ down chose away, stops an agent that's working,
 # and takes the card of an agent's answer away, while no popup and no search shows
@@ -36824,8 +36844,11 @@ draw_chosen(ctx, w, t::CodePicker) = begin
   empty!(t.buttons)
   t.chosen === nothing && return nothing
   node, m = t.chosen
-  r = try rect(node) catch; nothing end
+  # A paragraph or a heading that the click chose was made by the frame before this one
+  node = shown_now(node)
+  r = node === nothing ? nothing : try rect(node) catch; nothing end
   r === nothing && (t.chosen = nothing; return nothing)
+  t.chosen = (node, m)
   face = Face(SANS, "Medium", 11px, PICK_LINE, false)
   wides = [num(measure(face, words)) + 12 for (_, words) in CODE_BUTTONS]
   left, top, across, tall = pick_mark(ctx, w, r, "$(pick_name(node))  ·  $(code_label(m))"; room=sum(wides) + 4 * length(wides))

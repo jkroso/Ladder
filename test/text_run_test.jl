@@ -112,15 +112,42 @@ end
   @test wider isa K.ToChange && wider.node isa K.Paragraph
 end
 
-@testset "a click with ⌘ and ⌥ down, then Show Code on its line, shows the run's code" begin
-  move(spot(3, "struck")...)
+"Click with ⌘ and ⌥ down at the point `(x, y)` of the window, then draw some frames"
+cmd_opt_click(x, y) = begin
+  move(x, y)
   w.keys |= Keys.cmd; w.keys |= Keys.opt; frames(1)
   w.keys |= Keys.mouse_left
   onkey(w, KeyPress{Keys.mouse_left}(0, w))
   w.keys ⊻= Keys.mouse_left
   onkey(w, KeyRelease{Keys.mouse_left}(0, w))
   w.keys ⊻= Keys.cmd; w.keys ⊻= Keys.opt
-  frames()
+  frames(3)
+end
+
+@testset "a paragraph or a heading that a click with ⌘ and ⌥ down chose keeps its line" begin
+  # Each frame makes its blocks again, so the block that the click chose isn't the one that the next frame shows
+  t = K.code_picker(e)
+  for (i, text, T) in ((3, "Words", K.Paragraph), (1, "Runs", K.Heading), (7, "The end", K.Paragraph))
+    cmd_opt_click(spot(i, text)...)
+    @test t.chosen !== nothing && t.chosen[1] isa T && t.chosen[1].first == i
+    @test [a for (a, _) in t.buttons] == [:label, :show_code, :ask_for_change, :ask_about]
+    # What it holds is the block that this frame drew, so the buttons act on the page as it is
+    @test t.chosen !== nothing && rect(t.chosen[1]) !== nothing
+    onkey(w, KeyPress{Keys.escape}(0, w)); frames(1)
+    @test t.chosen === nothing
+  end
+  # A block is the same thing as the block from the same line that another frame made, and no other
+  move(spot(3, "Words")...)
+  a = K.code_under(w)[1]
+  frames(1)
+  b = K.code_under(w)[1]
+  @test a !== b && K.same_thing(a, b)
+  move(spot(7, "The end")...)
+  @test !K.same_thing(a, K.code_under(w)[1])
+end
+
+@testset "a click with ⌘ and ⌥ down, then Show Code on its line, shows the run's code" begin
+  cmd_opt_click(spot(3, "struck")...)
   # The run keeps its line, with its buttons. A run is made again each time, and it's still the same run.
   t = K.code_picker(e)
   @test t.chosen[1] isa K.TextRun && t.chosen[1].kind == "Struck" && [a for (a, _) in t.buttons] == [:label, :show_code, :ask_for_change, :ask_about]
