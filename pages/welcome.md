@@ -49,7 +49,7 @@ A wiki link with a ! before it, on a line of its own, shows a part of another pa
 
 ![[examples#Writing]]
 
-That part isn't a copy. It's the lines of examples.md. Click in it and type, and examples.md changes too. A change in examples.md shows here at once. ⌘S saves both pages. While the mouse is over the part, a line goes round it. The button with the other page's name opens that page at the part. Esc takes the caret back to this page, and so do ↑ on the part's first line and ↓ on its last line. Ted Nelson called this a transclusion. Notion calls it a synced block.
+That part isn't a copy. It's the lines of examples.md. Click in it and type, and examples.md changes too. A change in examples.md shows here at once. ⌘S saves both pages. While the mouse is over the part, a line goes round it. The button on that line, with the other page's name, opens that page at the part. Esc takes the caret back to this page, and so do ↑ on the part's first line and ↓ on its last line. Ted Nelson called this a transclusion. Notion calls it a synced block.
 
 What comes after the # says which part shows:
 

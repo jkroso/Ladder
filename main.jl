@@ -25698,6 +25698,13 @@ const DEEPEST_PART = 3
 "How tall the line is that shows in place of a part that isn't there"
 const PART_NOTE_H = 28px
 
+"""
+The room over the text of a part of another page. The button that opens the
+other page sits there, on the line round the part. A click goes only to what's
+inside its parent's box, so the button can't be over the line above the part.
+"""
+const PART_TAB = 15px
+
 "A part of another page, as a line of this page shows it"
 @def mutable struct Transclusion <: SemanticUI
   line::Int = 0            # the line of this page that names the part
@@ -25855,8 +25862,11 @@ transclusion_item(e, i, n) = begin
   own!(node!(Document, e, :document), v)
   v.line = i
   show_part!(v, e, String(strip(match(TRANSCLUSION, e.buf.lines[i])[1])))
-  Live(v, v.tall + 2LIVE_GAP)
+  Live(v, part_tall(v) + 2LIVE_GAP)
 end
+
+"How tall a part of another page is on the page that shows it, with the room over it for its button"
+part_tall(v::Transclusion) = isempty(v.note) ? PART_TAB + v.tall : v.tall
 
 """
 Find the part that `target`, like "Ideas#Plans", names, and lay out its lines
@@ -25948,7 +25958,7 @@ reveal_part!(e) = begin
   kept = pop!(e.nodes, :show_part, nothing)
   (kept === nothing || isempty(e.layout)) && return
   line, top, high = kept
-  at = item(e, line).top + LIVE_GAP + top
+  at = item(e, line).top + LIVE_GAP + PART_TAB + top
   scroll_into_view!(e.scroll, PAGE_TOP + at - 30px, PAGE_TOP + at + high + 40px)
 end
 
@@ -25957,12 +25967,13 @@ describe(v::Transclusion) = begin
     Icon("link-45deg", size=14px, color=colours.faint), Box(label(v.note, 13px, color=colours.dim)))
   doc = node!(Document, v.sub, :document)
   w = window_of(v)
+  page = Box(width(grow=grow), height(part_tall(v)), Alignment.Start, padding(PART_TAB, 0px, 0px, 0px), doc)
   # The name of the page that the part comes from shows at its top right while the mouse is over it or it has the keyboard
   on = ishovered(v) || (w !== nothing && w.focus === v.sub)
-  on || return Box(width(grow=grow), height(v.tall), Alignment.Start, doc)
+  on || return page
   source = node!(() -> PartSource(of=v), v.sub, :source)
-  Stack(width(grow=grow), height(v.tall), Alignment.Start, doc,
-    Row(width(grow=grow), Alignment.Start, justify=Alignment.End, offset_y=-LIVE_GAP - 20px, source))
+  Stack(width(grow=grow), height(part_tall(v)), Alignment.Start, page,
+    Row(width(grow=grow), Alignment.Start, justify=Alignment.End, padding(0px, 6px, 0px, 0px), source))
 end
 
 "Draw a line round a part of another page while the mouse is over it or it has the keyboard"
@@ -25971,8 +25982,16 @@ draw(ctx, size, ui::ConcreteRect, v::Transclusion) = begin
   w = window_of(v)
   on = w !== nothing && w.focus === v.sub
   (on || ishovered(v)) || return
-  round_box(ctx, num(ui.left) - RING_OUT, num(ui.top) - num(LIVE_GAP) + 2, num(ui.width) + 2RING_OUT, num(ui.height) + 2num(LIVE_GAP) - 4, 8.0,
+  top, high = num(ui.top) + num(PART_TAB), num(ui.height) - num(PART_TAB)
+  round_box(ctx, num(ui.left) - RING_OUT, top - num(LIVE_GAP) + 2, num(ui.width) + 2RING_OUT, high + 2num(LIVE_GAP) - 4, 8.0,
             line=on ? tint(colours.accent, 0.75) : colours.line, wide=on ? 1.5 : 1.0)
+  # The button that opens the other page sits on the line, so it's drawn again over the line
+  for row in ui.children
+    row isa ConcreteRect || continue
+    for chip in row.children
+      chip isa ConcreteRect && chip.from.from isa PartSource && draw(ctx, chip.size, chip)
+    end
+  end
 end
 
 # A click in the part's text is for its editor, which puts the caret there. A click that the part's editor didn't take,
@@ -25993,7 +26012,7 @@ live_cover(e, it::Item) = (c = node!(LiveCover, e, (:cover, it.first)); c.tall =
 
 describe(s::PartSource) = begin
   v = s.of
-  Row(height(18px), padding(0px, 7px), child_gap=4px, radius(9px), Alignment.Center,
+  Row(height(18px), padding(7px, 0px), child_gap=4px, radius(9px), Alignment.Center,
       background(ishovered(s) ? colours.active : colours.bg), border(1px, :solid, colours.line),
     Box(label(splitext(basename(v.path))[1], 11px, color=colours.dim)), Icon("box-arrow-up-right", size=10px, color=colours.dim))
 end

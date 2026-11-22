@@ -8,7 +8,7 @@
 @use Test: @test, @testset
 @use "../main" => K
 @use "github.com/jkroso/MiniFB.jl" Window KeyPress KeyRelease MouseMove Keys onkey onmouse Typed ontype
-@use "github.com/jkroso/UI.jl/Interface/draw" frame hittest clipboard
+@use "github.com/jkroso/UI.jl/Interface/draw" frame hittest clipboard rect
 @use "github.com/jkroso/UI.jl/Interface/objc" libobjc sel msg nsstring
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
 @use GeometryBasics: Vec2
@@ -252,8 +252,15 @@ end
 
 @testset "a link in the part opens its page in the window" begin
   v = part(line("![[costs#Prices]]"))
-  K.open_part!(v)
-  frames()
+  # The button shows while the mouse is over the part, and stays while the mouse goes on to it
+  at(spot(v, cline(v, "## Prices"))...)
+  source = v.sub.nodes[:source]
+  r = rect(source)
+  x, y = r.left + r.width / 2, r.top + r.height / 2
+  at(x, y)
+  @test hittest(w) === source
+  shot("part_button.png")
+  click((x, y))
   @test e.buf.path == costs
   @test e.buf.caret[1] == findfirst(==("## Prices"), e.buf.lines)
   K.go_back!(e); frames()
