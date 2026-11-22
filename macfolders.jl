@@ -39,6 +39,27 @@ date_of(path, key) = begin
   end
 end
 
+"""
+What the Finder calls the kind of the folder or the file at `path`, as its Kind
+column says it: `Folder`, `PNG image`, `Markdown`, or the app that opens it, like
+`Zed.app Document`. It's `Document` where macOS doesn't say. macOS answers in
+about 0.1 ms.
+"""
+finder_kind(path::AbstractString) = begin
+  Sys.isapple() || return isdir(path) ? "Folder" : "Document"
+  try
+    with_pool() do
+      url = msg(cls("NSURL"), "fileURLWithPath:", nsstring(path))
+      out = Ref{Object}(C_NULL)
+      ok = ccall((:objc_msgSend, libobjc), Bool, (Object, Object, Ref{Object}, Object, Object),
+                 url, sel("getResourceValue:forKey:error:"), out, nsstring("NSURLLocalizedTypeDescriptionKey"), C_NULL)
+      (ok && out[] != C_NULL) ? jstring(out[]) : "Document"
+    end
+  catch
+    "Document"
+  end
+end
+
 "When the folder or the file at `path` came into the folder that it's in, as the Finder's Date Added. It's when it last changed where macOS doesn't say."
 added(path::AbstractString) = something(date_of(path, "NSURLAddedToDirectoryDateKey"), Some(mtime(path)))
 

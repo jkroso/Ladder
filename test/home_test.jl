@@ -7,7 +7,7 @@
 
 @use Test: @test, @testset
 @use "../main" => K
-@use "github.com/jkroso/MiniFB.jl" Window KeyPress KeyRelease MouseMove Keys onkey onmouse
+@use "github.com/jkroso/MiniFB.jl" Window KeyPress KeyRelease MouseMove Keys onkey onmouse Typed ontype
 @use "github.com/jkroso/UI.jl/Interface/draw" frame rect popups
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
 @use GeometryBasics: Vec2
@@ -152,6 +152,13 @@ end
 menu() = (ps = [p for p in popups(w) if p.key == :menu]; isempty(ps) ? nothing : only(ps).content)
 choose(name) = (m = menu(); foreach(_ -> key(Keys.down), 1:findfirst(==(name), m.items)); key(Keys.enter))
 right_click(place) = (at(place); onkey(w, KeyPress{Keys.mouse_right}(0, w)); frames())
+typed(s) = (foreach(c -> ontype(w, Typed(c, w)), s); frames())
+"Sort the folder table `t` by the column `k` from its heading's menu, Z, the largest or the newest first when `desc` is true"
+sort_by(t, k, desc) = (click(middle(t.heads[k])); click(middle(t.parts[(:order, desc)])); K.close_folder_menu!(t); frames())
+"True when the menu of a column of a folder's table shows"
+column_menu() = any(p -> p.key == K.FOLDER_KEY, popups(w))
+"What's typed in the field `k` of the menus of the folder table `t`"
+field(t, k) = K.field_text(t, k)
 "Find the work again now, and wait for it"
 fresh!() = (H.forget!(); frames(1); H.wait!(); frames())
 
@@ -291,26 +298,26 @@ end
   shot("table")
   # A click on a heading sorts the table by its column, and a second click sorts it the other way
   by_name = ["Alpha", "Beta", "Code", "Desktop", "Gamma", "Library", "list.csv", "Mail", "page.md"]
-  click(middle(v.heads[:name]))
+  sort_by(v, :name, false)
   @test v.sort == :name && !v.desc && names() == by_name
   @test issorted([K.num(rect(row(n)).top) for n in by_name])
-  click(middle(v.heads[:name]))
+  sort_by(v, :name, true)
   @test v.desc && names() == reverse(by_name)
   # The largest first. A folder's size is of everything in it, and the two repositories have the most, in their .git folders.
   # Empty folders keep the sidebar's order, and the Library, which isn't read, comes last.
-  click(middle(v.heads[:size]))
+  sort_by(v, :size, true)
   @test v.sort == :size && v.desc
   @test sort(names()[1:2]) == ["Code", "Desktop"]
   @test names()[3:end] == ["Mail", "page.md", "list.csv", "Alpha", "Beta", "Gamma", "Library"]
   sizes = Dict(basename(it.path) => K.size_cell(it) for it in v.items)
   @test sizes["Mail"] == "16 bytes" && sizes["Alpha"] == "0 bytes" && sizes["Library"] == "" && sizes["page.md"] == "13 bytes"
   # A new column starts with the newest first, and a second click puts the oldest first
-  click(middle(v.heads[:when]))
+  sort_by(v, :when, true)
   @test v.sort == :when && v.desc && names() == order
-  click(middle(v.heads[:when]))
+  sort_by(v, :when, false)
   @test !v.desc && names() == reverse(order)
   shot("table-oldest")
-  click(middle(v.heads[:when]))
+  sort_by(v, :when, true)
   @test v.desc
   # A new file deep in a folder puts the folder first, as soon as macOS tells of it
   made("Mail/Inbox/2.eml", "Subject: hello\n\nhello\n")
@@ -333,13 +340,98 @@ end
   @test wait_until(() -> (t.read = 0.0; frames(1); only(t.items).known))
   @test isapprox(only(t.items).when, now - 0.5hour, atol=1)
   # Its own order, apart from the home folder's
-  click(middle(t.heads[:name]))
+  sort_by(t, :name, false)
   @test t.sort == :name && v.sort == :when
   # A click on a file shows it
   K.go_home!(e); frames()
   click(middle(row("page.md")))
   @test e.buf.path == page
   K.go_home!(e); frames()
+end
+
+@testset "a click on a heading opens its menu, which sorts the table and shows fewer rows" begin
+  K.go_home!(e); frames()
+  v = e.nodes[(:folder_table, home)]
+  v.read = 0.0; frames()
+  names() = Set(K.entry_name(it.object) for it in K.folder_filtered(v, v.items))
+  everything = Set(["page.md", "Code", "Desktop", "list.csv", "Mail", "Alpha", "Beta", "Gamma", "Library"])
+  @test names() == everything
+  # Each thing has the Finder's kind, which its icon shows. The heading over the icons opens the menu of the kinds.
+  @test all(it -> (it.kind == "Folder") == it.folder, v.items) && all(it -> !isempty(it.kind), v.items)
+  @test rect(v.heads[:kind]) !== nothing
+  # The name's menu has a field for words that a name holds, and it has the keyboard
+  click(middle(v.heads[:name]))
+  @test column_menu() && v.asking == :name && w.focus === v.fields[:name]
+  shot("name-menu")
+  typed("a")
+  @test names() == Set(["page.md", "Mail", "Alpha", "Beta", "Gamma", "Library"])
+  @test K.narrowed(v, :name) && K.narrowed(v)
+  # esc puts back what the column had, and closes the menu
+  key(Keys.escape)
+  @test !column_menu() && v.asking == :none && field(v, :name) == "" && names() == everything
+  # Return keeps what's typed, and a line over the rows has a button that shows every row again
+  click(middle(v.heads[:name])); typed("a"); key(Keys.enter)
+  @test !column_menu() && names() == Set(["page.md", "Mail", "Alpha", "Beta", "Gamma", "Library"])
+  shot("name-filtered")
+  click(middle(v.buttons[:clear]))
+  @test !K.narrowed(v) && names() == everything
+  # The size has two ends. A folder's size counts, and a folder that isn't read has none.
+  click(middle(v.heads[:size]))
+  @test w.focus === v.fields[:size_lo]
+  typed("10")
+  @test names() == Set(["page.md", "Mail", "Code", "Desktop"])
+  key(Keys.tab)
+  @test w.focus === v.fields[:size_hi]
+  typed("1 KB")
+  @test names() == Set(["page.md", "Mail"])
+  shot("size-menu")
+  # Words that aren't a size don't count, and the field says so
+  v.fields[:size_lo].text = "ten"
+  frames()
+  @test K.unread_field(v, :size_lo) && names() == Set(["page.md", "Mail", "list.csv", "Alpha", "Beta", "Gamma"])
+  key(Keys.escape)
+  @test !K.narrowed(v)
+  # The time has two ends, written as the column writes times, or as days
+  click(middle(v.heads[:when]))
+  typed("1 day ago")
+  @test names() == Set(["page.md", "Mail", "Code", "Desktop"])
+  key(Keys.tab); typed("1 h ago")
+  @test names() == Set(["Desktop"])
+  shot("when-menu")
+  key(Keys.enter)
+  K.clear_filters!(v); frames()
+  # The menu of the kinds has a tick for each kind, with its icon and how many there are
+  click(middle(v.heads[:kind]))
+  @test v.parts[(:kind, "Folder")].count == 7
+  click(middle(v.parts[(:kind, "Folder")]))
+  @test v.kinds == Set(["Folder"]) && names() == Set(["Code", "Desktop", "Mail", "Alpha", "Beta", "Gamma", "Library"])
+  shot("kind-menu")
+  # The menu's orders sort by its column
+  click(middle(v.parts[(:order, false)]))
+  @test v.sort == :kind && !v.desc
+  key(Keys.enter)
+  K.clear_filters!(v)
+  sort_by(v, :when, true)
+end
+
+@testset "the ends of a size or a time can be written in many ways" begin
+  @test K.read_size("10 MB") == 10_000_000 && K.read_size("1.5gb") == 1_500_000_000 && K.read_size("500k") == 500_000
+  @test K.read_size("300") == 300 && K.read_size("300 bytes") == 300 && K.read_size(" 2 GB ") == 2_000_000_000
+  @test K.read_size("ten") === nothing && K.read_size("5 parsecs") === nothing && K.read_size("") === nothing
+  noon = K.day_edge(K.Date(2026, 11, 23), false) + 12hour
+  start(y, m, d) = K.day_edge(K.Date(y, m, d), false)
+  @test K.read_when("3 days ago", false; now=noon) == noon - 72hour == K.read_when("3d", false; now=noon)
+  @test K.read_when("2 h ago", false; now=noon) == noon - 2hour == K.read_when("2 hours", true; now=noon)
+  @test K.read_when("5 min ago", false; now=noon) == noon - 300 && K.read_when("just now", true; now=noon) == noon
+  @test K.read_when("today", false; now=noon) == start(2026, 11, 23)
+  @test K.read_when("yesterday", false; now=noon) == start(2026, 11, 22)
+  @test K.read_when("yesterday", true; now=noon) ≈ start(2026, 11, 23) - 0.001
+  @test K.read_when("1 Nov 2026", false; now=noon) == start(2026, 11, 1) == K.read_when("1 nov", false; now=noon)
+  @test K.read_when("2026-11-01", false; now=noon) == start(2026, 11, 1) == K.read_when("1/11/2026", false; now=noon)
+  @test K.read_when("Nov 1", false; now=noon) == start(2026, 11, 1) == K.read_when("1 November", false; now=noon)
+  # A day with no year that's still to come this year is last year's
+  @test K.read_when("25 Dec", false; now=noon) == start(2025, 12, 25)
+  @test K.read_when("soon", false; now=noon) === nothing && K.read_when("", false) === nothing
 end
 
 @testset "a project's menu hides it, and the page shows it again" begin
