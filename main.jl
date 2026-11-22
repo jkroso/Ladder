@@ -43667,8 +43667,8 @@ end
 "Give the keyboard to the desktop that the page shows, or to the text when it shows none"
 focus_desktop!(e) = (v = get(e.nodes, (:desktop, e.buf.path), nothing); v isa DesktopView ? focus(v) : focus(e))
 
-"Open the icon called `name` of the desktop `v`, as a link to it does: a file shows in the page, and a folder in the sidebar"
-desktop_open!(v::DesktopView, name) = (show_path!(editor(v), joinpath(v.path, name)); nothing)
+"Open the icon called `name` of the desktop `v` in the page, as the Finder does: a file shows its page, and a folder its own page or a list of what's in it"
+desktop_open!(v::DesktopView, name) = (open_folder!(editor(v), joinpath(v.path, name)); nothing)
 
 onkey(v::DesktopView, ev::KeyPress{Keys.mouse_left}) = begin
   w = ev.window

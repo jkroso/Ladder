@@ -1020,7 +1020,7 @@ Ladder.DesktopDirectory
 ```
 ````
 
-Click an icon to choose it, and click it twice to open it. Hold ⌘ to choose more than one, or drag from the wallpaper to choose the icons in a box. Right-click the wallpaper to choose how the icons are laid out, as you do on the Mac. Sort By keeps them in an order. With None or Snap to Grid, you drag each icon to where you want it, and Ladder keeps its place. Clean Up puts the icons back in the grid. Drop an icon on a folder to move it into that folder. Right-click an icon for the menu of its file. Ladder's layout is its own: macOS doesn't let another app move the icons of the Mac's desktop, so those stay where they are.
+Click an icon to choose it, and click it twice to open it in the page, as the Finder opens a folder in its window. ← goes back to the desktop. Hold ⌘ to choose more than one, or drag from the wallpaper to choose the icons in a box. Right-click the wallpaper to choose how the icons are laid out, as you do on the Mac. Sort By keeps them in an order. With None or Snap to Grid, you drag each icon to where you want it, and Ladder keeps its place. Clean Up puts the icons back in the grid. Drop an icon on a folder to move it into that folder. Right-click an icon for the menu of its file. Ladder's layout is its own: macOS doesn't let another app move the icons of the Mac's desktop, so those stay where they are.
 
 Ladder knows some folders by itself, and shows each in its own way:
 

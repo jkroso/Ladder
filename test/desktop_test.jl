@@ -311,7 +311,7 @@ end
   key(Keys.escape)
 end
 
-@testset "two clicks open an icon: a file in the page, and a folder in the sidebar" begin
+@testset "two clicks open an icon in the page: a file, or a folder" begin
   click(icon("notes.md"))
   down(icon("notes.md"))
   up()
@@ -322,12 +322,23 @@ end
   @test K.go_back!(e)
   frames()
   @test e.buf.path == desk && K.page_covered(e)
+  # A folder shows in the page, in place of the desktop, and a hidden sidebar stays hidden
+  e.panel && K.toggle_panel!(e)
+  sleep(K.SLIDE_TIME + 0.05)
+  frames()
   click(icon("Projects"))
   down(icon("Projects"))
   up()
   frames()
+  @test e.buf.path == joinpath(desk, "Projects")
   @test e.folder == joinpath(desk, "Projects")
-  @test e.buf.path == desk   # the desktop still shows
+  @test !e.panel
+  @test K.go_back!(e)
+  frames()
+  @test e.buf.path == desk && K.page_covered(e)
+  K.toggle_panel!(e)
+  sleep(K.SLIDE_TIME + 0.05)
+  frames()
 end
 
 @testset "the Mac's wallpaper covers the desktop" begin
