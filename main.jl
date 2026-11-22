@@ -390,7 +390,7 @@
 @use "./notes" => Notes
 @use "./zip" => Zips
 @use "./macfolders" => Mac
-@use "./home" => Home
+@use "./folders" => Folders
 @use "./blog" => Blogs
 @use "github.com/jkroso/UI.jl/Interface/draw" Bubble
 @use "github.com/jkroso/UI.jl/Interface/draw" popups sync_mouse!
@@ -27840,7 +27840,7 @@ const COMMAND_GROUPS = [
   "Files and windows" => [
     Command(:save, "Save the file", :window, "cmd+s", (e, w, _) -> save_page!(e)),
     Command(:open, "Find a file by name", :window, "cmd+o", (e, w, _) -> open_finder!(e)),
-    Command(:home, "Show the home folder's page: your favourite folders, and what you worked on in the last 7 days", :window, "cmd+shift+h", (e, w, _) -> go_home!(e)),
+    Command(:home, "Open your home folder in the page", :window, "cmd+shift+h", (e, w, _) -> go_home!(e)),
     Command(:commands, "Show the command palette, to run a command by its name", :window, "cmd+shift+p", (e, w, _) -> toggle_palette!(e)),
     Command(:back, "Go back to the line or the file that showed before", :window, "cmd+opt+left", (e, w, _) -> go_back!(e)),
     Command(:forward, "Go forward again, to the line or the file that you went back from", :window, "cmd+opt+right", (e, w, _) -> go_forward!(e)),
@@ -31550,8 +31550,8 @@ file_act!(e, path, name; at=:sidebar) =
   name == "Copy Path" ? clipboard(path) :
   name == "Copy Link" ? clipboard(wiki_link(path)) :
   name == "Show in Finder" ? show_in_finder(path) :
-  name == "Add to Favourites" ? Home.favourite!(path) :
-  name == "Remove from Favourites" ? Home.unfavourite!(path) :
+  name == "Add to Favourites" ? Folders.favourite!(path) :
+  name == "Remove from Favourites" ? Folders.unfavourite!(path) :
   name == "Move to Trash" ? trash!(e, path) : nothing
 
 "Open a Finder window on the folder of the file at `path`, with the file selected"
@@ -46075,7 +46075,6 @@ end
 mac_kind(path::AbstractString) = begin
   Sys.isapple() || return nothing
   home = homedir()
-  path == home ? HomeDirectory :
   path == joinpath(home, "Downloads") ? DownloadsDirectory :
   path == joinpath(home, "Pictures") ? PicturesDirectory :
   path == Mac.trash() ? TrashDirectory :
@@ -46874,75 +46873,33 @@ onkey(v::TilesView, ev::KeyPress{K}) where K = begin
   handled
 end
 
-# --- the home folder ---------------------------------------------------------------------------
+# --- the home folder, and favourite folders ---------------------------------------------------
 #
-# The home folder has a page of its own, as Downloads has. It shows the
-# folders that you chose as favourites, and what you worked on in the last 7
-# days, as a project for each folder. home.jl keeps the favourites and finds
-# the work with Spotlight.
+# The home folder is a folder like any other: its page is the table of what's
+# in it. ⌘⇧H opens it, as it opens the home folder in the Finder.
 #
-#   - ⌘⇧H shows the home folder's page, as it shows the home folder in the
-#     Finder. A click on the home folder's name in the trail at the top of the
-#     sidebar shows it too.
-#   - A favourite is a folder. The folder's menu in the sidebar has Add to
-#     Favourites, and Remove from Favourites once it's one. The palette's
-#     command Go To Favourite goes to one from any page.
-#   - A click on a favourite opens its folder in the page, and leaves the
-#     sidebar as it is. Drag a favourite to put it in another place in the
-#     list. A right-click shows its menu.
-#   - Under the projects is a table of what's in the folder: the folders and
-#     files that the sidebar lists, each with its size and when it changed.
-#     The one that changed last is first. A click on the heading of a column
-#     sorts the table by that column, and a second click sorts it the other
-#     way. A folder's time is when anything in it last changed, at any depth,
-#     apart from hidden things. home.jl finds those times on a second thread,
-#     and hears of each change from macOS after that. While a folder is still
-#     being read, its time says so, and it sorts by its own time.
-#   - A project is a git repository. Its line says how many of its files
-#     changed, and when the last one did. A click on it opens its folder. A
-#     project's menu has Hide from This Page. The button Hidden Projects lists the hidden ones,
-#     and a click on one shows it on the page again.
-#
-# Any other folder shows the same way with a page of its own that ends with
-# `Ladder.HomeDirectory`. Its work is then what changed in that folder.
+# A favourite is a folder that you go to often. The folder's menu in the
+# sidebar has Add to Favourites, and Remove from Favourites once it's one. The
+# palette's command Go To Favourite opens one from any page. folders.jl keeps
+# the list.
 
-"The home folder: its page shows the favourite folders, and the work of the last 7 days by project"
-@def struct HomeDirectory <: AbstractDirectory end
-
-# What's in the home folder is a folder or a file like any other
-FS.kind(::HomeDirectory, path::FSPath) = folder_kind(path)
-
-push!(BLOCK_ICONS, "house", "folder-x", "eye-slash")
-entry_icon(::HomeDirectory) = "house"
-
-"The home folder that ⌘⇧H shows: the Mac's, unless a test names one of its own"
+"The home folder that ⌘⇧H opens: the Mac's, unless a test names one of its own"
 const HOME = Ref("")
 home_folder() = isempty(HOME[]) ? homedir() : HOME[]
 
-"Show the home folder's page. The sidebar lists the home folder, and a sidebar that's hidden stays hidden."
+"Open the home folder in the page. The sidebar lists the home folder, and a sidebar that's hidden stays hidden."
 go_home!(e) = open_folder!(e, home_folder())
 
-"A click on the home folder in the sidebar shows its page, and the sidebar lists what it holds"
-open!(e, d::HomeDirectory; record=true) = (open!(e, string(d.path); record); go_folder!(e, string(d.path)))
-page_view(e, d::HomeDirectory) = (path = string(d.path); node!(() -> HomeView(path=path), e, (:home, path)))
-
-"How many favourites there are, in words"
-favourites_words(n) = n == 1 ? "1 favourite" : "$n favourites"
-
-"How many files there are, in words"
-files_words(n) = n == 1 ? "1 file" : "$(commas(n)) files"
-
 "The item of a folder's menu that makes it a favourite, or takes it off the favourites"
-favourite_item(path) = Home.isfavourite(path) ? "Remove from Favourites" : "Add to Favourites"
+favourite_item(path) = Folders.isfavourite(path) ? "Remove from Favourites" : "Add to Favourites"
 
 # --- a table of what's in a folder ------------------------------------------------------------
 #
 # A folder that has no page of its own shows in the page as a table of its
-# folders and files, and so do a repository's page and the end of the home
-# folder's page. A row for each folder and file that the sidebar lists, with
+# folders and files, as the home folder does, and so does a repository's page. A row for each folder and file that the sidebar lists, with
 # its icon, its size and when it last changed. The icon is its kind. A
 # folder's size is of every file in it, at any depth, and its time is when
-# anything in it last changed: see `Home.newest` and `Home.sizes`. The one that
+# anything in it last changed: see `Folders.newest` and `Folders.sizes`. The one that
 # changed last is at the top.
 #
 # A click on a heading opens the menu of its column, as a CSV file's table
@@ -47028,6 +46985,8 @@ const FOLDER_ROWS_FIRST = 100
 const FOLDER_MENU_W = 260px
 "The key of the popup of that menu"
 const FOLDER_KEY = :folder_column
+# The app that's built has only the icons that it loaded when it was made
+push!(BLOCK_ICONS, "files", "funnel-fill")
 
 "The table of the folder at `path`, for a part of a page that `owner` draws. It keeps its order and what it shows while the window is open."
 folder_table!(e, owner, path) = get!(() -> own!(owner, FolderTable(path=path)), e.nodes, (:folder_table, path))
@@ -47045,9 +47004,9 @@ folder_items!(e, t::FolderTable) = begin
   found = d isa AbstractDirectory ? entries(e, d) : FSObject[]
   paths = String[joinpath(t.path, o.path.name) for o in found]
   # When anything in each folder last changed, for the folders that have been read
-  deep = Home.newest(t.path, [p for (p, o) in zip(paths, found) if o isa AbstractDirectory])
+  deep = Folders.newest(t.path, [p for (p, o) in zip(paths, found) if o isa AbstractDirectory])
   # How big each folder is, for the folders that have been read to the end
-  bytes = Home.sizes(t.path)
+  bytes = Folders.sizes(t.path)
   length(t.kindof) > 10_000 && empty!(t.kindof)
   t.items = map(zip(paths, found)) do (path, o)
     folder = o isa AbstractDirectory
@@ -47409,7 +47368,7 @@ folder_item_row(t::FolderTable, e, it::FolderItem) = begin
 end
 
 "What the table says of the size of `it`: nothing for a folder that Ladder doesn't read, like ~/Library"
-size_cell(it::FolderItem) = it.sized ? Zips.size_words(it.size) : Home.unread(it.path) ? "" : "Reading…"
+size_cell(it::FolderItem) = it.sized ? Zips.size_words(it.size) : Folders.unread(it.path) ? "" : "Reading…"
 
 describe(t::FolderTable) = begin
   e = editor(t)
@@ -47465,222 +47424,11 @@ end
 
 cursor(::FolderPage) = :arrow
 
-"What the page shows of the home folder: the favourite folders, and the work of the last 7 days"
-@def mutable struct HomeView <: SemanticUI
-  path::String = ""
-  rows::Dict{Any,PageRow} = Dict{Any,PageRow}()
-  buttons::Dict{Any,PageButton} = Dict{Any,PageButton}()
-  cards::Dict{String,Any} = Dict{String,Any}()   # the card of each favourite, by its folder
-  order::Vector{String} = String[]               # the favourites in the order that their cards show
-  cols::Int = 1                                  # how many cards there are in a row
-  all::Bool = false                              # it shows every project, not only the newest few
-  hidden::Bool = false                           # it lists the projects that you hid
-  press::Any = nothing                           # the favourite that the mouse went down on, and where
-  drag::Any = nothing                            # the favourite that's dragged, and the place in the list that it would go to
-  shown::Vector{String} = String[]               # the folders of the projects that show, from the top
-end
-
-"A favourite folder on the home folder's page"
-@def mutable struct FavouriteCard <: SemanticUI
-  path::String = ""
-  view::Any = nothing     # the HomeView that it's on
-  wide::Float64 = 200.0   # how wide it is
-  icon::Any = nothing     # the Finder's icon of the folder, or nothing until it's made
-end
-
-const CARD_H = 56.0       # how tall a favourite's card is
-const CARD_LEAST = 190.0  # how narrow a card can be before a row has one card fewer
-const CARD_GAP = 10.0     # between two cards
-"How many projects the page shows before the button that shows them all"
-const PROJECTS_FIRST = 8
-
-describe(c::FavouriteCard) = begin
-  v = c.view
-  dragged = v isa HomeView && v.drag !== nothing && v.drag[1] == c.path
-  there = isdir(c.path)
-  picture = c.icon === nothing ? Icon(there ? "folder" : "folder-x", size=22px, color=colours.dim) : Image(c.icon, fixed(32px), height(32px))
-  Row(fixed(px(c.wide)), height(px(CARD_H)), padding(12px, 0px), radius(8px), child_gap=10px, clip=true, name="Favourite",
-      background(dragged ? colours.active : ishovered(c) && v.drag === nothing ? colours.hover : colours.panel),
-      border(1px, :solid, colours.line),
-    Box(width(32px), picture),
-    # As tall as the card, so the clip that keeps a long name off the edge doesn't cut the bottoms of letters
-    Column(width(grow=grow), height(grow=grow), Alignment.Start, justify=Alignment.Center, child_gap=3px, clip=true,
-      Box(label(basename(c.path), 13px, weight="Semibold", color=there ? colours.ink : colours.faint)),
-      Box(label(there ? tilde(dirname(c.path)) : "This folder isn't there now", 11px, color=colours.faint))))
-end
-
-cursor(c::FavouriteCard) = :hand
-
-# The mouse going down only gets the card ready. Letting it go shows the folder, unless the card was dragged.
-# UI.jl gives the button's release to the part that has the keyboard, so the page takes the keyboard.
-onkey(c::FavouriteCard, ev::KeyPress{Keys.mouse_left}) = begin
-  v = c.view
-  focus(v)
-  v.press = (path=c.path, at=(num(ev.window.mouse[1]), num(ev.window.mouse[2])))
-  v.drag = nothing
-  handled
-end
-
-onkey(c::FavouriteCard, ev::KeyPress{Keys.mouse_right}) = (favourite_menu!(c.view, ev.window, c.path); handled)
-
-"The favourites of the page `v`, in the order that they show: with the one that's dragged in the place that it would go to"
-home_order(v::HomeView) = begin
-  order = filter(!=(""), copy(Home.favourites()))
-  d = v.drag
-  (d === nothing || !(d[1] in order)) && return order
-  filter!(!=(d[1]), order)
-  insert!(order, clamp(d[2], 1, length(order) + 1), d[1])
-  order
-end
-
-"The place in the list of favourites that a card dropped at `(x, y)` in the window goes to, from the places of the cards in the last frame"
-home_slot(v::HomeView, x, y) = begin
-  isempty(v.order) && return 1
-  r = rect(get(v.cards, v.order[1], nothing))
-  r === nothing && return 1
-  left, top, wide = num(r.left), num(r.top), num(r.width)
-  col = clamp(floor(Int, (x - left + CARD_GAP / 2) / (wide + CARD_GAP)), 0, v.cols - 1)
-  row = max(0, floor(Int, (y - top + CARD_GAP / 2) / (CARD_H + CARD_GAP)))
-  clamp(row * v.cols + col + 1, 1, length(v.order))
-end
-
-# Each move of a drag that started on a card comes here, from the card
-onmouse(v::HomeView, ev::MouseMove) = begin
-  p = v.press
-  # UI.jl sends a move just before the button's release, when the button is already up. The release ends the drag.
-  (p === nothing || !(Keys.mouse_left in ev.window.keys)) && return nothing
-  x, y = num(ev.position[1]), num(ev.position[2])
-  # A move of a few pixels is still a click
-  v.drag === nothing && hypot(x - p.at[1], y - p.at[2]) <= 4 && return handled
-  v.drag = (p.path, home_slot(v, x, y))
-  redraw_in!(v, 0)
-  handled
-end
-
-onkey(v::HomeView, ev::KeyRelease{Keys.mouse_left}) = begin
-  p, d = v.press, v.drag
-  v.press, v.drag = nothing, nothing
-  p === nothing && return nothing
-  d === nothing ? open_folder!(editor(v), p.path) : Home.move_favourite!(d...)
-  redraw_in!(v, 0)
-  handled
-end
-
-"Show the menu of the favourite at `path` on the page `v`"
-favourite_menu!(v::HomeView, w, path) = begin
-  e = editor(v)
-  items = ["Open in New Window", "Show in Finder", "Copy Path", "-", "Remove from Favourites"]
-  act(i) = (file_act!(e, path, get(items, i, "")); nothing)
-  off = isdir(path) ? Int[] : [1, 2]
-  system_menu(w, items, act; off) || drawn_menu!(w, items, act; off)
-  nothing
-end
-
-"Show the menu of the project of the folder at `path` on the page `v`"
-project_menu!(v::HomeView, w, path) = begin
-  e = editor(v)
-  items = ["Show in Finder", "Copy Path", favourite_item(path), "-", "Hide from This Page"]
-  act(i) = begin
-    item = get(items, i, "")
-    item == "Hide from This Page" ? Home.hide!(path) : file_act!(e, path, item)
-    redraw_in!(v, 0)
-    nothing
-  end
-  system_menu(w, items, act) || drawn_menu!(w, items, act)
-  nothing
-end
-
-# A right-click on a project shows its menu. The table shows the menu of its own rows.
-onkey(v::HomeView, ev::KeyPress{Keys.mouse_right}) = begin
-  for (key, r) in v.rows
-    (key isa Tuple && key[1] == :project && ishovered(r)) || continue
-    project_menu!(v, ev.window, key[2])
-    return handled
-  end
-  nothing
-end
-
-"The line of the project `p` on the page `v`: its name, its folder, how many of its files changed, and when the last one did"
-project_line(v::HomeView, e, p::Home.Project) =
-  page_row!(v, (:project, p.path), _ -> (open_folder!(e, p.path); nothing),
-    Box(fixed(14px), Icon("git", size=13px, color=colours.dim)),
-    Box(label(p.path == v.path ? "Home" : basename(p.path), 13px, weight="Semibold")),
-    (p.path == v.path ? () : (Box(label(tilde(dirname(p.path)), 12px, color=colours.faint)),))...,
-    Box(width(grow=grow)),
-    Box(label(files_words(p.count) * "  ·  " * Git.ago(p.when), 12px, color=colours.dim)))
-
-describe(v::HomeView) = begin
-  e = editor(v)
-  # The button came up over another part of the window, so the page never heard it: the drag ends with no drop
-  w = window_of(v)
-  w !== nothing && !(Keys.mouse_left in w.keys) && ((v.press, v.drag) = (nothing, nothing))
-  hid = Home.hidden()
-  work = filter(p -> !(p.path in hid), Home.recent(v.path))
-  # While Spotlight is asked, the page looks again soon. After that, the times of the work stay right to the minute.
-  redraw_in!(e, Home.busy() || !Home.found() ? 0.5 : 30)
-  # The favourites, in rows of as many cards as fit
-  r = rect(v)
-  wide = (r === nothing ? num(e.width) : num(r.width)) - 16
-  v.cols = max(1, floor(Int, (wide + CARD_GAP) / (CARD_LEAST + CARD_GAP)))
-  card_w = floor((wide - CARD_GAP * (v.cols - 1)) / v.cols)
-  v.order = home_order(v)
-  budget = Ref(4)
-  cards = map(v.order) do path
-    c = get!(() -> own!(v, FavouriteCard(path=path, view=v)), v.cards, path)
-    c.wide = card_w
-    c.icon === nothing && (c.icon = filelist_icon(e, path, budget))
-    c
-  end
-  length(v.cards) > length(v.order) + 50 && filter!(kv -> kv[1] in v.order, v.cards)
-  grid = isempty(cards) ?
-    (page_note("No favourites yet. Right-click a folder in the sidebar and choose Add to Favourites."),) :
-    (Column(width(grow=grow), Alignment.Start, padding(8px, 0px), child_gap=px(CARD_GAP),
-            [Row(child_gap=px(CARD_GAP), cards[i:min(i + v.cols - 1, end)]...) for i in 1:v.cols:length(cards)]...),)
-  # The work, the newest project first
-  shown = v.all ? work : work[1:min(PROJECTS_FIRST, end)]
-  v.shown = [p.path for p in shown]
-  more = length(work) - length(shown)
-  lines = Any[]
-  !Home.found() && push!(lines, page_note("Looking for what changed…"))
-  Home.found() && isempty(work) && push!(lines, page_note("No git repository in this folder changed in the last 7 days."))
-  foreach(p -> push!(lines, project_line(v, e, p)), shown)
-  # The page's one button lists the projects that you hid. The eye is open while it lists them.
-  buttons = isempty(hid) ? () : (page_button!(v, :hidden, _ -> (v.hidden = !v.hidden; nothing), icon=v.hidden ? "eye" : "eye-slash",
-                                              words="Hidden Projects · $(length(hid))"),)
-  about = join(filter(!isempty, [favourites_words(length(v.order)),
-                                 Home.found() ? (length(work) == 1 ? "1 recent project" : "$(length(work)) recent projects") : ""]), "  ·  ")
-  Column(width(grow=grow), Alignment.Start, name="Home",
-    page_title("house", "Home", about),
-    (isempty(buttons) ? () : (Row(padding(8px, 0px), child_gap=8px, buttons...),))...,
-    Box(height(18px)),
-    page_heading("Favourites"),
-    grid...,
-    Box(height(18px)),
-    page_heading("Worked on in the last 7 days"),
-    lines...,
-    (more > 0 ? (Row(padding(8px, 8px), page_button!(v, :more, _ -> (v.all = true; nothing), words="Show $more More")),) :
-     v.all && length(work) > PROJECTS_FIRST ? (Row(padding(8px, 8px), page_button!(v, :more, _ -> (v.all = false; nothing), words="Show Fewer")),) : ())...,
-    (v.hidden && !isempty(hid) ?
-      (Box(height(18px)), page_heading("Hidden projects"),
-       [page_row!(v, (:hidden, path), _ -> (Home.unhide!(path); nothing),
-          Box(fixed(14px), Icon("eye-slash", size=12px, color=colours.faint)),
-          Box(label(basename(path), 13px, color=colours.dim)),
-          Box(label(tilde(dirname(path)), 12px, color=colours.faint)),
-          Box(width(grow=grow)),
-          Box(label("Show on This Page", 12px, color=colours.accent))) for path in hid]...) : ())...,
-    # Last, a table of what's in the folder
-    Box(height(18px)),
-    page_heading("Folders and files"),
-    folder_table!(e, v, v.path))
-end
-
-cursor(::HomeView) = :arrow
-
 "A favourite folder, for a command to take"
 struct Favourite
   path::String
 end
-choices_for(::Type{Favourite}, e) = [Favourite(p) for p in Home.favourites()]
+choices_for(::Type{Favourite}, e) = [Favourite(p) for p in Folders.favourites()]
 worded(f::Favourite) = basename(f.path)
 sidenote(f::Favourite) = tilde(dirname(f.path))
 runs_at_once(::Val{:go_to_favourite}) = true
@@ -47689,13 +47437,13 @@ runs_at_once(::Val{:go_to_favourite}) = true
 go_to_favourite!(e, favourite::Favourite) = (open_folder!(e, favourite.path); nothing)
 add_command!(go_to_favourite!, title="Go to one of the folders that you made a favourite")
 
-"Make the folder `d` a favourite, so the home folder's page shows it"
-add_to_favourites!(d::AbstractDirectory) = (Home.favourite!(path_of(d)); nothing)
-"Take the folder `d` off the favourites of the home folder's page"
-remove_from_favourites!(d::AbstractDirectory) = (Home.unfavourite!(path_of(d)); nothing)
+"Make the folder `d` a favourite, so Go To Favourite goes to it"
+add_to_favourites!(d::AbstractDirectory) = (Folders.favourite!(path_of(d)); nothing)
+"Take the folder `d` off the favourites"
+remove_from_favourites!(d::AbstractDirectory) = (Folders.unfavourite!(path_of(d)); nothing)
 let group = "The file or the folder in focus"
-  add_command!(add_to_favourites!; group, title="Make the folder a favourite, so the home folder's page shows it")
-  add_command!(remove_from_favourites!; group, title="Take the folder off the favourites of the home folder's page")
+  add_command!(add_to_favourites!; group, title="Make the folder a favourite, so Go To Favourite goes to it")
+  add_command!(remove_from_favourites!; group, title="Take the folder off the favourites, so Go To Favourite doesn't list it")
 end
 
 # --- a folder that's a blog ------------------------------------------------------------------
