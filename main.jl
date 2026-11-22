@@ -1330,7 +1330,7 @@ end
 "A heading or a component of a file, as the sidebar lists it"
 struct Entry
   line::Int       # where it starts
-  level::Int      # a heading's level. A component has level 7, so it goes in the heading above it.
+  level::Int      # a heading's level. A component has level 7, so it goes in the heading above it. A run of text in a line, in the top bar's path, has 8.
   title::String
   icon::String
   caret::Int      # the line the caret goes to: the heading's own, or the line after a component
@@ -30025,7 +30025,9 @@ end
 # After the file's name come the headings over the caret, from the biggest,
 # and the component that the caret is on: `welcome.md › H2 › Sheet`. A heading
 # shows only its mark, so the path stays short, and a component its icon and
-# the name of its kind, as the sidebar has them. The bar shows them
+# the name of its kind, as the sidebar has them. When the caret is in inline
+# code, a link, bold words or another run of a line that's drawn its own way,
+# that run comes last, by its kind: `welcome.md › H2 › Code`. The bar shows them
 # after the name all the time, and the path shows them too. A click on a
 # heading of the path puts the caret on it. A page that's only read has no
 # caret, and so none.
@@ -30112,9 +30114,10 @@ trail_parts_wide(e, parts) = searchable(e) ? parts_wide(parts) + (isempty(parts)
 
 """
 The headings over the caret, from the biggest, then the component that the
-caret is on, if it's on one, as the sidebar names them. The path in the top
-bar shows them after the file's name. A page with no caret has none: one
-that's only read, one that Ladder only shows, and one that isn't Markdown.
+caret is on, if it's on one, as the sidebar names them, then the run of text
+that the caret is in, like inline code or a link (see `caret_run`). The path in
+the top bar shows them after the file's name. A page with no caret has none:
+one that's only read, one that Ladder only shows, and one that isn't Markdown.
 """
 focus_parts(e) = begin
   b = e.buf
@@ -30140,7 +30143,35 @@ focus_parts(e) = begin
       on = line <= close ? x : nothing
     end
   end
-  on === nothing ? heads : push!(heads, on)
+  on === nothing || push!(heads, on)
+  run = caret_run(b)
+  run === nothing ? heads : push!(heads, run)
+end
+
+"The icon of each kind of run of text in the path in the top bar, by the name that `span_kind` gives it"
+const RUN_ICONS = Dict("Code" => "code", "Link" => "link-45deg", "Wiki link" => "link", "Footnote" => "superscript",
+                       "Value" => "lightning-charge", "Comment" => "chat-left-text", "Highlighted" => "highlighter",
+                       "Formula" => "plus-slash-minus", "Struck" => "type-strikethrough", "Bold" => "type-bold",
+                       "Bold italic" => "type-bold", "Italic" => "type-italic")
+push!(BLOCK_ICONS, values(RUN_ICONS)...)
+
+"""
+The run of text that the caret is in, as the last part of the path in the top
+bar: inline code, a link, bold words, or another run that's drawn its own way,
+as ⌘⌥ picks them. Its title is its kind, like Code, and its level is 8, deeper
+than a component's. It's nothing on plain words, and on a line with no runs,
+like a line of a code block. The caret is in a run from just before its first
+letter to just after its last, inside its markup.
+"""
+caret_run(b) = begin
+  line, col = b.caret
+  kinds(b)[line].kind in (TEXT_KINDS..., Kind.table) || return nothing
+  for s in richspans(b, line)[2]
+    (!s.markup && s.col <= col <= s.col + length(s.text)) || continue
+    kind = span_kind(s.link, s, israw(b, line))
+    kind === nothing || return Entry(line, 8, kind, RUN_ICONS[kind], line)
+  end
+  nothing
 end
 
 """
@@ -40951,18 +40982,26 @@ or nothing for a run of plain words. `s` is the span of the line that it's
 part of, or nothing. `raw` is true while the line's markup shows.
 """
 run_kind(seg::Seg, s, raw::Bool) = begin
-  looks = which(face, Tuple{Face,Span})
   isbox(seg) && return ("To-do box", which(todo_box, Tuple{Seg}))
-  startswith(seg.link, '^') && return ("Footnote", which(describe, Tuple{Seg}))
-  isempty(seg.link) || return (wikitarget(seg.link) === nothing ? "Link" : "Wiki link", looks)
-  (s === nothing || s.markup) && return nothing
-  s.live && !raw && return ("Value", which(inline, Tuple{Any,Int,Span,Face}))
-  s.code && return ("Code", which(describe, Tuple{Seg}))
-  s.comment && return ("Comment", looks)
-  s.highlit && return ("Highlighted", which(describe, Tuple{Seg}))
-  s.math ? ("Formula", looks) : s.strike ? ("Struck", looks) :
-  s.bold && s.italic ? ("Bold italic", looks) : s.bold ? ("Bold", looks) : s.italic ? ("Italic", looks) : nothing
+  kind = span_kind(seg.link, s, raw)
+  kind === nothing && return nothing
+  kind, (kind in ("Footnote", "Code", "Highlighted") ? which(describe, Tuple{Seg}) :
+         kind == "Value" ? which(inline, Tuple{Any,Int,Span,Face}) : which(face, Tuple{Face,Span}))
 end
+
+"""
+What a run of a line's text is, like "Link" or "Code", or nothing for plain
+words and markup. `link` is where the run goes, when it's part of a link. `s`
+is the span of the line that it's part of, or nothing. `raw` is true while the
+line's markup shows: inline code that runs is then code, and not its value.
+"""
+span_kind(link, s, raw::Bool) =
+  startswith(link, '^') ? "Footnote" :
+  !isempty(link) ? (wikitarget(link) === nothing ? "Link" : "Wiki link") :
+  s === nothing || s.markup ? nothing :
+  s.live && !raw ? "Value" : s.code ? "Code" : s.comment ? "Comment" : s.highlit ? "Highlighted" :
+  s.math ? "Formula" : s.strike ? "Struck" :
+  s.bold && s.italic ? "Bold italic" : s.bold ? "Bold" : s.italic ? "Italic" : nothing
 
 """
 The run of text at the point `(x, y)` of the window of `e` that's drawn its

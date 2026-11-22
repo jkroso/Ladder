@@ -312,3 +312,39 @@ end
   click((550, 500))
   @test !showing(K.TS_KEY) && w.focus === e
 end
+
+@testset "in inline code, a link or bold words, the path ends with that run, by its kind" begin
+  runs = made(joinpath(dir, "runs.md"), """
+  # Runs
+
+  Use `sheet` blocks, **bold** words and a [link](https://example.com).
+  """)
+  K.open!(e, runs); frames()
+  text = e.buf.lines[3]
+  col(s) = findfirst(s, text)[1] - 1   # the column of the first letter of `s`, as the caret counts them
+  on!(c) = (b = e.buf; b.reading = false; b.caret = b.anchor = (3, c); frames())
+  last_part() = (p = K.focus_parts(e); isempty(p) ? nothing : (p[end].title, p[end].icon, p[end].level))
+  on!(col("sheet") + 2)
+  @test last_part() == ("Code", "code", 8)
+  # From just before its first letter to just after its last
+  on!(col("sheet")); @test last_part()[1] == "Code"
+  on!(col("sheet") + 5); @test last_part()[1] == "Code"
+  # Past the markup round it, the caret is on plain words, and the path ends with the heading
+  on!(col("sheet") - 1); @test last_part()[1] == "Runs"
+  on!(col("sheet") + 6); @test last_part()[1] == "Runs"
+  on!(col("bold") + 1); @test last_part()[1:2] == ("Bold", "type-bold")
+  on!(col("link") + 1); @test last_part()[1:2] == ("Link", "link-45deg")
+  on!(1); @test last_part()[1] == "Runs"
+  # The path over the bar shows it too, after the heading, as the last part: no click, and no › after it
+  on!(col("sheet") + 2)
+  hover!()
+  @test titles() == ["Runs", "Code"]
+  @test rect(drop(1)).left < rect(trail().marks[2]).left
+  # Nothing follows it: it ends the path, inside the path's own room at its end
+  r, v = rect(trail().marks[2]), rect(trail())
+  @test 0 <= K.num(v.left + v.width) - K.num(r.left + r.width) <= K.num(K.TT_EDGE) + 2
+  shot("run")
+  # On the heading's line, the caret is on no run
+  b = e.buf; b.caret = b.anchor = (1, 3); frames()
+  @test [x.title for x in K.focus_parts(e)] == ["Runs"]
+end
