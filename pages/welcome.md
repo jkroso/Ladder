@@ -96,7 +96,7 @@ The words can be `every day`, `every 2 weeks`, `every month`, `every year`, `dai
 
 After those words, a limit says when it stops: `for 3 days`, `for a week`, `for 6 months`, `4 times` or `once`. Each new item has what's left of the limit, so `Water the slab every day for 3 days` adds an item with `for 2 days`, then one with `for 1 day`. A tick of that one adds nothing.
 
-On a page with a `schedule` block, an item that repeats has a bar for each time that it's due.
+On a page with a `schedule` block, an item that repeats has a bar for each time that it's due. Another task can wait for one of those times, and one time can wait for another task.
 
 ## Tables
 

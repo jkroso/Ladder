@@ -128,12 +128,58 @@ end
   @test S.runs(slab, d(30), false) == one(1, 2) && S.last_day(slab, false) == d(2)
   # Seven times in two weeks. The run that's due on Sunday 22 is on Monday 23, and Saturday 28 on Monday 30.
   @test S.runs(hose, d(30), false) == one(2, 4, 7, 8, 10, 14) && S.last_day(hose, false) == d(14)
-  @test S.runs(hose, d(30), true) == one(2, 4, 6, 8, 10, 12)
+  every = S.plan!(S.schedule(["days: every day"]), S.todos(page), today=MON)[2]
+  @test S.runs(every, d(30), true) == one(2, 4, 6, 8, 10, 12)
   # From a Friday, the runs that are due on Saturday and Sunday are one run on Monday. A run that's left out doesn't count, so there are still three.
   @test (mop.start, S.runs(mop, d(30), false)) == (d(4), one(7, 8)) && S.last_day(mop, false) == d(8)
   @test S.running(slab, d(2), false) && !S.running(slab, d(3), false)
   # A task that doesn't repeat has no last day of its own
   @test S.last_day(dig, false) === nothing
+end
+
+@testset "a link to or from one time of a task that repeats" begin
+  page = ["- [ ] Pour the slab", "- [ ] Water the slab every day for 3 days", "- [ ] Cut the joints",
+          "- [ ] Take the forms off", "- [ ] Book the pump"]
+  W = "Water the slab every day for 3 days"
+  s = S.schedule(["$W | after Pour the slab", "Cut the joints | after time 2 of $W", "Take the forms off | after $W",
+                  "Book the pump | 5 days"])
+  plan() = S.plan!(s, S.todos(page), today=MON)
+  d(n) = MON + Day(n)
+  ts = plan()
+  pour, water, cut, forms, pump = ts
+  # The joints wait for the second time, and the forms for the last, as the name alone says
+  @test (water.start, water.runs) == (d(1), [(d(2), d(2)), (d(3), d(3))])
+  @test (cut.start, cut.after, cut.after_time) == (d(3), [2], [2]) && (forms.start, forms.after_time) == (d(4), [0])
+  @test S.links(ts) == [(1, 0, 2, 1), (2, 2, 3, 1), (2, 0, 4, 1)]
+  @test S.whole(water, 3) == 0 && S.whole(water, 2) == 2 && S.whole(pour, 1) == 0 && S.bar_of(water, 0) == 3
+  @test S.time_days(water, 3, false) == (d(3), d(3)) && S.time_days(water, 4, false) === nothing
+  # A time can wait for another task. It moves, and the times after it move after it.
+  @test S.link!(s, ts, 5, 2; to=2) == :ok
+  @test S.written(s)[end] == "time 2 of $W | after Book the pump"
+  ts = plan()
+  # The pump takes Monday 16 to Friday 20, so the second time is on Monday 23 and the third on Tuesday 24
+  @test ts[2].runs == [(d(7), d(7)), (d(8), d(8))] && ts[3].start == d(8) && ts[4].start == d(9)
+  @test (5, 0, 2, 2) in S.links(ts)
+  # A link that would make a time wait for itself, through other tasks, isn't made
+  @test S.link!(s, ts, 3, 2; to=2) == :loop && S.link!(s, ts, 4, 2; to=3) == :loop
+  @test S.link!(s, ts, 2, 3; from=3) == :ok && S.link!(s, ts, 5, 2; to=2) == :there && S.link!(s, ts, 2, 2; to=3) == :same
+  ts = plan()
+  @test ts[3].after == [2, 2] && ts[3].after_time == [2, 3] && ts[3].start == d(9)
+  # A link to a time is taken away, and the line of a time that says nothing goes
+  S.unlink!(s, ts, 5, 2; to=2)
+  S.unlink!(s, ts, 2, 3; from=3)
+  @test !any(startswith("time 2"), S.written(s)) && plan()[2].runs == [(d(2), d(2)), (d(3), d(3))]
+  # A renamed task's times keep their links
+  page[2] = "- [ ] Water the slab each day for 3 days"
+  @test S.link!(s, plan(), 5, 2; to=3) == :ok
+  page[2] = "- [ ] Water the slab every day for 3 days, gently"
+  ts = plan()
+  @test "Cut the joints | after time 2 of Water the slab every day for 3 days, gently" in S.written(s)
+  # The item doesn't repeat now, so the time lines wait to be needed again, and the task is one bar
+  @test isempty(ts[2].runs) && ts[3].start == d(2)
+  # A task that the page doesn't have any more takes its times with it
+  S.prune!(s, S.todos(page[[1, 3, 4, 5]]))
+  @test S.written(s) == ["Book the pump | 5 days"]
 end
 
 @testset "a task that was renamed" begin

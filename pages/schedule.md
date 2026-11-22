@@ -55,4 +55,6 @@ Add a to-do item to the list, and the schedule has a bar for it. Change the word
 
 A to-do item that repeats, like `- [ ] Water the slab every 2 days`, has a bar for each time that it's due. A bar that's due on a day with no work moves to the next working day. Drag any of its bars to move them all. On another day of the slider, the bars before that day show as done, but the item stays open, because it's due again. An item with a limit, like `- [ ] Water the slab every day for 3 days`, has that many bars in all. After its last bar, the slider shows it as done.
 
+Each bar of an item that repeats is like a task of its own. Put the mouse on a bar, and drag from its circle to another task. That task then waits for that time of the item. Drag from another task's circle to one bar, and that time waits for the task. The times after it move after it. The circle after the last bar is for the item as a whole, so a task linked from it waits for the last time. The block's lines call one time `time 2 of` and the item's words.
+
 Every change goes into the block's lines, so the file holds the whole schedule. To see the lines, hold ⌥ and click the block.

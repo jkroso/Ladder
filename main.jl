@@ -9654,8 +9654,44 @@ task_bar(v::ScheduleView, i::Int) = (t = v.tasks[i]; bar_box(v, i, t.start, t.fi
 task_runs(v::ScheduleView, i::Int) =
   v.zoom > 0 ? Schedules.runs(v.tasks[i], numday(v.at + v.box[3] / v.zoom), v.data.weekends) : Tuple{Date,Date}[]
 
-"The middle of the circle after the bar of the task at place `i`"
-knob(v::ScheduleView, i::Int) = (b = task_bar(v, i); (b[1] + b[3] + KNOB_GAP, b[2] + b[4] / 2))
+"Where the bar of the time `k` of the task at place `i` is in the window: its first bar when `k` is 1. Nothing when it has no such time."
+time_bar(v::ScheduleView, i::Int, k::Int) = begin
+  k == 1 && return task_bar(v, i)
+  d = Schedules.time_days(v.tasks[i], k, v.data.weekends)
+  d === nothing ? nothing : bar_box(v, i, d...)
+end
+
+"The bars of the task at place `i` that are in sight, or before them: its first, then each time after it up to the last day in sight"
+row_bars(v::ScheduleView, i::Int) = [task_bar(v, i); [bar_box(v, i, a, z) for (a, z) in task_runs(v, i)]]
+
+"""
+The middle of the circle that a link is dragged from, for the bar `b`, when the
+next bar of its task is `n`, or nothing: after the bar, or on its top right
+corner when `n` leaves no room after it. And true when it's on the corner.
+"""
+knob_place(b, n) = n === nothing || n[1] - (b[1] + b[3]) >= KNOB_GAP + KNOB + 3 ?
+  ((b[1] + b[3] + KNOB_GAP, b[2] + b[4] / 2), false) : ((b[1] + b[3] - KNOB - 2, b[2]), true)
+
+"The middle of the circle that a link is dragged from, for the time `k` of the task at place `i`"
+knob(v::ScheduleView, i::Int, k::Int=1) = knob_place(time_bar(v, i, k), time_bar(v, i, k + 1))[1]
+
+"Which time of the task at place `i` has its bar at `x` across the window: its number, or 1 when no later time has"
+time_at(v::ScheduleView, i::Int, x::Real) = begin
+  for (k, (a, z)) in enumerate(task_runs(v, i))
+    rx, _, rw, _ = bar_box(v, i, a, z)
+    rx <= x < rx + rw && return k + 1
+  end
+  1
+end
+
+"The task at place `i` in words, with the day of its time `k` when it repeats: “Water the slab” on Wed 9 Dec"
+time_words(v::ScheduleView, i::Int, k::Int) = begin
+  t = v.tasks[i]
+  words = "“$(t.todo.name)”"
+  Schedules.repeats(t.todo) === nothing && return words
+  d = Schedules.time_days(t, k, v.data.weekends)
+  d === nothing ? words : words * " on " * Schedules.short(d[1])
+end
 
 "The place of the task whose row is `y` down the window, or nothing"
 row_at(v::ScheduleView, y::Real) = begin
@@ -9664,12 +9700,15 @@ row_at(v::ScheduleView, y::Real) = begin
 end
 
 """
-The corners of the arrow from the end of task `a`'s bar to the start of task
-`b`'s. Where the bars leave no room to turn between them, it goes round,
+The corners of the arrow from the end of the bar of time `ka` of task `a` to
+the start of the bar of time `kb` of task `b`, or nothing when one has no such
+time. Where the bars leave no room to turn between them, it goes round,
 between two rows.
 """
-link_points(v::ScheduleView, a::Int, b::Int) = begin
-  from, to = task_bar(v, a), task_bar(v, b)
+link_points(v::ScheduleView, a::Int, b::Int) = link_points(v, a, 1, b, 1)
+link_points(v::ScheduleView, a::Int, ka::Int, b::Int, kb::Int) = begin
+  from, to = time_bar(v, a, ka), time_bar(v, b, kb)
+  (from === nothing || to === nothing) && return nothing
   sx, sy = from[1] + from[3], from[2] + from[4] / 2
   tx, ty = to[1], to[2] + to[4] / 2
   out = sx + 8
@@ -9688,11 +9727,13 @@ away(ps, x, y) = minimum(1:length(ps)-1) do k
 end
 
 """
-What's at the place `(x, y)` of a schedule's bars: `(:knob, i)` for the circle
-after the bar of the task at place `i`, `(:edge, i)` for the right end of its
-bar, `(:bar, i)` for the rest of the bar, `(:run, i, start, finish)` for the
-bar of a later run of a task that repeats, `(:link, a, b)` for the arrow from
-task `a` to task `b`, `(:row, i)` for the rest of the task's row, or nothing.
+What's at the place `(x, y)` of a schedule's bars: `(:knob, i, k)` for the
+circle of the time `k` of the task at place `i` (1 for its first bar),
+`(:edge, i)` for the right end of its first bar, `(:bar, i)` for the rest of
+the bar, `(:run, i, start, finish)` for the bar of a later time of a task that
+repeats, `(:link, a, b, r, k)` for the arrow from task `a` to the time `k` of
+task `b`, where `r` is the time of `a` as `Schedules.links` gives it,
+`(:row, i)` for the rest of the task's row, or nothing.
 """
 under(v::ScheduleView, x::Real, y::Real) = begin
   left, top, wide, tall = v.box
@@ -9700,8 +9741,12 @@ under(v::ScheduleView, x::Real, y::Real) = begin
   i = row_at(v, y)
   i === nothing && return nothing
   bx, by, bw, bh = task_bar(v, i)
-  kx, ky = knob(v, i)
-  hypot(x - kx, y - ky) <= KNOB + 3 && return (:knob, i)
+  # The circle of each bar of the task. One on a bar's corner reaches less far, so the bar's end can still be dragged.
+  bars = row_bars(v, i)
+  for k in eachindex(bars)
+    (kx, ky), corner = knob_place(bars[k], get(bars, k + 1, nothing))
+    hypot(x - kx, y - ky) <= (corner ? KNOB + 1.5 : KNOB + 3) && return (:knob, i, k)
+  end
   if by - 2 <= y < by + bh + 2
     bx <= x < bx + bw + 3 && return x >= bx + bw - min(BAR_EDGE, bw / 2) ? (:edge, i) : (:bar, i)
     for (a, z) in task_runs(v, i)
@@ -9709,8 +9754,9 @@ under(v::ScheduleView, x::Real, y::Real) = begin
       rx <= x < rx + rw && return (:run, i, a, z)
     end
   end
-  for (b, t) in enumerate(v.tasks), a in t.after
-    away(link_points(v, a, b), x, y) <= 4 && return (:link, a, b)
+  for (a, r, b, k) in Schedules.links(v.tasks)
+    ps = link_points(v, a, Schedules.bar_of(v.tasks[a], r), b, k)
+    ps === nothing || away(ps, x, y) > 4 || return (:link, a, b, r, k)
   end
   (:row, i)
 end
@@ -9895,10 +9941,26 @@ draw_bar(ctx, x, y, w, h, days::Int, done::Bool, strong::Bool) = begin
 end
 
 """
+Which time of the task at place `i` shows the circle that a link is dragged
+from: the one under the mouse, or else the task as a whole, which is its last
+time when its item says how many, and its first otherwise.
+"""
+hot_time(v::ScheduleView, i::Int) = begin
+  t = v.tasks[i]
+  whole = Schedules.bar_of(t, 0)
+  w = window_of(v)
+  w === nothing && return whole
+  hit = under(v, num(w.mouse[1]), num(w.mouse[2]))
+  (hit === nothing || hit[2] != i) && return whole
+  hit[1] == :knob ? hit[3] : hit[1] in (:bar, :edge) ? 1 : hit[1] == :run ? time_at(v, i, num(w.mouse[1])) : whole
+end
+
+"""
 Draw the bar of each task. A task whose item says how often it repeats has a
-bar for each run, to the right edge of the days. The task under the mouse, and
-the one that's selected, have the circle that a link is dragged from, after
-the bar of the first run.
+bar for each time, to the right edge of the days, or to its last time. The
+task under the mouse, and the one that's selected, have the circle that a link
+is dragged from: after the bar of the time under the mouse, or of the task as
+a whole.
 """
 draw_bars(ctx, v::ScheduleView) = begin
   left, _, wide, _ = v.box
@@ -9917,9 +9979,13 @@ draw_bars(ctx, v::ScheduleView) = begin
     (x + w + 2KNOB_GAP < left || x > left + wide) && continue
     # On another day than today, the plan says which runs are done
     hue = draw_bar(ctx, x, y, w, h, t.days, run_done(e, t.start, t.finish, t.todo.done), on || lit)
-    if (g === nothing && (i == hot || on)) || (g !== nothing && g[1] == :link && g[2] == t.todo.key)
-      kx, ky = knob(v, i)
-      trace(ctx, [(x + w, ky), (kx - KNOB, ky)], RGBA(hue, 0.7), 1.2)
+    linking = g !== nothing && g[1] == :link && g[2] == t.todo.key
+    if (g === nothing && (i == hot || on)) || linking
+      k = linking ? g[3] : hot_time(v, i)
+      b = time_bar(v, i, k)
+      b === nothing && continue
+      (kx, ky), corner = knob_place(b, time_bar(v, i, k + 1))
+      corner || trace(ctx, [(b[1] + b[3], ky), (kx - KNOB, ky)], RGBA(hue, 0.7), 1.2)
       for (r, colour) in ((KNOB, hue), (KNOB - 1.5, takeoff_back()))
         paint = ink(colour)
         Skia.sk_canvas_draw_circle(ctx, Float32(kx), Float32(ky), Float32(r), paint)
@@ -9929,11 +9995,34 @@ draw_bars(ctx, v::ScheduleView) = begin
   end
 end
 
-"Draw an arrow from each task to each task that waits for it"
+"""
+Draw an arrow from each task to each task that waits for it, from and to the
+bars of the times that they say. Each time of a task that repeats waits for
+the time before it, so a short arrow joins them where there's room between
+their bars.
+"""
 draw_links(ctx, v::ScheduleView) = begin
-  for (b, t) in enumerate(v.tasks), a in t.after
-    on = v.picked == (:link, v.tasks[a].todo.key, t.todo.key)
-    arrow(ctx, link_points(v, a, b), on ? colours.accent : RGBA(colours.dim, 0.9), on ? 2.0 : 1.2)
+  for (a, r, b, k) in Schedules.links(v.tasks)
+    ps = link_points(v, a, Schedules.bar_of(v.tasks[a], r), b, k)
+    ps === nothing && continue
+    on = v.picked == (:link, v.tasks[a].todo.key, v.tasks[b].todo.key, r, k)
+    arrow(ctx, ps, on ? colours.accent : RGBA(colours.dim, 0.9), on ? 2.0 : 1.2)
+  end
+  left, _, wide, _ = v.box
+  for (i, t) in enumerate(v.tasks)
+    Schedules.repeats(t.todo) === nothing && continue
+    bars = row_bars(v, i)
+    for k in 1:length(bars)-1
+      x, y, w, h = bars[k]
+      nx = bars[k+1][1]
+      (nx < left || x > left + wide) && continue
+      mid = y + h / 2
+      if nx - (x + w) >= 10
+        arrow(ctx, [(x + w + 1, mid), (nx - 1, mid)], RGBA(colours.dim, 0.9), 1.2)
+      elseif nx - (x + w) >= 4
+        trace(ctx, [(x + w, mid), (nx, mid)], RGBA(colours.dim, 0.9), 1.2)
+      end
+    end
   end
 end
 
@@ -9948,11 +10037,11 @@ draw_drag(ctx, v::ScheduleView) = begin
     win = window_of(v)
     win === nothing && return
     mx, my = num(win.mouse[1]), num(win.mouse[2])
-    trace(ctx, [knob(v, i), (mx, my)], colours.accent, 1.5)
-    # The task that the link would go to has a line round its bar
+    trace(ctx, [knob(v, i, g[3]), (mx, my)], colours.accent, 1.5)
+    # The task that the link would go to has a line round its bar: the bar of the time under the mouse, or its first
     j = row_at(v, my)
     if j !== nothing && j != i
-      tx, ty, tw, th = task_bar(v, j)
+      tx, ty, tw, th = time_bar(v, j, time_at(v, j, mx))
       round_box(ctx, tx - 2, ty - 2, tw + 4, th + 4, 7; line=colours.accent, wide=1.5)
     end
   else
@@ -10017,13 +10106,14 @@ onkey(a::ChartArea, ev::KeyPress{Keys.mouse_left}) = begin
     v.picked = nothing
     v.grab = (:pan, x, v.at)
   elseif hit[1] == :link
-    v.picked = (:link, v.tasks[hit[2]].todo.key, v.tasks[hit[3]].todo.key)
+    v.picked = (:link, v.tasks[hit[2]].todo.key, v.tasks[hit[3]].todo.key, hit[4], hit[5])
   else
     t = v.tasks[hit[2]]
     key = t.todo.key
     v.picked = (:task, key)
     if hit[1] == :knob
-      v.grab = (:link, key)
+      # The link goes from the time whose circle it is
+      v.grab = (:link, key, hit[3])
     elseif hit[1] == :edge
       v.grab = (:size, key, false)
     elseif twice
@@ -10046,9 +10136,11 @@ drop!(v::ScheduleView) = begin
     a = task_place(v, g[2])
     b = w === nothing ? nothing : row_at(v, num(w.mouse[2]))
     (a === nothing || b === nothing) && return v
-    did = Schedules.link!(v.data, v.tasks, a, b)
+    # It goes to the time whose bar is under the mouse, or to the task's first time
+    to = time_at(v, b, num(w.mouse[1]))
+    did = Schedules.link!(v.data, v.tasks, a, b; from=Schedules.whole(v.tasks[a], g[3]), to)
     did == :ok && return commit!(v)
-    did == :loop && (v.said = "“$(v.tasks[a].todo.name)” waits for “$(v.tasks[b].todo.name)”, so it can't go before it")
+    did == :loop && (v.said = "$(time_words(v, a, g[3])) waits for $(time_words(v, b, to)), so it can't go before it")
   elseif g[1] in (:move, :size) && g[end]
     commit!(v)
   end
@@ -10071,10 +10163,11 @@ onmouse(a::ChartArea, ev::MouseMove) = begin
       words = task_words((start=hit[3], finish=hit[4], days=t.days)) * "  ·  " * Repeats.how_often(t.todo.name).match
       show_tooltip!(ev.window, tip_label(words), px.(bar_box(v, hit[2], hit[3], hit[4]))..., placement=:top, gap=6px)
     elseif hit !== nothing && hit[1] == :knob
-      kx, ky = knob(v, hit[2])
+      kx, ky = knob(v, hit[2], hit[3])
       show_tooltip!(ev.window, tip_label("Drag to the task that waits for this one"), px(kx - KNOB), px(ky - KNOB), px(2KNOB), px(2KNOB), placement=:top, gap=6px)
     elseif hit !== nothing && hit[1] == :link
-      words = "“$(v.tasks[hit[3]].todo.name)” waits for “$(v.tasks[hit[2]].todo.name)”.  Click, then Delete takes the link away"
+      a, b, r, k = hit[2:5]
+      words = "$(time_words(v, b, k)) waits for $(time_words(v, a, Schedules.bar_of(v.tasks[a], r))).  Click, then Delete takes the link away"
       show_tooltip!(ev.window, tip_label(words), px(x - 4), px(y - 4), 8px, 8px, placement=:top, gap=6px)
     end
     return handled
@@ -10142,7 +10235,7 @@ onkey(a::ChartArea, ::KeyPress{K}) where K = begin
     from, to = task_place(v, p[2]), task_place(v, p[3])
     v.picked = nothing
     (from === nothing || to === nothing) && return handled
-    Schedules.unlink!(v.data, v.tasks, from, to)
+    Schedules.unlink!(v.data, v.tasks, from, to; from=p[4], to=p[5])
     commit!(v)
     return handled
   elseif (command = command_of(editor(v), window_of(a), K)) in (:undo, :redo)

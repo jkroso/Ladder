@@ -86,12 +86,12 @@ end
   pointer(p) = (at(p); K.cursor(area))
   @test K.under(v, bar(1)...) == (:bar, 1) && pointer(bar(1)) == :hand
   @test K.under(v, bar_end(1)...) == (:edge, 1) && pointer(bar_end(1)) == :resize_x
-  @test K.under(v, knob(2)...) == (:knob, 2) && pointer(knob(2)) == :hand
+  @test K.under(v, knob(2)...) == (:knob, 2, 1) && pointer(knob(2)) == :hand
   @test K.under(v, right(bar(4), 6)...) == (:row, 4) && pointer(right(bar(4), 6)) == :arrow
   # The arrow from the first task to the second
   ps = K.link_points(v, 1, 2)
   spot = ((ps[2][1] + ps[3][1]) / 2, (ps[2][2] + ps[3][2]) / 2)
-  @test K.under(v, spot...) == (:link, 1, 2) && pointer(spot) == :hand
+  @test K.under(v, spot...) == (:link, 1, 2, 0, 1) && pointer(spot) == :hand
   # A bar says its days
   at(bar(1))
   @test !isempty(popups(w))
@@ -158,7 +158,7 @@ end
   # Click the arrow, and Delete takes the link away
   ps = K.link_points(v, 2, 3)
   click(((ps[end-1][1] + ps[end][1]) / 2, ps[end][2]))
-  @test v.picked == (:link, "Lay the pipe", "Test the pipe") && w.focus === K.chart(v)
+  @test v.picked == (:link, "Lay the pipe", "Test the pipe", 0, 1) && w.focus === K.chart(v)
   key(Keys.delete)
   @test isempty(task(3).after) && v.picked === nothing && length(block()) == 4
   # Delete with nothing selected leaves the page as it is
@@ -427,6 +427,75 @@ end
   @test K.standing(e, water) == :doing && !K.finished(e, water)
   K.set_day!(K.block_view(e, K.DAY_BLOCK, 1), nov(13)); frames()
   @test K.standing(e, water) == :done && K.finished(e, water)
+  K.calendar_day[] = nothing
+end
+
+@testset "each time of a task that repeats has its own circle, and its own links" begin
+  K.calendar_day[] = MON
+  job = joinpath(dir, "repeats-links.md")
+  write(job, """
+  - [ ] Pour the slab
+  - [ ] Water the slab every day for 3 days
+  - [ ] Cut the joints
+  - [ ] Book the pump
+  - [ ] Seal the slab
+
+  ```schedule
+  start: 2026-11-09
+
+  Water the slab every day for 3 days | after Pour the slab
+  Book the pump | 4 days
+  ```
+
+  The end.
+  """)
+  K.open!(e, job); frames()
+  u = e.nodes[(:schedule, job, 1)]
+  W = "Water the slab every day for 3 days"
+  lines() = (s = K.block_lines(e.buf, K.SCHEDULE, 1); e.buf.lines[s[1]+1:s[2]-1])
+  nov(n) = Date(2026, 11, n)
+  mid(b) = (b[1] + b[3] / 2, b[2] + b[4] / 2)
+  water = u.tasks[2]
+  @test (water.start, water.runs) == (nov(10), [(nov(11), nov(11)), (nov(12), nov(12))])
+  # The third time leaves no room after the second, so the second's circle is on its own top right corner
+  b2 = K.time_bar(u, 2, 2)
+  k2, corner = K.knob_place(b2, K.time_bar(u, 2, 3))
+  @test corner && b2[1] < k2[1] < b2[1] + b2[3] && k2[2] == b2[2]
+  @test K.under(u, k2...) == (:knob, 2, 2)
+  # The last time's circle is after its bar, where there's room
+  b3 = K.time_bar(u, 2, 3)
+  @test !K.knob_place(b3, nothing)[2] && K.knob(u, 2, 3)[1] > b3[1] + b3[3]
+  # The mouse on a time shows that time's circle. Elsewhere in the row, the circle is the last time's: the task as a whole.
+  at(mid(b2))
+  @test K.hot_time(u, 2) == 2
+  haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], "schedule-time-knob.png"), w)
+  at(mid(K.time_bar(u, 2, 1)))
+  @test K.hot_time(u, 2) == 1
+  at((b3[1] + b3[3] + 3u.zoom, b3[2] + b3[4] / 2))
+  @test K.hot_time(u, 2) == 3
+  # From the second time's circle to the joints: they wait for the second time
+  drag(k2, mid(K.task_bar(u, 3)))
+  @test "Cut the joints | after time 2 of $W" in lines() && u.tasks[3].start == nov(12)
+  # From the last time's circle, the link is to the task as a whole
+  drag(K.knob(u, 2, 3), mid(K.task_bar(u, 5)))
+  @test "Seal the slab | after $W" in lines() && u.tasks[5].start == nov(13)
+  # To the bar of the third time: it waits for the pump, and so does the sealing, after it
+  drag(K.knob(u, 4), mid(K.time_bar(u, 2, 3)))
+  @test "time 3 of $W | after Book the pump" in lines()
+  @test u.tasks[2].runs[2] == (nov(13), nov(13)) && u.tasks[5].start == nov(16)
+  # The second time can't wait for the joints, which wait for it
+  drag(K.knob(u, 3), mid(K.time_bar(u, 2, 2)))
+  @test occursin("waits for", u.said) && !any(startswith("time 2 of"), lines())
+  haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], "schedule-time-links.png"), w)
+  # The arrow to the third time says which day it goes to. Click it, and Delete takes it away.
+  ps = K.link_points(u, 4, 1, 2, 3)
+  spot = ((ps[end-1][1] + ps[end][1]) / 2, ps[end][2])
+  @test K.under(u, spot...) == (:link, 4, 2, 0, 3)
+  @test K.time_words(u, 2, 3) == "“$(W)” on Fri 13 Nov"
+  click(spot)
+  @test u.picked == (:link, "Book the pump", W, 0, 3)
+  key(Keys.delete)
+  @test !any(startswith("time 3 of"), lines()) && u.tasks[2].runs[2] == (nov(12), nov(12))
   K.calendar_day[] = nothing
 end
 
