@@ -1318,7 +1318,7 @@ end
   rect::NTuple{4,px} = (0px, 0px, 0px, 0px)
 end
 const Block = Union{Paragraph,Heading,List,Quote,CodeBlock,Table,Rule,LiveBlock,SheetBlock}
-"A file in the file finder's list"
+"A row of the file finder's list, or of the project picker's: a page or a project"
 @def mutable struct FileRow <: SemanticUI
   path::String = ""
   finder::Int = 0    # its place in the list
@@ -10560,7 +10560,7 @@ const BAR_ROOM = 64px    # the bottom of the window, where the bar of buttons is
 const MOST_ZOOM = 8.0    # the biggest a picture gets: this many times its own size, or the size that fits the window if that's bigger
 const ZOOM_STEP = 1.25   # how much bigger the + button, and ⌘+, make a picture
 "The commands that do what they always do while a picture fills the window. The rest would change the page under it."
-const PAGE_COMMANDS = (:save, :open, :print, :close, :settings, :sidebar, :sidebar_keys)
+const PAGE_COMMANDS = (:save, :open, :open_project, :print, :close, :settings, :sidebar, :sidebar_keys)
 
 "What fills the window, over the page"
 @def mutable struct ZoomView <: SemanticUI
@@ -27944,11 +27944,12 @@ const COMMAND_GROUPS = [
   "Files and windows" => [
     Command(:save, "Save the file", :window, "cmd+s", (e, w, _) -> save_page!(e)),
     Command(:open, "Find a file by name", :window, "cmd+o", (e, w, _) -> open_finder!(e)),
+    Command(:open_project, "Find a project by name and open it", :window, "cmd+p", (e, w, _) -> open_projects!(e)),
     Command(:home, "Open your home folder in the page", :window, "cmd+shift+h", (e, w, _) -> go_home!(e)),
     Command(:commands, "Show the command palette, to run a command by its name", :window, "cmd+shift+p", (e, w, _) -> toggle_palette!(e)),
     Command(:back, "Go back to the line or the file that showed before", :window, "cmd+opt+left", (e, w, _) -> go_back!(e)),
     Command(:forward, "Go forward again, to the line or the file that you went back from", :window, "cmd+opt+right", (e, w, _) -> go_forward!(e)),
-    Command(:print, "Print the page", :window, "cmd+p", (e, w, _) -> print!(e, w)),
+    Command(:print, "Print the page", :window, "cmd+opt+p", (e, w, _) -> print!(e, w)),
     Command(:export, "Export the page as HTML", :window, "cmd+shift+e", (e, w, _) -> export_html!(e, w)),
     Command(:slides, "Show the page as slides, or as a page again", :window, "ctrl+cmd+shift+p", (e, w, _) -> slides!(e)),
     Command(:close, "Close the file, or the window when it shows no file", :window, "cmd+w", (e, w, _) -> close_file_or_window!(e, w)),
@@ -28022,12 +28023,12 @@ ones in the bundle called Ladder, with the shortcuts it gives them.
 """
 const BUNDLES = [
   "Ladder" => Pair{Symbol,String}[],
-  # ⌘P finds a file, as Quick Open does, so printing has another key. The slides' key, ⌃⌘⇧P, is free in every bundle.
+  # ⌘P finds a project in every bundle, so printing has another key. The slides' key, ⌃⌘⇧P, is free in every bundle.
   "VS Code" => [
-    :open => "cmd+p, cmd+o", :print => "cmd+opt+p", :back => "ctrl+minus", :forward => "ctrl+shift+minus",
+    :back => "ctrl+minus", :forward => "ctrl+shift+minus",
     :line_up => "opt+up", :line_down => "opt+down", :duplicate_line => "opt+shift+down, opt+shift+up"],
   "Sublime Text" => [
-    :open => "cmd+p, cmd+o", :print => "cmd+opt+p", :back => "ctrl+minus", :forward => "ctrl+shift+minus",
+    :back => "ctrl+minus", :forward => "ctrl+shift+minus",
     :sidebar => "cmd+k cmd+b, cmd+backslash", :redo => "cmd+shift+z, cmd+y",
     :line_up => "ctrl+cmd+up", :line_down => "ctrl+cmd+down", :delete_line => "ctrl+shift+k",
     :erase_line_start => "cmd+backspace, cmd+k cmd+backspace", :erase_line_end => "ctrl+k, cmd+k cmd+k"],
@@ -28356,7 +28357,7 @@ onkey(e::Editor, ev::KeyPress{K}) where K = begin
     # that renames a file, it stays where it is.
     return K == Keys.tab && (w.focus === find_input(e) || w.focus === renamer(e)) ? handled : nothing
   end
-  e.popup == :finder && return (finder_key!(e, K); K == Keys.tab ? handled : nothing)
+  e.popup in (:finder, :projects) && return (finder_key!(e, K); K == Keys.tab ? handled : nothing)
   # The list of names under a sheet's expression takes ↑, ↓, Return, Tab and esc
   unmodified(w) && suggest_key!(e, K) && return nothing
   # Esc hides the box that lists what a function takes
@@ -31246,7 +31247,7 @@ onkey(m::SearchMenu, ev::KeyPress{Keys.tab}) = unmodified(ev) ? close_search_men
 
 title(path) = splitext(basename(path))[1]
 
-# A row of the file finder's list looks like a row of the command palette's
+# A row of the file finder's list, or of the project picker's, looks like a row of the command palette's
 describe(r::FileRow) = begin
   e = editor(r)
   c = omni(e)
@@ -31259,15 +31260,16 @@ describe(r::FileRow) = begin
   Row(width(grow=grow), height(px(OMNI_ROW_ONE)), padding(14px, 0px), child_gap=10px, name="File",
       background(on ? c.selected : c.drop), border(1px, :solid, ruled ? c.rule : clear)[:top],
     Box(width(grow=grow), Alignment.Start, clip_x=true, Row(parts...)),
-    # A page with changes that aren't saved says so at the right, faint
-    (changed ? (Box(omni_label("Not saved", 12, on ? c.ink2 : c.muted)),) : ())...)
+    # A page with changes that aren't saved says so at the right, faint, and a project says where it is
+    (changed ? (Box(omni_label("Not saved", 12, on ? c.ink2 : c.muted)),) :
+     e.popup == :projects ? (Box(omni_label(project_place(r.path), 12, on ? c.ink2 : c.muted)),) : ())...)
 end
 
 cursor(::FileRow) = :hand
 # The mouse over a row chooses it, as it does in the command palette
 onmouse(r::FileRow, ::MouseMove) = (editor(r).picked = r.finder; handled)
 
-onkey(r::FileRow, ::KeyPress{Keys.mouse_left}) = open!(editor(r), r.path)
+onkey(r::FileRow, ::KeyPress{Keys.mouse_left}) = picker_open!(editor(r), r.path)
 
 # The sidebar is a tree, UI.jl's ListTree. Each file of the folder is a group.
 # The items in it are the file's headings and its components: the sheets and
@@ -32645,31 +32647,61 @@ context_menu!(e, w) = begin
   onpage ? page_menu!(e, w) : file_menu!(e, w)
 end
 
-# --- the file finder -----------------------------------------------------------------------
+# --- the file finder and the project picker ------------------------------------------------
 #
 # ⌘O opens the file finder: a bar near the top of the window, with a list of
-# the folder's pages hanging under it. Type some letters of a page's name, in
-# order, and the list keeps the pages that have them. ↑ and ↓ choose a page,
-# Return opens it and Esc closes the finder. It has the command palette's
-# colours, its font and its rows. The list is in the same box as the field, so
-# the two are as wide as each other.
+# the folder's pages under it. ⌘P opens the project picker, which looks the
+# same and lists projects: the folders that you made favourites, in your
+# order, then the git repositories in your home folder, the one that git last
+# wrote in first. See "the projects" in folders.jl. Type some letters of a
+# name, in order, and the list keeps the rows that have them. ↑ and ↓ choose a
+# row, Return opens it and Esc closes the list. A project opens in the window,
+# as a click on a folder in the top bar's path opens it. `e.popup` is
+# `:finder` or `:projects` while one shows.
+#
+# Both have the command palette's colours, its font and its rows. The list is
+# in the same box as the field, so the two are as wide as each other.
 
-open_finder!(e) = begin
-  e.popup = :finder
+"Open the file finder"
+open_finder!(e) = (list_files!(e); open_picker!(e, :finder, "Find a file"))
+
+"Open the project picker. A search for the projects starts on a second thread."
+open_projects!(e) = (project_list(e); open_picker!(e, :projects, "Find a project"))
+
+open_picker!(e, kind, words) = begin
+  e.popup = kind
   e.picked = 1
   i = input(e)
   i.text = ""
   i.cursor = i.anchor = 0
   # The command palette has the same field, with other words in it and smaller text beside a chip
-  i.placeholder, i.font_size, i.font_family = "Find a file", 15px, omni_font()
-  list_files!(e)
+  i.placeholder, i.font_size, i.font_family = words, 15px, omni_font()
   focus(i)
 end
 
-"The files whose names have the letters typed, in order"
+"The projects that the picker lists: the favourites that are there, then the git repositories of the home folder that aren't favourites"
+project_list(e) = begin
+  favourites = filter(isdir, Folders.favourites())
+  [favourites; filter(!in(favourites), Folders.projects(home_folder()))]
+end
+
+"Where the project at `path` is, as its row says: the folder that it's in, with ~ for the home folder"
+project_place(path) = (d = dirname(path); inside_path(d, homedir()) ? "~" * d[ncodeunits(homedir())+1:end] : d)
+
+"Open the row for `path`: a page of the folder, or a project in the window"
+picker_open!(e, path) =
+  if e.popup == :projects
+    e.popup = :none
+    focus(e)
+    open_folder!(e, path)
+  else
+    open!(e, path)
+  end
+
+"The pages, or the projects, whose names have the letters typed, in order"
 matches(e) = begin
   q = lowercase(input(e).text)
-  filter(e.files) do path
+  filter(e.popup == :projects ? project_list(e) : e.files) do path
     name = lowercase(basename(path))
     at = firstindex(name)
     all(q) do c
@@ -32699,7 +32731,7 @@ const FINDER_TOP = 90.0     # how far the finder's bar is from the top of the wi
 const FINDER_WIDE = 600.0   # how wide its bar is, when the window has room for it
 const FINDER_MOST = 9       # the most rows that its list shows
 
-"The files that the finder's list shows: as many as fit in the window, up to `FINDER_MOST`"
+"The rows that the list shows: as many as fit in the window, up to `FINDER_MOST`"
 finder_shown(e) = begin
   # Besides the rows, the box has the field, 4 lines and 6px under the card. The window keeps 24px under the box.
   room = num(window_size(e)[2]) - FINDER_TOP - OMNI_FIELD_H - 4 - 6 - 24
@@ -32715,7 +32747,7 @@ finder_key!(e, K) = begin
     e.popup = :none
     focus(e)
   elseif K == Keys.enter
-    isempty(found) ? (e.popup = :none; focus(e)) : open!(e, found[clamp(e.picked, 1, length(found))])
+    isempty(found) ? (e.popup = :none; focus(e)) : picker_open!(e, found[clamp(e.picked, 1, length(found))])
   elseif K == Keys.down
     e.picked = min(e.picked + 1, max(1, length(found)))
   elseif K == Keys.up
@@ -32740,18 +32772,26 @@ describe(f::FinderInput) = Row(width(grow=grow), height(grow=grow), padding(0px,
 onkey(f::FinderInput, ::KeyPress{Keys.mouse_left}) = focus(input(editor(f)))
 cursor(::FinderInput) = :ibeam
 
+"What the list says when it has no row"
+picker_none(e) =
+  e.popup == :finder ? "No file has that name" :
+  Folders.searching() !== nothing && isempty(project_list(e)) ? "Looking for projects…" :
+  isempty(strip(input(e).text)) ? "Your home folder has no git repository" : "No project has that name"
+
 finder(e) = begin
   c = omni(e)
   i = input(e)
   i.color, i.placeholder_color, i.font_size, i.font_family = c.ink, c.muted, 15px, omni_font()
+  # While the projects are searched for, the window looks again soon for what the search found
+  e.popup == :projects && Folders.searching() !== nothing && redraw_in!(e, 0.1)
   found = finder_shown(e)
   rows = isempty(found) ?
-    Row(width(grow=grow), height(px(OMNI_ROW_ONE)), padding(14px, 0px), Box(omni_label("No file has that name", 14, c.ink, weight=OMNI_NAME))) :
+    Row(width(grow=grow), height(px(OMNI_ROW_ONE)), padding(14px, 0px), Box(omni_label(picker_none(e), 14, c.ink, weight=OMNI_NAME))) :
     Column(width(grow=grow), Alignment.Start, [node!(() -> FileRow(path=p, finder=n), e, (:pick, n, p)) for (n, p) in enumerate(found)]...)
   at = finder_place(e)
   # The field is at the top of the box, and the rows are under it on a card with a line round it, 6px inside the box
   omni_at(at.x, at.y, Column(fixed(px(at.w)), Alignment.Start, radius(6px), background(c.drop), border(1px, :solid, c.drop_line),
-                             shadow(0, 4, 18, RGBA(0, 0, 0, e.theme == :night ? 0.5 : 0.14)), name="File finder",
+                             shadow(0, 4, 18, RGBA(0, 0, 0, e.theme == :night ? 0.5 : 0.14)), name=e.popup == :projects ? "Project picker" : "File finder",
     Box(width(grow=grow), height(px(OMNI_FIELD_H)), node!(FinderInput, e, :finder_input)),
     Box(width(grow=grow), padding(0px, 6px, 6px, 6px),
       Column(width(grow=grow), Alignment.Start, radius(4px), clip=true, background(c.drop), border(1px, :solid, c.drop_line), rows))))

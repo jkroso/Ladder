@@ -1,6 +1,7 @@
-# Tests for the file finder that ⌘O opens: a bar near the top of the window
-# with the folder's pages in a list under it. It looks like the command
-# palette. See "the file finder" in main.jl. Run them with
+# Tests for the file finder that ⌘O opens, a bar near the top of the window
+# with the folder's pages in a list under it, and the project picker that ⌘P
+# opens, which lists projects the same way. Both look like the command
+# palette. See "the file finder and the project picker" in main.jl. Run them with
 # `julia -O0 --project=. test/file_finder_test.jl`. They use windows that
 # aren't on the screen.
 
@@ -111,4 +112,67 @@ end
   @test e.picked == shown
   press(w, Keys.enter)
   @test basename(e.buf.path) == "$(NAMES[shown]).md"
+end
+
+"A folder at `path` in `home` that's a git repository, which git last wrote in at `when`, as `touch -t` writes a time"
+repository(home, path, when) = begin
+  p = mkpath(joinpath(home, path))
+  mkpath(joinpath(p, ".git", "logs"))
+  files = (joinpath(p, ".git", "HEAD"), joinpath(p, ".git", "index"), joinpath(p, ".git", "logs", "HEAD"))
+  foreach(touch, files)
+  foreach(f -> run(`touch -t $when $f`), (joinpath(p, ".git"), files...))
+  p
+end
+
+@testset "⌘P lists the favourites, then the git repositories of the home folder, newest first, and opens one in the window" begin
+  home = mkpath(joinpath(dir, "home"))
+  old = repository(home, "Desktop/Old", "202601011200")
+  new = repository(home, "Desktop/Code/New", "202611011200")
+  mid = repository(home, "work/Mid", "202606011200")
+  # None of these is a project: it's hidden, in Library, in node_modules, or in a repository
+  repository(home, ".config/Hidden", "202611021200")
+  repository(home, "Library/Kept", "202611021200")
+  repository(home, "work/node_modules/package", "202611021200")
+  repository(home, "Desktop/Code/New/inside", "202611021200")
+  @test Set(K.Folders.repositories(home)) == Set([old, new, mid])
+  @test K.Folders.newest_first([old, mid, new]) == [new, mid, old]
+  # A favourite comes first, in the order of the favourites, whether it's a repository or not
+  K.Folders.FILE[] = joinpath(dir, "favourites")
+  notes = mkpath(joinpath(home, "Notes"))
+  K.Folders.favourite!(notes); K.Folders.favourite!(mid)
+  K.HOME[] = home
+  K.Folders.forget_projects!()
+  try
+    e, w = window()
+    press(w, Keys.p, Keys.cmd)
+    @test e.popup == :projects && K.input(e).placeholder == "Find a project"
+    t = K.Folders.searching()
+    t === nothing || wait(t)
+    frames(w)
+    @test names(e) == ["Notes", "Mid", "New", "Old"]
+    # The letters typed keep the projects whose names have them, in order
+    typed(w, "new")
+    @test names(e) == ["New"]
+    typed(w, "zzz")
+    @test isempty(rows(e)) && K.picker_none(e) == "No project has that name"
+    foreach(_ -> press(w, Keys.backspace), 1:3)
+    @test K.input(e).text == "new" && names(e) == ["New"]
+    # Return opens the project in the window. The sidebar lists its folder, and stays hidden.
+    press(w, Keys.enter)
+    @test e.popup == :none && e.folder == new
+    # ⌘O still finds a page of the folder
+    press(w, Keys.o, Keys.cmd)
+    @test e.popup == :finder && K.input(e).placeholder == "Find a file"
+    press(w, Keys.escape)
+  finally
+    K.HOME[] = ""
+    K.Folders.FILE[] = ""
+    K.Folders.forget_projects!()
+  end
+end
+
+@testset "a project's row says where the project is, with ~ for the home folder" begin
+  @test K.project_place(joinpath(homedir(), "Desktop", "Canon")) == "~/Desktop"
+  @test K.project_place(joinpath(homedir(), "Notes")) == "~"
+  @test K.project_place("/opt/work/thing") == "/opt/work"
 end

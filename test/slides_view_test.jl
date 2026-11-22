@@ -351,7 +351,7 @@ end
     @test K.caps(first(of[:slides])) == "⌃⌘⇧P"
     @test [name for (name, strokes) in of if any(s -> K.caps(s) == "⌃⌘⇧P", strokes)] == [:slides]
   end
-  # Printing has the key that the slides first had in the bundles where ⌘P finds a file
+  # Printing has the key that the slides first had, since ⌘P finds a project
   @test K.caps(first(K.bundle_keys("VS Code")[:print])) == "⌘⌥P"
 end
 

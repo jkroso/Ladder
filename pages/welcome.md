@@ -103,11 +103,12 @@ On a page with a `schedule` block, an item that repeats has a bar for each time 
 | Keys | What they do |
 |------|--------------|
 | ⌘O | Finds a file in this folder by name |
+| ⌘P | Finds a project by name and opens it in the window. A project is a folder that you made a favourite, or a git repository in your home folder. The one that git last wrote in comes first, after your favourites. |
 | ⌘⇧P | Opens the command palette. It lists the commands that have a use where you are. Type a command's name and press Return to run it. While you choose a Theme or a Text Size with ↑ or ↓, the page shows each choice at once, and Esc puts it back. |
 | ⌘⌥← and ⌘⌥→ | Go back to the line or the file that showed before, and forward again |
 | ⌘F | Finds text in the page. Return goes to the next place that has it. |
 | ⌘E | Shows the markup of the part of the page that the caret is in, or hides it again |
-| ⌘P | Prints the page, or saves it as a PDF |
+| ⌘⌥P | Prints the page, or saves it as a PDF |
 | ⌘⇧E | Saves the page as a page of HTML, for a website |
 | ⌘Return | Sends the page to an agent that waits for it |
 | ⌘, | Opens the settings in a window of their own. Press it again to close that window. |

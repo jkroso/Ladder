@@ -318,8 +318,9 @@ warm_up() = begin
   # The command palette: its list, then the chip of its first command, Autosave, which is a switch. Space turns the switch
   # and runs nothing. Esc empties the bar, and Esc again closes it, so the page and the settings are as they were.
   press(Keys.p, Keys.cmd, Keys.shft); press(Keys.down); press(Keys.up); press(Keys.enter); press(Keys.space); press(Keys.escape); press(Keys.escape)
-  # The page drawn for paper. A window that isn't on the screen shows no print panel.
-  press(Keys.p, Keys.cmd)
+  # The project picker, then the page drawn for paper. A window that isn't on the screen shows no print panel.
+  press(Keys.p, Keys.cmd); press(Keys.escape)
+  press(Keys.p, Keys.cmd, Keys.opt)
   # The settings window. A setting that changes there changes in this window too, and ⌘W closes the settings window.
   press(Keys.comma, Keys.cmd)
   settings = settings_editor()

@@ -78,7 +78,7 @@ end
   end
   # The keys that Ladder has always had
   of = K.bundle_keys("Ladder")
-  for (name, keys) in (:save => "⌘S", :open => "⌘O", :print => "⌘P", :export => "⌘⇧E", :close => "⌘W", :settings => "⌘,", :sidebar => "⌘\\",
+  for (name, keys) in (:save => "⌘S", :open => "⌘O", :open_project => "⌘P", :print => "⌘⌥P", :export => "⌘⇧E", :close => "⌘W", :settings => "⌘,", :sidebar => "⌘\\",
                        :undo => "⌘Z", :redo => "⌘⇧Z", :bold => "⌘B", :italic => "⌘I", :find => "⌘F", :run => "⌘Return", :run_step => "⇧Return")
     @test K.caps(first(of[name])) == keys
   end
@@ -342,8 +342,8 @@ end
   @test b.lines == ["a", "b", "c"]
   press(w, Keys.down, opt, shift)                 # this has a command of its own, so it selects nothing
   @test b.lines == ["a", "a", "b", "c"] && b.caret == b.anchor
-  press(w, Keys.p, cmd)                           # ⌘P finds a file
-  @test e.popup == :finder
+  press(w, Keys.p, cmd)                           # ⌘P finds a project, as in every bundle
+  @test e.popup == :projects
   press(w, Keys.escape)
   @test e.popup == :none
   @test_throws ErrorException K.bundle!(e, "Notepad")
@@ -502,7 +502,7 @@ end
   frame(wa); frame(wb)
   K.bundle!(a, "Sublime Text")
   K.rebind!(a, :save, (K.read_stroke("ctrl+s"),))
-  K.rebind!(a, :italic, (K.read_stroke("cmd+p"),))   # this takes one of the two shortcuts that find a file
+  K.rebind!(a, :italic, (K.read_stroke("cmd+p"),))   # this takes the shortcut that finds a project
   @test b.bundle == "Sublime Text" && b.rebound == a.rebound
   @test K.command_of(b, wb, Keys.k) === nothing
   wb.keys |= ctrl
@@ -510,7 +510,7 @@ end
   wb.keys ⊻= ctrl
   @test occursin("keys=Sublime Text\n", read(kept, String))
   @test occursin("key.save=ctrl+s\n", read(kept, String))
-  @test occursin("key.open=cmd+o\n", read(kept, String))
+  @test occursin("key.open_project=\n", read(kept, String))
   # The next window that opens has them
   c = K.build_editor(joinpath(dir, "page.md"))
   K.load_settings!(c)

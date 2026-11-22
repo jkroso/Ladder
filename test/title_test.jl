@@ -167,7 +167,7 @@ end
   @test w.focus === K.file_tree(e)
 end
 
-@testset "⌘P lists each page with its ending, and finds a page by its whole name" begin
+@testset "⌘O lists each page with its ending, and finds a page by its whole name" begin
   write(joinpath(dir, "plan.md"), "# Plan\n")
   write(joinpath(dir, "plan.markdown"), "# Plan\n")
   K.open_finder!(e)

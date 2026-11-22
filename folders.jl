@@ -91,6 +91,98 @@ unfavourite!(path::AbstractString) = begin
   nothing
 end
 
+# --- the projects -------------------------------------------------------------------------
+#
+#     repositories(homedir())   # ["/Users/jake/Desktop/Canon", ...]
+#     projects(homedir())       # the same, newest first, as the last search found them
+#
+# A project is a git repository: a folder with a .git in it. The project
+# picker that ⌘P opens lists them. The search looks six folders down from the
+# home folder, and not in hidden folders, in Library, in node_modules or in an
+# app. It doesn't look inside a repository, so one inside another isn't a
+# project of its own. In a home folder with 76 repositories it took 0.4
+# seconds the first time and 0.05 seconds after that, so it runs on a second
+# thread each time the picker opens, and the picker shows what the last search
+# found until it ends.
+#
+# The newest project is the one that git last wrote in: its index, which a
+# commit, `git add` and `git status` after a change write, or its HEAD, which a
+# commit or a checkout writes. Reading the time of every file in 76
+# repositories would take too long.
+
+"The folders that the search for projects doesn't go into, by name. Hidden folders and apps are left out too."
+const NOT_SEARCHED = Set(["Library", "node_modules"])
+
+"The git repositories in the folder `root`, as far down as `depth` folders. `root` itself isn't one."
+repositories(root::AbstractString; depth::Integer=6) = begin
+  found = String[]
+  look(dir, d) = begin
+    names = try readdir(dir) catch; return end
+    d > 0 && ".git" in names && return push!(found, dir)
+    d < depth || return
+    for name in names
+      (startswith(name, ".") || name in NOT_SEARCHED || endswith(name, ".app")) && continue
+      path = joinpath(dir, name)
+      # A link to a folder isn't followed, so the search can't go round in a circle
+      s = try lstat(path) catch; continue end
+      isdir(s) && look(path, d + 1)
+    end
+  end
+  look(clean(root), 0)
+  found
+end
+
+"When git last wrote in the repository at `path`: its index or its HEAD. 0 when it never did."
+worked_on(path::AbstractString) =
+  maximum(p -> mtime(p), (joinpath(path, ".git"), joinpath(path, ".git", "index"), joinpath(path, ".git", "HEAD"), joinpath(path, ".git", "logs", "HEAD")))
+
+"`paths` with the one that git last wrote in first"
+newest_first(paths) = (times = Dict(p => worked_on(p) for p in paths); sort(paths, by=p -> times[p], rev=true))
+
+"What the last search for projects found in the folder `root`, and the search while it runs"
+mutable struct Search
+  root::String
+  found::Vector{String}
+  task::Union{Task,Nothing}
+  at::Float64
+end
+const SEARCH = Search("", String[], nothing, 0.0)
+const SEARCH_LOCK = ReentrantLock()
+"Seconds after a search starts that `projects` starts another"
+const SEARCH_AGAIN = 5.0
+
+"""
+The projects in the folder `root`, newest first, as the last search found
+them. A new search starts on a second thread, unless one is running or the
+last one started less than `SEARCH_AGAIN` seconds ago. `searching()` gives it
+while it runs.
+"""
+projects(root::AbstractString) = lock(SEARCH_LOCK) do
+  r = clean(root)
+  SEARCH.root == r || forget_projects!(r)
+  if SEARCH.task === nothing && time() - SEARCH.at > SEARCH_AGAIN
+    SEARCH.at = time()
+    SEARCH.task = Threads.@spawn begin
+      found = try newest_first(repositories(r)) catch; String[] end
+      lock(SEARCH_LOCK) do
+        SEARCH.root == r && (SEARCH.found = found)
+        SEARCH.task = nothing
+      end
+    end
+  end
+  SEARCH.found
+end
+
+"The search for projects while it runs, or nothing"
+searching() = lock(() -> SEARCH.task, SEARCH_LOCK)
+
+"Forget what the searches for projects found, as a test does before it makes projects of its own. The next search is in `root`."
+forget_projects!(root="") = lock(SEARCH_LOCK) do
+  SEARCH.root = root
+  SEARCH.found = String[]
+  SEARCH.at = 0.0
+end
+
 # --- when anything in a folder last changed, and how big it is ----------------------------------
 #
 #     newest(homedir(), ["/Users/jake/Desktop", ...])   # Dict("/Users/jake/Desktop" => 1.795e9, ...)
