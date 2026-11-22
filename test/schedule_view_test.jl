@@ -7,6 +7,7 @@
 @use Dates: Dates, Date, Day
 @use "github.com/jkroso/MiniFB.jl" Window KeyPress KeyRelease MouseMove Keys onkey onmouse Typed ontype onscroll
 @use "github.com/jkroso/UI.jl/Interface/draw" frame rect popups onpinch
+@use "github.com/jkroso/UI.jl/Interface/save" save_png
 @use GeometryBasics: Vec2
 @use "../main" => K
 const S, px = K.Schedules, K.px
@@ -332,6 +333,60 @@ end
   K.open!(e, plain); frames()
   at(line_place(2))
   @test isempty(K.task_over(e))
+end
+
+@testset "a task that repeats has a bar for each run" begin
+  K.calendar_day[] = MON
+  job = joinpath(dir, "repeats.md")
+  write(job, """
+  - [ ] Dig the trench
+  - [ ] Water the slab every 2 days
+
+  ```schedule
+  start: 2026-11-09
+
+  Dig the trench | 2 days
+  ```
+
+  ```day
+  ```
+
+  The end.
+  """)
+  K.open!(e, job); frames()
+  u = e.nodes[(:schedule, job, 1)]
+  nov(n) = Date(2026, 11, n)
+  # Every two days from Monday 9: the run that's due on Sunday 15 is done on Monday 16
+  runs = K.task_runs(u, 2)
+  @test runs[1:4] == [(nov(11), nov(11)), (nov(13), nov(13)), (nov(16), nov(16)), (nov(17), nov(17))]
+  @test isempty(K.task_runs(u, 1))
+  # Each run has a bar of its own, and the mouse over it says its days and how often the task repeats
+  r = K.bar_box(u, 2, nov(13), nov(13))
+  spot = (r[1] + r[3] / 2, r[2] + r[4] / 2)
+  @test K.under(u, spot...) == (:run, 2, nov(13), nov(13))
+  at(spot)
+  @test any(p -> p.key == :tooltip, popups(w))
+  haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], "schedule-repeats.png"), w)
+  # A drag of a run moves every run: the first one starts a day later, and so do the others
+  drag(spot, (spot[1] + u.zoom, spot[2]))
+  s = K.block_lines(e.buf, K.SCHEDULE, 1)
+  @test e.buf.lines[s[1]+1:s[2]-1] == ["start: 2026-11-09", "", "Dig the trench | 2 days", "Water the slab every 2 days | from 2026-11-10"]
+  @test u.tasks[2].start == nov(10) && K.task_runs(u, 2)[1] == (nov(12), nov(12))
+  K.undo!(e.buf); frames()
+  @test u.tasks[2].start == nov(9)
+  # On another day, the runs that are finished by then are done, and the task itself is never done: its next run is to come
+  water = u.tasks[2]
+  K.set_day!(K.block_view(e, K.DAY_BLOCK, 1), nov(13)); frames()
+  @test K.standing(e, water) == :doing && !K.finished(e, water) && K.ticked_then(e, 2) == false
+  @test K.run_done(e, nov(11), nov(11), false) && !K.run_done(e, nov(13), nov(13), false) && K.run_done(e, water.start, water.finish, false)
+  K.set_day!(K.block_view(e, K.DAY_BLOCK, 1), nov(14)); frames()
+  @test K.standing(e, water) == :todo && K.standing(e, u.tasks[1]) == :done
+  haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], "schedule-repeats-day.png"), w)
+  # A ticked item doesn't repeat, because its tick added the next item
+  K.set_day!(K.block_view(e, K.DAY_BLOCK, 1), MON); frames()
+  K.tick!(e, 2); frames()
+  @test u.tasks[2].todo.done && isempty(K.task_runs(u, 2))
+  K.calendar_day[] = nothing
 end
 
 foreach(close, (w,))

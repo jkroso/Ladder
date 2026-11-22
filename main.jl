@@ -9636,12 +9636,18 @@ day_x(v::ScheduleView, n::Real) = v.box[1] + (n - v.at) * v.zoom
 "The number of the day at `x` across the window, with the part of the day that's passed"
 x_day(v::ScheduleView, x::Real) = v.at + (x - v.box[1]) / v.zoom
 
-"Where the bar of the task at place `i` is in the window: its left, top, width and height"
-task_bar(v::ScheduleView, i::Int) = begin
-  t = v.tasks[i]
-  left, right = day_x(v, daynum(t.start)) + 1, day_x(v, daynum(t.finish) + 1) - 1
+"Where the bar of the task at place `i` is in the window for its run from `start` to `finish`: its left, top, width and height"
+bar_box(v::ScheduleView, i::Int, start::Date, finish::Date) = begin
+  left, right = day_x(v, daynum(start)) + 1, day_x(v, daynum(finish) + 1) - 1
   (left, v.box[2] + DATES_H + (i - 1) * TASK_H + (TASK_H - TASK_BAR) / 2, max(right - left, 3.0), TASK_BAR)
 end
+
+"Where the bar of the first run of the task at place `i` is in the window: its left, top, width and height"
+task_bar(v::ScheduleView, i::Int) = (t = v.tasks[i]; bar_box(v, i, t.start, t.finish))
+
+"The first and the last day of each run after the first of the task at place `i`, when its item says how often it repeats, up to the last day in sight"
+task_runs(v::ScheduleView, i::Int) =
+  v.zoom > 0 ? Schedules.runs(v.tasks[i], numday(v.at + v.box[3] / v.zoom), v.data.weekends) : Tuple{Date,Date}[]
 
 "The middle of the circle after the bar of the task at place `i`"
 knob(v::ScheduleView, i::Int) = (b = task_bar(v, i); (b[1] + b[3] + KNOB_GAP, b[2] + b[4] / 2))
@@ -9679,7 +9685,8 @@ end
 """
 What's at the place `(x, y)` of a schedule's bars: `(:knob, i)` for the circle
 after the bar of the task at place `i`, `(:edge, i)` for the right end of its
-bar, `(:bar, i)` for the rest of the bar, `(:link, a, b)` for the arrow from
+bar, `(:bar, i)` for the rest of the bar, `(:run, i, start, finish)` for the
+bar of a later run of a task that repeats, `(:link, a, b)` for the arrow from
 task `a` to task `b`, `(:row, i)` for the rest of the task's row, or nothing.
 """
 under(v::ScheduleView, x::Real, y::Real) = begin
@@ -9690,8 +9697,12 @@ under(v::ScheduleView, x::Real, y::Real) = begin
   bx, by, bw, bh = task_bar(v, i)
   kx, ky = knob(v, i)
   hypot(x - kx, y - ky) <= KNOB + 3 && return (:knob, i)
-  if by - 2 <= y < by + bh + 2 && bx <= x < bx + bw + 3
-    return x >= bx + bw - min(BAR_EDGE, bw / 2) ? (:edge, i) : (:bar, i)
+  if by - 2 <= y < by + bh + 2
+    bx <= x < bx + bw + 3 && return x >= bx + bw - min(BAR_EDGE, bw / 2) ? (:edge, i) : (:bar, i)
+    for (a, z) in task_runs(v, i)
+      rx, _, rw, _ = bar_box(v, i, a, z)
+      rx <= x < rx + rw && return (:run, i, a, z)
+    end
   end
   for (b, t) in enumerate(v.tasks), a in t.after
     away(link_points(v, a, b), x, y) <= 4 && return (:link, a, b)
@@ -9849,30 +9860,55 @@ end
 "The colour of a task's bar: one for a task that's done, and one for a task that isn't"
 task_hue(done::Bool) = done ? colours.string : colours.accent
 
-"Draw the bar of each task. The task under the mouse, and the one that's selected, have the circle that a link is dragged from."
+"""
+True when the bar of a task's run from `start` to `finish` shows as done.
+`done` is true when the task's item is ticked. On another day than today, the
+plan says: a run that's finished by then is done.
+"""
+run_done(e, start::Date, finish::Date, done::Bool) = another_day(e) ? Days.stands(start, finish, done, page_day(e), calendar_today()) == :done : done
+
+"""
+Draw a bar of a task, `days` long, at `(x, y)`, `w` wide and `h` tall. A bar
+that's `done` has a tick, a `strong` one is darker, and a bar with room says
+how many days it is. It gives the bar's colour.
+"""
+draw_bar(ctx, x, y, w, h, days::Int, done::Bool, strong::Bool) = begin
+  hue = task_hue(done)
+  round_box(ctx, x, y, w, h, 5; fill=RGBA(hue, strong ? 0.32 : 0.17), line=RGBA(hue, 0.9), wide=strong ? 1.8 : 1.0)
+  inset = 6.0
+  if done && w >= 18
+    trace(ctx, [(x + 5.5, y + h / 2 + 0.5), (x + 8.5, y + h / 2 + 3.5), (x + 13.5, y + h / 2 - 3.5)], hue, 1.6)
+    inset = 18.0
+  end
+  face = Face(SANS, "Medium", 10.5px, hue, false)
+  words = "$(days)d"
+  num(measure(face, words)) + inset + 5 <= w && write_ink(ctx, words, x + inset, y + h / 2 + 3.8, face)
+  hue
+end
+
+"""
+Draw the bar of each task. A task whose item says how often it repeats has a
+bar for each run, to the right edge of the days. The task under the mouse, and
+the one that's selected, have the circle that a link is dragged from, after
+the bar of the first run.
+"""
 draw_bars(ctx, v::ScheduleView) = begin
   left, _, wide, _ = v.box
   hot = hot_row(v)
   g = v.grab
   e = editor(v)
   for (i, t) in enumerate(v.tasks)
-    x, y, w, h = task_bar(v, i)
-    (x + w + 2KNOB_GAP < left || x > left + wide) && continue
-    done = finished(e, t)   # on another day than today, the plan says which tasks are done
-    hue = task_hue(done)
     on = v.picked == (:task, t.todo.key)
     # A bar is marked while the mouse is on its task in another part of the page
     lit = i != hot && marked(v, t.todo.key)
-    round_box(ctx, x, y, w, h, 5; fill=RGBA(hue, on || lit ? 0.32 : 0.17), line=RGBA(hue, 0.9), wide=on || lit ? 1.8 : 1.0)
-    # A task that's done has a tick, and a bar with room says how many days it is
-    inset = 6.0
-    if done && w >= 18
-      trace(ctx, [(x + 5.5, y + h / 2 + 0.5), (x + 8.5, y + h / 2 + 3.5), (x + 13.5, y + h / 2 - 3.5)], hue, 1.6)
-      inset = 18.0
+    for (a, z) in task_runs(v, i)
+      x, y, w, h = bar_box(v, i, a, z)
+      x + w < left || draw_bar(ctx, x, y, w, h, t.days, run_done(e, a, z, false), on || lit)
     end
-    face = Face(SANS, "Medium", 10.5px, hue, false)
-    words = "$(t.days)d"
-    num(measure(face, words)) + inset + 5 <= w && write_ink(ctx, words, x + inset, y + h / 2 + 3.8, face)
+    x, y, w, h = task_bar(v, i)
+    (x + w + 2KNOB_GAP < left || x > left + wide) && continue
+    # On another day than today, the plan says which runs are done
+    hue = draw_bar(ctx, x, y, w, h, t.days, run_done(e, t.start, t.finish, t.todo.done), on || lit)
     if (g === nothing && (i == hot || on)) || (g !== nothing && g[1] == :link && g[2] == t.todo.key)
       kx, ky = knob(v, i)
       trace(ctx, [(x + w, ky), (kx - KNOB, ky)], RGBA(hue, 0.7), 1.2)
@@ -10021,6 +10057,11 @@ onmouse(a::ChartArea, ev::MouseMove) = begin
     hit = under(v, x, y)
     if hit !== nothing && hit[1] in (:bar, :edge)
       show_tooltip!(ev.window, tip_label(task_words(v.tasks[hit[2]])), px.(task_bar(v, hit[2]))..., placement=:top, gap=6px)
+    elseif hit !== nothing && hit[1] == :run
+      # A later run of a task that repeats says its own days, and how often the task repeats
+      t = v.tasks[hit[2]]
+      words = task_words((start=hit[3], finish=hit[4], days=t.days)) * "  ·  " * Repeats.how_often(t.todo.name).match
+      show_tooltip!(ev.window, tip_label(words), px.(bar_box(v, hit[2], hit[3], hit[4]))..., placement=:top, gap=6px)
     elseif hit !== nothing && hit[1] == :knob
       kx, ky = knob(v, hit[2])
       show_tooltip!(ev.window, tip_label("Drag to the task that waits for this one"), px(kx - KNOB), px(ky - KNOB), px(2KNOB), px(2KNOB), placement=:top, gap=6px)
@@ -21998,8 +22039,16 @@ end
 "True when the page shows a day that isn't today"
 another_day(e) = page_day(e) != calendar_today()
 
-"How the task `t` of a schedule stands on the page's day: `:done`, `:doing` or `:todo`"
-standing(e, t::Schedules.Planned) = Days.stands(t.start, t.finish, t.todo.done, page_day(e), calendar_today())
+"""
+How the task `t` of a schedule stands on the page's day: `:done`, `:doing` or
+`:todo`. On another day than today, a task that repeats is never done, because
+its next run is still to come: it's `:doing` on the days of a run.
+"""
+standing(e, t::Schedules.Planned) = begin
+  d, today = page_day(e), calendar_today()
+  d != today && Schedules.repeats(t.todo) !== nothing && return Schedules.running(t, d, calendar_tasks(e)[2]) ? :doing : :todo
+  Days.stands(t.start, t.finish, t.todo.done, d, today)
+end
 
 "True when the task `t` shows as done: it's ticked, or on another day than today, the plan has it finished by then"
 finished(e, t::Schedules.Planned) = another_day(e) ? standing(e, t) == :done : t.todo.done

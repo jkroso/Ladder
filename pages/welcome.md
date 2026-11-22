@@ -81,6 +81,8 @@ A to-do item that ends with words like `every week` or `every 3 months` repeats.
 
 The words can be `every day`, `every 2 weeks`, `every month`, `every year`, `daily`, `weekly`, `monthly`, `yearly`, `every Monday` or `every weekday`. They count only at the end of the item, or just before its day, so "Write the daily report" doesn't repeat. An item with no day repeats from the day that you tick it. An item that you tick late skips the days that it missed. The ticked item stays, so the page keeps the days that the work was done. Take the tick away again, and the new item goes too.
 
+On a page with a `schedule` block, an item that repeats has a bar for each time that it's due.
+
 ## Tables
 
 | Keys | What they do |

@@ -92,6 +92,30 @@ end
   @test ts[1].after == [4] && isempty(ts[4].after) && ts[1].start == MON + Day(1)
 end
 
+@testset "a task that repeats" begin
+  page = ["- [ ] Water the plants every 2 days", "- [ ] Check the site every day", "- [x] Sweep up every day",
+          "- [ ] Pay the rent every month", "- [ ] Hose the slab every 2 days"]
+  s = S.schedule(["Pay the rent every month | from 2026-11-30", "Hose the slab every 2 days | 2 days"])
+  water, check, sweep, rent, hose = S.plan!(s, S.todos(page), today=MON)
+  d(n) = MON + Day(n)
+  one(ns...) = [(d(n), d(n)) for n in ns]
+  # Every two days from Monday 16: the run that's due on Sunday 22 is done on Monday 23, and Saturday 28 on Monday 30
+  @test S.runs(water, d(14), false) == one(2, 4, 7, 8, 10, 14)
+  @test S.runs(water, d(14), true) == one(2, 4, 6, 8, 10, 12, 14)
+  @test S.runs(water, d(1), false) == [] && length(S.runs(water, d(14), false; most=3)) == 3
+  # The runs of every day that are due on Saturday and Sunday are one run on Monday
+  @test S.runs(check, d(8), false) == one(1, 2, 3, 4, 7, 8)
+  # A ticked item doesn't repeat: its tick added the next item
+  @test S.repeats(sweep.todo) === nothing && S.runs(sweep, d(14), false) == []
+  # A month after 30 December is a Saturday, so that run is on the Monday after
+  @test S.runs(rent, Date(2027, 2, 1), false) == [(Date(2026, 12, 30), Date(2026, 12, 30)), (Date(2027, 2, 1), Date(2027, 2, 1))]
+  # Each run takes as many working days as the first. One that would start before the run before it is finished is left out.
+  @test (hose.start, hose.finish) == (d(0), d(1))
+  @test S.runs(hose, d(10), false) == [(d(2), d(3)), (d(4), d(7)), (d(8), d(9)), (d(10), d(11))]
+  @test S.running(water, d(0), false) && S.running(water, d(7), false) && !S.running(water, d(5), false) && !S.running(water, d(9), false)
+  @test S.running(hose, d(5), false) && !S.running(sweep, d(2), false)
+end
+
 @testset "a task that was renamed" begin
   s = S.schedule(BLOCK)
   page = replace(PAGE, "- [x] Dig the trench" => "- [x] Dig out the trench")
