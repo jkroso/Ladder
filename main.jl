@@ -29784,8 +29784,17 @@ chip_wide(e, p::CommandPalette, chips, k::Int) = begin
   frame + max(kind == :number ? 60.0 : 40.0, ceil(wide) + (on && kind != :pick ? 20 : 6))
 end
 
-"The tag, the chips and the Run button, each with how wide it is, in their order"
-palette_items(e, p::CommandPalette, chips) = begin
+"""
+True when the words that the command `name` asks for are what it's for, as the
+question of Ask About is. Their chip is wide before anything is typed in it.
+"""
+wide_words(::Val) = false
+wide_words(::Union{Val{:ask_about},Val{:ask_for_change}}) = true
+
+const OMNI_WORDS_LEAST, OMNI_WORDS_MOST = 240.0, 560.0   # how wide the chip of such words is, when the bar has room
+
+"The tag, the chips and the Run button, each with how wide it is, in their order, when a line of the bar has room for `room`"
+palette_items(e, p::CommandPalette, chips, room) = begin
   items = Any[(what=:tag, k=0, w=20 + ceil(omni_wide(palette_name(p.command.name), 13, "Medium")))]
   for k in eachindex(chips)
     push!(items, (what=:chip, k=k, w=chip_wide(e, p, chips, k)))
@@ -29811,10 +29820,21 @@ end
 
 "The lines of the bar: all of them when the chips are on as many lines as they need, and the first line with room for the … button when they aren't and don't fit. The second is true when the … shows."
 palette_bar_lines(e, p::CommandPalette, chips, room) = begin
-  items = palette_items(e, p, chips)
+  items = palette_items(e, p, chips, room)
   lines = palette_lines(items, room)
   (p.wrap || length(lines) == 1) && return (lines, false)
   ([first(palette_lines(items, room - 42 - OMNI_GAP))], true)
+  # Words that the command is for take the room that's left on the line, up to OMNI_WORDS_MOST. Long words
+  # grow the chip only to the end of the line, and then scroll in it, so the chip and the Run button stay in sight.
+  if wide_words(Val(p.command.name))
+    at = findfirst(it -> it.what == :chip && chip_kind(e, chips[it.k]) == :text, items)
+    if at !== nothing
+      it = items[at]
+      left = floor(room - (sum(i -> i.w, items) - it.w) - OMNI_GAP * (length(items) - 1))
+      most = left >= OMNI_WORDS_LEAST ? left : room
+      items[at] = (what=it.what, k=it.k, w=min(most, max(it.w, clamp(left, OMNI_WORDS_LEAST, OMNI_WORDS_MOST))))
+    end
+  end
 end
 
 "How wide the bar is inside, for the tag, the chips and the Run button"
