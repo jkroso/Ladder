@@ -29824,6 +29824,17 @@ palette_items(e, p::CommandPalette, chips, room) = begin
     push!(items, (what=:chip, k=k, w=chip_wide(e, p, chips, k)))
   end
   push!(items, (what=:run, k=0, w=24 + ceil(omni_wide("Run", 13, "Semibold")) + 4 + 11))
+  # Words that the command is for take the room that's left on the line, up to OMNI_WORDS_MOST. Long words
+  # grow the chip only to the end of the line, and then scroll in it, so the chip and the Run button stay in sight.
+  if wide_words(Val(p.command.name))
+    at = findfirst(it -> it.what == :chip && chip_kind(e, chips[it.k]) == :text, items)
+    if at !== nothing
+      it = items[at]
+      left = floor(room - (sum(i -> i.w, items) - it.w) - OMNI_GAP * (length(items) - 1))
+      most = left >= OMNI_WORDS_LEAST ? left : room
+      items[at] = (what=it.what, k=it.k, w=min(most, max(it.w, clamp(left, OMNI_WORDS_LEAST, OMNI_WORDS_MOST))))
+    end
+  end
   items
 end
 
@@ -29848,17 +29859,6 @@ palette_bar_lines(e, p::CommandPalette, chips, room) = begin
   lines = palette_lines(items, room)
   (p.wrap || length(lines) == 1) && return (lines, false)
   ([first(palette_lines(items, room - 42 - OMNI_GAP))], true)
-  # Words that the command is for take the room that's left on the line, up to OMNI_WORDS_MOST. Long words
-  # grow the chip only to the end of the line, and then scroll in it, so the chip and the Run button stay in sight.
-  if wide_words(Val(p.command.name))
-    at = findfirst(it -> it.what == :chip && chip_kind(e, chips[it.k]) == :text, items)
-    if at !== nothing
-      it = items[at]
-      left = floor(room - (sum(i -> i.w, items) - it.w) - OMNI_GAP * (length(items) - 1))
-      most = left >= OMNI_WORDS_LEAST ? left : room
-      items[at] = (what=it.what, k=it.k, w=min(most, max(it.w, clamp(left, OMNI_WORDS_LEAST, OMNI_WORDS_MOST))))
-    end
-  end
 end
 
 "How wide the bar is inside, for the tag, the chips and the Run button"

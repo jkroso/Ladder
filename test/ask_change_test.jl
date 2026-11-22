@@ -474,6 +474,21 @@ end
   p = K.palette(e)
   @test p.command.name == :ask_about && [K.chip_name(c) for c in K.palette_chips(p)] == ["Node", "Question"] && p.at == 2
   @test K.chip_value(p, K.palette_chips(p), 1).node === node()
+  # The question is what the command is for, so its chip takes the room that's left on the bar, up to OMNI_WORDS_MOST
+  frames(w)
+  room = K.palette_room(e)
+  place(k) = only(filter(pl -> pl.what == :chip && pl.k == k, p.plan.places))
+  run() = only(filter(pl -> pl.what == :run, p.plan.places))
+  @test place(2).w >= min(K.OMNI_WORDS_LEAST, room) && place(2).w <= K.OMNI_WORDS_MOST
+  @test place(2).w > 4K.chip_wide(e, p, K.palette_chips(p), 1)
+  @test run().y == place(2).y && run().x + run().w <= p.plan.bar.x + p.plan.bar.w
+  # Long words grow it only to the end of its line, and then scroll in it, so it and the Run button stay in sight
+  typed(w, repeat("why is it blue ", 20))
+  frames(w)
+  @test !p.plan.more && run().y == place(2).y && run().x + run().w <= p.plan.bar.x + p.plan.bar.w
+  @test K.input(e).scroll > 0
+  # Words for a command that isn't for them, like Rename In Code's new name, are as wide as they are
+  @test !K.wide_words(Val(:rename_in_code)) && K.wide_words(Val(:ask_for_change))
   press(w, Keys.escape); press(w, Keys.escape)
   # The agent that answers can read files, and can't change them. Each agent prints its steps as lines of JSON.
   K.AGENT_COMMAND[] = nothing
@@ -495,21 +510,6 @@ end
   # While the agent works, the thing's label says its last step
   steps = joinpath(dir, "steps.sh")
   write(steps, """
-  # The question is what the command is for, so its chip takes the room that's left on the bar, up to OMNI_WORDS_MOST
-  frames(w)
-  room = K.palette_room(e)
-  place(k) = only(filter(pl -> pl.what == :chip && pl.k == k, p.plan.places))
-  run() = only(filter(pl -> pl.what == :run, p.plan.places))
-  @test place(2).w >= min(K.OMNI_WORDS_LEAST, room) && place(2).w <= K.OMNI_WORDS_MOST
-  @test place(2).w > 4K.chip_wide(e, p, K.palette_chips(p), 1)
-  @test run().y == place(2).y && run().x + run().w <= p.plan.bar.x + p.plan.bar.w
-  # Long words grow it only to the end of its line, and then scroll in it, so it and the Run button stay in sight
-  typed(w, repeat("why is it blue ", 20))
-  frames(w)
-  @test !p.plan.more && run().y == place(2).y && run().x + run().w <= p.plan.bar.x + p.plan.bar.w
-  @test K.input(e).scroll > 0
-  # Words for a command that isn't for them, like Rename In Code's new name, are as wide as they are
-  @test !K.wide_words(Val(:rename_in_code)) && K.wide_words(Val(:ask_for_change))
     #!/bin/sh
     printf '%s' "\$1" > "$dir/asked.txt"
     echo '{"type":"system","subtype":"init"}'
