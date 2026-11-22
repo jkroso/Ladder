@@ -11,7 +11,7 @@
 
 include("start.jl")
 
-@use ".." build_editor open_editor move_old_folders! run_startup! startup_page STARTUP_FOLDER STARTUP WELCOME restyle! problems pages_dir SIDEBAR_ICONS FILE_ICONS todo_at inbox Agent INSERTS PLAN_ICONS SCHEDULE_ICONS BLOCK_ICONS window! editors settings_editor theme! Update open! level! SOURCE_FILES
+@use ".." build_editor open_editor move_old_folders! run_startup! startup_page STARTUP_FOLDER STARTUP WELCOME restyle! problems pages_dir SIDEBAR_ICONS FILE_ICONS todo_at inbox Agent INSERTS PLAN_ICONS SCHEDULE_ICONS BLOCK_ICONS window! editors settings_editor theme! Update open! level! SOURCE_FILES kinds
 @use "github.com/jkroso/MiniFB.jl" Window KeyPress KeyRelease MouseMove Keys onkey onmouse Typed ontype
 @use "github.com/jkroso/Font.jl/units" px
 @use "github.com/jkroso/UI.jl/Interface/abstract" focus window_of
@@ -204,6 +204,9 @@ h1 { font-size: 22px; margin: 0 0 12px } .muted { color: #777; font-size: 12px; 
 </table></td></tr></table></body></html>
 """
 
+"The markup that makes a line of the warm-up's page draw another way: inline code that runs, inline code, a formula, links, a picture, bold, struck words, HTML, a table's cells and a to-do box"
+const LINE_MARKS = ("!`", "`", "\$", "[[", "](", "![", "**", "~~", "<", "|", "[ ]", "[x]")
+
 """
 Open a copy of the welcome page in a throwaway folder and send input to a
 window that isn't on screen. While the app is built this compiles the code it
@@ -242,9 +245,17 @@ warm_up() = begin
     frame(w)
   end
   # Down the whole page a line at a time: through the table, the code, the live blocks and the sheet
+  typed = Set{Any}()
   for _ in 1:length(e.buf.lines)
     press(Keys.down)
-    # Type, go to the next cell and back, select and undo, in whatever the caret is in
+    # Type, go to the next cell and back, select and undo, in whatever the caret is in. That's done in the first
+    # line of each kind. Another line like it compiles nothing more, and the typing in every line was most of the
+    # time that a build took, since a build runs this four times.
+    i = e.buf.caret[1]
+    line, text = kinds(e.buf)[i], e.buf.lines[i]
+    like = (line.kind, line.level, line.lang, map(mark -> occursin(mark, text), LINE_MARKS))
+    like in typed && continue
+    push!(typed, like)
     press(Keys.a); press(Keys.backspace)
     press(Keys.tab); press(Keys.tab, Keys.shft)
     press(Keys.right, Keys.shft); press(Keys.left)
