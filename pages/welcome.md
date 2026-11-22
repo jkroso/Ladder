@@ -43,6 +43,25 @@ A line that holds only a video file shows a player for it, like `![The kitchen](
 
 To play a video or a sound faster or slower, move the mouse over its player, and click the small 1× circle on the player's bottom edge. The circle also shows while the file plays. Each click goes to the next speed: 1½×, 2×, ½×, then 1× again. Once you've clicked a player, < and > change the speed by a quarter at a time, the space bar plays and stops, and ← and → go back and on by 5 seconds.
 
+## Parts of other pages
+
+A wiki link with a ! before it, on a line of its own, shows a part of another page. This part is the list of what Ladder does with words, from the page of examples:
+
+![[examples#Writing]]
+
+That part isn't a copy. It's the lines of examples.md. Click in it and type, and examples.md changes too. A change in examples.md shows here at once. ⌘S saves both pages. While the mouse is over the part, a line goes round it. The button with the other page's name opens that page at the part. Esc takes the caret back to this page, and so do ↑ on the part's first line and ↓ on its last line. Ted Nelson called this a transclusion. Notion calls it a synced block.
+
+What comes after the # says which part shows:
+
+- `![[examples]]` shows the whole page.
+- `![[examples#Writing]]` shows the heading Writing and the lines under it, up to the next heading that's as big.
+- `![[examples#list 2]]` shows the second list of the page. The kinds are paragraph, heading, list, quote, table, code and picture, and the language of a block, like board or canvas. Without a number, it's the first one.
+- `![[examples#^writing]]` shows the block with the name writing. The name is at the end of the block's last line, like `^writing`, as Obsidian writes it. The page doesn't show the name. To get a link like this, put the caret in a block, press ⌘⇧P and run Copy Link To Block. Ladder gives the block a name if it has none, and copies the link.
+
+A board, a chart or another live block in a part shows what it shows in its own page. You can't change it in the part. To change it, click the button with the page's name.
+
+Copy a whole block of a page and paste it into another page, and Ladder pastes a part of the first page, not a copy of its lines. A block is whole when the caret is on it as a whole, when a click with ⌘ and ⌥ down chose it, or when the selection runs from its start to its end. A heading with the lines under it is one block, and so is an item of a list with the lines under it. If the block has no name, Ladder gives it one, like `^sand-the-walls`. To paste a copy of the lines, press ⌘⇧V. A paste in the page that the block came from is a copy, and so is a paste of a block that you cut.
+
 ## Lists
 
 1. Press Return at the end of this line. The next number is typed for you.

@@ -431,8 +431,27 @@ end
 "The spans of `text`, whose first character is at column `offset` of its line"
 spans(text::AbstractString, offset::Int=0) = begin
   chars = collect(text)
-  scan!(Span[], chars, 1, length(chars), Style(), offset)
+  # A block's name at the end of the line is markup, with the spaces before it: it says which block this is
+  named = block_id(text) === nothing ? 0 : findlast(==('^'), chars)
+  named == 0 && return scan!(Span[], chars, 1, length(chars), Style(), offset)
+  ends = named - 1
+  while ends >= 1 && isspace(chars[ends]); ends -= 1 end
+  out = scan!(Span[], chars, 1, ends, Style(), offset)
+  push!(out, Span(offset + ends, String(chars[ends+1:end]), false, false, false, false, "", true, false))
 end
+
+# A block can have a name, as Obsidian gives one: ^prices at the end of its
+# last line, after a space, or on a line of its own under the block, for a
+# table or a code block. Another page shows that block with ![[Costs#^prices]].
+# The name doesn't show in rich text. See "a part of another page" in main.jl.
+
+const BLOCK_ID = r"(?:^|\s)\^([\p{L}\p{N}][\p{L}\p{N}_-]*)\s*$"
+
+"The name that `text` gives its block, like `prices` for a line that ends with ^prices, or nothing"
+block_id(text::AbstractString) = (m = match(BLOCK_ID, text); m === nothing ? nothing : String(m[1]))
+
+"True when `text` holds only the name of the block above it, like ^prices"
+only_id(text::AbstractString) = block_id(text) !== nothing && startswith(lstrip(text), '^')
 
 "True for the line of dashes under a table's headings"
 isdivider(text::AbstractString) = occursin(DIVIDER, text) && occursin('-', text)
@@ -477,5 +496,5 @@ end
 "How many words are in a document"
 words(lines) = sum(text -> count(_ -> true, eachmatch(r"[\p{L}\p{N}][\p{L}\p{N}'’-]*", text)), lines, init=0)
 
-export Kind, Line, Span, Cell, classify, spans, tablecells, isdivider, words, isdone, front_matter, MATTER, TOML_MATTER, MATH, CALLOUTS, callout, opens_callout, wikilink, wikitarget
+export Kind, Line, Span, Cell, classify, spans, tablecells, isdivider, words, isdone, front_matter, MATTER, TOML_MATTER, MATH, CALLOUTS, callout, opens_callout, wikilink, wikitarget, block_id, only_id
 export COMMENT, opens_comment, closes_comment

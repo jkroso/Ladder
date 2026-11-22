@@ -17,6 +17,7 @@ The block at the top of this page is front matter: lines at the very top of a fi
 - [Footnotes](welcome.md#text)
 - [Highlighted words, and comments that the page hides](welcome.md#text)
 - [Wiki links: `[[Page]]` links to a page by its name, wherever it is](welcome.md#text)
+- [A part of another page that you can type in: `![[Page#Heading]]` on a line of its own](welcome.md#parts-of-other-pages)
 - [The start of a page in a card: hold ⌘ and rest the mouse on a link to it](welcome.md#text)
 - [A link card: a web page as a card, with its title, its description and its picture](welcome.md#link-cards)
 - [A page of the web that you use in the window](welcome.md#pages-of-the-web)

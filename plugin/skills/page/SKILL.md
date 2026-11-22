@@ -88,6 +88,7 @@ Exit code 3 means that Ladder is not installed, or that it is too old to send a 
 | A footnote | `[^1]` in the text, and a line that starts with `[^1]:`. |
 | Words with a highlighter's colour behind them | `==the words==`. |
 | Another page | A link to another `.md` file. The user holds ⌘ and clicks it. |
+| A part of another page, which the user can change in this page | `![[name#Heading]]` on a line of its own shows the heading and the lines under it from the page `name.md`. `![[name#table 2]]` shows its second table, and `![[name]]` the whole page. What the user types there changes `name.md`. |
 
 Ladder does not draw HTML tags. Do not use them.
 

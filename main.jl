@@ -121,6 +121,12 @@
 #     project, as in Obsidian. [[Ideas|my ideas]] shows other words, and
 #     [[Ideas#Plans]] goes to a heading. A page that isn't there yet opens empty.
 #     After [[, a list shows the pages whose names fit what you type.
+#   - Write ![[Ideas#Plans]] on a line of its own to show a part of the page
+#     Ideas: the heading Plans and the lines under it. ![[Ideas#table 2]] shows
+#     its second table, and ![[Ideas#^prices]] the block named ^prices. Type in
+#     the part, and the page Ideas changes too. ⌘S saves both pages. See "a
+#     part of another page". Copy a whole block and paste it in another page,
+#     and the paste is such a part. ⌘⇧V pastes a copy of its lines.
 #   - Right-click a word with red dots under it to put its spelling right.
 #   - The button at the top left, or ⌘\, shows the other files in the folder.
 #     Drag the right edge of that list to make it wider or narrower.
@@ -338,7 +344,7 @@
 @use "./spelling" misspelt guesses learn!
 @use "./transcribe" Transcription check! finished phrases words_between
 @use "./html" html footnotes NOTE escape
-@use "./markdown" Kind Line Span Cell classify spans tablecells isdivider words isdone front_matter MATTER TOML_MATTER MATH CALLOUTS callout opens_callout wikitarget
+@use "./markdown" Kind Line Span Cell classify spans tablecells isdivider words isdone front_matter MATTER TOML_MATTER MATH CALLOUTS callout opens_callout wikitarget block_id only_id
 @use "./markdown" COMMENT
 @use "./highlight" tokens left_open
 @use "./sheet" SHEET Result sheetcells parts uses tally known units shown number_at nudged name_values ident cases
@@ -1658,6 +1664,8 @@ A folder shows too, when its kind has a method of `page_view`. The sidebar
 then lists the folder that it's in, as it does for a file.
 """
 open!(e, path; record=true) = begin
+  # A link in a part of another page opens its page in the window, not in the part
+  hosted(e) === nothing || return open!(top_editor(e), path; record)
   leave_page!(e, path; record)
   e.buf = get!(e.buffers, path) do
     isfile(path) ? load(path) : isdir(path) ? Buffer(path=path, view=:file) : Buffer(path=path)
@@ -2414,7 +2422,7 @@ something other than its text, which is only so while it's typed: a ``` line,
 a line across the page, a picture, a table's line of dashes.
 """
 israw(b::Buffer, i::Int) =
-  alone(b, i) && (!rich(b) || (picked(b) === nothing && (kinds(b)[i].kind in (Kind.fence, Kind.rule, Kind.table) || pictured(b, i) || maths_line(b, i))))
+  alone(b, i) && (!rich(b) || (picked(b) === nothing && (kinds(b)[i].kind in (Kind.fence, Kind.rule, Kind.table) || pictured(b, i) || maths_line(b, i) || transcludes(b, i) || only_id(b.lines[i]))))
 
 """
 The spans of line `i` as rich text reads them: the text after what starts the
@@ -2493,7 +2501,7 @@ solid(b::Buffer, i::Int) = begin
                        (lang == MATH && has_maths(join(b.lines[s+1:t-1], "\n"))) || block_source(b, s) !== nothing)
     return whole ? (s, t) : k.kind == Kind.fence ? (i, i) : nothing
   end
-  (k.kind == Kind.rule || pictured(b, i) || maths_line(b, i)) && return (i, i)
+  (k.kind == Kind.rule || pictured(b, i) || maths_line(b, i) || transcludes(b, i)) && return (i, i)
   if k.kind == Kind.table
     run = table(b, i)
     run !== nothing && i == run[1] + 1 && return (i, i)
@@ -2781,8 +2789,8 @@ laid(e, text, line::Line, raw::Bool, i::Int, wide=e.width) = begin
   base = face(e, line)
   ps = spare(pieces(e, text, line, raw, i))
   k = line.kind
-  # A hidden ``` line leaves a little room at the top or bottom of its block
-  lh = k == Kind.heading ? base.size * 1.35 : body(e).size * (k == Kind.fence && !raw ? 0.6 : 1.65)
+  # A hidden ``` line leaves a little room at the top or bottom of its block, and so does a line that only names the block over it
+  lh = k == Kind.heading ? base.size * 1.35 : body(e).size * ((k == Kind.fence || (k == Kind.paragraph && only_id(text))) && !raw ? 0.6 : 1.65)
   # Lines of bigger code are further apart. The lines of a comment are laid out as text.
   code = k in (Kind.code, Kind.fence) && line.lang != COMMENT
   code && (lh *= e.code_scale / CODE_SCALE)
@@ -9610,6 +9618,8 @@ save_page!(e) = begin
     node.renamed && commit!(node)
   end
   save!(e.buf)
+  # A page that a part of this one shows, and that was changed there, is saved with it
+  foreach(b -> dirty(b) && save!(b), shown_buffers(e))
 end
 
 # --- where things are ------------------------------------------------------------------------
@@ -24012,14 +24022,16 @@ layout!(e, width=text_width(e)) = begin
   top::px = 0px
   i::Int = 1
   n::Int = length(b.lines)
-  # The lines of a block that went down a level from the window it filled show by themselves
-  span = lowered(e)
+  # The lines of a block that went down a level from the window it filled show by themselves, and so do
+  # the lines of a part of this page that another page shows
+  span = hosted(e) === nothing ? lowered(e) : e.nodes[:span]
   span === nothing || ((i, n) = span)
   # The email as it was sent, with the lines that it stands for, or nothing when the page shows its lines
   sent = span === nothing ? sent_email(e) : nothing
   sent === nothing || (lines = sent_lines(e); sent = lines === nothing ? nothing : (sent, lines))
   plans = 0   # how many takeoff blocks there have been so far
   schedules = 0   # and how many schedules
+  parts = 0   # and how many lines that show a part of another page
   seen = Dict{String,Int}()   # and how many blocks in each of the languages of `BLOCKS`
   # The lines of plain text as the frame before laid them out: see `PlainLine`. A page in columns, an email as it
   # was sent, and a page of emails have lines that are laid out another way.
@@ -24197,6 +24209,15 @@ layout!(e, width=text_width(e)) = begin
       i = t + 1
       continue
     end
+    # A line that holds only a link like ![[Ideas#Plans]] shows that part of the other page, unless the caret is in the line
+    if ks[i].kind == Kind.paragraph && !israw(b, i) && transcludes(b, i)
+      parts += 1   # each one keeps its view by its place among the page's lines like it
+      content = transclusion_item(e, i, parts)
+      push!(items, Item(i, i, top, content.tall, content))
+      top += content.tall
+      i += 1
+      continue
+    end
     # A line that holds only a picture shows the picture, unless the caret is on the line
     if ks[i].kind == Kind.paragraph && !israw(b, i) && occursin("![", b.lines[i])
       content = picture_item(e, i)
@@ -24330,7 +24351,10 @@ describe(e::Editor, it::Item, g::Grid) = begin
 end
 
 describe(e::Editor, it::Item, l::Live) = begin
-  Box(width(grow=grow), height(l.tall), Alignment.Start, padding(0px, LIVE_GAP), geometry(l.node))
+  # In a part of this page that another page shows, a live block is only shown: a cover over it takes its clicks
+  inner = hosted(e) === nothing || l.node isa Transclusion ? geometry(l.node) :
+    Stack(width(grow=grow), Alignment.Start, geometry(l.node), live_cover(e, it))
+  Box(width(grow=grow), height(l.tall), Alignment.Start, padding(0px, LIVE_GAP), inner)
 end
 
 "The kind of block that an item is part of, or nothing for a blank line"
@@ -24381,6 +24405,8 @@ describe(d::Document) = begin
   from, to = e.scroll.offset - PAGE_TOP - 200px, e.scroll.offset + h + 200px
   lo = something(findfirst(it -> it.top + it.tall >= from, items), length(items))
   hi = something(findlast(it -> it.top <= to, items), lo)
+  # A part of this page that another page shows is built whole. That page's own scroll says what's on screen.
+  hosted(e) === nothing || ((lo, hi) = (1, length(items)))
   lo, hi = whole_groups(e, items, lo, hi)   # a group of columns is built whole
   e.shown = lo:hi
   # Each row of text cuts off what's past its end, so long lines that don't wrap need a page as wide as the longest
@@ -24937,6 +24963,8 @@ end
 
 press!(e, pos) = begin
   slideshow(e) === nothing || return slide_press!(e, pos)   # a click on a slide goes to the next one, or back
+  # ⌥-click on a part of another page shows the link that names the part, as ⌥-click on any part shows its lines
+  (hosted(e) !== nothing && only_held(e, Keys.opt)) && return press!(hosted(e), pos)
   empty!(e.glides)   # a click puts the caret at its new place at once, even a click that changes the text
   b = e.buf
   # A click on the number of a line asks git when the line last changed. The click puts the caret on the line too.
@@ -25113,6 +25141,7 @@ end
 
 "Show the page at `path` with its heading `name` near the top of the window. A page with no such heading shows from where it was. It's true."
 go_heading!(e, path, name) = begin
+  hosted(e) === nothing || return go_heading!(top_editor(e), path, name)   # a link in a part of another page goes there in the window
   path == e.buf.path || open!(e, path)
   b = e.buf
   ks = kinds(b)
@@ -25301,6 +25330,614 @@ complete!(e, i, start, name) = begin
   end
 end
 
+# --- a part of another page ----------------------------------------------------------------
+#
+# A line that holds only a link like ![[Ideas#Plans]] shows that part of the
+# page Ideas in this page. Ted Nelson called that a transclusion, and Notion
+# calls it a synced block. The part isn't a copy. It's the other page's own
+# lines: type in it here and the other page changes, and a change there shows
+# here at once. ⌘S saves both pages. What comes after the # names the part:
+#
+#   - ![[Ideas]] is the whole page, without its front matter.
+#   - ![[Ideas#Plans]] is the heading Plans and the lines under it, up to the
+#     next heading that's as big as it or bigger.
+#   - ![[Ideas#^prices]] is the block that has the name prices, as Obsidian
+#     names one: see `block_id` in markdown.jl. The command Copy Link To Block
+#     names the block at the caret, and copies the link that shows it.
+#   - ![[Ideas#table 2]] is the second table of the page. A kind is one of
+#     paragraph, heading, list, quote, table, code and picture, or the
+#     language of a code block, like board, canvas or julia. Without a number,
+#     it's the first one. Code counts the code blocks that show as code.
+#
+# A heading with the name comes first, so a heading called "Table 2" wins over
+# the second table. The page is found as a wiki link finds it: see `wiki_path`.
+#
+# An editor of its own shows the part. It edits the other page's lines, and
+# shows only the lines of the part. Ladder's keys work in it as they do in any
+# page. A click in its text puts its caret there, and Return gives it the
+# keyboard while the caret is on the part as a whole. ↑ on its first line, ↓
+# on its last line and esc go back to this page. A key for the window, like
+# ⌘W, is this page's. A live block of the other page, like a board or a chart,
+# shows there what it shows in its own page, but a click on it does nothing.
+
+"A line that holds only a link to a part of another page. The name of the part is after the [[."
+const TRANSCLUSION = r"^\s*!\[\[([^\]|]+)(?:\|[^\]]*)?\]\]\s*$"
+
+"True when line `i` holds only a link that shows a part of another page"
+transcludes(b::Buffer, i::Int) = (line = b.lines[i]; occursin("![[", line) && occursin(TRANSCLUSION, line))
+
+"How many parts of other pages can show inside each other: a part of a page that shows a part of a page that…"
+const DEEPEST_PART = 3
+
+"How tall the line is that shows in place of a part that isn't there"
+const PART_NOTE_H = 28px
+
+"A part of another page, as a line of this page shows it"
+@def mutable struct Transclusion <: SemanticUI
+  line::Int = 0            # the line of this page that names the part
+  target::String = ""      # what the line names, like "Ideas#Plans"
+  path::String = ""        # the other page's file
+  sub::Any = nothing       # the editor of the other page's lines
+  note::String = ""        # what shows in place of a part that isn't there
+  tall::px = 0px
+end
+
+"What covers a live block in a part of another page, so that a click on the block does nothing"
+@def mutable struct LiveCover <: SemanticUI
+  tall::px = 0px
+end
+
+"The button over a part of another page that opens that page"
+@def mutable struct PartSource <: SemanticUI
+  of::Any = nothing   # the Transclusion
+end
+
+"The editor of the page that shows the part of a page that `e` edits, or nothing when `e` is the window's own"
+hosted(e) = get(e.nodes, :host, nothing)
+
+"The editor of the window that `e` is in: `e`, or the editor of the page that shows the part that `e` edits, and so on up"
+top_editor(e) = (h = hosted(e); h === nothing ? e : top_editor(h))
+
+"The files of `e`'s page, of the page that shows a part of it, and so on up to the window's page"
+host_paths(e) = (h = hosted(e); h === nothing ? [e.buf.path] : [e.buf.path; host_paths(h)])
+
+"The views of the parts of other pages that `e`'s page shows"
+transclusions(e) = [v for (k, v) in e.nodes if v isa Transclusion && k[2] == e.buf.path]
+
+"The pages whose lines the parts on `e`'s page edit, with the pages that parts of those edit, and so on"
+shown_buffers(e) = begin
+  out = Buffer[]
+  for v in transclusions(e)
+    v.sub === nothing && continue
+    any(b -> b === v.sub.buf, out) || push!(out, v.sub.buf)
+    foreach(b -> any(c -> c === b, out) || push!(out, b), shown_buffers(v.sub))
+  end
+  out
+end
+
+"""
+The blocks of the page that `b` holds, in order, as the kind of each, the
+language of a code block, and its first and last line. The front matter and a
+line that only names the block above it aren't blocks.
+"""
+transclusion_blocks(b::Buffer) = begin
+  ks, lines = kinds(b), b.lines
+  n = length(lines)
+  out = Tuple{String,String,Int,Int}[]
+  i = front_matter(lines) + 1
+  lists = (Kind.bullet, Kind.ordered, Kind.todo)
+  # The lines after `i` that go on in the block of line `i`
+  run(more) = (t = i; while t < n && more(t + 1); t += 1 end; t)
+  while i <= n
+    k = ks[i]
+    if k.kind == Kind.blank || only_id(lines[i])
+      i += 1
+      continue
+    end
+    kind, lang, t = if k.kind in (Kind.fence, Kind.code)
+      s, t = codeblock(b, i)
+      # A block that shows as what it makes, like a board, isn't code
+      (solid(b, i) == (s, t) ? "block" : "code", k.lang, t)
+    elseif k.kind == Kind.heading
+      ("heading", "", i)
+    elseif k.kind == Kind.rule
+      ("rule", "", i)
+    elseif k.kind == Kind.table
+      ("table", "", run(j -> ks[j].kind == Kind.table))
+    elseif k.kind in lists
+      # A list goes on through the lines that are indented under its items
+      ("list", "", run(j -> ks[j].kind in lists || (ks[j].kind == Kind.paragraph && ks[j].level > 0)))
+    elseif k.kind == Kind.blockquote
+      ("quote", "", run(j -> ks[j].kind == Kind.blockquote))
+    elseif pictured(b, i) || transcludes(b, i)
+      ("picture", "", i)
+    else
+      ("paragraph", "", run(j -> ks[j].kind == Kind.paragraph && !only_id(lines[j]) && !pictured(b, j) && !transcludes(b, j)))
+    end
+    push!(out, (kind, lang, i, t))
+    i = t + 1
+  end
+  out
+end
+
+"""
+The first and last line of the part of the page in `b` that `part` names, as
+what comes after the # of a link like ![[Ideas#Plans]] names one, or nothing
+when the page has no such part. "" names the whole page.
+"""
+transclusion_lines(b::Buffer, part::AbstractString) = begin
+  lines, ks = b.lines, kinds(b)
+  n = length(lines)
+  part = String(strip(part))
+  trimmed((s, t)) = (while t > s && isempty(strip(lines[t])); t -= 1 end; s <= t ? (s, t) : nothing)
+  isempty(part) && return trimmed((min(front_matter(lines) + 1, n), n))
+  found = transclusion_blocks(b)
+  if startswith(part, '^')
+    # The block whose last line ends with the name, or the block over a line that holds only the name
+    name = part[2:end]
+    i = findfirst(l -> block_id(l) == name, lines)
+    i === nothing && return nothing
+    if only_id(lines[i])
+      above = findlast(x -> x[4] < i, found)
+      return above === nothing ? nothing : found[above][3:4]
+    end
+    at = findfirst(x -> x[3] <= i <= x[4], found)
+    at === nothing && return nothing
+    kind, _, s, t = found[at]
+    kind == "heading" && return heading_lines(b, i)
+    # In a list, the name is on one item, and the part is that item with the lines indented under it
+    if kind == "list"
+      last = t
+      t = i
+      while t < last && ks[t+1].level > ks[i].level; t += 1 end
+      return (i, t)
+    end
+    return (s, t)
+  end
+  # A heading with the name
+  slug = heading_slug(part)
+  i = findfirst(j -> ks[j].kind == Kind.heading && heading_slug(heading_words(b, j)) == slug, 1:n)
+  i === nothing || return heading_lines(b, i)
+  # A kind and a number, like table 2
+  m = match(r"^(\p{L}[\p{L}\p{N}_+-]*)\s*(\d*)$", part)
+  m === nothing && return nothing
+  want, nth = lowercase(m[1]), isempty(m[2]) ? 1 : parse(Int, m[2])
+  want = get(Dict("paragraphs" => "paragraph", "headings" => "heading", "lists" => "list", "quotes" => "quote",
+                  "tables" => "table", "pictures" => "picture", "image" => "picture"), want, want)
+  fits = [(s, t) for (kind, lang, s, t) in found if kind == want || (kind in ("code", "block") && lowercase(lang) == want)]
+  1 <= nth <= length(fits) ? fits[nth] : nothing
+end
+
+"The words of the heading on line `i`, without its #s and without the name of its block"
+heading_words(b::Buffer, i::Int) = begin
+  text = rest(b.lines[i], kinds(b)[i].prefix)
+  block_id(text) === nothing ? text : rstrip(text[1:prevind(text, findlast(==('^'), text))])
+end
+
+"The heading on line `i` and the lines under it, up to the next heading that's as big or bigger, without the empty lines at the end"
+heading_lines(b::Buffer, i::Int) = begin
+  ks, n = kinds(b), length(b.lines)
+  t = i
+  while t < n && !(ks[t+1].kind == Kind.heading && ks[t+1].level <= ks[i].level); t += 1 end
+  while t > i && isempty(strip(b.lines[t])); t -= 1 end
+  (i, t)
+end
+
+"What line `i` shows when it holds a link to a part of another page. It's the `n`th such line of the page."
+transclusion_item(e, i, n) = begin
+  v = get!(Transclusion, e.nodes, (:part, e.buf.path, n))
+  own!(node!(Document, e, :document), v)
+  v.line = i
+  show_part!(v, e, String(strip(match(TRANSCLUSION, e.buf.lines[i])[1])))
+  Live(v, v.tall + 2LIVE_GAP)
+end
+
+"""
+Find the part that `target`, like "Ideas#Plans", names, and lay out its lines
+for the page of `e`. While the part's editor has the keyboard, the part keeps
+the lines that it has, with the lines that typing adds, so a heading that's
+being renamed doesn't make it go.
+"""
+show_part!(v::Transclusion, e, target::String) = begin
+  v.target = target
+  name, part = occursin('#', target) ? String.(split(target, '#', limit=2)) : (target, "")
+  name = String(strip(name))
+  path = isempty(name) ? e.buf.path : wiki_path(e, name)
+  shown = isempty(name) ? title(path) : name
+  note(words) = (v.note = words; v.tall = PART_NOTE_H; v)
+  isfile(path) || return note("There's no page called $shown")
+  ismarkdown(path) || return note("Only a page of Markdown can show a part of itself here")
+  path in host_paths(e) && return note("A page can't show a part of itself")
+  length(host_paths(e)) >= DEEPEST_PART && return note("Parts of pages show inside each other too deeply to show $shown here")
+  if v.sub === nothing || v.path != path
+    v.sub = part_editor(e, path)
+    setfield!(v.sub, :parent, v)
+  end
+  v.path = path
+  sub = v.sub
+  b = sub.buf
+  refresh!(b)   # a change that something else made to the other page's file shows here too
+  w = window_of(e)
+  typing = w !== nothing && w.focus === sub
+  kept = get(sub.nodes, :kept, nothing)
+  span = if typing && kept !== nothing
+    # Every change while it types is in the part, so its last line moves down as lines are added
+    (s, t), had = kept
+    s <= length(b.lines) ? (s, clamp(t + length(b.lines) - had, s, length(b.lines))) : nothing
+  else
+    transclusion_lines(b, part)
+  end
+  span === nothing && return note("$shown has no $(isempty(part) ? "lines" : part)")
+  v.note = ""
+  sub.nodes[:span] = span
+  sub.nodes[:kept] = (span, length(b.lines))
+  # While no part of this page has the other page's caret, every line of the part shows as it reads
+  (w !== nothing && w.focus isa Editor && w.focus.buf === b) || (b.reading = true; sub.plain = false)
+  follow_host!(sub, e)
+  layout!(sub, e.width)
+  v.tall = isempty(sub.layout) ? 0px : lowest(sub, sub.layout)
+  typing && sub.reveal && keep_shown!(v, e)
+  v
+end
+
+"An editor of the page at `path`, for a part of it that the page of `e` shows. It edits the lines that the window has open for that page."
+part_editor(e, path) = begin
+  sub = Editor()
+  sub.buffers = e.buffers
+  sub.buf = get!(() -> load(path), e.buffers, path)
+  sub.nodes[:input] = own!(sub, TextInput())
+  sub.nodes[:host] = e
+  sub
+end
+
+"Give the editor of a part the choices of the editor of the page that shows it: its colours, font, text size and keys"
+follow_host!(sub, e) = begin
+  for f in (:theme, :look, :font, :weight, :zoom, :code_scale, :code_font, :code_weight, :indent, :wrap, :spelling,
+            :glide, :bundle, :rebound, :widest, :size, :autosave)
+    setfield!(sub, f, getfield(e, f))
+  end
+  # Text that was laid out in another font or at another size is laid out again
+  key = (e.theme, e.look, e.font, e.weight, e.zoom, e.code_scale, e.code_font, e.code_weight)
+  get(sub.nodes, :style, nothing) == key || (sub.nodes[:style] = key; empty!(sub.flows))
+  sub
+end
+
+"Scroll the page of `e` so that the caret of the part that `v` shows is in the window"
+keep_shown!(v::Transclusion, e) = begin
+  sub = v.sub
+  sub.reveal = false
+  b = sub.buf
+  it = item(sub, b.caret[1])
+  top, high = it.top, it.tall
+  if it.content isa Flow
+    k, _ = spot(it.content, b.caret[2])
+    top, high = it.top + line_top(it.content, k), it.content.lines[k].high
+  end
+  # The page's own layout isn't done, so the place of the part on it is found after it is
+  e.nodes[:show_part] = (v.line, top, high)
+end
+
+"Scroll the window's page to the caret of a part of another page that it shows, once the page is laid out"
+reveal_part!(e) = begin
+  kept = pop!(e.nodes, :show_part, nothing)
+  (kept === nothing || isempty(e.layout)) && return
+  line, top, high = kept
+  at = item(e, line).top + LIVE_GAP + top
+  scroll_into_view!(e.scroll, PAGE_TOP + at - 30px, PAGE_TOP + at + high + 40px)
+end
+
+describe(v::Transclusion) = begin
+  isempty(v.note) || return Row(width(grow=grow), height(v.tall), Alignment.Center, child_gap=6px,
+    Icon("link-45deg", size=14px, color=colours.faint), Box(label(v.note, 13px, color=colours.dim)))
+  doc = node!(Document, v.sub, :document)
+  w = window_of(v)
+  # The name of the page that the part comes from shows at its top right while the mouse is over it or it has the keyboard
+  on = ishovered(v) || (w !== nothing && w.focus === v.sub)
+  on || return Box(width(grow=grow), height(v.tall), Alignment.Start, doc)
+  source = node!(() -> PartSource(of=v), v.sub, :source)
+  Stack(width(grow=grow), height(v.tall), Alignment.Start, doc,
+    Row(width(grow=grow), Alignment.Start, justify=Alignment.End, offset_y=-LIVE_GAP - 20px, source))
+end
+
+"Draw a line round a part of another page while the mouse is over it or it has the keyboard"
+draw(ctx, size, ui::ConcreteRect, v::Transclusion) = begin
+  isempty(v.note) || return
+  w = window_of(v)
+  on = w !== nothing && w.focus === v.sub
+  (on || ishovered(v)) || return
+  round_box(ctx, num(ui.left) - RING_OUT, num(ui.top) - num(LIVE_GAP) + 2, num(ui.width) + 2RING_OUT, num(ui.height) + 2num(LIVE_GAP) - 4, 8.0,
+            line=on ? tint(colours.accent, 0.75) : colours.line, wide=on ? 1.5 : 1.0)
+end
+
+# A click in the part's text is for its editor, which puts the caret there. A click that the part's editor didn't take,
+# like one on the room round its text, puts this page's caret on the part as a whole.
+onkey(v::Transclusion, ev::KeyPress{Keys.mouse_left}) =
+  (w = ev.window; v.sub !== nothing && (w.focus === v.sub || only_held(w, Keys.opt)) ? handled : click_page!(v, ev))
+# A key that the part's editor had is done with: it isn't for this page too
+onkey(::Transclusion, ::KeyPress) = handled
+onmouse(::Transclusion, ::MouseMove) = handled
+
+describe(c::LiveCover) = Box(width(grow=grow), height(c.tall))
+onkey(::LiveCover, ::KeyPress{Keys.mouse_left}) = handled
+onmouse(::LiveCover, ::MouseMove) = handled
+cursor(::LiveCover) = :arrow
+
+"What covers the live block that `it` shows in the part of another page that `e` edits"
+live_cover(e, it::Item) = (c = node!(LiveCover, e, (:cover, it.first)); c.tall = it.content.tall - 2LIVE_GAP; c)
+
+describe(s::PartSource) = begin
+  v = s.of
+  Row(height(18px), padding(0px, 7px), child_gap=4px, radius(9px), Alignment.Center,
+      background(ishovered(s) ? colours.active : colours.bg), border(1px, :solid, colours.line),
+    Box(label(splitext(basename(v.path))[1], 11px, color=colours.dim)), Icon("box-arrow-up-right", size=10px, color=colours.dim))
+end
+cursor(::PartSource) = :hand
+onkey(s::PartSource, ::KeyPress{Keys.mouse_left}) = (open_part!(s.of); handled)
+onmouse(::PartSource, ::MouseMove) = handled
+
+"Show the page that `v` shows a part of, with the part's first line near the top of the window"
+open_part!(v::Transclusion) = begin
+  top = top_editor(editor(v))
+  s = v.sub === nothing ? 1 : get(v.sub.nodes, :span, (1, 1))[1]
+  open!(top, v.path)
+  show_line!(top, s)
+  top.nodes[:hold] = (s, 24px - PAGE_TOP)
+  top
+end
+
+"""
+Give the keyboard to the part that `v` shows, with its caret at the start of
+the part's first line, or at `at` in the other page's lines.
+"""
+enter_shown!(v::Transclusion, at=nothing) = begin
+  sub = v.sub
+  (sub === nothing || !isempty(v.note)) && return nothing
+  b = sub.buf
+  s, t = sub.nodes[:span]
+  b.reading = false
+  b.caret = b.anchor = settle(b, something(at, (s, 0)), 1)
+  confine!(sub)
+  focus(sub)
+  touch!(sub)
+  sub
+end
+
+"""
+Give the keyboard back to the page that shows the part that `e` edits. Its
+caret goes onto the part as a whole, or with `by` of -1 or 1 on to the line
+over the part or under it.
+"""
+leave_part!(e, by::Int=0) = begin
+  host = hosted(e)
+  v = getfield(e, :parent)
+  e.buf.reading = true
+  e.plain = false
+  hb = host.buf
+  hb.caret = hb.anchor = (v.line, 0)
+  focus(host)
+  touch!(host)
+  w = window_of(host)
+  by == 0 || w === nothing || run!(host, w, by < 0 ? :up : :down)
+  host
+end
+
+"Commands for the window that leave the keyboard in the part of another page that has it"
+const KEEP_PART = (:save, :bigger, :smaller, :usual_size, :inspector, :sidebar, :hidden_files, :settings, :commands)
+
+"""
+What a key does in a part of another page before the part's editor does what
+it does with a key. True when the key is done with. A command for the window
+runs in the window's own page. ⌘E shows the part's lines as they're written.
+"""
+part_key!(e, w, K, command, select) = begin
+  b = e.buf
+  s, t = e.nodes[:span]
+  kind = command === nothing ? :none : COMMANDS[command].kind
+  K == Keys.escape && unmodified(w) && return (leave_part!(e); true)
+  if command == :plain
+    e.plain = !e.plain
+    return true
+  end
+  if kind == :window || command in (:find, :find_next, :find_last)
+    if !(command in KEEP_PART)
+      f = e
+      while hosted(f) !== nothing; f = leave_part!(f) end
+    end
+    run!(top_editor(e), w, command, select)
+    return true
+  end
+  # ↑ on the first line and ↓ on the last go on to the page that shows the part
+  if command in (:up, :down) && !select && isempty(others(b))
+    by = command == :up ? -1 : 1
+    p = vertical(e, by)
+    (p[1] < s || p[1] > t || p == b.caret) && return (leave_part!(e, by); true)
+  end
+  # A key that would join the part's first line to the line over it, or its last line to the line under it, does nothing
+  if !selecting(b) && ((command in (:erase_back, :erase_word_back, :erase_line_start) && b.caret == (s, 0)) ||
+                       (command in (:erase, :erase_word) && b.caret == line_end(b, t)))
+    return true
+  end
+  # A live block in the part is only shown: the caret can be on it as a whole, and nothing changes it
+  picked(b) !== nothing && (K == Keys.enter || kind in (:edit, :type))
+end
+
+"""
+Copy a link that shows the block at the caret in another page, like
+![[Ideas#^prices]]. A block without a name gets one from its first words: at
+the end of its last line, or on a line under a list, a table or a code block.
+"""
+copy_link_to_block!(e) = begin
+  link = block_link!(e)
+  link === nothing && return nothing
+  clipboard(link)
+  e.nodes[:result] = ("Copied $link", time())
+  redraw_in!(e, 0)
+  link
+end
+works_here(e, ::Val{:copy_link_to_block}) = e.buf.view == :markdown && !readonly(e.buf)
+
+"The link that shows the block at the caret in another page, as `copy_link_to_block!` makes it, or nothing. The block gets a name if it has none."
+block_link!(e) = begin
+  b = e.buf
+  (b.view == :markdown && !readonly(b) && !b.fixed && isfile(b.path)) || return nothing
+  i = b.caret[1]
+  found = transclusion_blocks(b)
+  at = findfirst(x -> x[3] <= i <= x[4], found)
+  at === nothing && return nothing
+  _, _, s, t = found[at]
+  # A heading's link shows the lines under it too
+  kinds(b)[s].kind == Kind.heading && ((s, t) = heading_lines(b, s))
+  name = node_name!(b, s, t)
+  touch!(e)
+  "![[$(title(b.path))#^$name]]"
+end
+
+"""
+The block of `b` that lines `s` to `t` are the whole of, or nothing: a block
+of the page, a heading with the lines under it, or an item of a list with the
+lines indented under it. The front matter isn't one, and nor is a line that
+already shows a part of another page.
+"""
+whole_node(b::Buffer, s::Int, t::Int) = begin
+  (b.view == :markdown && front_matter(b.lines) < s <= t <= length(b.lines)) || return nothing
+  ks = kinds(b)
+  ks[s].kind == Kind.heading && return heading_lines(b, s) == (s, t) ? (s, t) : nothing
+  found = transclusion_blocks(b)
+  at = findfirst(x -> x[3] <= s <= x[4], found)
+  at === nothing && return nothing
+  kind, _, from, to = found[at]
+  (kind == "picture" && transcludes(b, s)) && return nothing
+  from == s && to == t && return (s, t)
+  kind == "list" || return nothing
+  last = s
+  while last < to && ks[last+1].level > ks[s].level; last += 1 end
+  last == t ? (s, t) : nothing
+end
+
+"""
+The name of the block of `b` from line `s` to line `t`, which a link from
+another page uses, like `prices` in ![[costs#^prices]]. A block without one
+gets one from the first words of its first line: at the end of the line of a heading or an item
+of a list, at the end of a paragraph's last line, or on a line under anything
+else. The caret stays where it was in the text.
+"""
+node_name!(b::Buffer, s::Int, t::Int) = begin
+  ks = kinds(b)
+  found = transclusion_blocks(b)
+  at = findfirst(x -> x[3] == s, found)
+  kind, lang = at === nothing ? ("item", "") : found[at][1:2]
+  ks[s].kind == Kind.heading && (kind = "heading")
+  kind == "list" && found[at][4] != t && (kind = "item")
+  ends = kind in ("heading", "item") ? s : kind == "paragraph" ? t : 0
+  name = ends > 0 ? block_id(b.lines[ends]) : nothing
+  # A name on a line under the block names it too, but not a heading's lines or an item's: that's the name of their last block
+  under = kind in ("heading", "item") || t == length(b.lines) || !only_id(b.lines[t+1]) ? nothing : block_id(b.lines[t+1])
+  name = something(name, under, Some(nothing))
+  name === nothing || return name
+  words = kind in ("code", "block") ? [isempty(lang) ? "code" : lang] :
+          kind in ("table", "picture") ? [kind] :
+          first(split(lowercase(replace(b.lines[s], r"[^\p{L}\p{N}\s]" => " "))), 4)
+  words = first(filter(w -> !isempty(w) && w != "x", String.(words)), 3)
+  base = isempty(words) ? kind : join(words, '-')
+  taken = Set(something(block_id(l), "") for l in b.lines)
+  name, k = base, 1
+  while name in taken; k += 1; name = "$base-$k" end
+  caret, anchor = b.caret, b.anchor
+  if ends > 0
+    edit!(b, line_end(b, ends), line_end(b, ends), " ^" * name)
+    b.caret, b.anchor = caret, anchor
+  else
+    edit!(b, line_end(b, t), line_end(b, t), "\n^" * name)
+    moved(p) = p[1] > t ? (p[1] + 1, p[2]) : p
+    b.caret, b.anchor = moved(caret), moved(anchor)
+  end
+  name
+end
+
+# --- a block that's copied pastes as a part of its page --------------------------------------
+#
+# Copy a whole block of a page and paste it into another page, and the other
+# page gets a line like ![[costs#^prices]]: a part of the first page, which
+# you type in, and not a copy of its lines. The block gets a name if it has
+# none. A block is copied whole while the caret is on it as a whole, after a
+# click with ⌘ and ⌥ down chose it, or when the selection runs from its start
+# to its end. A heading with the lines under it is one block, and so is an
+# item of a list with the lines indented under it. ⌘⇧V pastes the lines
+# instead. A paste in the page that the block came from pastes its lines too,
+# and so does a block that's cut, since a cut block leaves its page.
+
+"The block that Ladder last copied whole: the text that it put on the clipboard, the lines of the page that the block is in, the block's lines and its first and last line"
+const COPIED_BLOCK = Ref{Any}(nothing)
+
+"Put `text` on the clipboard. A window that isn't on the screen keeps it to itself, so a test leaves the Mac's clipboard alone."
+copy_text!(e, text) = (w = window_of(e); w === nothing ? clipboard(text) : clipboard!(w, text); text)
+
+"Note what was just copied: `text`, from the selection `span` of the page of `e`. A whole block is kept, for a paste in another page."
+copied!(e, span, text) = begin
+  COPIED_BLOCK[] = nothing
+  b = e.buf
+  (span === nothing || b.view != :markdown || !isfile(b.path) || Eml.isemail(b.path)) && return nothing
+  lo, hi = span
+  s, t = lo[1], hi[1]
+  hi[2] == 0 && t > s && (t -= 1)   # a selection that ends at the start of the next line
+  # It starts no later than the first line's words start, and goes to the end of its last line
+  (lo[2] <= kinds(b)[s].prefix && (hi[1] > t || hi[2] >= length(b.lines[t]))) || return nothing
+  whole_node(b, s, t) === nothing && return nothing
+  COPIED_BLOCK[] = (text=String(text), buf=b, lines=b.lines[s:t], first=s, last=t)
+end
+
+"""
+The line that shows the block that Ladder last copied whole, when `text` is
+what it copied and the page of `e` is another page, or nothing. The block
+gets a name in its own page if it has none. Its page is saved then if it had
+no other changes, so that a window that reads the page from its file finds the name.
+"""
+pasted_part(e, text) = begin
+  c = COPIED_BLOCK[]
+  (c !== nothing && c.text == text) || return nothing
+  b, src = e.buf, c.buf
+  (b.view == :markdown && !readonly(b) && !b.fixed && b.path != src.path && isfile(src.path)) || return nothing
+  # The block is on the lines that it was copied from, or it's found again in its page
+  s, t = c.first, c.last
+  n = t - s
+  if !(t <= length(src.lines) && src.lines[s:t] == c.lines)
+    k = findfirst(i -> i + n <= length(src.lines) && src.lines[i:i+n] == c.lines, eachindex(src.lines))
+    k === nothing && return nothing
+    s, t = k, k + n
+  end
+  whole_node(src, s, t) === nothing && return nothing
+  clean = !dirty(src)
+  name = node_name!(src, s, t)
+  clean && dirty(src) && save!(src)
+  "![[$(page_name_for(e, src.path))#^$name]]"
+end
+
+"Put `link`, a line that shows a part of another page, on a line of its own: on the empty line that the caret is on, or under the block that it's in. The caret goes onto the part as a whole."
+paste_part!(e, link) = begin
+  b = e.buf
+  selecting(b) && type!(e, "")
+  i = b.caret[1]
+  if isempty(strip(b.lines[i]))
+    edit!(b, (i, 0), line_end(b, i), link)
+  else
+    under = block_end(b, i)
+    after = under < length(b.lines) && !isempty(strip(b.lines[under+1])) ? "\n" : ""
+    edit!(b, line_end(b, under), line_end(b, under), "\n\n" * link * after)
+    i = under + 2
+  end
+  b.caret = b.anchor = (i, 0)
+  focus(e)
+  touch!(e)
+end
+
+"Paste what the clipboard holds as text: a block that was copied whole from another page goes in as a copy of its lines, not as a part of that page"
+paste_copy!(e) = begin
+  copied = COPIED_BLOCK[]
+  COPIED_BLOCK[] = nothing
+  try paste!(e) finally COPIED_BLOCK[] = copied end
+end
+
+
 "True when the Finder shows the folder at `path` as one file, as it shows an app"
 ispackage(path) = with_pool() do
   ccall((:objc_msgSend, libobjc), Bool, (Ptr{Cvoid}, Ptr{Cvoid}, Ptr{Cvoid}),
@@ -25328,6 +25965,7 @@ as a link to it does. A folder of a kind that shows in the page shows there.
 A folder that the Finder shows as one file, like an app, opens as that file does.
 """
 show_path!(e, path) = begin
+  hosted(e) === nothing || return show_path!(top_editor(e), path)   # a link in a part of another page shows in the window
   isfile(path) && return open!(e, path)
   (isdir(path) && !ispackage(path)) || return open_url(path)
   # A folder does what a click on it in the sidebar does. A folder of no kind shows in the sidebar, and a kind can show in the page too.
@@ -26021,13 +26659,24 @@ surround!(e, mark::String) = begin
   touch!(e)
 end
 
-"Copy what's selected. With several selections, each one's text goes on a line of its own, in the order of the page."
+"""
+Copy what's selected. With several selections, each one's text goes on a line
+of its own, in the order of the page. With none, the part that the caret is on
+as a whole, like a board or a picture, is copied as its lines. A whole block
+pastes in another page as a part of this one: see "a block that's copied
+pastes as a part of its page".
+"""
 copy_selection!(e) = begin
   b = e.buf
-  selecting(b) && write_blocks!(e)   # a block that a file defines is copied as what it holds now
+  run = picked(b)
+  (selecting(b) || run !== nothing) && write_blocks!(e)   # a block that a file defines is copied as what it holds now
   spans = selecting(b) ? [selection(b)] : Tuple{Pos,Pos}[]
   with_others(() -> selecting(b) && push!(spans, selection(b)), b)
-  isempty(spans) ? false : clipboard(join((excerpt(b, s...) for s in sort(spans)), "\n"))
+  isempty(spans) && run !== nothing && push!(spans, ((run[1], 0), line_end(b, run[2])))
+  isempty(spans) && return false
+  text = join((excerpt(b, s...) for s in sort(spans)), "\n")
+  copied!(e, length(spans) == 1 ? only(spans) : nothing, text)
+  copy_text!(e, text)
 end
 
 """
@@ -26047,6 +26696,9 @@ paste!(e) = begin
   paths = Pasteboard.files()
   if isempty(paths)
     text = Sys.isapple() ? Pasteboard.text() : clipboard()
+    # A whole block that was copied from another page goes in as a part of that page
+    link = pasted_part(e, text)
+    link === nothing || return paste_part!(e, link)
     # A contact that was copied in the Contacts app goes in as a block of contacts
     list = copied_contacts(e, text)
     isempty(list) || return paste_contacts!(e, list)
@@ -27169,6 +27821,7 @@ onkey(e::Editor, ev::KeyPress{Keys.mouse_forward}) = side_button!(e, ev.window, 
 
 "Run the `command` of a button at the side of the mouse: `:back` or `:forward`"
 side_button!(e, w, command) = begin
+  e = top_editor(e)   # in a part of another page, they go back and forward in the window's page
   # While a picture fills the window, or the file finder is open, the page under it stays, as it does for the keys
   (zooming(e) === nothing && e.popup == :none) || return nothing
   run!(e, w, command)
@@ -27197,6 +27850,8 @@ onkey(e::Editor, ev::KeyPress{K}) where K = begin
   # The first key of a shortcut of two, like ⌃X, does nothing but wait for the second
   command, select = command!(e, w, K)
   command == :wait && return
+  # In a part of another page, a key for the window is the window's page's, and esc goes back to that page
+  hosted(e) === nothing || !part_key!(e, w, K, command, select) || return handled
   # While the command palette shows, every key is its own, whatever part of it has the keyboard
   e.popup == :commands && return (palette_key!(e, w, K, command); K == Keys.tab ? handled : nothing)
   kind = command === nothing ? :none : COMMANDS[command].kind
@@ -28428,9 +29083,9 @@ widen!(e) = begin
   e
 end
 
-"Keep the caret, and each selection, in the lines that fill the window"
+"Keep the caret, and each selection, in the lines that fill the window, or in the part of a page that another page shows"
 confine!(e) = begin
-  span = lowered(e)
+  span = hosted(e) === nothing ? lowered(e) : e.nodes[:span]
   span === nothing && return e
   b = e.buf
   s, t = span
@@ -28879,6 +29534,8 @@ enter_part!(e) = begin
   run = picked(b)
   (run === nothing || isempty(e.layout)) && return e
   it = item(e, run[1])
+  # A part of another page has an editor of its own, with the caret at its start
+  it.content isa Live && it.content.node isa Transclusion && return (enter_shown!(it.content.node); e)
   # A plan, a schedule and a sketch have keys of their own
   views = nodes_in(n -> keyboard_part(n) !== nothing, e, it)
   isempty(views) || return (focus(keyboard_part(first(views))); e)
@@ -28922,11 +29579,13 @@ describe(t::Title) = begin
     return Box(width(wide), height(22px), padding(5px, 0px), radius(4px), Alignment.Start, background(colours.bg),
                border(1px, :solid, colours.accent), renamer(e))
   end
+  # A page whose parts of other pages were changed there is edited too, since ⌘S saves them with it
+  edited = dirty(b) || any(dirty, shown_buffers(e))
   # A name that's too long for its room in the bar ends in …, so that its start still shows
-  room = get(e.nodes, :title_room, 10_000px) - (dirty(b) ? 70px : 16px)
+  room = get(e.nodes, :title_room, 10_000px) - (edited ? 70px : 16px)
   Row(child_gap=6px,
     label(elide(something(page_title(e), name(b)), 13px, max(room, 40px)), 13px, color=colours.dim),
-    (dirty(b) ? (label("— edited", 13px, color=colours.faint),) : ())...)
+    (edited ? (label("— edited", 13px, color=colours.faint),) : ())...)
 end
 
 onkey(t::Title, ::KeyPress{Keys.mouse_right}) = begin
@@ -30589,11 +31248,20 @@ const INSERTS = [
 const PAGE_MENU = ["Cut", "Copy", "Paste", "-", "Select All", "-", "Find…", "Export as HTML…", "-",
                    "Insert" => [x isa String ? x : x[1] for x in INSERTS], "-", "Show as Slides"]
 
-cut!(e) = copy_selection!(e) === false || each_selection!(() -> type!(e, ""), e)
+cut!(e) = begin
+  run = picked(e.buf)
+  copied = copy_selection!(e)
+  COPIED_BLOCK[] = nothing   # a block that's cut leaves its page, so it pastes as its lines
+  copied === false && return false
+  # The part that the caret was on as a whole goes, as ⌫ takes it
+  run === nothing ? each_selection!(() -> type!(e, ""), e) : delete_lines!(e)
+end
 select_all!(e) = begin
   b = e.buf
   b.reading = false   # a selection shows the caret's end of it
-  b.anchor, b.caret = (1, 0), line_end(b, length(b.lines))
+  # In a part of another page, it's all of the part
+  s, t = hosted(e) === nothing ? (1, length(b.lines)) : e.nodes[:span]
+  b.anchor, b.caret = (s, 0), line_end(b, t)
   e
 end
 
@@ -30730,6 +31398,8 @@ page_menu!(e, w) = begin
   b.fixed && append!(off, n .+ findall(x -> (x isa Pair ? first(x) : x) in ("Cut", "Paste", "Insert"), PAGE_MENU))
   # A file of code is no page, and has no place for a table or a recording
   b.view == :code && append!(off, n .+ findall(x -> (x isa Pair ? first(x) : x) in ("Export as HTML…", "Insert", "Show as Slides"), PAGE_MENU))
+  # A part of another page isn't the page that the window shows
+  hosted(e) === nothing || append!(off, n .+ findall(x -> (x isa Pair ? first(x) : x) in ("Find…", "Export as HTML…", "Show as Slides"), PAGE_MENU))
   items = Any[spell..., PAGE_MENU...]
   system_menu(w, items, act; off) || drawn_menu!(w, items, act; off)
   nothing
@@ -37909,6 +38579,7 @@ describe_window(e::Editor) = begin
   hold = pop!(e.nodes, :hold, nothing)
   hold === nothing || (e.scroll.offset = max(0px, item(e, hold[1]).top - hold[2]))
   e.reveal && (reveal!(e); e.reveal = false)
+  reveal_part!(e)   # the caret of a part of another page that has the keyboard
   # The window is drawn again as soon as a key or the mouse does something, so
   # typing shows without waiting for a frame that was already under way. Between
   # times it only wakes to blink the caret.
@@ -38357,6 +39028,10 @@ end
 # Reset Module gives the page's code a new module: see `reset_module!`
 add_commands!("The text", [Command(:reset_module, "Run the page's Julia code in a new, empty module, without what it made before", :window, "",
                                    (e, w, _) -> reset_module!(e))])
+
+# ⌘⇧V pastes a block that was copied from another page as its lines: see "a block that's copied pastes as a part of its page"
+add_commands!("The text", [Command(:paste_copy, "Paste a block from another page as a copy of its lines, not as a part of that page", :edit, "cmd+shift+v",
+                                   (e, w, _) -> paste_copy!(e))])
 
 # --- commands that are functions ----------------------------------------------------------
 #
@@ -38962,6 +39637,7 @@ word_count(e) = begin
 end
 works_here(e, ::Val{:word_count}) = e.buf.view in (:markdown, :code)
 add_command!(word_count, title="Say how many words the page has, how many characters, and how long it takes to read", kind=:look)
+add_command!(copy_link_to_block!, title="Copy a link that shows the block at the caret in another page, like ![[Ideas#^prices]]", kind=:edit)
 
 # --- the commands of a file and of a folder ---
 #
@@ -39348,6 +40024,23 @@ shown_now(b::Block) = begin
 end
 
 tool_input(t::CodePicker, w, ::KeyRelease{Keys.mouse_left}) = (was = t.swallow; t.swallow = false; was)
+# ⌘C copies the block that a click with ⌘ and ⌥ down chose, as a whole block
+tool_input(t::CodePicker, w, ::KeyPress{Keys.c}) = begin
+  (t.chosen !== nothing && only_held(w, Keys.cmd)) || return false
+  e = t.editor
+  b = e.buf
+  b.view == :markdown || return false
+  # A block of the page's lines, or a view that's all that a block shows, like a board
+  x = first(t.chosen)
+  at = x isa Block ? nothing : findfirst(it -> it.content isa Live && it.content.node === x, e.layout)
+  lines = x isa Block ? (x.first, x.last) : at === nothing ? nothing : (e.layout[at].first, e.layout[at].last)
+  lines === nothing && return false
+  span = ((lines[1], 0), line_end(b, lines[2]))
+  text = excerpt(b, span...)
+  copied!(e, span, text)
+  copy_text!(e, text)
+  true
+end
 # Esc takes the line of a thing that a click with ⌘ and ⌥ down chose away, stops an agent that's working,
 # and takes the card of an agent's answer away, while no popup and no search shows
 tool_input(t::CodePicker, w, ::KeyPress{Keys.escape}) = begin
