@@ -28526,6 +28526,7 @@ end
 "What takes a click outside the palette"
 @def mutable struct PaletteCatch <: SemanticUI end
 "The outline round a list and what it hangs over, drawn as one shape"
+  pointed::Bool = false                                  # true once the mouse chose a row of the chip's list, for Return and Tab to take: see `palette_say!`
 @def mutable struct PaletteLens <: SemanticUI end
 "What blurs the page under the strip that the bar is in, as frosted glass does. The blur fades out above the bar."
 @def mutable struct PaletteFrost <: SemanticUI end
@@ -29171,8 +29172,10 @@ take_command!(e, w, p::CommandPalette, c::Command) = begin
   isempty(p.values) && return palette_run!(e, w, p)
   start_chips!(e, p)
   # A command that runs at once still waits here: what the window gave its chips is shown first, and Return or a click runs it
-  # The keyboard goes to the first chip that has nothing yet, or to the Run button
-  go_chip!(e, p, something(findfirst(x -> x === UNSAID, p.values), length(palette_chips(p)) + 1))
+  # The keyboard goes to the first chip that has nothing yet. When each has something, it goes to the first chip
+  # for a thing in the window, so the mouse picks out what a click would choose instead, or else to the Run button.
+  chips = palette_chips(p)
+  go_chip!(e, p, something(findfirst(x -> x === UNSAID, p.values), findfirst(chip_points, chips), length(chips) + 1))
 end
 
 "Give each chip that has nothing the thing that its type starts with: see `chip_start`"
@@ -29242,13 +29245,26 @@ paler(c) = RGBA(0.6c.r + 0.4, 0.6c.g + 0.4, 0.6c.b + 0.4, 1.0)
 
 """
 The chip that a click on the window chooses a thing for: the one that the
-keyboard is in, or else the first that's for a thing in the window. It's
-nothing while the palette shows no such chip.
+keyboard is in, when it's for a thing in the window. It's nothing while the
+keyboard is in another chip, like the words of Ask About, so the mouse then
+picks nothing out on the page and a click there chooses nothing.
 """
 click_chip(e, p::CommandPalette) = begin
   (e.popup == :commands && p.command !== nothing) || return nothing
   chips = palette_chips(p)
-  p.at <= length(chips) && chip_points(chips[p.at]) && return p.at
+  p.at <= length(chips) && chip_points(chips[p.at]) ? p.at : nothing
+end
+
+"""
+The chip for a thing in the window that ⌥↑ and ⌥↓ make bigger or smaller: the
+one that the keyboard is in, or else the first. It's nothing while the
+palette shows no such chip.
+"""
+thing_chip(e, p::CommandPalette) = begin
+  k = click_chip(e, p)
+  k === nothing || return k
+  (e.popup == :commands && p.command !== nothing) || return nothing
+  chips = palette_chips(p)
   findfirst(k -> chip_points(chips[k]), eachindex(chips))
 end
 
@@ -29305,7 +29321,7 @@ What ⌥↑ and ⌥↓ do while the palette shows a chip for a thing in the wind
 goes back to the thing that it was before.
 """
 resize_thing!(e, p::CommandPalette, by::Int) = begin
-  k = click_chip(e, p)
+  k = thing_chip(e, p)
   k === nothing && return nothing
   chips = palette_chips(p)
   x = chip_value(p, chips, k)
@@ -29367,16 +29383,14 @@ end
 
 """
 Draw a line round the thing of each chip that's for a thing in the window, in
-the chip's colour, with the chip's letter. A paler line goes round what a
-click would choose, with its words. The window's tool draws them, over the
-rest of the window.
+the chip's colour, with the chip's letter, for as long as the command shows.
+While the keyboard is in such a chip, a paler line goes round what a click
+would choose, with its words. The window's tool draws them, over the rest of
+the window.
 """
 mark_chips(ctx, w, e) = begin
   p = get(e.nodes, :palette, nothing)
-  p isa CommandPalette || return nothing
-  k = click_chip(e, p)
-  k === nothing && return nothing
-  redraw_in!(e, 1/30)   # the line follows the mouse
+  (p isa CommandPalette && e.popup == :commands && p.command !== nothing) || return nothing
   chips = palette_chips(p)
   letters = chip_letters(p, chips)
   for l in letters
@@ -29387,6 +29401,9 @@ mark_chips(ctx, w, e) = begin
   x = clicked_thing(e, p, w, k)
   (x === nothing || any(l -> l.thing == x, letters)) && return nothing
   r = shown_at(e, x)
+  k = click_chip(e, p)
+  k === nothing && return nothing
+  redraw_in!(e, 1/30)   # the line follows the mouse
   r === nothing && return nothing
   # With ⇧ held, a click adds the thing, in the colour that it would have
   adds = only_held(w, Keys.shft) && adds_things(chips[k]) && chip_value(p, chips, k) !== UNSAID
@@ -29403,7 +29420,7 @@ that's searched starts with an empty field, and its row is the one that's said.
 go_chip!(e, p::CommandPalette, k::Int) = begin
   chips = palette_chips(p)
   p.at = clamp(k, 1, length(chips) + 1)
-  p.query, p.browsed, p.fault, p.shown = "", false, "", 0
+  p.query, p.browsed, p.pointed, p.fault, p.shown = "", false, false, "", 0
   p.scroll.offset = 0px
   x = chip_value(p, chips, p.at)
   typed = p.at <= length(chips) && chip_kind(e, chips[p.at]) in (:text, :number)
@@ -29551,14 +29568,21 @@ palette_sync!(e, p::CommandPalette) = begin
   nothing
 end
 
-"Say the row that's chosen for the chip that the keyboard is in. With no rows, the chip stays as it is."
+"""
+Say the row that's chosen for the chip that the keyboard is in. With no rows,
+the chip stays as it is. A chip that has something keeps it too, unless the
+mouse chose a row: the arrows say their row at once, and typing takes away
+what the chip had. So the things that clicks on the window chose stay.
+"""
 palette_say!(e, p::CommandPalette) = begin
   rows = palette_rows(e, p)
   isempty(rows) && return
   empty!(p.inner)
-  say!(p, palette_chips(p), p.at, rows[clamp(p.pick, 1, length(rows))].value)
+  say!(p, chips, p.at, rows[clamp(p.pick, 1, length(rows))].value)
   nothing
 end
+  chips = palette_chips(p)
+  chip_value(p, chips, p.at) === UNSAID || p.pointed || return
 
 """
 What ↑ and ↓ do in a chip with a list: choose the row before or after, and
@@ -30148,7 +30172,7 @@ describe(r::PaletteRow) = begin
 end
 cursor(::PaletteRow) = :hand
 # The mouse over a row chooses it, and no more. The row is in sight already, so the list doesn't scroll to it.
-onmouse(r::PaletteRow, ::MouseMove) = (p = palette(editor(r)); p.pick = p.shown = r.k; handled)
+onmouse(r::PaletteRow, ::MouseMove) = (p = palette(editor(r)); p.pick = p.shown = r.k; p.pointed = true; handled)
 # A click on a row does what Return does on it
 onkey(r::PaletteRow, ev::KeyPress{Keys.mouse_left}) = begin
   e = editor(r)
@@ -30159,6 +30183,7 @@ onkey(r::PaletteRow, ev::KeyPress{Keys.mouse_left}) = begin
   handled
 end
 
+  p.pointed = true
 "The field with the rest of a name after its text, in a fainter colour. `size` is the size of the field's text."
 omni_field(e, p::CommandPalette, size) = begin
   i = input(e)

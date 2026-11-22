@@ -170,23 +170,39 @@ end
   p = K.palette(e)
   said() = K.chip_value(p, K.palette_chips(p), 1)
   # What the caret was on is the node, so the keyboard is in the words
-  @test said().node === node() && p.at == 2 && K.click_chip(e, p) == 1
+  @test said().node === node() && p.at == 2
   # The node's chip shows only a letter in a colour, which the line round the node has too
   letters() = [(l.k, l.letter, l.colour) for l in K.chip_letters(p, K.palette_chips(p))]
   @test letters() == [(1, "A", K.CHIP_MARKS[1])]
   @test K.chip_wide(e, p, K.palette_chips(p), 1) < 40
-  # A click on the page's `julia` block chooses it, and the keyboard stays in the words
+  # While the keyboard is in the words, the mouse picks out nothing on the page, and a click there chooses nothing
+  @test K.click_chip(e, p) === nothing
+  click(w, on_line(e, 10)...)
+  @test said().node === node() && p.at == 2 && e.popup == :commands
+  # With the keyboard in the node's chip, a click on the page's `julia` block chooses it, and the keyboard goes on to the words
+  press(w, Keys.tab, Keys.shft)
+  @test p.at == 1 && K.click_chip(e, p) == 1
   click(w, on_line(e, 10)...)
   @test said().words == "x = 1" && p.at == 2 && e.popup == :commands && e.buf.caret == (3, 0)
   # A click on the bar chooses the thing that the block shows
+  press(w, Keys.tab, Keys.shft)
   click(w, middle(rect(node()))...)
   @test said().node === node() && p.at == 2
   # ⇧ and a click add a second thing, B in orange, and the chip shows both letters. Again takes it out.
+  press(w, Keys.tab, Keys.shft)
   w.keys |= Keys.shft
   click(w, on_line(e, 10)...)
   w.keys ⊻= Keys.shft
-  @test said() isa K.Things && [x.words for x in said().all] == ["Level", "x = 1"] && p.at == 2
-  @test letters() == [(1, "A", K.CHIP_MARKS[1]), (1, "B", K.CHIP_MARKS[2])] && 60 < K.chip_wide(e, p, K.palette_chips(p), 1) < 80
+  @test said() isa K.Things && [x.words for x in said().all] == ["Level", "x = 1"] && p.at == 1
+  @test letters() == [(1, "A", K.CHIP_MARKS[1]), (1, "B", K.CHIP_MARKS[2])]
+  # Tab goes on to the words, and the chip keeps both things
+  press(w, Keys.tab)
+  @test p.at == 2 && said() isa K.Things && length(said().all) == 2 && 60 < K.chip_wide(e, p, K.palette_chips(p), 1) < 80
+  # ⇧Tab and Return keep them too
+  press(w, Keys.tab, Keys.shft)
+  press(w, Keys.enter)
+  @test p.at == 2 && said() isa K.Things && length(said().all) == 2
+  press(w, Keys.tab, Keys.shft)
   prompt = K.change_prompt(said().all, "make A look like B")
   @test occursin("A: a part of its window, a Level.", prompt) && occursin("B: a block of Julia code on a page of Markdown, in the file", prompt)
   @test occursin("The user's words: make A look like B", prompt)
@@ -194,6 +210,9 @@ end
   click(w, on_line(e, 10)...)
   w.keys ⊻= Keys.shft
   @test said().node === node()
+  # ⌥↑ works from the words too
+  press(w, Keys.tab)
+  @test p.at == 2
   # ⌥↑ takes the part that holds it, which is bigger on the screen, and ⌥↓ goes back, with the keyboard where it was
   place(x) = (r = rect(x); (r.left, r.top, r.width, r.height))
   press(w, Keys.up, Keys.opt)
@@ -227,10 +246,12 @@ end
   @test p.command.name == :ask_for_change && [K.chip_name(c) for c in chips] == ["Node", "Request"] && K.chip_kind(code, chips[1]) == :search
   # The node is the block that the caret is in, so the keyboard is in the words
   @test K.chip_value(p, chips, 1).words == "wide(l::Level)" && p.at == 2
-  # A click on another block of the file chooses it, and a click on the first chooses it again
+  # With the keyboard in the node's chip, a click on another block of the file chooses it, and a click on the first chooses it again
   @test K.num(on_line(code, 17)[2]) < K.palette(code).plan.band.y
+  press(cw, Keys.tab, Keys.shft)
   click(cw, on_line(code, 17)...)
   @test K.chip_value(p, chips, 1).words == "describe(l::Level)" && p.at == 2
+  press(cw, Keys.tab, Keys.shft)
   click(cw, on_line(code, 14)...)
   @test K.chip_value(p, chips, 1).words == "wide(l::Level)" && code.buf.caret == (14, 3)
   # ⌥↑ takes the whole file, which nothing holds, and ⌥↓ goes back to the block
