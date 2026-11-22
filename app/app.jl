@@ -56,7 +56,7 @@ const page = read(WELCOME, String)
 const PAGES = dirname(WELCOME)
 "The text of each of the app's own pages, by the file's place in the folder of pages. The model, the video, the recording, the plan, the table and the pictures that the pages show are here too, as the bytes of their files."
 const pages = Dict(name => read(joinpath(PAGES, name), String)
-                   for name in ("welcome.md", "examples.md", "components.md", "julia.md", "settings/settings.md", "settings/code-editor.md", "settings/key-bindings.md", "schedule.md", "counter.md", "widgets.jl", "progress.jl", "knot.stl", "knot.mp4", "hello.m4a", "plan.pdf", "costs.csv", "orders.json",
+                   for name in ("welcome.md", "components.md", "julia.md", "settings/settings.md", "settings/code-editor.md", "settings/key-bindings.md", "schedule.md", "counter.md", "widgets.jl", "progress.jl", "knot.stl", "knot.mp4", "hello.m4a", "plan.pdf", "costs.csv", "orders.json",
                                "photos/1 footings.png", "photos/2 frame.png", "photos/3 roof.png", "photos/4 bricks.png", "photos/5 window.png", "photos/6 finished.png"))
 
 "The `user/repo/file` that a file Kip got from GitHub has there, or nothing for any other file. A file of Ladder's own has a place too, so that the app can show the code that draws a thing."
@@ -166,7 +166,7 @@ error. An editor only runs the blocks that are on screen, so this scrolls down
 each page a screen at a time.
 """
 check_pages(dir) =
-  for name in ("welcome.md", "examples.md", "components.md", "julia.md", "settings/settings.md", "settings/code-editor.md", "settings/key-bindings.md", "schedule.md", "counter.md")
+  for name in ("welcome.md", "components.md", "julia.md", "settings/settings.md", "settings/code-editor.md", "settings/key-bindings.md", "schedule.md", "counter.md")
     empty!(problems)
     e = build_editor(joinpath(dir, name))
     w = Window(e, title="check", size=(1100px, 800px))

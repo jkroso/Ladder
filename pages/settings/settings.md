@@ -10,8 +10,7 @@ Three more pages have the rest of the settings. Hold ⌘ and click a link to go 
 
 These pages show what a page can do:
 
-- [Examples](../examples.md) lists everything, with a link to an example of each.
-- [Welcome](../welcome.md) has an example of each kind of block.
+- [Welcome](../welcome.md) has an example of everything that Ladder does.
 - [Components](../components.md) has the buttons, menus, sliders and other parts that a block can show.
 - [Julia](../julia.md) runs code where it is.
 - [Schedule](../schedule.md) plans a job, with the days of each task.

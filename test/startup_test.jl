@@ -31,8 +31,8 @@ end
   @test lines[1] == "# Home" && any(l -> occursin("```julia", l), lines)
   # Its links go to Ladder's own pages, by the way there from the folder of the settings, where the page is
   links = [m[1] for m in eachmatch(r"\]\(([^)]+)\)", read(page, String))]
-  @test length(links) == 3 && all(l -> isfile(abspath(K.settings_dir(), l)), links)
-  @test abspath(K.settings_dir(), links[1]) == joinpath(K.pages_dir[], "welcome.md") && links[3] == "settings.md"
+  @test length(links) == 2 && all(l -> isfile(abspath(K.settings_dir(), l)), links)
+  @test abspath(K.settings_dir(), links[1]) == joinpath(K.pages_dir[], "welcome.md") && links[2] == "settings.md"
   # A page that's there is never written again
   write(page, "# Mine\n")
   @test K.startup_page!() == page && read(page, String) == "# Mine\n"

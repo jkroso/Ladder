@@ -4,19 +4,9 @@ Each block on this page is a `ui` code block. Its code makes one of the componen
 
 To see the code of a block, hold ⌥ and click the block. A block can use each component by its name, with no line that loads it. A block can make a layout too, like a `Column` with components in it.
 
-## Sums in a line of text
+## A component in a line of text
 
-Code can run in a line of text too. Write a `!` and then the code between backticks, and the line shows what the code comes to. Press ⌘E and click a line to see its code.
-
-A wall that is !`l = 16m` long and !`h = 2.4m` high has an area of !`area = l * h`. Two coats of paint that covers !`coverage = 16m²` a litre take !`area * 2 / (coverage / litre)`. A car that goes 150km in 2 hours travels at !`150km / 2hr`, which is !`convert(m/s, 150km / 2hr)`. A person who is 5 feet 10 inches tall is !`convert(cm, 5ft + 10inch)` tall.
-
-The numbers have units from Units.jl: lengths like `m`, `km`, `ft` and `inch`, times like `s`, `minute` and `hr`, masses like `kg`, and volumes like `litre`. A sheet has the same units.
-
-A sum that is one number has a line of dashes under what it shows, like the 16m and the 2.4m above. Drag it to the right or to the left to change the number. The sums that use its name follow while the mouse moves, so the area and the paint above change with the wall. Hold ⇧ to make each step ten times as big. ⌘Z takes a drag back.
-
-A sum can use the rows of the page's sheets too, with a `_` for each space in a row's name. The page [welcome.md](welcome.md#sheets) has an example.
-
-A component can go in a line as well: here is a switch !`Toggle(on=true)` and the folder of this page, !`fs"."`.
+A component can go in a line of text too. Write a `!` and then its code between backticks: here is a switch !`Toggle(on=true)` and the folder of this page, !`fs"."`. The page [welcome.md](welcome.md#sums-in-a-line-of-text) has sums in a line of text.
 
 ## Checkboxes and switches
 

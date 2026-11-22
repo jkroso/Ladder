@@ -1,16 +1,29 @@
+---
+title: Welcome
+about: Everything that Ladder does, with an example of each
+---
+
 # Ladder
 
 Ladder is a Markdown editor made with UI.jl. This page is a Markdown file. Each line is drawn the way it will read, and the markup characters stay out of sight. A line keeps that look while you type in it. To change its markup, **click the line and press ⌘E**, or click the ladder at the top right. As in the game of snakes and ladders, a ladder means that you are up and a snake means that you are down. The click takes you down a level: the part of the page with the caret shows its markup, and a snake takes the ladder's place. ⌘E again, or a click on the snake, takes you back up. Hold the mouse over the ladder and it opens into a slider, with the snake at one end and the ladder at the other. Press ⌘S to write your changes to the file.
 
-The page [examples.md](examples.md) lists everything that Ladder does, with a link to an example of each.
+This page shows everything that Ladder does, with an example of each. The block at the top of the page is front matter: lines at the very top of a file that say things about it.
+
+These pages have more examples. Hold ⌘ and click a link to go there. To come back, press ⌘⌥←.
+
+- [components.md](components.md) has each component that a live block can show: buttons, menus, sliders, players for sound and video, and 3D models.
+- [julia.md](julia.md) runs Julia code where it is.
+- [schedule.md](schedule.md) plans a job, with the days of each task.
+- [counter.md](counter.md) defines a new kind of block, and says in words what each part of its code does.
+- [settings.md](settings/settings.md) has the colours, the font and the size of the text. ⌘, opens it too.
 
 ## Text
 
 You can write in **bold**, in *italic* or in ***both***. Use backticks for `code`, and square brackets for [a link](https://github.com/jkroso/UI.jl). Hold ⌘ and click a link to open it. A name like snake_case_name keeps its underscores.
 
-Two square brackets around a page's name make a wiki link, as in Obsidian: [[examples]] links to the page examples.md. Ladder finds the page wherever it is in the project, so the link still works when the page moves to another folder. The project is the nearest folder above the page that has a `.git` or `.obsidian` folder in it. To show other words, write them after a |, like [[examples|the list of examples]]. [[examples#Writing]] goes to a heading of the page, and [[#Tables]] to a heading of this page. A link to a page that isn't there yet opens a new empty page, and Ladder makes its file when you write in it. While you type a name after [[, a list under it shows the pages whose names fit. Press ↑ and ↓ to choose one, and Return or Tab to finish the link. Esc hides the list.
+Two square brackets around a page's name make a wiki link, as in Obsidian: [[schedule]] links to the page schedule.md. Ladder finds the page wherever it is in the project, so the link still works when the page moves to another folder. The project is the nearest folder above the page that has a `.git` or `.obsidian` folder in it. To show other words, write them after a |, like [[schedule|the plan of a driveway]]. [[schedule#Tasks]] goes to a heading of the page, and [[#Tables]] to a heading of this page. A link to a page that isn't there yet opens a new empty page, and Ladder makes its file when you write in it. While you type a name after [[, a list under it shows the pages whose names fit. Press ↑ and ↓ to choose one, and Return or Tab to finish the link. Esc hides the list.
 
-Hold ⌘ and rest the mouse on a link to a page, like [[examples#Writing]]. A card under the link shows the start of that page, so you can read it without leaving this one. A link to a heading shows the part under that heading. To turn the card off, press ⌘, and untick "Show a page when I hold ⌘ over its link".
+Hold ⌘ and rest the mouse on a link to a page, like [[schedule#Tasks]]. A card under the link shows the start of that page, so you can read it without leaving this one. A link to a heading shows the part under that heading. To turn the card off, press ⌘, and untick "Show a page when I hold ⌘ over its link".
 
 > A line that starts with > is a quote.
 > It can run over several lines.
@@ -45,18 +58,18 @@ To play a video or a sound faster or slower, move the mouse over its player, and
 
 ## Parts of other pages
 
-A wiki link with a ! before it, on a line of its own, shows a part of another page. This part is the list of what Ladder does with words, from the page of examples:
+A wiki link with a ! before it, on a line of its own, shows a part of another page. This part is the list of tasks from the page schedule.md:
 
-![[examples#Writing]]
+![[schedule#Tasks]]
 
-That part isn't a copy. It's the lines of examples.md. Click in it and type, and examples.md changes too. A change in examples.md shows here at once. ⌘S saves both pages. While the mouse is over the part, a line goes round it. The button on that line, with the other page's name, opens that page at the part. Esc takes the caret back to this page, and so do ↑ on the part's first line and ↓ on its last line. Ted Nelson called this a transclusion. Notion calls it a synced block.
+That part isn't a copy. It's the lines of schedule.md. Click in it and type, and schedule.md changes too. A change in schedule.md shows here at once. ⌘S saves both pages. While the mouse is over the part, a line goes round it. The button on that line, with the other page's name, opens that page at the part. Esc takes the caret back to this page, and so do ↑ on the part's first line and ↓ on its last line. Ted Nelson called this a transclusion. Notion calls it a synced block.
 
 What comes after the # says which part shows:
 
-- `![[examples]]` shows the whole page.
-- `![[examples#Writing]]` shows the heading Writing and the lines under it, up to the next heading that's as big.
-- `![[examples#list 2]]` shows the second list of the page. The kinds are paragraph, heading, list, quote, table, code and picture, and the language of a block, like board or canvas. Without a number, it's the first one.
-- `![[examples#^writing]]` shows the block with the name writing. The name is at the end of the block's last line, like `^writing`, as Obsidian writes it. The page doesn't show the name. To get a link like this, put the caret in a block, press ⌘⇧P and run Copy Link To Block. Ladder gives the block a name if it has none, and copies the link.
+- `![[schedule]]` shows the whole page.
+- `![[schedule#Tasks]]` shows the heading Tasks and the lines under it, up to the next heading that's as big.
+- `![[schedule#list 2]]` shows the second list of the page. The kinds are paragraph, heading, list, quote, table, code and picture, and the language of a block, like board or canvas. Without a number, it's the first one.
+- `![[schedule#^tasks]]` shows the block with the name tasks. The name is at the end of the block's last line, like `^tasks`, as Obsidian writes it. The page doesn't show the name. To get a link like this, put the caret in a block, press ⌘⇧P and run Copy Link To Block. Ladder gives the block a name if it has none, and copies the link.
 
 A board, a chart or another live block in a part shows what it shows in its own page. You can't change it in the part. To change it, click the button with the page's name.
 
@@ -189,7 +202,7 @@ The caret doesn't go into a block like this one. Move it down the page with ↓,
 
 A click on the block with ⌥ held shows its code too.
 
-Code can run in a line of text too. Write a `!` and then the code between backticks, like \!`fs"."`. This page is in the folder !`fs"."` and its colours are !`page_theme()`. A number works too: 12 × 2.4 is !`12 * 2.4`. Press ⌘E and click a line to see its code.
+Code can run in a line of text too. Write a `!` and then the code between backticks, like \!`fs"."`. This page is in the folder !`fs"."` and its colours are !`page_theme()`. A number works too: 12 × 2.4 is !`12 * 2.4`. Press ⌘E and click a line to see its code. [Sums in a line of text](#sums-in-a-line-of-text) has more.
 
 The page [components.md](components.md) has a live block for each of UI.jl's components: checkboxes, switches, a slider, a menu, a colour picker, a viewer for 3D models, players for sound and video, diagrams, a text field, a tree and an inspector. It shows shadows too. Hold ⌘ and click the link to open it.
 
@@ -321,7 +334,19 @@ A row can use the names of other blocks of the page, the way that it uses the na
 - a measure of a takeoff, like `kitchen floor tiles`, which is its amount in metres or square metres
 - a task of a time log, like `framing`, which is the hours that the log has for it
 
-So `Tiles = kitchen floor tiles / 0.36m^2` follows the outline that's drawn on the plan. A sum in a line of text can use the rows of every sheet of the page, with a `_` for each space: \!`wall_length` shows !`wall_length`. The page [components.md](components.md#sums-in-a-line-of-text) says more of such sums.
+So `Tiles = kitchen floor tiles / 0.36m^2` follows the outline that's drawn on the plan.
+
+## Sums in a line of text
+
+A sum can go in a line of text too. Write a `!` and then the sum between backticks, and the line shows what the sum comes to. Press ⌘E and click a line to see its sums.
+
+A wall that is !`l = 16m` long and !`h = 2.4m` high has an area of !`wall_area = l * h`. Two coats of paint that covers !`per_litre = 16m²` a litre take !`wall_area * 2 / (per_litre / litre)`. A car that goes 150km in 2 hours travels at !`150km / 2hr`, which is !`convert(m/s, 150km / 2hr)`. A person who is 5 feet 10 inches tall is !`convert(cm, 5ft + 10inch)` tall.
+
+The numbers have units from Units.jl: lengths like `m`, `km`, `ft` and `inch`, times like `s`, `minute` and `hr`, masses like `kg`, and volumes like `litre`. A sheet has the same units.
+
+A sum that is one number has a line of dashes under what it shows, like the 16m and the 2.4m above. Drag it to the right or to the left to change the number. The sums that use its name follow while the mouse moves, so the area and the paint above change with the wall. Hold ⇧ to make each step ten times as big. ⌘Z takes a drag back.
+
+A sum can use the rows of every sheet of the page, with a `_` for each space in a row's name: \!`wall_length` shows !`wall_length`, from the sheets above.
 
 ## Spreadsheets
 
@@ -977,7 +1002,7 @@ Click a file in the list that isn't Markdown to see it in the page. Ladder shows
 
 A Markdown page or a file of code that your Mac marks as read-only shows as it always does. Ladder doesn't change it, and the top bar says "Read only". A click on a link in it opens the link, with no key held. Take the mark off in the Finder's Get Info window, and you can write in the page again.
 
-Right-click a file or a folder in the list to rename it, duplicate it, copy its path, show it in the Finder or move it to the Trash. A folder goes to the Trash with everything in it. A folder's menu also makes a new page or a new folder in it, and opens it in a new window. A file's menu also opens it in a new window or in the Mac's app for it. Its Copy Link item copies a wiki link to the file, like `[[examples]]`. Right-click under the list to make a new page or folder in the folder that the list shows. Right-click the file's name at the top of the window for the file's menu.
+Right-click a file or a folder in the list to rename it, duplicate it, copy its path, show it in the Finder or move it to the Trash. A folder goes to the Trash with everything in it. A folder's menu also makes a new page or a new folder in it, and opens it in a new window. A file's menu also opens it in a new window or in the Mac's app for it. Its Copy Link item copies a wiki link to the file, like `[[schedule]]`. Right-click under the list to make a new page or folder in the folder that the list shows. Right-click the file's name at the top of the window for the file's menu.
 
 When you rename a file or a folder, or move it to another folder, Ladder changes the links to it in the other pages of the project, as Obsidian does. So `[[Ideas]]` becomes `[[Thoughts]]`, and `[see](Ideas.md)` becomes `[see](Thoughts.md)`. A link keeps its words after the | and its heading after the #. Ladder doesn't change a link in a code block. A note under the top bar says how many links changed.
 
@@ -1028,8 +1053,8 @@ A zip file shows what it holds, without being unpacked: its folders and files, e
 
 Right-click the page to cut, copy or paste. The menu's Insert item adds a new block where you clicked: a heading, a list, a to-do item, a table, a sheet, a spreadsheet, a diagram, a takeoff, a schedule, a chart, a board, a calendar, a sketch, a canvas, a live block and more.
 
-A file can start with front matter: lines like `title: Notes` between two lines of `---`. Ladder shows it as a block of its own. To see how many words a page has, press ⌘⇧P and run Word Count. It leaves out the front matter and the comments, and it also says how many characters the page has and how long it takes to read.
+A file can start with front matter: lines like `title: Notes` between two lines of `---`. Ladder shows it as a block of its own, as at the top of this page. To see how many words a page has, press ⌘⇧P and run Word Count. It leaves out the front matter and the comments, and it also says how many characters the page has and how long it takes to read.
 
-Press ⌘, to open the settings in a window of their own: the colours, the font and its weight, the size of the text and the width of the page. A button there makes Ladder the app that opens your Markdown files. Links at the top of that page go to the other pages of the settings. Code editor has the settings for code: its font, its weight, its size, its indent, its line numbers and whether a long line wraps. Key bindings has the keys of each command. There you can choose the keys of VS Code, Sublime Text or Emacs, or click a command and press the keys you want for it.
+Press ⌘, to open [the settings](settings/settings.md) in a window of their own: the colours, the font and its weight, the size of the text and the width of the page. A button there makes Ladder the app that opens your Markdown files. Links at the top of that page go to the other pages of the settings. [Code editor](settings/code-editor.md) has the settings for code: its font, its weight, its size, its indent, its line numbers and whether a long line wraps. [Key bindings](settings/key-bindings.md) has the keys of each command. There you can choose the keys of VS Code, Sublime Text or Emacs, or click a command and press the keys you want for it.
 
 The Ladder app updates itself. It gets a newer version while you work, and the new version takes the place of this one when you quit. A box at the end of the settings turns that off.

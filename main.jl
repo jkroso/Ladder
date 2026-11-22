@@ -47302,7 +47302,6 @@ startup_text() = """
   Ladder opens this page when you start it without a file. The page is yours, so change it as you like.
 
   - [Welcome](../welcome.md) shows what Ladder can do.
-  - [Examples](../examples.md) has more to copy.
   - [Settings](settings.md) has the colours, the font and the keys. ⌘, opens it too.
 
   ## Code that runs when Ladder starts
