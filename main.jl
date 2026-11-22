@@ -358,6 +358,7 @@
 @use "./csv" => Csvs
 @use "./filter" => Filters
 @use "./save" => Saves
+@use "./forms" => Forms
 @use "./math" => Maths
 @use "./ask" => Asks
 @use "./changes" => Diffs
@@ -17217,17 +17218,15 @@ tick_page!(e, m::Searches.Match, done::Bool) = begin
     i = Searches.locate(m, b.lines, kinds(b))
     i === nothing && return false
     clean = !dirty(b)
-    caret, anchor = b.caret, b.anchor
-    col = findfirst('[', b.lines[i])
-    edit!(b, (i, col), (i, col + 1), done ? "x" : " ")
-    b.caret, b.anchor = caret, anchor
+    tick_item!(b, i, done)
     b !== e.buf && clean && save!(b)
   else
     isfile(m.path) || return false
     lines = text(m.path)
     i = Searches.locate(m, lines)
     i === nothing && return false
-    lines[i] = Searches.ticked(lines[i], done)
+    new, z = Repeats.tick(lines, i, done; today=calendar_today())
+    splice!(lines, i:z, new)
     # A file that can't be written, like one of the pages that come with the app, stays as it is
     try write(m.path, join(lines, "\n")) catch; return false end
     empty!(FOLDER_PAGES)   # the folder is read again, so that a list has the file as it is now
@@ -24947,18 +24946,34 @@ inline_at(f::Flow, dx::px, dy::px) = begin
   nothing
 end
 
-"Tick the box of the to-do item on line `i`, or take its tick away. The caret stays where it is."
+"""
+Tick the box of the to-do item on line `i`, or take its tick away. The caret
+stays where it is. A tick of an item that repeats, like one that ends with
+"every week", adds the next one under it: see repeats.jl.
+"""
 tick!(e, i::Int) = begin
-  b = e.buf
   # On another day than today, the box shows how the item stands then, which a click can't change
   ticked_then(e, i) === nothing || return e
-  text = b.lines[i]
-  col = findfirst('[', text)   # the column after the [, because only spaces and a - come before it
-  caret, anchor = b.caret, b.anchor
-  edit!(b, (i, col), (i, col + 1), isdone(text) ? " " : "x")
-  b.caret, b.anchor = caret, anchor
+  tick_item!(e.buf, i, !isdone(e.buf.lines[i]))
   stop_clock!(e, i)   # a tick stops the clock of a time log that runs on the item
   e
+end
+
+"""
+Tick the to-do item on line `i` of `b` when `done`, or take its tick away, in
+one edit, so one ⌘Z takes it back. The item that a tick of a repeating item
+adds goes in the same edit. The caret and the other end of the selection stay
+with their text.
+"""
+tick_item!(b::Buffer, i::Int, done::Bool) = begin
+  new, z = Repeats.tick(b.lines, i, done; today=calendar_today())
+  caret, anchor = b.caret, b.anchor
+  edit!(b, (i, 0), line_end(b, z), join(new, "\n"))
+  grow = length(new) - (z - i + 1)
+  # A line after the item moves down or up with the line that went in or out. One that went takes it to the item's last line.
+  keep((l, c)) = l > z ? (l + grow, c) : l < i + length(new) ? (l, min(c, length(b.lines[l]))) : line_end(b, i + length(new) - 1)
+  b.caret, b.anchor = keep(caret), keep(anchor)
+  b
 end
 
 press!(e, pos) = begin

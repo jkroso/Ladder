@@ -75,6 +75,12 @@ Copy a whole block of a page and paste it into another page, and Ladder pastes a
 - [x] An item that starts with `- [x]` has a box with a tick in it.
 - [ ] Click the box of an item like this one to tick it.
 
+A to-do item that ends with words like `every week` or `every 3 months` repeats. Tick it, and a new item goes under it, on the next day that it's due:
+
+- [ ] Test the smoke alarms 2026-12-01 every 3 months
+
+The words can be `every day`, `every 2 weeks`, `every month`, `every year`, `daily`, `weekly`, `monthly`, `yearly`, `every Monday` or `every weekday`. They count only at the end of the item, or just before its day, so "Write the daily report" doesn't repeat. An item with no day repeats from the day that you tick it. An item that you tick late skips the days that it missed. The ticked item stays, so the page keeps the days that the work was done. Take the tick away again, and the new item goes too.
+
 ## Tables
 
 | Keys | What they do |
