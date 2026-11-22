@@ -9,6 +9,7 @@
 #     move_favourite!(path, 1)           # puts it first
 #     recent(homedir())                  # [Project(path="/Users/jake/Desktop/JuliaLang/Ladder", files=[...]), ...]
 #     newest(homedir(), folders)         # when anything in each folder last changed, at any depth
+#     sizes(homedir())                   # how many bytes each of those folders holds, at any depth
 #
 # Ladder keeps the favourites in a file of its own, in its folder in
 # ~/Library/Application Support, one folder on each line. The same file keeps
@@ -369,9 +370,10 @@ end
 "Find the work again the next time that it's asked for"
 forget!() = (RECENT.at = 0.0; nothing)
 
-# --- when anything in a folder last changed ---------------------------------------------------
+# --- when anything in a folder last changed, and how big it is ----------------------------------
 #
 #     newest(homedir(), ["/Users/jake/Desktop", ...])   # Dict("/Users/jake/Desktop" => 1.795e9, ...)
+#     sizes(homedir())                                  # Dict("/Users/jake/Desktop" => 48_000_000_000, ...)
 #
 # The table on the home folder's page says when anything in each of its
 # folders last changed: the newest time of the folder itself and of each
@@ -384,25 +386,38 @@ forget!() = (RECENT.at = 0.0; nothing)
 # million files took 10 seconds. Before it starts, Ladder asks macOS to tell it
 # of each change in the home folder, at any depth (FSEvents). Each change
 # moves its folder's time on. A change that's newer than the start of a
-# folder's reading ends that reading: nothing that the reading could still
+# folder's reading makes its time known: nothing that the reading could still
 # find is newer. A folder's time never goes back, since taking a file out of a
 # folder changes the folder's own time.
+#
+# The same reading adds up the sizes of the files in each folder, hidden ones
+# too, as the Finder does. Its size is known when the reading ends. Ladder
+# keeps the bytes of the files right in each folder that it read, at any
+# depth: about 76,000 folders in a home folder. After a change, it reads again
+# only the folder that the change was in, half a second later, so a lot of
+# changes at once cost one reading of each folder. A folder that went takes
+# its bytes away, and a folder that came is read to the end.
 #
 # ~/Library isn't read. It holds more than a million files, a read of it took 8
 # minutes, and macOS asks you before an app reads the data that other apps
 # keep there. Its time is its own until macOS tells of a change in it. Apps
-# change files there all the time, so that's about a second.
+# change files there all the time, so that's about a second. The same goes
+# for each folder inside a Library folder, for the page of a folder in
+# ~/Library, or of /Library itself.
 
-"The folders that `newest` doesn't read, by name: their time is their own, and each change that macOS tells of"
+"The folders that `newest` doesn't read, by name, and doesn't read the folders in: their time is their own, and each change that macOS tells of"
 const UNREAD = Set(["Library"])
 
-"The reading of one folder: the folders in it that are still to read, and the newest time found so far"
+"True when `newest` doesn't read the folder at `path`: it's one of `UNREAD`, or it's inside one"
+unread(path::AbstractString) = any(in(UNREAD), splitpath(path))
+
+"The reading of one folder: the folders in it that are still to read, each with true when it's in a hidden folder, and the newest time found so far"
 mutable struct Reading
-  stack::Vector{String}
+  stack::Vector{Tuple{String,Bool}}
   best::Float64
 end
 
-"What's known of when the folders of one folder last changed"
+"What's known of when the folders of one folder last changed, and of how big they are"
 mutable struct Times
   root::String
   times::Dict{String,Float64}     # the newest time in each folder, as far as it's known, by its path
@@ -413,8 +428,14 @@ mutable struct Times
   reading::Bool                   # a second thread reads folders now
   monitor::Any                    # what hears of the changes from macOS, or nothing
   lock::ReentrantLock
+  bytes::Dict{String,Int}         # the bytes of the files right in each folder that was read, at any depth, by its path
+  sizes::Dict{String,Int}         # the bytes of each folder that was asked for, at any depth, as far as it's read
+  sized::Set{String}              # the folders that were asked for whose reading ended, so their size is known
+  dirty::Set{String}              # the paths that macOS told of a change at, since the last look
+  looking::Bool                   # a look at those changes is to come
 end
-Times(root) = Times(root, Dict{String,Float64}(), Set{String}(), Set{String}(), String[], Dict{String,Float64}(), false, nothing, ReentrantLock())
+Times(root) = Times(root, Dict{String,Float64}(), Set{String}(), Set{String}(), String[], Dict{String,Float64}(), false, nothing, ReentrantLock(),
+                    Dict{String,Int}(), Dict{String,Int}(), Set{String}(), Set{String}(), false)
 
 "What's known of the folders of each folder that `newest` was asked about, by that folder's path"
 const TIMES = Dict{String,Times}()
@@ -435,7 +456,7 @@ newest(root::AbstractString, folders) = begin
     for f in folders
       f in t.asked && continue
       push!(t.asked, f)
-      if basename(f) in UNREAD
+      if unread(f)
         t.times[f] = max(get(t.times, f, 0.0), own_time(f))
         push!(t.known, f)
       else
@@ -466,18 +487,19 @@ read_all!(t::Times) = begin
         f = popfirst!(t.queue)
         t.started[f] = time()
         # A link to a folder counts with the time of the folder that it leads to. Inside, links aren't followed.
-        open[f] = Reading([f], try stat(f).mtime catch; 0.0 end)
+        open[f] = Reading([(f, false)], try stat(f).mtime catch; 0.0 end)
       end
       isempty(open) && (t.reading = false)
     end
     isempty(open) && return
     for (f, r) in collect(open)
-      ended = lock(() -> f in t.known, t.lock)
-      ended || isempty(r.stack) || read_one!(r)
-      if ended || isempty(r.stack)
+      # A change that macOS told of can make its time known first. The reading goes on to the end for its size.
+      isempty(r.stack) || read_one!(t, r)
+      if isempty(r.stack)
         lock(t.lock) do
           t.times[f] = max(get(t.times, f, 0.0), r.best)
           push!(t.known, f)
+          push!(t.sized, f)
         end
         delete!(open, f)
       end
@@ -487,18 +509,44 @@ read_all!(t::Times) = begin
   end
 end
 
-"Read the last folder of `r`'s list: the times of what's in it, apart from what's hidden. Its folders go on the list."
-read_one!(r::Reading) = begin
-  dir = pop!(r.stack)
+"""
+Read the last folder of `r`'s list, for `t`: the times of what's in it, apart
+from what's hidden, and the bytes of its files, hidden ones too. Its folders go
+on the list. A folder that was read already, after a change, isn't read again.
+"""
+read_one!(t::Times, r::Reading) = begin
+  dir, hid = pop!(r.stack)
+  claim!(t, dir) || return
+  bytes, kids, newest = files_in(dir)
+  for (path, st) in kids
+    seen = hid || startswith(basename(path), '.')
+    seen || (r.best = max(r.best, st.mtime))
+    push!(r.stack, (path, seen))
+  end
+  hid || (r.best = max(r.best, newest))
+  lock(() -> set_bytes!(t, dir, bytes), t.lock)
+end
+
+"""
+What's right in the folder `dir`: the bytes of its files, its folders, each
+with what `lstat` says of it, and the newest time of its files that aren't
+hidden. A folder that macOS doesn't let Ladder read has nothing.
+"""
+files_in(dir::AbstractString) = begin
+  bytes, kids, newest = 0, Tuple{String,Base.Filesystem.StatStruct}[], 0.0
   # macOS doesn't let Ladder read some folders, like the Trash before Ladder has Full Disk Access
-  names = try readdir(dir) catch; return end
+  names = try readdir(dir) catch; return bytes, kids, newest end
   for name in names
-    startswith(name, '.') && continue
     path = joinpath(dir, name)
     st = try lstat(path) catch; continue end
-    r.best = max(r.best, st.mtime)
-    isdir(st) && push!(r.stack, path)
+    if isdir(st)
+      push!(kids, (path, st))
+    else
+      bytes += st.size
+      startswith(name, '.') || (newest = max(newest, st.mtime))
+    end
   end
+  bytes, kids, newest
 end
 
 """
@@ -544,10 +592,12 @@ const UV_FS_EVENT_RECURSIVE = Cint(4)
 changed!(t::Times, name::AbstractString) = begin
   parts = split(name, '/', keepempty=false)
   isempty(parts) && return
-  # A change inside a hidden folder, or to a hidden file, doesn't count
+  path = joinpath(t.root, name)
+  # Each change counts for the sizes, hidden ones too
+  note!(t, path)
+  # A change inside a hidden folder, or to a hidden file, doesn't count for the time
   any(p -> startswith(p, '.'), parts[2:end]) && return
   folder = joinpath(t.root, parts[1])
-  path = joinpath(t.root, name)
   # The thing's own time. A thing that went has none, but the folder that held it changed when it went.
   when = length(parts) == 1 ? own_time(path) : max(own_time(path), own_time(dirname(path)))
   lock(t.lock) do
@@ -556,6 +606,128 @@ changed!(t::Times, name::AbstractString) = begin
     when >= started && push!(t.known, folder)
   end
   nothing
+end
+
+# --- the sizes ---
+
+"How long after a change Ladder looks at the sizes, so that a lot of changes at once cost one look"
+const LOOK_WAIT = 0.5
+
+"""
+How many bytes each folder that `newest` was asked about in the folder `root`
+holds, at any depth, hidden files too, by its path. A folder that's still
+being read, or that isn't read, like ~/Library, isn't in it.
+"""
+sizes(root::AbstractString) = begin
+  t = lock(() -> get(TIMES, root, nothing), TIMES_LOCK)
+  t === nothing && return Dict{String,Int}()
+  lock(() -> Dict{String,Int}(f => get(t.sizes, f, 0) for f in t.sized), t.lock)
+end
+
+"The folder that was asked for that `path`, a folder in the folder of `t` at any depth, is in"
+top_of(t::Times, path::AbstractString) = joinpath(t.root, first(splitpath(relpath(path, t.root))))
+
+"Keep the bytes of the files right in the folder `dir`, and add the difference to the size of the folder that it's in. The caller holds `t`'s lock."
+set_bytes!(t::Times, dir::AbstractString, bytes::Integer) = begin
+  old = get(t.bytes, dir, 0)
+  t.bytes[dir] = bytes
+  top = top_of(t, dir)
+  t.sizes[top] = get(t.sizes, top, 0) + bytes - old
+  nothing
+end
+
+"True when no reading of `t` has had the folder `dir` yet, which this one now has. So two readings never count a folder twice."
+claim!(t::Times, dir::AbstractString) = lock(t.lock) do
+  haskey(t.bytes, dir) && return false
+  t.bytes[dir] = 0
+  true
+end
+
+"Take away from `t` each folder in `gone`, and each folder in those, at any depth. The caller holds `t`'s lock."
+forget_under!(t::Times, gone) = begin
+  for dir in collect(keys(t.bytes))
+    d = dir
+    while length(d) >= length(t.root)
+      if d in gone
+        set_bytes!(t, dir, 0)
+        delete!(t.bytes, dir)
+        break
+      end
+      up = dirname(d)
+      up == d && break
+      d = up
+    end
+  end
+end
+
+"Keep the change at `path` for a look at the sizes of `t`, `LOOK_WAIT` after the first change that's kept"
+note!(t::Times, path::AbstractString) = lock(t.lock) do
+  push!(t.dirty, path)
+  t.looking && return
+  t.looking = true
+  errormonitor(Threads.@spawn (sleep(LOOK_WAIT); look!(t)))
+  nothing
+end
+
+"""
+Take in the changes that `t` kept: read again each folder that a change was
+in, take away the folders that went, and read the folders that came to the
+end. Only folders that a reading had are read again. The others are still to
+be read.
+"""
+look!(t::Times) = begin
+  paths = lock(t.lock) do
+    t.looking = false
+    p = collect(t.dirty)
+    empty!(t.dirty)
+    p
+  end
+  gone, again, came = Set{String}(), Set{String}(), String[]
+  for path in paths
+    st = try lstat(path) catch; nothing end
+    folder = st !== nothing && isdir(st)
+    had = lock(() -> haskey(t.bytes, path), t.lock)
+    had && !folder && push!(gone, path)   # a folder that went, or that a file took the place of
+    folder && (had ? push!(again, path) : push!(came, path))
+    # The nearest folder over it that a reading had. macOS can tell only of a file in a folder that came, at any depth.
+    up = lock(() -> read_over(t, path), t.lock)
+    up === nothing || push!(again, up)
+  end
+  isempty(gone) || lock(() -> forget_under!(t, gone), t.lock)
+  for dir in again
+    lock(() -> haskey(t.bytes, dir), t.lock) || continue
+    bytes, kids, _ = files_in(dir)
+    lock(() -> set_bytes!(t, dir, bytes), t.lock)
+    # macOS can tell of a folder that came only as a change in the folder that holds it
+    foreach(k -> push!(came, k[1]), kids)
+  end
+  foreach(path -> walk!(t, path), came)
+end
+
+"The nearest folder over `path` that a reading of `t` had, or nothing. The caller holds `t`'s lock."
+read_over(t::Times, path::AbstractString) = begin
+  d = dirname(path)
+  while length(d) > length(t.root)
+    haskey(t.bytes, d) && return d
+    up = dirname(d)
+    up == d && break
+    d = up
+  end
+  nothing
+end
+
+"Read the folder at `path` to the end for its size, when it came after the folder that holds it was read. A folder that a reading will still get to is left to it."
+walk!(t::Times, path::AbstractString) = begin
+  lock(() -> haskey(t.bytes, dirname(path)) && !haskey(t.bytes, path), t.lock) || return
+  stack = [path]
+  while !isempty(stack)
+    dir = pop!(stack)
+    claim!(t, dir) || continue
+    bytes, kids, _ = files_in(dir)
+    foreach(k -> push!(stack, k[1]), kids)
+    lock(() -> set_bytes!(t, dir, bytes), t.lock)
+    yield()
+  end
 end
 
 "Forget what's known of when folders changed, and stop hearing of changes, for a test"

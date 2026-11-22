@@ -106,13 +106,26 @@ wait_until(f; s=10) = (t0 = time(); while !f() && time() - t0 < s; sleep(0.05) e
   @test isapprox(got[deep], now - 3hour, atol=1)
   @test isapprox(got[flat], now - 100hour, atol=1)
   @test isapprox(got[library], now - 100hour, atol=1)
+  # A folder's size is of its files at any depth, hidden ones too. The Library isn't read, so it has none.
+  @test H.sizes(root) == Dict(deep => 3, flat => 1)
   # A change that macOS tells of moves its folder's time on, at any depth, in the Library too
   put("Flat/x/y/z.txt"); put("Library/Caches/y")
   @test wait_until(() -> (g = H.newest(root, folders); g[flat] > now - 60 && g[library] > now - 60))
-  # A change in a hidden folder doesn't
+  # A folder that came is read for its size
+  @test wait_until(() -> H.sizes(root)[flat] == 2)
+  # A change in a hidden folder doesn't move the time on, but its size counts
   put("Deep/a/.git/index")
   sleep(1.5)
   @test isapprox(H.newest(root, folders)[deep], now - 3hour, atol=1)
+  @test H.sizes(root)[deep] == 4
+  # A file that grows, and a folder that goes, change the size
+  write(joinpath(root, "Deep/old.txt"), "xxxxx")
+  rm(joinpath(root, "Flat/x"), recursive=true)
+  @test wait_until(() -> H.sizes(root) == Dict(deep => 8, flat => 1))
+  # The page of the Library, or of a folder in it, doesn't read the folders in it either: each time is its own
+  caches = joinpath(library, "Caches")
+  @test H.unread(library) && H.unread(caches) && !H.unread(deep)
+  @test haskey(H.newest(library, [caches]), caches)
   H.forget_times!()
 end
 
@@ -202,7 +215,7 @@ end
 @testset "a click on a favourite opens its folder in the page, and the sidebar stays hidden" begin
   e.panel = false; frames()
   click(middle(view().cards[favs[2]]))
-  # A plain folder shows as the tree of what's in it
+  # A plain folder shows as the table of what's in it
   @test e.buf.path == favs[2] && e.folder == favs[2]
   @test e.nodes[(:folder_page, favs[2])] isa K.FolderPage
   @test !e.panel
@@ -251,7 +264,8 @@ end
 end
 
 @testset "under the projects is a table of the home folder, the newest first" begin
-  v = view()
+  v = e.nodes[(:folder_table, home)]
+  @test v isa K.FolderTable
   H.forget_times!()
   now = time()
   ages = ["page.md" => 0.02, "Desktop" => 2, "Code" => 26, "list.csv" => 50, "Mail" => 80,
@@ -262,10 +276,10 @@ end
   stamp(joinpath(app, ".git", "HEAD"), now)
   order = ["page.md", "Code", "Desktop", "list.csv", "Mail", "Alpha", "Beta", "Gamma", "Library"]
   # Until a folder is read, its time says so
-  all_read() = (v.read = 0.0; frames(1); all(it -> it.known, v.items))
+  all_read() = (v.read = 0.0; frames(1); all(it -> it.known && (it.sized || basename(it.path) == "Library"), v.items))
   @test wait_until(all_read)
   frames()
-  names() = [K.entry_name(it.object) for it in K.home_sorted(v)]
+  names() = [K.entry_name(it.object) for it in K.folder_sorted(v)]
   row(name) = v.rows[(:item, joinpath(home, name))]
   # The sidebar's folders and files, with no hidden folder, the one that changed last first
   @test v.sort == :when && v.desc
@@ -282,10 +296,14 @@ end
   @test issorted([K.num(rect(row(n)).top) for n in by_name])
   click(middle(v.heads[:name]))
   @test v.desc && names() == reverse(by_name)
-  # The largest file first. A folder has no size, so the folders come last, in the sidebar's order.
+  # The largest first. A folder's size is of everything in it, and the two repositories have the most, in their .git folders.
+  # Empty folders keep the sidebar's order, and the Library, which isn't read, comes last.
   click(middle(v.heads[:size]))
   @test v.sort == :size && v.desc
-  @test names() == ["page.md", "list.csv", "Alpha", "Beta", "Code", "Desktop", "Gamma", "Library", "Mail"]
+  @test sort(names()[1:2]) == ["Code", "Desktop"]
+  @test names()[3:end] == ["Mail", "page.md", "list.csv", "Alpha", "Beta", "Gamma", "Library"]
+  sizes = Dict(basename(it.path) => K.size_cell(it) for it in v.items)
+  @test sizes["Mail"] == "16 bytes" && sizes["Alpha"] == "0 bytes" && sizes["Library"] == "" && sizes["page.md"] == "13 bytes"
   # A new column starts with the newest first, and a second click puts the oldest first
   click(middle(v.heads[:when]))
   @test v.sort == :when && v.desc && names() == order
@@ -302,11 +320,21 @@ end
   right_click(middle(row("Code")))
   @test menu() !== nothing && "Show in Finder" in menu().items && !("Rename" in menu().items)
   key(Keys.escape)
-  # A click on a folder opens it in the page, as its tree
+  # A click on a folder opens it in the page, as a table of its own, the newest first
   click(middle(row("Code")))
   code = joinpath(home, "Code")
   @test e.buf.path == code && e.nodes[(:folder_page, code)] isa K.FolderPage
-  @test [basename(c.firstchild.path) for c in e.nodes[(:folder_tree, code)].children] == ["app"]
+  t = e.nodes[(:folder_table, code)]
+  @test [basename(it.path) for it in t.items] == ["app"]
+  @test t.sort == :when && t.desc
+  @test rect(t.rows[(:item, app)]) !== nothing && rect(t.heads[:when]) !== nothing
+  shot("folder-table")
+  # Its folder's time is when anything in it changed: the newest file in app is main.jl
+  @test wait_until(() -> (t.read = 0.0; frames(1); only(t.items).known))
+  @test isapprox(only(t.items).when, now - 0.5hour, atol=1)
+  # Its own order, apart from the home folder's
+  click(middle(t.heads[:name]))
+  @test t.sort == :name && v.sort == :when
   # A click on a file shows it
   K.go_home!(e); frames()
   click(middle(row("page.md")))
@@ -352,7 +380,7 @@ end
   K.open!(e, notes)
   frames()
   @test e.folder == app && e.buf.path == notes
-  # Code is a plain folder: it shows as the tree of what's in it
+  # Code is a plain folder: it shows as the table of what's in it
   code = joinpath(home, "Code")
   click(middle(trail_name(code)))
   @test e.folder == code && e.buf.path == code && e.nodes[(:folder_page, code)] isa K.FolderPage
