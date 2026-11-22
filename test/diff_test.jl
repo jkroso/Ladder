@@ -3,6 +3,7 @@
 # the top bar has a button beside the Commit button. A click on it gives the
 # new lines a green background, and shows the lines that went in red under the
 # line before them. A button on each change puts the last commit's lines back.
+# The chevrons beside the button go to the change before the caret and the next one.
 # Run them with `julia -O0 --project=. test/diff_test.jl`. They make a
 # repository in a temporary folder with the Mac's own git, and click in a
 # window that isn't on the screen. With `LADDER_SHOTS` set to a folder, they
@@ -76,6 +77,7 @@ const CHANGED = replace(COMMITTED, "What this is." => "What this is, and what it
   again()
   b = button()
   @test b !== nothing
+  # While what changed doesn't show, there are no chevrons between the two
   c = e.nodes[:commit]
   @test K.num(rect(b).left) < K.num(rect(c).left) <= K.num(rect(b).left + rect(b).width) + 4   # just before it
   @test K.tip(b) == "Show what changed in Readme.md since the last commit"
@@ -110,6 +112,45 @@ end
   @test rect(p) !== nothing
   @test K.num(rect(p).left + rect(p).width) > 800
   shot("page")
+end
+
+@testset "while what changed shows, two chevrons are beside the diff button, one over the other" begin
+  b = button()
+  up, down, c = rect(e.nodes[:previous_change]), rect(e.nodes[:next_change]), rect(e.nodes[:commit])
+  right(r) = K.num(r.left + r.width)
+  @test right(rect(b)) <= K.num(up.left) <= right(rect(b)) + 4
+  @test K.num(up.left) == K.num(down.left) && K.num(up.top + up.height) <= K.num(down.top)
+  @test right(up) <= K.num(c.left) <= right(up) + 4
+  # The two together are as tall as the diff button, and in line with it
+  @test K.num(up.top) ≈ K.num(rect(b).top) && K.num(down.top + down.height) ≈ K.num(rect(b).top + rect(b).height)
+  # The upper one's tooltip goes under both, so it doesn't cover the lower one
+  @test K.num(K.tip_rect(e.nodes[:previous_change])[4]) ≈ 2K.num(up.height) &&
+        K.num(K.tip_rect(e.nodes[:next_change])[4]) ≈ K.num(down.height)
+end
+
+@testset "the chevrons beside the diff button go from change to change, and round again" begin
+  starts = [K.change_span(e.buf, c)[1] for c in K.gone_now(e).diff.changes]
+  # The lines that went from after line 8 show over line 9, so that change is at line 9
+  @test starts[1:2] == [3, 9] && starts[3] > 9
+  up, down = e.nodes[:previous_change], e.nodes[:next_change]
+  e.buf.caret = e.buf.anchor = (1, 0)
+  frames()
+  @test K.tip(down) == "Next change (1 of 3)" && K.tip(up) == "Previous change (3 of 3)"
+  for i in (1, 2, 3, 1)   # after the last change comes the first
+    click(rect(down))
+    @test e.buf.caret == e.buf.anchor == (starts[i], 0)
+  end
+  @test K.tip(down) == "Next change (2 of 3)"
+  click(rect(up))   # before the first comes the last
+  @test e.buf.caret == (starts[3], 0)
+  click(rect(up))
+  @test e.buf.caret == (starts[2], 0)
+  # From inside a change, the one before is the one over it
+  e.buf.caret = e.buf.anchor = (starts[3], 3)
+  click(rect(up))
+  @test e.buf.caret == (starts[2], 0)
+  @test K.works_here(e, Val(:next_change)) && K.works_here(e, Val(:previous_change))
+  @test K.diffing(e)
 end
 
 @testset "the changes follow what you type" begin
@@ -153,6 +194,8 @@ end
   click(rect(button()))
   frames()
   @test !K.diffing(e) && K.gone_now(e) === nothing
+  # The chevrons go too, and the Commit button is just after the diff button again
+  @test K.num(rect(e.nodes[:commit]).left) <= K.num(rect(button()).left + rect(button()).width) + 4
   plain = plain_tops()
   frames()
   @test all(it -> K.num(it.top) ≈ plain[it.first], e.layout)
@@ -199,6 +242,46 @@ end
   @test gone_lines(rect(e.nodes[:document])) == ["sub(a, b) = a - b", "mul(a, b) = a * b"]
   @test K.is_new(gone, K.item(e, 3))
   shot("code")
+end
+
+@testset "the chevrons scroll to each change, and the palette's command shows what changed first" begin
+  long = joinpath(repo, "long.jl")
+  lines = ["f$i() = $i" for i in 1:300]
+  write(long, join(lines, "\n") * "\n")
+  git("add", "long.jl")
+  git("commit", "-q", "-m", "Add a long file")
+  # Line 40 changes, line 150 goes, and a line comes after line 280
+  lines[40] = "f40() = 40 + 0"
+  deleteat!(lines, 150)
+  insert!(lines, 280, "extra() = 0")
+  write(long, join(lines, "\n") * "\n")
+  K.open!(e, long)
+  again()
+  @test !K.diffing(e) && e.buf.caret[1] == 1
+  shows(i) = (y = top(i) - K.num(e.scroll.offset); 0 < y < 760 - 100)
+  # The palette's command goes to the next change while what changed doesn't show, and shows it
+  K.next_change!(e)
+  frames()
+  @test K.diffing(e) && e.buf.caret == (40, 0) && shows(40)
+  click(rect(e.nodes[:previous_change]))   # before the first comes the last
+  @test e.buf.caret == (280, 0) && shows(280) && !shows(40)
+  click(rect(e.nodes[:next_change]))
+  @test e.buf.caret == (40, 0) && shows(40)
+  click(rect(e.nodes[:next_change]))
+  @test e.buf.caret == (150, 0) && shows(150)   # the line after the line that went
+  @test K.gone_now(e).after[149] == ["f150() = 150"]
+  click(rect(e.nodes[:next_change]))
+  @test e.buf.caret == (280, 0) && shows(280) && !shows(40)
+  click(rect(e.nodes[:previous_change]))
+  @test e.buf.caret == (150, 0) && shows(150)
+  # With no change to go to, a chevron does nothing: here the file is as the last commit has it
+  write(long, read(`git -C $repo show HEAD:long.jl`, String))
+  K.refresh!(e.buf)
+  frames()
+  @test K.change_after(e) === nothing && K.BUTTONS[:next_change].off(e)
+  was = e.buf.caret
+  K.next_change!(e)
+  @test e.buf.caret == was
 end
 
 close(w)

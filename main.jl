@@ -25796,10 +25796,12 @@ describe(b::ToolButton) = begin
        (haskey(BUTTONS, b.action) && get(BUTTONS[b.action], :on, _ -> false)(e))
   # A button whose work takes a while, like a commit while Claude writes its message, spins until it's done
   busy = haskey(BUTTONS, b.action) && get(BUTTONS[b.action], :busy, _ -> false)(e)
-  box = Box(width(30px), height(28px), radius(6px), Alignment.Center, name="Button",
+  # A half button, like each chevron beside the diff button, is half as tall as the others, with one over the other, and narrow
+  half = haskey(BUTTONS, b.action) && get(BUTTONS[b.action], :half, false) !== false
+  box = Box(width(half ? 18px : 30px), height(half ? 14px : 28px), radius(half ? 4px : 6px), Alignment.Center, name="Button",
             background(on ? colours.active : ishovered(b) && !off(b) ? colours.hover : clear),
           busy ? Spinner(size=15px) :
-          Icon(b.icon, size=15px, color=off(b) ? colours.faint : haskey(BUTTONS, b.action) && BUTTONS[b.action].strong ? colours.accent : colours.dim))
+          Icon(b.icon, size=half ? 9px : 15px, color=off(b) ? colours.faint : haskey(BUTTONS, b.action) && BUTTONS[b.action].strong ? colours.accent : colours.dim))
   # While the sidebar is closed, a dot beside its button says that an agent waits for a page that isn't showing
   (b.action == :panel && waiting_dot(e)) || return box
   Row(Alignment.Center, child_gap=DOT_GAP, box, Box(width(DOT_W), height(DOT_W), radius(DOT_W / 2), background(colours.accent)))
@@ -25898,9 +25900,14 @@ draw(ctx, size, ui::ConcreteRect, b::Tipped) = (b.rect = (ui.left, ui.top, ui.wi
 
 onmouse(b::Tipped, ev::MouseMove) = begin
   b.quiet && return
-  show_tooltip!(ev.window, tip_label(tip(b)), b.rect...,
+  show_tooltip!(ev.window, tip_label(tip(b)), tip_rect(b)...,
                 placement=:bottom, gap=6px)
 end
+
+"What a button's tooltip points at: the button itself, or the upper half button and the one under it, so the tooltip doesn't cover the lower one"
+tip_rect(b::Tipped) = b.rect
+tip_rect(b::ToolButton) = haskey(BUTTONS, b.action) && get(BUTTONS[b.action], :half, false) == :top ?
+                          (b.rect[1], b.rect[2], b.rect[3], 2b.rect[4]) : b.rect
 
 hush!(b::Tipped) = (b.quiet = true; hide_tooltip!(window_of(b)))
 
@@ -40818,6 +40825,11 @@ push!(BLOCK_ICONS, "chevron-down", "square", "check2-square")
 # The changes follow what you type. The button is shaded while they show, and
 # a click on it hides them. They show for that file until then.
 #
+# While the changes show, two chevrons beside the button, one over the other,
+# go from change to change: up to the change before the caret, down to the
+# next one. After the last change comes the first again. Each puts the caret
+# at the start of its change, near the top of the window.
+#
 # The lines that went take room on the page. After `layout!`, in each frame of
 # the window, `inline_diff!` moves each item down by the height of the old
 # lines over it, in a new list, since `file_lines` keeps the list that it gave.
@@ -40843,15 +40855,64 @@ show_changes!(e, path) = begin
   e.nodes[:diffing] = path
   d = diff_now(e)
   (d === nothing || isempty(d.changes)) && return e
+  go_change!(e, 1)
+end
+
+"""
+The first and the last line of the file that change `(o, n)` has: its new
+lines. A change that only took lines away has none of the file's lines, so
+the line after them is both: the lines that went show over it.
+"""
+change_span(b, (o, n)) = (i = clamp(first(n), 1, length(b.lines)); (i, isempty(n) ? i : last(n)))
+
+"Put the caret at the start of change `k` of the file, from the top, near the top of the window"
+go_change!(e, k) = begin
   b = e.buf
-  # A change that only took lines away has none of the file's lines, so the line after them shows it
-  i = clamp(first(d.changes[1][2]), 1, length(b.lines))
+  i = change_span(b, diff_now(e).changes[k])[1]
   b.caret = b.anchor = (i, 0)
   touch!(e)
   # The change is near the top of the window, with a few lines over it, so the lines under it show too
   e.nodes[:hold] = (max(i - 3, 1), 24px - PAGE_TOP)
   redraw_in!(e, 0)
   e
+end
+
+"""
+Which change of the file is the next one after the caret, or with `by` of -1
+the one before it, from the top. After the last change comes the first, and
+before the first comes the last. Nothing while the window shows no change.
+"""
+change_after(e, by=1) = begin
+  d = diff_now(e)
+  (d === nothing || isempty(d.changes)) && return nothing
+  b = e.buf
+  c = b.caret[1]
+  # From inside a change, the next one is the one under it, and the one before is the one over it
+  k = by > 0 ? findfirst(ch -> change_span(b, ch)[1] > c, d.changes) : findlast(ch -> change_span(b, ch)[2] < c, d.changes)
+  something(k, by > 0 ? 1 : length(d.changes))
+end
+
+"""
+Go to the next change of the file after the caret, or with `by` of -1 to the
+one before it. The chevrons beside the diff button do this. From the palette,
+the window shows what changed first, if it doesn't yet.
+"""
+step_change!(e, by=1) = begin
+  diffing(e) || (e.nodes[:diffing] = e.buf.path)
+  k = change_after(e, by)
+  k === nothing ? (redraw_in!(e, 0); e) : go_change!(e, k)
+end
+
+"Go to the next change in the file since the last commit, after the caret"
+next_change!(e) = step_change!(e, 1)
+"Go to the change in the file since the last commit before the caret"
+previous_change!(e) = step_change!(e, -1)
+
+"What the tooltip of a chevron beside the diff button says: which change it goes to, of how many, while they show"
+step_tip(e, by) = begin
+  words = by > 0 ? "Next change" : "Previous change"
+  k = change_after(e, by)
+  k === nothing ? words : "$words ($k of $(length(diff_now(e).changes)))"
 end
 
 "The lines of each file in a commit, by the repository's top folder, the file's place in it and the commit's hash. A file that the commit hasn't got has none."
@@ -41064,15 +41125,31 @@ put_back_over(e) = begin
   out
 end
 
-"The button of the top bar that shows what changed in the file since the last commit, while it has a change to commit"
-diff_part(e) = commit_change(e, e.buf.path) === nothing ? () : (button(e, :diff, "file-diff"),)
+"""
+The button of the top bar that shows what changed in the file since the last
+commit, while it has a change to commit. While what changed shows, the
+chevrons beside it go to the change before the caret and the next one.
+"""
+diff_part(e) = commit_change(e, e.buf.path) === nothing ? () :
+  (Row(Alignment.Center, name="Diff", button(e, :diff, "file-diff"),
+       (diffing(e) ? (Column(Alignment.Center, button(e, :previous_change, "chevron-up"), button(e, :next_change, "chevron-down")),) : ())...),)
 
 BUTTONS[:diff] = (run=toggle_diff!, off=e -> false, strong=false, on=diffing,
                   tip=e -> (diffing(e) ? "Hide what changed in " : "Show what changed in ") * basename(e.buf.path) * " since the last commit")
+# The chevrons are half buttons, one over the other. Each does nothing while what changed shows and there's no change
+# to go to, as in slides.
+for (action, by, half) in ((:previous_change, -1, :top), (:next_change, 1, :bottom))
+  BUTTONS[action] = (run=e -> step_change!(e, by), off=e -> change_after(e) === nothing, strong=false, half=half,
+                     tip=e -> step_tip(e, by))
+end
 push!(BLOCK_ICONS, "arrow-counterclockwise")
 
 add_command!(toggle_diff!, name=:show_changes_in_place, title="Show or hide what changed in the file since the last commit, in the file itself")
 works_here(e, ::Val{:show_changes_in_place}) = diffing(e) || commit_change(e, e.buf.path) !== nothing
+add_command!(next_change!, title="Go to the next change in the file since the last commit, after the caret")
+add_command!(previous_change!, title="Go to the change in the file since the last commit before the caret")
+works_here(e, ::Val{:next_change}) = commit_change(e, e.buf.path) !== nothing
+works_here(e, ::Val{:previous_change}) = commit_change(e, e.buf.path) !== nothing
 
 # --- a folder of notes -------------------------------------------------------------------------
 #
