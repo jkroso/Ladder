@@ -44101,10 +44101,11 @@ page_title(icon, name, about) =
 #     file in it has a dot.
 #   - A click on the repository's name in the trail at the top of the
 #     sidebar shows the repository's page.
-#   - The repository's page lists the folders and the files in its top
-#     folder, each with its mark. Git's panel at the right of the window has
-#     the branch, the files that have changes, and the last commits. A click
-#     on a folder or a file shows it. The button at the right end of the top
+#   - The repository's page has the table of the folders and the files in
+#     its top folder, as any folder's page has, each with its mark. Git's
+#     panel at the right of the window has the branch, the files that have
+#     changes, and the last commits. A click on a folder opens it in the page,
+#     and a click on a file shows it. The button at the right end of the top
 #     bar hides git's panel, and shows it again.
 #   - In the list of a folder that holds repositories, each one has its
 #     branch after its name, and how many of its files have changes.
@@ -44217,16 +44218,13 @@ show_beside!(e, path) = begin
 end
 
 """
-What the page shows of the top folder of a repository: the folders and the
-files in it, as the sidebar lists them, each with git's mark. What git says
-of the repository is in git's panel at the right of the window: see `GitPanel`.
+What the page shows of the top folder of a repository: the table of the
+folders and the files in it, as a folder's page has it, each with git's mark.
+What git says of the repository is in git's panel at the right of the window:
+see `GitPanel`.
 """
 @def mutable struct RepoView <: SemanticUI
   path::String = ""
-  rows::Dict{Any,PageRow} = Dict{Any,PageRow}()
-  listed::Vector{FSObject} = FSObject[]   # the folders and the files in it, as it was last read
-  read::Float64 = 0.0                     # when it was read
-  hidden::Bool = false                    # it listed the hidden files and folders then
   scroll::Scroll = Scroll(width(grow=grow), height(grow=grow))
 end
 
@@ -44250,57 +44248,25 @@ BUTTONS[:right_panel] = (run=toggle_right!, tip=e -> (e.right ? "Hide " : "Show 
 add_command!(toggle_right!, name=:right_panel, title="Show or hide the panel at the right of the page, like git's panel beside a repository's files")
 works_here(e, ::Val{:right_panel}) = right_view(e) !== nothing
 
-const REPO_HEAD_H = 84.0   # how tall the part over the list of a repository's page is: the folder's name, and what it holds
-
-"Read the folder of the repository's page `v` again: a second after it was last read, or at once when the sidebar starts or stops listing hidden files"
-repo_read!(e, v::RepoView) = begin
-  time() - v.read < 1 && v.hidden == e.hidden && return
-  v.read, v.hidden = time(), e.hidden
-  d = try object(e, v.path) catch; nothing end
-  v.listed = d isa AbstractDirectory ? entries(e, d) : FSObject[]
-  nothing
-end
-
-"How many folders and files the repository's page `v` lists, in words"
-holds_words(v::RepoView) = begin
-  folders = count(o -> o isa AbstractDirectory, v.listed)
-  files = length(v.listed) - folders
+"How many folders and files the table `t`, a `FolderTable`, lists, in words. The type is defined further on, with the table."
+holds_words(t) = begin
+  folders = count(it -> it.folder, t.items)
+  files = length(t.items) - folders
   parts = String[]
   folders > 0 && push!(parts, folders == 1 ? "1 folder" : "$(commas(folders)) folders")
   files > 0 && push!(parts, files == 1 ? "1 file" : "$(commas(files)) files")
   isempty(parts) ? "Empty" : join(parts, "  ·  ")
 end
 
-"The line of the repository's page `v` for the folder or the file `o`. A click shows it, as a click on it in the sidebar does."
-repo_line(v::RepoView, e, o::FSObject) = begin
-  path = string(o.path)
-  st = try stat(path) catch; nothing end
-  folder = o isa AbstractDirectory
-  when = st === nothing ? "" : Git.ago(st.mtime)
-  size = folder || st === nothing ? "" : Zips.size_words(Int(st.size))
-  page_row!(v, (:entry, path), _ -> (show_path!(e, path); nothing),
-    Box(width(16px), Icon(entry_icon(o), size=14px, color=colours.dim)),
-    Row(width(grow=grow), height(grow=grow), clip=true, child_gap=8px,
-      Box(label(entry_name(o), 13px)), entry_marks(e, o)...),
-    Box(label(size, 12px, color=colours.faint)),
-    Box(width(84px), Alignment.End, label(when, 12px, color=colours.faint)))
-end
-
+# The page has its own scroll, since it covers the page's space to leave git's panel the room at its right
 describe(v::RepoView) = begin
   e = editor(v)
-  repo_read!(e, v)
-  redraw_in!(e, 1)   # the folder is read again each second, so a new file gets its line
-  n = length(v.listed)
-  row = num(PAGE_ROW_H)
-  _, high = window_size(e)
-  # Only the lines that are in the window are made, and a few more above and below
-  lo = clamp(floor(Int, (num(v.scroll.offset) - num(PAGE_TOP) - REPO_HEAD_H) / row) - 6, 0, n)
-  hi = min(n, lo + ceil(Int, num(high) / row) + 12)
+  t = folder_table!(e, v, v.path)
+  folder_items!(e, t)   # the line under the name says what the table holds
   reuse!(v.scroll, Row(width(grow=grow), Alignment.Start, justify=Alignment.Center, padding(PAGE_TOP, PAGE_X, PAGE_BOTTOM, PAGE_X),
     Column(width(grow=grow, max=e.widest * e.zoom), Alignment.Start, name="Repository",
-      Column(width(grow=grow), height(px(REPO_HEAD_H)), Alignment.Start, clip=true,
-        page_title("git", basename(v.path), holds_words(v))),
-      spacer(PAGE_ROW_H * lo), [repo_line(v, e, v.listed[i]) for i in lo+1:hi]..., spacer(PAGE_ROW_H * (n - hi)))))
+      page_title("git", basename(v.path), holds_words(t)),
+      t)))
 end
 
 cursor(::RepoView) = :arrow
@@ -46950,6 +46916,7 @@ end
   desc::Bool = true                              # Z, the largest or the newest first
   heads::Dict{Symbol,Any} = Dict{Symbol,Any}()   # the heading of each column
   every::Bool = false                            # it shows every row, not only the first ones
+  hidden::Bool = false                           # it listed the hidden files and folders when it was read
 end
 
 "The heading of a column of a folder's table. A click on it sorts the table by that column."
@@ -46968,10 +46935,15 @@ const FOLDER_ROWS_FIRST = 100
 "The table of the folder at `path`, for a part of a page that `owner` draws. It keeps its order while the window is open."
 folder_table!(e, owner, path) = get!(() -> own!(owner, FolderTable(path=path)), e.nodes, (:folder_table, path))
 
-"Read the folder of the table `t` again, a second after it was last read: the folders and files that the sidebar lists, each with its size and when it last changed. A folder's are of everything in it."
+"""
+Read the folder of the table `t` again: the folders and files that the
+sidebar lists, each with its size and when it last changed. A folder's are of
+everything in it. It's read a second after it was last read, or at once when
+the sidebar starts or stops listing hidden files.
+"""
 folder_items!(e, t::FolderTable) = begin
-  time() - t.read < 1 && return t.items
-  t.read = time()
+  time() - t.read < 1 && t.hidden == e.hidden && return t.items
+  t.read, t.hidden = time(), e.hidden
   d = try object(e, t.path) catch; nothing end
   found = d isa AbstractDirectory ? entries(e, d) : FSObject[]
   paths = String[joinpath(t.path, o.path.name) for o in found]

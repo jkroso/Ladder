@@ -98,12 +98,14 @@ end
   v = e.nodes[(:repo, repo)]
   @test v isa K.RepoView
   @test rect(v) !== nothing
-  # The page lists the folders and the files of the top folder, the folders first, as the sidebar does
-  @test [basename(string(o.path)) for o in v.listed] == ["src", "new.md", "notes.md", "Readme.md"]
-  @test K.holds_words(v) == "1 folder  ·  3 files"
-  @test sort!([k[2] for k in keys(v.rows) if k[1] == :entry]) == sort!(joinpath.(repo, ["Readme.md", "new.md", "notes.md", "src"]))
-  # Each line has git's mark, as the sidebar has
-  line(name) = v.rows[(:entry, joinpath(repo, name))]
+  # The page has the folder's table, with a row for each folder and file of the top folder that the sidebar lists
+  tb = e.nodes[(:folder_table, repo)]
+  @test tb isa K.FolderTable && rect(tb) !== nothing
+  @test sort!([basename(it.path) for it in tb.items]) == ["Readme.md", "new.md", "notes.md", "src"]
+  @test K.holds_words(tb) == "1 folder  ·  3 files"
+  @test sort!([k[2] for k in keys(tb.rows) if k[1] == :item]) == sort!(joinpath.(repo, ["Readme.md", "new.md", "notes.md", "src"]))
+  # Each row has git's mark, as the sidebar has
+  line(name) = tb.rows[(:item, joinpath(repo, name))]
   words(r) = reduce(vcat, map(texts, collect(r.parts)), init=String[])
   @test "M" in words(line("notes.md"))
   @test "U" in words(line("new.md"))
@@ -125,9 +127,16 @@ end
   shot("page")
 end
 
-@testset "a click on a line of the repository's page shows its file, or lists its folder" begin
-  v = e.nodes[(:repo, repo)]
-  click(middle(v.rows[(:entry, joinpath(repo, "notes.md"))]))
+@testset "a click on a row of the repository's page shows its file, or opens its folder" begin
+  tb = e.nodes[(:folder_table, repo)]
+  # The rows are in the order of their times, so a row moves when its folder's time is known. Wait for every time.
+  t0 = time()
+  while !(tb.read = 0.0; frames(1); all(it -> it.known && it.sized, tb.items)) && time() - t0 < 10
+    sleep(0.05)
+  end
+  @test all(it -> it.known && it.sized, tb.items)
+  frames()
+  click(middle(tb.rows[(:item, joinpath(repo, "notes.md"))]))
   @test e.buf.path == joinpath(repo, "notes.md")
   # git's panel and its button are only beside the page of the repository
   @test K.right_view(e) === nothing
@@ -136,11 +145,14 @@ end
   frames()
   @test e.buf.path == repo
   @test K.right_part(e) != ()
-  click(middle(v.rows[(:entry, joinpath(repo, "src"))]))
-  @test e.folder == joinpath(repo, "src")   # the sidebar lists the folder
-  @test e.buf.path == repo                  # and the page stays
-  K.go_folder!(e, repo)
+  # A folder opens in the page, as its own table, and the sidebar lists it
+  click(middle(tb.rows[(:item, joinpath(repo, "src"))]))
+  src = joinpath(repo, "src")
+  @test e.folder == src && e.buf.path == src
+  @test e.nodes[(:folder_page, src)] isa K.FolderPage
+  K.open_folder!(e, repo)
   settle()
+  @test e.folder == repo && e.buf.path == repo
 end
 
 @testset "a click on a file in git's panel shows the file" begin
