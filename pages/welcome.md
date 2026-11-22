@@ -874,7 +874,7 @@ The button at the top left shows the files in this folder. Under the file that s
 
 Over the list are the names of the folders on the way to it. Click a name to open that folder in the page: its own page, like your home folder's or a desktop's, or else its folders and files, in rows like the list's. While another page shows, click the last name to open its folder again.
 
-Hold the mouse over the file's name at the top of the window, and the name grows into its path, like `~ › Desktop › Canon › Quotes.md`. Click a folder in the path to open it in the page. Click a › for a menu of what's in the folder before it. In a menu, each folder opens a menu of what's in it, and you choose a file to show it. So you can go anywhere from the top of the window, with the list hidden.
+Hold the mouse over the file's name at the top of the window, and the name grows into its path, like `~ › Desktop › Canon › Quotes.md`. Click a folder in the path to open it in the page. Click a › for a list of what's in the folder before it, and type to narrow the list. Rest the mouse on a folder in the list, and a list of what's in that folder opens beside it. Click a file to show it, or a folder to open it. So you can go anywhere from the top of the window, with the sidebar hidden.
 
 The list leaves out hidden files and folders, the ones whose names start with a dot, like `.media`. To list them too, click the eye beside the button at the top left, or press ⌘⇧. as you do in the Finder. Click the eye again to leave them out.
 

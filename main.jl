@@ -8662,16 +8662,17 @@ const FLOAT_ROW = 28px   # how tall a row of such a list is
 
 """
 A list that floats beside what it's for, with a field at its top that searches
-it. `input` is the field, and `body` is the rows under it.
+it. `input` is the field, or nothing for a list with no field, and `body` is
+the rows under it.
 """
 float_list(input, body; name="List") = begin
   c = found_colours()
+  field = input === nothing ? () :
+    (Box(width(grow=grow), padding(2px, 2px),
+       Box(width(grow=grow), height(28px), padding(8px, 0px), radius(6px), border(1px, :solid, c.line), background(c.frame), input)),)
   Box(width(grow=grow), padding(6px), radius(8px), background(c.frame), border(1px, :solid, c.line),
       shadow(0, 6, 16, RGBA(60 / 255, 45 / 255, 20 / 255, 0.2)), name=name,
-    Column(width(grow=grow), Alignment.Start, child_gap=4px,
-      Box(width(grow=grow), padding(2px, 2px),
-        Box(width(grow=grow), height(28px), padding(8px, 0px), radius(6px), border(1px, :solid, c.line), background(c.frame), input)),
-      body))
+    Column(width(grow=grow), Alignment.Start, child_gap=4px, field..., body))
 end
 
 """
@@ -27266,10 +27267,10 @@ end
 #
 #   - A click on a folder opens it in the page: its own page, like the home
 #     folder's or a desktop's, or a list of what's in it.
-#   - A click on a › shows the menu of what's in the folder before it.
-#   - In a menu, each folder opens a menu of what's in it. Choose a file to
-#     show it. "Go to …" at the top of a folder's menu does what a click on
-#     the folder's name does.
+#   - A click on a › shows a list of what's in the folder before it, under
+#     the ›. Rest the mouse on a folder in it, and a list of what's in that
+#     folder opens beside it. Click a file to show it, or a folder to open it.
+#     See "the list of a folder, under a › of the path".
 #   - A right-click on a name shows the menu of that folder or file.
 #
 # So you can go anywhere from the top bar, with the sidebar hidden.
@@ -27300,7 +27301,7 @@ const TT_PAD = 7px      # inside a name, on each side
 const TT_ARROW = 14px   # how wide a › is
 const TT_EDGE = 4px     # inside the path, at each end
 const TT_WAIT = 0.15    # how many seconds the mouse is over the name before the path shows
-const TT_MOST = 80      # the most things that a menu of a folder lists
+const TT_MOST = 80      # the most things that a list of a folder shows
 
 "How wide each name of `steps` is in the top bar. The file's name is a little bolder."
 title_widths(steps) = [measure(Face(SANS, i == length(steps) ? "Medium" : "", 13px, colours.ink, false), n) + 2TT_PAD
@@ -27348,8 +27349,11 @@ title_trail!(e, t) = begin
   w === nothing && return
   path = e.buf.path
   open = any(p -> p.key == :title_trail, popups(w))
-  if !(ishovered(t) && !nofile(e) && isabspath(path) && isdir(dirname(path)) && renaming(e, :title) != path && e.popup == :none)
+  # A list of a folder under a › keeps the path, until a click or Esc takes the list away
+  listing = any(p -> p.content isa FolderList, popups(w))
+  if !((ishovered(t) || listing) && !nofile(e) && isabspath(path) && isdir(dirname(path)) && renaming(e, :title) != path && e.popup == :none)
     delete!(e.nodes, :title_hover)
+    listing && close_folder_lists!(e, w)
     open && close_popup!(w, :title_trail)
     return
   end
@@ -27366,6 +27370,7 @@ end
 show_title_trail!(e, t, w, path) = begin
   r = rect(t)
   r === nothing && return
+  close_folder_lists!(e, w)   # the path moves, so a list under one of its › would point at nothing
   wide = window_size(e)[1]
   # The Mac draws its close, minimise and zoom buttons over the window, so the path starts after them
   start = mac_buttons_room(e) + 4px
@@ -27417,19 +27422,20 @@ describe(c::TitleCrumb) =
       background(!c.last && ishovered(c) ? colours.hover : clear),
     label(c.name, 13px, color=c.last ? colours.ink : colours.dim, weight=c.last ? "Medium" : ""))
 
-describe(a::TitleArrow) =
+describe(a::TitleArrow) = begin
+  # It's shaded while its list shows under it
+  w = window_of(a)
+  dropped = w !== nothing && any(p -> p.content isa FolderList && p.content.arrow === a, popups(w))
   Box(width(TT_ARROW), height(grow=grow), radius(4px), Alignment.Center, justify=Alignment.Center, name="Arrow",
-      background(ishovered(a) ? colours.hover : clear),
+      background(ishovered(a) || dropped ? colours.hover : clear),
     Icon("chevron-right", size=8px, color=colours.faint))
+end
 
 cursor(c::TitleCrumb) = c.last ? :arrow : :hand
 cursor(::TitleArrow) = :hand
 
-"Where a menu that drops down from `node` in the top bar starts: under its left end"
-drop_at(node, w) = (r = rect(node); r === nothing ? (w.mouse[1], w.mouse[2]) : (r.left, r.top + r.height + 4px))
-
-onkey(c::TitleCrumb, ev::KeyPress{Keys.mouse_left}) = (c.last || title_go!(editor(c), ev.window, c.path; at=drop_at(c, ev.window)); handled)
-onkey(a::TitleArrow, ev::KeyPress{Keys.mouse_left}) = (folder_menu!(editor(a), ev.window, a.path; at=drop_at(a, ev.window)); handled)
+onkey(c::TitleCrumb, ev::KeyPress{Keys.mouse_left}) = (c.last || title_go!(editor(c), ev.window, c.path); handled)
+onkey(a::TitleArrow, ev::KeyPress{Keys.mouse_left}) = (open_folder_list!(editor(a), ev.window, a); handled)
 
 # A right-click on a name shows the menu of its folder or file, as in the sidebar. Only the file's own name can be renamed in the bar.
 onkey(c::TitleCrumb, ev::KeyPress{Keys.mouse_right}) = begin
@@ -27439,7 +27445,7 @@ onkey(c::TitleCrumb, ev::KeyPress{Keys.mouse_right}) = begin
 end
 
 "Do what a choice of the folder or the file at `path` in the top bar does: a file shows, and a folder opens in the page"
-title_go!(e, w, path; at) = (close_popup!(w, :title_trail); open_folder!(e, path); nothing)
+title_go!(e, w, path) = (close_folder_lists!(e, w); close_popup!(w, :title_trail); open_folder!(e, path); nothing)
 
 "What's in the folder `dir`, by name, its folders first, or nothing when it can't be read. Hidden ones show while the sidebar shows them."
 title_listing(e, dir) = begin
@@ -27451,73 +27457,233 @@ title_listing(e, dir) = begin
   (names, kinds)
 end
 
-"""
-The menu of what's in the folder `dir`, as `system_menu` takes it, and the
-path of each item, at the same places. With `deep`, each folder in it opens a
-menu of what's in that folder, which starts with an item that goes to it.
-"""
-folder_menu_items(e, dir; deep=true) = begin
-  found = title_listing(e, dir)
-  found === nothing && return (Any["Ladder can't read this folder"], Any[nothing])
-  names, kinds = found
-  isempty(names) && return (Any["This folder is empty"], Any[nothing])
-  shown = first(names, TT_MOST)
-  items, paths = Any[], Any[]
-  for n in shown
-    p = joinpath(dir, n)
-    if kinds[n] && deep
-      inner, inner_paths = folder_menu_items(e, p; deep=false)
-      push!(items, n => Any["Go to $n", "-", inner...])
-      push!(paths, Any[p, nothing, inner_paths...])
-    else
-      push!(items, n)
-      push!(paths, p)
-    end
-    # A line between the folders and the files
-    kinds[n] && n != last(shown) && !kinds[shown[findfirst(==(n), shown)+1]] && (push!(items, "-"); push!(paths, nothing))
-  end
-  length(names) > length(shown) && (push!(items, "-", "$(length(names) - length(shown)) more"); push!(paths, nothing, nothing))
-  (items, paths)
+# --- the list of a folder, under a › of the path ---
+#
+# A click on a › of the path shows what's in the folder before it, in a list
+# under the ›. It looks like the other lists that float beside what they're
+# for, like the list of a `find` block's kinds (see `float_list`), with a field
+# at its top that has the keyboard. Its folders come first, then its files.
+# What's on the way to the file that shows is in bold.
+#
+#   - Type in the field, and the list keeps the names that have the words typed.
+#   - A click on a name, or Return, shows the file or opens the folder in the page.
+#   - Rest the mouse on a folder, or press →, and a list of what's in it opens
+#     beside it, as a submenu does. ← takes that list away again.
+#   - The up and down arrows pick a name. Esc, a click somewhere else, or a
+#     second click on the › takes every list away.
+#
+# The lists are popups with no parent in the window, so a key that they don't
+# use goes to the field, and never on to the page.
+
+const TT_LIST = :folder_list   # the key of the popup of the list under a ›. Each list beside it adds its level.
+const TT_ROWS = 12             # the rows that a list shows before it scrolls
+const TT_NARROW = 200px        # how wide a list is, at least
+const TT_BROAD = 320px         # and at most
+const TT_ROOM = 72px           # how much wider a list is than the longest name in it: its icon, its › and its edges
+const TT_AIM = 18px            # how far the caret of the list under a › is from the list's left edge
+
+"A list of what's in a folder, under a › of the path in the top bar, or beside a folder of such a list"
+@def mutable struct FolderList <: SemanticUI
+  of::Any = nothing                       # the window's Editor
+  dir::String = ""
+  level::Int = 1                          # 1 under a ›, 2 beside a folder of that list, and so on
+  arrow::Any = nothing                    # the › that it drops from, at level 1
+  all::Vector{String} = String[]          # what's in the folder, its folders first
+  folders::Set{String} = Set{String}()    # which of those are folders
+  names::Vector{String} = String[]        # the rows: those that have the words typed in the field, no more than TT_MOST
+  more::Int = 0                           # how many more have the words typed
+  unread::Bool = false                    # Ladder can't read the folder
+  typed::String = ""                      # the words in the field when the rows were chosen
+  pick::Int = 0                           # the row that Return takes, or 0
+  shown::Int = 0                          # the row that the list last scrolled to
+  rest::Tuple{Int,Float64} = (0, 0.0)     # the row that the mouse rests on, and since when
+  open::String = ""                       # the folder whose list shows beside this one
+  side::Symbol = :below                   # where the list is beside the ›, for its caret
+  wide::Any = TT_NARROW
+  parts::Dict{Any,Any} = Dict{Any,Any}()  # its field, its scroll and its rows
 end
 
-"The path at `place` of the paths that `folder_menu_items` gives, or nothing"
-place_path(paths, place) = begin
-  p = get(paths, place[1], nothing)
-  length(place) == 1 ? (p isa String ? p : nothing) : (p isa Vector ? get(p, place[2], nothing) : nothing)
+"A row of a list of a folder: one thing in the folder"
+@def mutable struct FolderRow <: SemanticUI
+  of::Any = nothing
+  k::Int = 0
 end
 
+"The key of the popup of a list of a folder at `level`"
+list_key(level) = level == 1 ? TT_LIST : Symbol(TT_LIST, "_", level)
+
+"The lists of folders that show in the window `w`, from the one under the › on"
+folder_lists(w) = sort!(FolderList[p.content for p in popups(w) if p.content isa FolderList], by=l -> l.level)
+
 """
-Show the menu of what's in the folder `dir` at `at`. What's on the way to the
-file that shows has a tick. Choose a file to show it, or a folder to go to it.
+Take away the lists of folders that are deeper than `level`, and with 0 every
+one of them. The keyboard goes back to the page from the field of the list
+under the ›.
 """
-folder_menu!(e, w, dir; at=(w.mouse[1], w.mouse[2])) = begin
-  items, paths = folder_menu_items(e, dir)
-  off, ticked = Any[], Any[]
-  for (i, entry) in enumerate(items)
-    if entry isa Pair
-      for (j, x) in enumerate(last(entry))
-        x != "-" && paths[i][j] === nothing && push!(off, (i, j))
-        # The first item goes to the folder itself, and has no tick
-        j > 1 && paths[i][j] isa String && inside_path(e.buf.path, paths[i][j]) && push!(ticked, (i, j))
-      end
-      inside_path(e.buf.path, paths[i][1]) && push!(ticked, (i,))
-    else
-      entry != "-" && paths[i] === nothing && push!(off, (i,))
-      paths[i] isa String && inside_path(e.buf.path, paths[i]) && push!(ticked, (i,))
-    end
+close_folder_lists!(e, w, level=0) = begin
+  for l in folder_lists(w)
+    l.level > level || continue
+    close_popup!(w, list_key(l.level))
+    l.level == 1 && left_list!(e, w, l)
   end
-  # The Mac's menu calls `pick` before it closes. What's chosen happens after it has closed.
-  chosen, closed = Ref{Any}(nothing), Ref(false)
-  pick(place...) = (p = place_path(paths, place); p === nothing ? nothing : closed[] ? title_go!(e, w, p; at) : (chosen[] = p); nothing)
-  if system_menu(w, items, pick; at, off, ticked)
-    closed[] = true
-    chosen[] === nothing || title_go!(e, w, chosen[]; at)
-  else
-    closed[] = true
-    drawn_menu!(w, items, pick; off, ticked, at)
-  end
+  foreach(l -> l.level == level && (l.open = ""), folder_lists(w))
   nothing
 end
+
+"Give the keyboard back to the page when the field of the list `l`, which has gone, has it"
+left_list!(e, w, l) = (w.focus === get(l.parts, :field, nothing) && focus(e); nothing)
+
+"Read what's in the folder of the list `l`, and make the list wide enough for its names"
+read_folder!(l::FolderList) = begin
+  found = title_listing(l.of, l.dir)
+  l.unread = found === nothing
+  names, kinds = something(found, (String[], Dict{String,Bool}()))
+  l.all, l.folders = names, Set{String}(n for n in names if kinds[n])
+  face = Face(SANS, "Semibold", 13px, colours.ink, false)
+  l.wide = clamp(maximum((measure(face, n) for n in first(names, TT_MOST)), init=0px) + TT_ROOM, TT_NARROW, TT_BROAD)
+  rows!(l, "")
+end
+
+"Make the rows of `l` the names that have every word of `typed`. Its first name that starts with them is picked."
+rows!(l::FolderList, typed) = begin
+  words = split(lowercase(typed))
+  found = filter(n -> all(w -> occursin(w, lowercase(n)), words), l.all)
+  l.typed, l.names, l.more = typed, first(found, TT_MOST), max(0, length(found) - TT_MOST)
+  start = findfirst(n -> startswith(lowercase(n), lowercase(typed)), l.names)
+  l.pick = isempty(l.names) ? 0 : isempty(typed) ? 1 : something(start, 1)
+  l
+end
+
+"""
+Show the list of what's in the folder before the › `a`, under it, with the
+keyboard in its field. What's on the way to the file that shows is picked.
+When the list shows already, the click on its › takes it away.
+"""
+open_folder_list!(e, w, a::TitleArrow) = begin
+  was = [l for l in folder_lists(w) if l.level == 1]
+  close_folder_lists!(e, w)
+  !isempty(was) && only(was).arrow === a && return handled
+  r = rect(a)
+  r === nothing && return handled
+  l = read_folder!(FolderList(of=e, dir=a.path, arrow=a))
+  l.pick = something(findfirst(n -> inside_path(e.buf.path, joinpath(l.dir, n)), l.names), l.pick)
+  field = l.parts[:field] = own!(l, TextInput(placeholder="Filter…", font_family=SANS, font_size=13px,
+                                               look=(_, text) -> Row(width(grow=grow), height(grow=grow), clip=true, text)))
+  field.color = colours.ink
+  # The caret at the top of the list points at the middle of the ›
+  popup!(w, l, anchor=(r.left + r.width / 2 - TT_AIM, r.top, 0px, r.height), placement=:below, gap=8px, width=l.wide,
+         key=TT_LIST, theme=component_theme(), onclose=() -> (close_folder_lists!(e, w); left_list!(e, w, l)))
+  focus(field)
+  redraw_in!(e, 0)   # the › stays shaded while its list shows
+  handled
+end
+
+"""
+Show what's in the folder of row `k` of the list `l` in a list beside the row,
+with its first row in line with it: at the right of `l`, or at its left when
+the window has no room at the right. With `keys`, as → opens it, its first
+row is picked.
+"""
+open_beside!(l::FolderList, k; keys=false) = begin
+  e, w = l.of, window_of(l)
+  row = get(l.parts, (:row, k), nothing)
+  (w === nothing || row === nothing || !(k in eachindex(l.names))) && return
+  r, me = rect(row), rect(l)
+  (r === nothing || me === nothing) && return
+  close_folder_lists!(e, w, l.level)
+  inner = read_folder!(FolderList(of=e, dir=joinpath(l.dir, l.names[k]), level=l.level + 1))
+  keys || (inner.pick = 0)
+  x = me.left + me.width + 2px
+  x + inner.wide > window_size(e)[1] - 4px && (x = me.left - inner.wide - 2px)
+  popup!(w, inner, anchor=(x, r.top - 7px, 0px, 0px), placement=:below, width=inner.wide, key=list_key(inner.level),
+         theme=component_theme(), onclose=() -> (l.open = ""))
+  l.open = inner.dir
+  nothing
+end
+
+"""
+After the mouse has rested on a row of `l` for a moment: a folder's list opens
+beside it, or the list beside `l` goes when the row is a file's. A mouse that
+only passes over rows on its way to the list beside changes nothing.
+"""
+rest_tick!(l::FolderList) = begin
+  k, since = l.rest
+  row = get(l.parts, (:row, k), nothing)
+  (k in eachindex(l.names) && row !== nothing && ishovered(row)) || return
+  want = l.names[k] in l.folders ? joinpath(l.dir, l.names[k]) : ""
+  want == l.open && return
+  wait = TT_WAIT - (time() - since)
+  wait > 0 && return redraw_in!(l.of, wait + 0.01)
+  w = window_of(l)
+  isempty(want) ? (w === nothing || close_folder_lists!(l.of, w, l.level)) : open_beside!(l, k)
+  nothing
+end
+
+describe(l::FolderList) = begin
+  field = get(l.parts, :field, nothing)
+  if field !== nothing
+    # New words in the field choose the rows again, and the list beside goes
+    typed = String(strip(field.text))
+    typed == l.typed || (rows!(l, typed); w = window_of(l); w === nothing || close_folder_lists!(l.of, w, l.level))
+  end
+  rest_tick!(l)
+  n, high = length(l.names), FLOAT_ROW
+  body = if n == 0
+    float_none(l.unread ? "Ladder can't read this folder" : isempty(l.all) ? "This folder is empty" : "Nothing has that name")
+  else
+    scroll = get!(() -> Scroll(width(grow=grow)), l.parts, :scroll)
+    # Half a row at the bottom says that the list goes on
+    scroll.height = height(n <= TT_ROWS ? n * high : TT_ROWS * high - high / 2)
+    l.shown == l.pick || (l.shown = l.pick; l.pick > 0 && scroll_into_view!(scroll, high * (l.pick - 1), high * l.pick))
+    reuse!(scroll, Column(width(grow=grow), Alignment.Start, [get!(() -> own!(l, FolderRow(of=l, k=k)), l.parts, (:row, k)) for k in 1:n]...))
+  end
+  more = l.more == 0 ? () : (float_none(l.level == 1 ? "$(l.more) more. Type a name to find them." : "$(l.more) more"),)
+  float_list(field, Column(width(grow=grow), Alignment.Start, body, more...), name="Folder")
+end
+
+placed!(l::FolderList, side) = (l.side = side; nothing)
+draw(ctx, size, ui::ConcreteRect, l::FolderList) = l.arrow === nothing ? nothing : caret(ctx, ui, l.side, rect(l.arrow))
+
+describe(r::FolderRow) = begin
+  l = r.of
+  r.k in eachindex(l.names) || return Box(height(0px))
+  c = found_colours()
+  name = l.names[r.k]
+  path = joinpath(l.dir, name)
+  folder = name in l.folders
+  Row(width(grow=grow), height(FLOAT_ROW), padding(8px, 0px), radius(6px), child_gap=8px, Alignment.Center, name="Thing",
+      background(l.pick == r.k || l.open == path ? c.pick : c.frame),
+    Icon(folder ? "folder" : file_icon(path), size=13px, color=c.dim),
+    Row(width(grow=grow), height(grow=grow), Alignment.Center, clip=true,
+      label(elide(name, 13px, l.wide - TT_ROOM), 13px, color=c.ink, weight=inside_path(l.of.buf.path, path) ? "Semibold" : "")),
+    (folder ? (Icon("chevron-right", size=8px, color=c.dim),) : ())...)
+end
+
+cursor(::FolderRow) = :hand
+
+# The mouse picks the row that it's over, as the arrow keys do
+onmouse(r::FolderRow, ::MouseMove) = begin
+  l = r.of
+  l.pick = l.shown = r.k   # it's in sight already, so the list doesn't scroll to it
+  l.rest[1] == r.k || (l.rest = (r.k, time()); redraw_in!(l.of, TT_WAIT + 0.01))
+  handled
+end
+
+onkey(r::FolderRow, ev::KeyPress{Keys.mouse_left}) = begin
+  l = r.of
+  r.k in eachindex(l.names) && title_go!(l.of, ev.window, joinpath(l.dir, l.names[r.k]))
+  handled
+end
+
+# The list that opened last sees a key before the field does
+onkey(l::FolderList, ev::KeyPress{Keys.down}) = unmodified(ev) ? (isempty(l.names) || (l.pick = min(l.pick + 1, length(l.names))); handled) : nothing
+onkey(l::FolderList, ev::KeyPress{Keys.up}) = unmodified(ev) ? (isempty(l.names) || (l.pick = max(l.pick - 1, 1)); handled) : nothing
+onkey(l::FolderList, ev::KeyPress{Keys.enter}) =
+  unmodified(ev) ? (l.pick in eachindex(l.names) && title_go!(l.of, ev.window, joinpath(l.dir, l.names[l.pick])); handled) : nothing
+onkey(l::FolderList, ev::KeyPress{Keys.right}) =
+  unmodified(ev) && l.pick in eachindex(l.names) && l.names[l.pick] in l.folders ? (open_beside!(l, l.pick; keys=true); handled) : nothing
+onkey(l::FolderList, ev::KeyPress{Keys.left}) = unmodified(ev) && l.level > 1 ? (close_folder_lists!(l.of, ev.window, l.level - 1); handled) : nothing
+onkey(l::FolderList, ev::KeyPress{Keys.escape}) = unmodified(ev) ? (close_folder_lists!(l.of, ev.window); handled) : nothing
 
 # --- the sidebar --------------------------------------------------------------------------
 

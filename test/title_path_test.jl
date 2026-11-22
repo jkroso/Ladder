@@ -7,7 +7,7 @@
 
 @use Test: @test, @testset
 @use "../main" => K
-@use "github.com/jkroso/MiniFB.jl" Window KeyPress KeyRelease MouseMove Keys onkey onmouse
+@use "github.com/jkroso/MiniFB.jl" Window KeyPress KeyRelease MouseMove Keys onkey onmouse Typed ontype
 @use "github.com/jkroso/UI.jl/Interface/draw" frame rect popups
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
 @use GeometryBasics: Vec2
@@ -46,7 +46,15 @@ key(k, held...) = begin
   frames()
 end
 menu() = (ps = [p for p in popups(w) if p.key == :menu]; isempty(ps) ? nothing : only(ps).content)
-choose(name) = (m = menu(); foreach(_ -> key(Keys.down), 1:findfirst(==(name), m.items)); key(Keys.enter))
+typed(s) = (foreach(c -> ontype(w, Typed(c, w)), s); frames())
+"The lists of folders that show, from the one under the › on"
+lists() = K.folder_lists(w)
+"The list of a folder at `level`"
+list(level=1) = only(l for l in lists() if l.level == level)
+"The row of the list `l` that has `name`"
+row(l, name) = l.parts[(:row, findfirst(==(name), l.names))]
+"Rest the mouse on the row of `l` that has `name` until something happens"
+rest!(l, name) = (at(middle(row(l, name))); sleep(K.TT_WAIT + 0.05); frames())
 showing() = any(p -> p.key == :title_trail, popups(w))
 trail() = e.nodes[:title_trail]
 crumb(path) = trail().crumbs[path]
@@ -99,31 +107,100 @@ end
   K.open!(e, a); frames()
 end
 
-@testset "a › shows a menu of what's in the folder before it" begin
+@testset "a › shows a list of what's in the folder before it, that Ladder draws" begin
   hover!()
   click(middle(arrow(plain)))
-  @test menu() !== nothing
-  # Its folders first, then its files. The file that shows has a tick. Hidden files stay out.
-  @test menu().items == ["Sub  ›", "✓ a.md", "b.md"]
-  shot("menu")
-  choose("b.md")
-  @test e.buf.path == b
-  # A folder in the menu opens a menu of what's in it
+  l = list()
+  @test menu() === nothing   # not the Mac's menu
+  # Its folders first, then its files. Hidden files stay out. The file that shows is picked, and in bold.
+  @test l.names == ["Sub", "a.md", "b.md"] && l.names[l.pick] == "a.md"
+  # It hangs under the ›, and the keyboard is in its field
+  r, ra = rect(l), rect(arrow(plain))
+  @test r.top > ra.top + ra.height && r.left < ra.left && ra.left + ra.width < r.left + r.width
+  @test w.focus === l.parts[:field]
+  shot("list")
+  # The path stays while the list shows, with the mouse somewhere else
+  at((550, 400))
+  @test showing() && list() === l
+  # A click on a file shows it, and the list, the path and the keyboard go back
+  click(middle(row(l, "b.md")))
+  @test e.buf.path == b && isempty(lists()) && w.focus !== l.parts[:field]
+end
+
+@testset "rest the mouse on a folder of the list, and a list of what's in it opens beside it" begin
   hover!()
   click(middle(arrow(plain)))
-  @test menu().items == ["Sub  ›", "a.md", "✓ b.md"]
-  choose("Sub  ›")
-  @test menu().items == ["Go to Sub", "c.md"]
-  choose("c.md")
-  @test e.buf.path == c
-  # Go to Sub opens the folder in the page, as a click on a folder's name does
+  l = list()
+  rest!(l, "Sub")
+  inner = list(2)
+  @test inner.names == ["c.md"] && inner.pick == 0
+  # It's at the right of the list, with its first row in line with the folder's
+  r, ri = rect(l), rect(inner)
+  @test K.num(ri.left) >= K.num(r.left + r.width)
+  @test abs(K.num(rect(row(inner, "c.md")).top) - K.num(rect(row(l, "Sub")).top)) <= 1
+  shot("beside")
+  # A rest on a file takes it away again
+  rest!(l, "a.md")
+  @test length(lists()) == 1
+  rest!(l, "Sub")
+  click(middle(row(list(2), "c.md")))
+  @test e.buf.path == c && isempty(lists())
+  # A click on a folder opens it in the page, as a click on its name in the path does
   hover!()
   click(middle(arrow(plain)))
-  choose("Sub  ›")
-  @test menu().items == ["Go to Sub", "✓ c.md"]
-  choose("Go to Sub")
-  @test menu() === nothing && e.buf.path == sub && !e.panel
+  click(middle(row(list(), "Sub")))
+  @test e.buf.path == sub && e.folder == sub && !e.panel
   K.open!(e, a); frames()
+end
+
+@testset "the keys work the list" begin
+  hover!()
+  click(middle(arrow(plain)))
+  # Words typed in the field keep the names that have them, and pick the first that starts with them
+  typed("b")
+  @test list().names == ["Sub", "b.md"] && list().names[list().pick] == "b.md"
+  typed("zz")
+  @test isempty(list().names)
+  shot("none")
+  foreach(_ -> key(Keys.backspace), 1:3)
+  @test list().names == ["Sub", "a.md", "b.md"]
+  # → opens the picked folder beside, ← takes it away, and Return takes the picked row
+  key(Keys.up)
+  @test list().names[list().pick] == "Sub"
+  key(Keys.right)
+  @test length(lists()) == 2 && list(2).pick == 1
+  key(Keys.left)
+  @test length(lists()) == 1
+  key(Keys.right)
+  key(Keys.enter)
+  @test e.buf.path == c && isempty(lists())
+  # Esc takes every list away, and the keyboard goes back to the page
+  hover!()
+  click(middle(arrow(plain)))
+  rest!(list(), "Sub")
+  key(Keys.escape)
+  @test isempty(lists()) && w.focus === e
+  K.open!(e, a); frames()
+end
+
+@testset "a second click on the ›, or a click somewhere else, takes the list away" begin
+  hover!()
+  click(middle(arrow(plain)))
+  @test length(lists()) == 1
+  click(middle(arrow(plain)))
+  @test isempty(lists())
+  click(middle(arrow(plain)))
+  # A click on the page takes it away and does nothing else
+  caret = e.buf.caret
+  click((550, 400))
+  @test isempty(lists()) && e.buf.caret == caret && e.buf.path == a
+  # A › of another folder shows that folder
+  hover!()
+  click(middle(arrow(top)))
+  @test list().names == ["Plain"] && list().arrow === arrow(top)
+  click(middle(arrow(plain)))
+  @test length(lists()) == 1 && list().dir == plain
+  key(Keys.escape)
 end
 
 @testset "a right-click on a folder shows its menu, with no Rename" begin
