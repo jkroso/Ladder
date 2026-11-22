@@ -6,6 +6,7 @@
 @use Test: @test, @testset
 @use "github.com/jkroso/MiniFB.jl" Window KeyPress MouseMove Keys onkey onmouse
 @use "github.com/jkroso/UI.jl/Interface/draw" frame rect
+@use "github.com/jkroso/UI.jl/Interface/window" swipe_button click_button!
 @use GeometryBasics: Vec2
 
 @use "../main" => K
@@ -285,4 +286,18 @@ end
   # No command can have one as its shortcut
   @test !haskey(K.KEY_NAMES, "mouse_back") && !haskey(K.KEY_NAMES, "mouse_forward")
   @test K.ismouse(Keys.mouse_back) && K.ismouse(Keys.mouse_forward)
+end
+
+@testset "a swipe goes back and forward, as from a mouse whose side buttons send swipes" begin
+  # Logi Options+ makes the side buttons of an MX Master send macOS's swipe to the left or the right, and
+  # a three-finger swipe on the trackpad sends the same. The window's view clicks the back or forward button for it.
+  e, w, _ = window("a.md", "b.md")
+  K.follow!(e, "b.md"); frames(w)
+  swipe(dx) = (click_button!(w, swipe_button(dx)); frames(w))
+  swipe(1.0)
+  @test showing(e) == "a.md"
+  swipe(-1.0)
+  @test showing(e) == "b.md"
+  # No button stays down after it
+  @test !(Keys.mouse_back in w.keys) && !(Keys.mouse_forward in w.keys)
 end
