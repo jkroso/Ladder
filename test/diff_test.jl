@@ -284,4 +284,32 @@ end
   @test e.buf.caret == was
 end
 
+@testset "Put back leaves the caret where it was, so a block that a change was in shows as the block" begin
+  job = joinpath(repo, "job.md")
+  JOB = "# A job\n\nSome words.\n\n```day\n```\n\nThe end.\n"
+  write(job, JOB)
+  git("add", "job.md")
+  git("commit", "-q", "-m", "Add a job")
+  # The day picker wrote a day into its block
+  write(job, replace(JOB, "```day\n```" => "```day\n2026-11-25\n```"))
+  K.open!(e, job)
+  again()
+  click(rect(button()))
+  frames()
+  @test K.gone_now(e).diff.changes == [(6:5, 6:6)]
+  e.buf.caret = e.buf.anchor = (3, 4)
+  click(rect(e.nodes[(:put_back, 1)]))
+  @test e.buf.lines[5:6] == ["```day", "```"]
+  @test e.buf.caret == e.buf.anchor == (3, 4)
+  # The block shows as the day picker, and not as its ``` lines
+  @test !K.incode(e.buf, 5) && !occursin("```", drawn(rect(e.nodes[:document])))
+  shot("put-back-block")
+  # A caret after the change moves with its line
+  K.undo!(e.buf); frames()
+  e.buf.caret = e.buf.anchor = (9, 2)
+  K.put_change_back!(e, 1); frames()
+  @test e.buf.lines[8] == "The end." && e.buf.caret == e.buf.anchor == (8, 2)
+  click(rect(button()))
+end
+
 close(w)

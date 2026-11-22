@@ -41360,7 +41360,10 @@ end
 """
 Put the last commit's lines back in place of change `k` of the file, from the
 top, as one edit that ⌘Z takes back. A change that only added lines takes
-them out, and one that only took lines away puts them back.
+them out, and one that only took lines away puts them back. The caret stays
+with the text it was in: the button is clicked with the mouse, so the caret
+doesn't go to the change. If it did, it could stop on a ``` line, and the
+block would show its code.
 """
 put_change_back!(e, k::Int) = begin
   d = diff_now(e)
@@ -41371,16 +41374,18 @@ put_change_back!(e, k::Int) = begin
   if isempty(n)
     # The old lines go back over the line that's in their place now, or after the last line
     at = first(n)
-    at <= length(lines) ? edit!(b, (at, 0), (at, 0), join(old, "\n") * "\n") :
-                          edit!(b, line_end(b, length(lines)), line_end(b, length(lines)), "\n" * join(old, "\n"))
+    lo, hi, new = at <= length(lines) ? ((at, 0), (at, 0), join(old, "\n") * "\n") :
+                  (line_end(b, length(lines)), line_end(b, length(lines)), "\n" * join(old, "\n"))
   elseif isempty(o)
     # The new lines go, with the line break after them, or the one before them at the end of the file
-    lo, hi = (first(n), 0), line_end(b, last(n))
+    lo, hi, new = (first(n), 0), line_end(b, last(n)), ""
     last(n) < length(lines) ? (hi = (last(n) + 1, 0)) : first(n) > 1 && (lo = line_end(b, first(n) - 1))
-    edit!(b, lo, hi, "")
   else
-    edit!(b, (first(n), 0), line_end(b, last(n)), join(old, "\n"))
+    lo, hi, new = (first(n), 0), line_end(b, last(n)), join(old, "\n")
   end
+  caret, anchor = b.caret, b.anchor
+  edit!(b, lo, hi, new)
+  b.caret, b.anchor = moved(caret, lo, hi, b.caret), moved(anchor, lo, hi, b.caret)
   redraw_in!(e, 0)
   e
 end
