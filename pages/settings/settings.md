@@ -71,6 +71,14 @@ Checkbox(label="Check spelling", checked=page_spelling(), onchange=box -> page_s
 
 With this on, a word that the Mac's dictionary doesn't have gets a line of red dots under it. Right-click the word to see the words it may have been meant to be, or to teach the dictionary the word. Code isn't checked.
 
+## Links
+
+```ui
+Checkbox(label="Show a page when I hold ⌘ over its link", checked=page_peeks(), onchange=box -> page_peeks!(box.checked))
+```
+
+With this on, hold ⌘ and rest the mouse on a link to a page. A card under the link shows the start of that page. A link to a heading shows the part under that heading. With this off, the card says only where the link goes.
+
 ## Caret
 
 ```ui

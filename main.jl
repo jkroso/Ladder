@@ -1194,6 +1194,7 @@ end
   spelling::Bool = true                 # put a line of dots under each word that's spelt wrong
   updates::Bool = true                  # the app looks for a newer version of itself, and gets it, without being asked
   autosave::Bool = false                # a page is written to its file when its window stops being the front window
+  peeks::Bool = true                    # the card of a link to a page, while ⌘ is held, shows the start of the page. See "the start of a page in a link's card".
   glide::Bool = true                    # the caret moves to a new place in a short time, and doesn't jump there
   wrap::Bool = true                     # a line of a file of code that's too long for the window goes on under itself
   numbers::Bool = true                  # a file of code shows the number of each line beside it
@@ -3836,6 +3837,9 @@ sandbox(e) = get!(e.nodes, :sandbox) do
   # ... and whether the caret moves to a new place in a short time, and doesn't jump there
   Core.eval(m, :(const page_glide = $(() -> (reads!(e, :glide); e.glide))))
   Core.eval(m, :(const page_glide! = $(on -> glide!(e, Bool(on)))))
+  # ... and whether the card of a link to a page shows the start of the page, while ⌘ is held
+  Core.eval(m, :(const page_peeks = $(() -> (reads!(e, :peeks); e.peeks))))
+  Core.eval(m, :(const page_peeks! = $(on -> peeks!(e, Bool(on)))))
   # ... and whether a line of a file of code that's too long for the window goes on under itself
   Core.eval(m, :(const code_wrap = $(() -> (reads!(e, :wrap); e.wrap))))
   Core.eval(m, :(const code_wrap! = $(on -> wrap!(e, Bool(on)))))
@@ -22253,7 +22257,12 @@ peek_card(e, found) = begin
   # Each line has a set height: a Text alone in a box can be less tall than its line, and the lines then overlap
   said(text; family=SANS, color=TIP_INK) = Box(height(17px), Text(text, size=12px, family=family, color=color, wrap=WrapMode.none))
   faint = RGBA(TIP_INK.r, TIP_INK.g, TIP_INK.b, 0.65)
-  k === nothing || return Box(padding(10px, 7px), said(segs[k].link))
+  if k !== nothing
+    # A link to a page shows the start of the page, unless the setting is off. Any other link says where it goes.
+    page = e.peeks ? linked_page(e, segs[k].link) : nothing
+    card = page === nothing ? nothing : page_peek(e, page...)
+    return something(card, Box(padding(10px, 7px), said(segs[k].link)))
+  end
   place = Base.invokelatest(definition, e, (line, lo))
   place === nothing && return nothing
   # `open` says if the first line that shows is inside a docstring, when long documentation shows only its last lines
@@ -22307,8 +22316,125 @@ peek!(e, w, found) = begin
   k, x = spot(f, lo)
   _, x2 = spot(f, hi)
   top = e.origin[2] + it.top + line_top(f, k)
+  # The start of a page is a card of the page's own colours, and not a dark box. It goes as a tooltip does, when the mouse moves.
+  card isa PagePeek && return popup!(w, card.layout, anchor=(e.origin[1] + x, top, max(x2 - x, 4px), f.lines[k].high),
+                                     placement=:below, gap=4px, key=:tooltip, input=false)
   show_tooltip!(w, card, e.origin[1] + x, top, max(x2 - x, 4px), f.lines[k].high; placement=:bottom, gap=4px)
 end
+
+# --- the start of a page in a link's card ---
+#
+# While ⌘ is held, the card of a link to a page shows the start of that page,
+# as the page reads, so you can read it without leaving your own page. A link
+# to a heading, like [[Ideas#Plans]], shows the page from that heading to the
+# next heading that's as big. A page that's open shows as it is now, with what
+# isn't saved yet. The setting "Show a page when I hold ⌘ over its link" turns
+# this off, and the card then says where the link goes, as for any other link.
+
+const PEEK_PAGE_W = 440px      # how wide the card of a page is
+const PEEK_PAGE_HIGH = 280px   # the most of the page that shows. A longer page is cut there.
+
+"The start of a page, for the card of a link to it: what shows, kept apart from other cards so that it isn't put in a dark box"
+struct PagePeek
+  layout::Any
+  flows::Vector{Flow}   # the lines of the page that it shows, laid out
+end
+
+"""
+The page that the link `url` goes to, and the heading of the page that it
+names, or "" for none. It's nothing for a link that doesn't go to a Markdown
+page that's there: a web address, a footnote, a file of another kind, or a
+wiki link to a page that isn't made yet.
+"""
+linked_page(e, url::AbstractString) = begin
+  startswith(url, '^') && return nothing   # a footnote
+  target = wikitarget(url)
+  name, heading = if target !== nothing
+    occursin('#', target) ? String.(split(target, '#', limit=2)) : (String(target), "")
+  else
+    # An address with a scheme, like https: or mailto:, isn't a file
+    occursin(r"^[a-z][a-z0-9+.-]+:"i, url) && return nothing
+    file, mark = occursin('#', url) ? String.(split(url, '#', limit=2)) : (String(url), "")
+    (unescaped(file), unescaped(mark))
+  end
+  name = String(strip(name))
+  path = isempty(name) ? e.buf.path : target !== nothing ? wiki_path(e, name) : abspath(docdir(e), expanduser(name))
+  (ismarkdown(path) && (isfile(path) || path == e.buf.path && !isempty(e.buf.lines))) || return nothing
+  (path, String(strip(heading)))
+end
+
+"""
+The lines of the page at `path`, their kinds, and the lines of them that the
+card of a link shows: from the heading `heading` to the next heading that's as
+big, or from the top, after the page's front matter. A page that's open gives
+its lines as they are now. It's nothing when the file can't be read as text.
+"""
+peek_page_lines(e, path, heading) = begin
+  b = path == e.buf.path ? e.buf : get(e.buffers, path, nothing)
+  lines = if b !== nothing
+    b.lines
+  else
+    found = reading(path, tidy=false)
+    found === nothing && return nothing
+    found[1]
+  end
+  isempty(lines) && return nothing
+  ks = classify(lines)
+  from, to = front_matter(lines) + 1, length(lines)
+  if !isempty(heading)
+    slug = heading_slug(heading)
+    i = findfirst(i -> ks[i].kind == Kind.heading && heading_slug(rest(lines[i], ks[i].prefix)) == slug, eachindex(ks))
+    if i !== nothing
+      from = i
+      next = findnext(j -> ks[j].kind == Kind.heading && ks[j].level <= ks[i].level, eachindex(ks), i + 1)
+      next === nothing || (to = next - 1)
+    end
+  end
+  while from < to && isempty(strip(lines[from])); from += 1 end
+  while to > from && isempty(strip(lines[to])); to -= 1 end
+  (lines, ks, from:to)
+end
+
+"""
+The card of a link to the page at `path`: the page's name, with the heading
+`heading` after it, over the start of the page as it reads, a little smaller
+than the page's own text. Only as many lines are laid out as the card shows.
+It's nothing when the page has nothing to show.
+"""
+page_peek(e, path, heading) = begin
+  found = peek_page_lines(e, path, heading)
+  found === nothing && return nothing
+  lines, ks, shown = found
+  wide = PEEK_PAGE_W - 2 * 6px - 2 * 14px   # the card has 6px of room on each side, and the page 14px inside that
+  zoom = e.zoom
+  e.zoom = zoom * PAGE_ZOOM
+  flows = Flow[]
+  # -1 says that the line isn't one of the document's, so its inline code isn't run
+  try
+    total = 0px
+    for i in shown
+      push!(flows, laid(e, lines[i], ks[i], false, -1, wide))
+      total += tall(flows[end])
+      total > PEEK_PAGE_HIGH && break
+    end
+  finally
+    e.zoom = zoom
+  end
+  isempty(flows) && return nothing
+  total = sum(tall, flows)
+  name = splitext(basename(path))[1]
+  title = isempty(heading) ? name : "$name  ›  $heading"
+  PagePeek(Column(fixed(PEEK_PAGE_W), Alignment.Start, padding(6px), radius(8px), background(colours.block),
+                  border(1px, :solid, colours.line), lifted, child_gap=4px,
+    Row(width(grow=grow), height(22px), padding(8px, 0px), child_gap=6px, clip=true,
+      Icon("file-earmark-text", size=12px, color=colours.dim), label(title, 12px, color=colours.dim)),
+    Box(width(grow=grow), height(min(total, PEEK_PAGE_HIGH) + 2TEXT_PAD), padding(14px, 0px), radius(5px), background(colours.bg), clip=true,
+      Column(width(grow=grow), Alignment.Start, spacer(TEXT_PAD),
+        [describe(e, Item(0, 0, 0px, tall(f), f), f) for f in flows]...))), flows)
+end
+
+"Turn on or off whether the card of a link to a page shows the start of the page, while ⌘ is held"
+peeks!(e, on::Bool) = (e.peeks = on; save_settings!(e); rerun!(e, :peeks); e)
 
 "Take hold of the number at `found`, which `scrub_at` gave, with the mouse at `pos`"
 scrub!(e, found, pos) = begin
@@ -31427,7 +31553,7 @@ starts something that takes a while, like Rename or Ask For Change, waits for
 Run. A command that takes nothing runs at once anyway.
 """
 runs_at_once(::Val) = false
-runs_at_once(::Union{Val{:go_to},Val{:theme},Val{:text_size},Val{:key_bindings},Val{:spelling},Val{:autosave},Val{:insert},Val{:rename_in_code},Val{:show_code},Val{:find_uses}}) = true
+runs_at_once(::Union{Val{:go_to},Val{:theme},Val{:text_size},Val{:key_bindings},Val{:spelling},Val{:autosave},Val{:peeks},Val{:insert},Val{:rename_in_code},Val{:show_code},Val{:find_uses}}) = true
 
 """
 Run the palette's command when it runs at once and each of its chips has
@@ -37481,7 +37607,7 @@ end
 const pages_dir = Ref(joinpath(@__DIR__, "pages"))
 
 "The settings that every window has the same: each is a field of the editor"
-const SHARED = (:theme, :font, :weight, :zoom, :widest, :plain, :spelling, :updates, :autosave, :glide, :wrap, :numbers, :shade, :beside, :indent, :code_scale, :code_font, :code_weight, :guide, :bundle, :rebound, :side, :hidden, :right, :own)
+const SHARED = (:theme, :font, :weight, :zoom, :widest, :plain, :spelling, :updates, :autosave, :peeks, :glide, :wrap, :numbers, :shade, :beside, :indent, :code_scale, :code_font, :code_weight, :guide, :bundle, :rebound, :side, :hidden, :right, :own)
 
 "The folder of the pages that have the settings"
 settings_dir() = joinpath(pages_dir[], "settings")
@@ -37594,7 +37720,7 @@ save_settings!(e) = begin
     mkpath(dirname(settings_file()))
     # After the bundle of key bindings comes a line for each command that has other keys than the bundle's, like key.save=ctrl+s
     changed = join(["key.$name=$(e.rebound[name])\n" for name in sort!(collect(keys(e.rebound)))])
-    write(settings_file(), "theme=$(e.theme)\nfont=$(e.font)\nweight=$(e.weight)\nzoom=$(e.zoom)\nwidth=$(e.widest.value)\nplain=$(e.plain)\nspelling=$(e.spelling)\nupdates=$(e.updates)\nautosave=$(e.autosave)\nglide=$(e.glide)\nwrap=$(e.wrap)\nnumbers=$(e.numbers)\nshade=$(e.shade)\nbeside=$(e.beside)\nindent=$(e.indent)\ncode=$(e.code_scale)\ncodefont=$(e.code_font)\ncodeweight=$(e.code_weight)\nguide=$(e.guide)\nsidebar=$(e.side.value)\nhidden=$(e.hidden)\nright=$(e.right)\nownmessage=$(e.own)\nkeys=$(e.bundle)\n$changed")
+    write(settings_file(), "theme=$(e.theme)\nfont=$(e.font)\nweight=$(e.weight)\nzoom=$(e.zoom)\nwidth=$(e.widest.value)\nplain=$(e.plain)\nspelling=$(e.spelling)\nupdates=$(e.updates)\nautosave=$(e.autosave)\npeeks=$(e.peeks)\nglide=$(e.glide)\nwrap=$(e.wrap)\nnumbers=$(e.numbers)\nshade=$(e.shade)\nbeside=$(e.beside)\nindent=$(e.indent)\ncode=$(e.code_scale)\ncodefont=$(e.code_font)\ncodeweight=$(e.code_weight)\nguide=$(e.guide)\nsidebar=$(e.side.value)\nhidden=$(e.hidden)\nright=$(e.right)\nownmessage=$(e.own)\nkeys=$(e.bundle)\n$changed")
   catch
     # A file that can't be written only means the settings last as long as the window
   end
@@ -37693,6 +37819,8 @@ load_settings!(e) = begin
       e.autosave = value == "true"
     elseif name == "glide"
       e.glide = value != "false"
+    elseif name == "peeks"
+      e.peeks = value != "false"
     elseif name == "wrap"
       e.wrap = value != "false"
     elseif name == "numbers"
@@ -38420,6 +38548,8 @@ add_command!(theme!, title="Use other colours for the page")
 add_command!(text_size!, title="Make the page's text a number of pixels tall")
 add_command!(key_bindings!, title="Use the keys of another editor")
 add_command!(spelling!, title="Turn the spelling check on or off")
+# The command palette asks whether it's on or off. See "the start of a page in a link's card".
+add_command!(peeks!, title="Turn on or off showing a page when you hold ⌘ over its link")
 
 """
 Say how many words the page has, how many characters, and how long it takes

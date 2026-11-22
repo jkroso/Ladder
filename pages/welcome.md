@@ -10,6 +10,8 @@ You can write in **bold**, in *italic* or in ***both***. Use backticks for `code
 
 Two square brackets around a page's name make a wiki link, as in Obsidian: [[examples]] links to the page examples.md. Ladder finds the page wherever it is in the project, so the link still works when the page moves to another folder. The project is the nearest folder above the page that has a `.git` or `.obsidian` folder in it. To show other words, write them after a |, like [[examples|the list of examples]]. [[examples#Writing]] goes to a heading of the page, and [[#Tables]] to a heading of this page. A link to a page that isn't there yet opens a new empty page, and Ladder makes its file when you write in it. While you type a name after [[, a list under it shows the pages whose names fit. Press ↑ and ↓ to choose one, and Return or Tab to finish the link. Esc hides the list.
 
+Hold ⌘ and rest the mouse on a link to a page, like [[examples#Writing]]. A card under the link shows the start of that page, so you can read it without leaving this one. A link to a heading shows the part under that heading. To turn the card off, press ⌘, and untick "Show a page when I hold ⌘ over its link".
+
 > A line that starts with > is a quote.
 > It can run over several lines.
 
