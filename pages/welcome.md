@@ -685,10 +685,17 @@ A code block in the language `canvas` is a board of cards that you put anywhere,
 ```canvas
 text size 28 0,0 The bathroom
 note 0,60 Tiles to the ceiling
-note 300,60 Grey tiles on the walls
-note 300,140 White grout
+note 425.8,-27.9 Grey tiles on the walls
+note -165.6,252.9 White grout
+note 131.9,247.6 hfkjhffhd hsdjhf kjsda sdsa
+  dsad 
+  sad
+  sa 
+  d
+  sa
 join 2 3
 join 2 4
+join 4 5
 ```
 
 Paste a picture, a web address or a wiki link like `[[Ideas]]` onto the board, and it becomes a card. You can drop pictures and pages from the Finder onto it too. A card of a page shows the page's own board, when it has one. Click the card twice to go into that board, and Back comes out again. The text tool writes words straight on the board, with no card round them, and the pen draws by hand. Each card is a line of the block, so ⌘Z takes back the last change.
