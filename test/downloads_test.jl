@@ -80,7 +80,7 @@ line(name, folder=down) = begin
   v = view(folder)
   i = findfirst(l -> l isa K.ListItem && l.name == name, v.lines)
   r = rect(v)
-  (K.num(r.left) + 200, K.num(r.top) + K.LIST_HEAD_H + K.LIST_ROW_H * (i - 0.5))
+  (K.num(r.left) + 200, K.num(r.top) + K.filelist_head_h(v) + K.LIST_ROW_H * (i - 0.5))
 end
 key(k, held...) = begin
   foreach(h -> w.keys |= h, held)
@@ -129,7 +129,7 @@ end
   shot("chosen")
   # A click on the words of a group chooses nothing
   r = rect(view())
-  click((K.num(r.left) + 200, K.num(r.top) + K.LIST_HEAD_H + K.LIST_ROW_H * 0.5))
+  click((K.num(r.left) + 200, K.num(r.top) + K.filelist_head_h(view()) + K.LIST_ROW_H * 0.5))
   @test chosen() == []
 end
 
@@ -198,12 +198,25 @@ end
   shot("trash")
 end
 
+@testset "the Trash's page has no buttons, and its first line is right under its name" begin
+  v = view(bin)
+  @test !haskey(v.buttons, :back) && !haskey(v.buttons, :finder)
+  @test K.filelist_head_h(v) < K.LIST_HEAD_H == K.filelist_head_h(view(down))
+  # A click on the first line chooses that line, at the height that it shows
+  click(line("plan.pdf", bin))
+  @test chosen(bin) == ["plan.pdf"]
+  empty!(v.chosen)
+end
+
+"Right-click the line of `name` in the Trash"
+right_click(name) = (at(line(name, bin)); onkey(w, KeyPress{Keys.mouse_right}(0, w)); frames())
+
 @testset "Put Back moves a thing to where it was, under the name that it had" begin
   v = view(bin)
-  @test v.buttons[:back].off          # nothing is chosen
-  click(line("notes 10.42.07 am.md", bin))
-  @test !v.buttons[:back].off
-  click(middle(v.buttons[:back]))
+  right_click("notes 10.42.07 am.md")
+  @test chosen(bin) == ["notes 10.42.07 am.md"]
+  @test menu() !== nothing && menu().items[1] == "Put Back"
+  choose("Put Back")
   again(bin)
   @test isfile(joinpath(desk, "notes.md")) && !ispath(joinpath(bin, "notes 10.42.07 am.md"))
   @test v.said == ""
@@ -218,12 +231,17 @@ end
 
 @testset "a thing that the Finder wrote nothing about stays, and the page says why" begin
   v = view(bin)
-  click(line("stray.txt", bin))
-  @test v.buttons[:back].off
+  right_click("stray.txt")
+  @test menu() !== nothing && !("Put Back" in menu().items)   # the menu has it grey
+  key(Keys.escape)
   K.filelist_put_back!(v, ["stray.txt"])
   frames()
   @test isfile(joinpath(bin, "stray.txt"))
   @test occursin("stray.txt", v.said)
+  # The words go in a row over the list, and the list moves down for them
+  @test K.filelist_head_h(v) == K.LIST_HEAD_H
+  click(line("stray.txt", bin))
+  @test chosen(bin) == ["stray.txt"]
 end
 
 @testset "a Trash that macOS doesn't let Ladder read shows a note, and the window goes on" begin

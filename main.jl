@@ -46027,17 +46027,17 @@ cursor(::ZipView) = :arrow
 #   - In Downloads, a file that a browser saved has the site that it came from
 #     after its name. Each line has the file's size and when it came.
 #   - In the Trash, each line has the folder that the thing was in, and when
-#     it went to the Trash. Put Back moves it back there, under the name that
-#     it had. The Finder writes where each thing was, and a thing that
-#     it wrote nothing about can't be put back from here.
+#     it went to the Trash. Put Back in the right-click menu, or ⌘⌫, moves it
+#     back there, under the name that it had. The Trash's page has no buttons.
+#     The Finder writes where each thing was, and a thing that it wrote
+#     nothing about can't be put back from here.
 #   - A click chooses a line, and ⌘ or ⇧ with a click chooses more. Two
 #     clicks, Return or ⌘↓ show what's chosen. ↑ and ↓ go from line to line,
 #     and ⌘A chooses every line. ⌘⌫ moves what's chosen to the Trash, and in
 #     the Trash it puts what's chosen back, as it does in the Finder. A
 #     right-click shows a menu.
 #
-# Nothing here empties the Trash. The Finder does that, and the button "Show
-# in Finder" opens the Trash there.
+# Nothing here empties the Trash. The Finder does that.
 #
 # Any other folder shows the same way with a page of its own that ends with
 # `Ladder.DownloadsDirectory`.
@@ -46135,6 +46135,12 @@ page_view(e, d::ListDirectory) = (path = string(d.path); node!(() -> FileList(pa
 
 const LIST_ROW_H = 30.0     # how tall a line of the list is, and the words over a group
 const LIST_HEAD_H = 118.0   # how tall the part over the list is: the folder's name, and the buttons
+"""
+How tall the part over the list `v` is. The Trash has no row of buttons, as a
+right-click and ⌘⌫ put a thing back. That row is 44 high: a button of 28, and 8
+over and under it. When a thing couldn't be put back, the row is there with why.
+"""
+filelist_head_h(v) = v.trash && isempty(v.said) ? LIST_HEAD_H - 44.0 : LIST_HEAD_H
 "The top folder of the disk that the Trash is on. A test names a folder of its own."
 const TRASH_DISK = Ref("/")
 "The page of the Mac's settings that lets an app read every folder"
@@ -46176,7 +46182,7 @@ filelist_under(v::FileList) = begin
   w = window_of(v)
   r = rect(v)
   (w === nothing || r === nothing || !ishovered(v)) && return 0
-  i = floor(Int, (num(w.mouse[2]) - num(r.top) - LIST_HEAD_H) / LIST_ROW_H) + 1
+  i = floor(Int, (num(w.mouse[2]) - num(r.top) - filelist_head_h(v)) / LIST_ROW_H) + 1
   1 <= i <= length(v.lines) && v.lines[i] isa ListItem ? i : 0
 end
 
@@ -46219,7 +46225,7 @@ describe(v::FileList) = begin
   n = length(v.lines)
   _, high = window_size(e)
   # Only the lines that are in the window are made, and a few more above and below
-  lo = clamp(floor(Int, (num(e.scroll.offset) - num(page_top(e)) - num(LIVE_GAP) - LIST_HEAD_H) / LIST_ROW_H) - 6, 0, n)
+  lo = clamp(floor(Int, (num(e.scroll.offset) - num(page_top(e)) - num(LIVE_GAP) - filelist_head_h(v)) / LIST_ROW_H) - 6, 0, n)
   hi = min(n, lo + ceil(Int, num(high) / LIST_ROW_H) + 12)
   over = filelist_under(v)
   budget = Ref(6)
@@ -46227,20 +46233,18 @@ describe(v::FileList) = begin
   names = filelist_chosen(v)
   about = (things == 1 ? "1 thing" : "$(commas(things)) things") * (isempty(names) ? "" : "  ·  $(length(names)) chosen")
   some = !isempty(names)
-  buttons = v.trash ?
-    (page_button!(v, :back, _ -> filelist_put_back!(v, filelist_chosen(v)), icon="arrow-counterclockwise", words="Put Back",
-                  off=!any(n -> haskey(v.origins, n), names)),
-     page_button!(v, :finder, _ -> (Sys.isapple() && run(`open $(v.path)`, wait=false); nothing), icon="folder2-open", words="Show in Finder")) :
+  buttons = v.trash ? () :
     (page_button!(v, :open, _ -> filelist_open!(v, filelist_chosen(v)), icon="box-arrow-up-right", words="Open", off=!some),
      page_button!(v, :trash, _ -> filelist_trash!(v, filelist_chosen(v)), icon="trash", words="Move to Trash", off=!some),
      page_button!(v, :finder, _ -> show_in_finder(v.path), icon="folder2-open", words="Show in Finder"))
   access = isempty(v.problem) || !v.trash ? () :
     (page_button!(v, :access, _ -> (open_url(FULL_ACCESS_SETTINGS); nothing), words="Open the Mac's settings"),)
   Column(width(grow=grow), Alignment.Start, name="List",
-    Column(width(grow=grow), height(px(LIST_HEAD_H)), Alignment.Start, justify=Alignment.Start, clip=true,
+    Column(width(grow=grow), height(px(filelist_head_h(v))), Alignment.Start, justify=Alignment.Start, clip=true,
       page_title(v.trash ? "trash" : "download", v.trash ? "Trash" : basename(v.path), about),
-      Row(padding(8px, 0px), child_gap=8px, buttons...,
-          (isempty(v.said) ? () : (Box(label(v.said, 12px, color=git_colour(:deleted))),))...)),
+      (isempty(buttons) && isempty(v.said) ? () :
+        (Row(padding(8px, 0px), child_gap=8px, buttons...,
+             (isempty(v.said) ? () : (Box(label(v.said, 12px, color=git_colour(:deleted))),))...),))...),
     (isempty(v.problem) ? () : (page_note(v.problem), Row(padding(8px, 6px), access...)))...,
     (isempty(v.problem) && n == 0 ? (page_note(v.trash ? "The Trash is empty." : "This folder is empty."),) : ())...,
     spacer(px(LIST_ROW_H * lo)), [filelist_line(v, e, i, i == over, budget) for i in lo+1:hi]..., spacer(px(LIST_ROW_H * (n - hi))))
@@ -46289,7 +46293,7 @@ filelist_step!(v::FileList, by, more=false) = begin
   more || empty!(v.chosen)
   push!(v.chosen, it.name)
   v.last = it.name
-  top = page_top(e) + LIVE_GAP + px(LIST_HEAD_H + LIST_ROW_H * (at[k] - 1))
+  top = page_top(e) + LIVE_GAP + px(filelist_head_h(v) + LIST_ROW_H * (at[k] - 1))
   scroll_into_view!(e.scroll, top - px(LIST_ROW_H), top + px(2LIST_ROW_H))
   nothing
 end
