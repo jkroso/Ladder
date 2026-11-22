@@ -46,6 +46,7 @@ const MARKS = (:changed, :added, :new, :deleted, :renamed, :clash, :inside)
   changes::Dict{String,Symbol} = Dict{String,Symbol}()
   staged::Set{String} = Set{String}()  # the paths whose change is ready for the next commit
   folders::Set{String} = Set{String}() # each folder that has a change in it
+  head::String = ""                    # the whole hash of the last commit, or "(initial)" before the first
 end
 
 "One commit: the start of its hash, its first line, who made it and when"
@@ -135,7 +136,7 @@ read_status(text::AbstractString) = begin
   end
   # With no branch checked out, the start of the commit's hash stands for one
   branch == "(detached)" && (branch = first(hash, 7))
-  State(known=true; branch, follows, ahead, behind, changes, staged, folders)
+  State(known=true; branch, follows, ahead, behind, changes, staged, folders, head=hash)
 end
 
 "Read what `git log` printed with `LOG_FORMAT`"

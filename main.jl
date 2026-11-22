@@ -22595,7 +22595,7 @@ coloured(tok, f::Face) =
 rows(f::Flow, edge=0px) =
   [Row(width(grow=grow), height(vl.high), padding(0px, 0px, 0px, vl.x - edge), clip=true, map(describe, vl.segs)...) for vl in f.lines]
 
-describe(e::Editor, it::Item) = describe(e, it, it.content)
+describe(e::Editor, it::Item) = gone_under(e, it, describe(e, it, it.content))
 
 describe(e::Editor, it::Item, f::Flow) = begin
   f = in_colour(e, it, f)   # a line of a file gets the colours of its code here
@@ -22684,7 +22684,7 @@ describe(d::Document) = begin
   e.shown = lo:hi
   # Each row of text cuts off what's past its end, so long lines that don't wrap need a page as wide as the longest
   Column(fixed(wraps(e) ? e.width : max(e.width, e.reach + SIDE_ROOM)), Alignment.Start, name="Document",
-    spacer(items[lo].top),
+    gone_over(e, items, lo)...,
     page_parts(d, e, items[lo:hi])...,
     spacer(total - lowest(e, view(items, lo:hi))))
 end
@@ -22931,6 +22931,7 @@ draw(ctx, size, ui::ConcreteRect, d::Document) = begin
   e = editor(d)
   b = e.buf
   e.origin = (ui.left, ui.top)
+  tint_new(ctx, e, ui)
   fill_selection(ctx, selection_boxes(ctx, e, ui))
   with_others(() -> fill_selection(ctx, selection_boxes(ctx, e, ui)), b)
   outline_same_word(ctx, e, ui)
@@ -23031,6 +23032,7 @@ margin(ctx, e, ui) = begin
   shade_line(ctx, e, left - room, ui.top)
   draw_numbers(ctx, e, left, ui.top)
   draw_fresh(ctx, e, left, ui.top)
+  draw_diff_bars(ctx, e, left, ui.top)
 end
 
 const SHADE = 0.05   # how much of the colour of the text the shade of the caret's line has
@@ -26260,7 +26262,7 @@ describe(t::TopBar) = begin
                       mode...,
                       # The app that the Mac uses for the file can change it, so a button opens the file there
                       button(e, :outside, "box-arrow-up-right")) :
-                     (more..., job_part(e)..., agent_part(e)..., checks..., commit_part(e)..., mode...,
+                     (more..., job_part(e)..., agent_part(e)..., checks..., diff_part(e)..., commit_part(e)..., mode...,
                       # A page that's never changed says so at the end
                       (b.fixed ? (Box(height(28px), padding(8px, 0px), label("Read only", 12px, color=colours.dim)),) : ())...))...))
 end
@@ -35708,6 +35710,7 @@ describe_window(e::Editor) = begin
   app_tick!(e)
   publish_tick!(e)
   layout!(e)
+  inline_diff!(e)   # room for the lines that went from the file, while the window shows what changed in it
   # A page whose long lines don't wrap scrolls sideways as far as its longest line goes, and no further when the window grows
   if !wraps(e)
     e.reach = maximum(it -> it.content isa Flow ? extent(it.content) : 0px, e.layout, init=0px)
@@ -35739,7 +35742,7 @@ describe_window(e::Editor) = begin
   # The command palette has nothing behind it that dims the page, and it shows while it slides down after it closes
   popup = palette_shows(e) ? (palette(e),) : e.popup == :none ? () : (node!(Backdrop, e, :backdrop), finder(e))
   Stack(width(grow=grow), height(grow=grow), Alignment.Start, name="Editor",
-    body, panel_edge(e)..., tablebar(e)..., outcome_over(e)..., callbox(e)..., suggestbox(e)..., findbar(e)..., sound_over(e)..., fill_over(e)..., task_over(e)..., slides_over(e)..., takeoff_over(e)..., zoom_over(e)...,
+    body, panel_edge(e)..., tablebar(e)..., put_back_over(e)..., outcome_over(e)..., callbox(e)..., suggestbox(e)..., findbar(e)..., sound_over(e)..., fill_over(e)..., task_over(e)..., slides_over(e)..., takeoff_over(e)..., zoom_over(e)...,
     (screening(e) ? () : (node!(TopBar, e, :topbar),))...,   # a video that fills the screen is all that the window shows
     popup...)
 end
@@ -40044,6 +40047,253 @@ commit_part(e) = commit_change(e, e.buf.path) === nothing ? () : (button(e, :com
 # The keyboard goes to the page first, so the file that shows is the one in focus, not a row of the sidebar
 BUTTONS[:commit] = (run=e -> (focus(e); open_palette!(e, COMMANDS[:commit])), tip=e -> "Commit $(basename(e.buf.path))",
                     off=e -> false, strong=false)
+
+# --- what changed in the file that shows ------------------------------------------------------
+#
+# Beside the Commit button, a button with a diff's mark shows what changed in
+# the file since the last commit, in the file itself, as Zed shows it:
+#
+#   - The lines that are new or changed have a green background, and a green
+#     bar in the margin.
+#   - The lines that went show in red under the line before them, in the font
+#     of code, with a red bar in the margin. They aren't part of the text. A
+#     click on them puts the caret at the end of the line above.
+#   - A button at the right end of the first line of each change puts the last
+#     commit's lines back in its place, as one edit that ⌘Z takes back.
+#
+# The changes follow what you type. The button is shaded while they show, and
+# a click on it hides them. They show for that file until then.
+#
+# The lines that went take room on the page. After `layout!`, in each frame of
+# the window, `inline_diff!` moves each item down by the height of the old
+# lines over it, in a new list, since `file_lines` keeps the list that it gave.
+# It keeps what it did in `e.nodes[:gone]`. The Document draws the old lines
+# only for the layout that it made, so printing and slides, which lay the page
+# out again, never have them.
+
+"True while the window shows what changed in its file since the last commit, in the file itself"
+diffing(e) = !isempty(e.buf.path) && get(e.nodes, :diffing, "") == e.buf.path
+
+"Show what changed in the file since the last commit, in the file itself, or hide it again"
+toggle_diff!(e) = (diffing(e) ? delete!(e.nodes, :diffing) : (e.nodes[:diffing] = e.buf.path); redraw_in!(e, 0); e)
+
+"The lines of each file in a commit, by the repository's top folder, the file's place in it and the commit's hash. A file that the commit hasn't got has none."
+const COMMITTED = Dict{Tuple{String,String,String},Vector{String}}()
+
+"The lines of the file at `rel` in the commit `head` of the repository at `root`, split as a page splits a file's text"
+committed_lines(root, rel, head) = begin
+  length(COMMITTED) > 100 && empty!(COMMITTED)
+  get!(COMMITTED, (root, rel, head)) do
+    # Before its first commit a repository's head is "(initial)", which is no commit
+    text = isempty(head) || startswith(head, "(") ? nothing : Git.at_commit(root, head, rel)
+    text === nothing ? String[] : String.(split(replace(text, "\r\n" => "\n"), '\n'))
+  end
+end
+
+"""
+What changed in the file that shows since the last commit, while the window
+shows it in the file: the changes, each a run of the old lines and the run of
+the new lines that took its place, and the old lines. It's nothing while the
+window doesn't show them, and on a page that's in columns, in slides or under
+a block that fills the window. It's worked out again when the text changes,
+and after a commit.
+"""
+diff_now(e) = begin
+  diffing(e) || return nothing
+  b = e.buf
+  b.view in (:code, :markdown, :text) || return nothing
+  (lowered(e) === nothing && slideshow(e) === nothing && !haskey(e.nodes, :columns)) || return nothing
+  root = git_top(dirname(b.path))
+  isempty(root) && return nothing
+  s = watch_git!(e, root)
+  s.known || return nothing
+  key = (b.path, b.version, s.head)
+  kept = get(e.nodes, :diff_now, nothing)
+  kept !== nothing && kept[1] == key && return kept[2]
+  rel = try relpath(realpath(b.path), realpath(root)) catch; return nothing end
+  old = committed_lines(root, rel, s.head)
+  found = (changes=changes(old, b.lines), old=old)
+  e.nodes[:diff_now] = (key, found)
+  found
+end
+
+"How tall a line that went from the file is: as tall as a line of a file of code"
+gone_h(e) = code_size(e) * 1.5 / CODE_SCALE
+
+"""
+Make room in the layout for the lines that went from the file, while the
+window shows what changed: each item moves down by the height of the old
+lines over it. The old lines go under the item that has the line before them.
+"""
+inline_diff!(e) = begin
+  d = diff_now(e)
+  (d === nothing || isempty(e.layout)) && return (delete!(e.nodes, :gone); nothing)
+  items = e.layout
+  was = get(e.nodes, :gone, nothing)
+  # A file of code keeps its layout while its text is the same, so the room is made once
+  was !== nothing && was.from === items && was.diff === d && return (e.layout = was.layout; nothing)
+  lh = gone_h(e)
+  firsts = Int[it.first for it in items]
+  shows(i) = clamp(searchsortedlast(firsts, i), 1, length(items))   # the item that shows line `i`
+  after = Dict{Int,Vector{String}}()   # the old lines under each item, by the item's last line
+  above = String[]                     # the old lines over the first line
+  for (o, n) in d.changes
+    isempty(o) && continue
+    first(n) <= 1 ? append!(above, d.old[o]) : append!(get!(Vector{String}, after, items[shows(first(n) - 1)].last), d.old[o])
+  end
+  # Only new lines are marked where they are, and nothing moves
+  out = isempty(above) && isempty(after) ? items : Vector{Item}(undef, length(items))
+  if out !== items
+    shift = lh * length(above)
+    for (k, it) in enumerate(items)
+      out[k] = shift == 0px ? it : Item(it.first, it.last, it.top + shift, it.tall, it.content)
+      rows = get(after, it.last, nothing)
+      rows === nothing || (shift += lh * length(rows))
+    end
+  end
+  # Where each change starts on the page: at its first line that went, or else at its first new line
+  tops = map(d.changes) do (o, n)
+    isempty(o) ? out[shows(first(n))].top :
+    first(n) <= 1 ? out[1].top - lh * length(above) : (it = out[shows(first(n) - 1)]; it.top + it.tall)
+  end
+  e.layout = out
+  e.nodes[:gone] = (from=items, layout=out, diff=d, after=after, above=above, lh=lh, tops=tops)
+  nothing
+end
+
+"What `inline_diff!` did to the layout that the window shows now, or nothing"
+gone_now(e) = (g = get(e.nodes, :gone, nothing); g !== nothing && g.layout === e.layout ? g : nothing)
+
+"The lines `lines` that went from the file: red rows each `lh` tall, with the colours of code in the file's language"
+gone_rows(e, lines, lh) = begin
+  lang, open, size = file_lang(e.buf.path), '\0', code_size(e)
+  face(kind) = Face(codefont(), kind == :comment ? codeslant() : codestyle(), size, kind == :plain ? colours.ink : getfield(colours, kind), false)
+  rows = Any[]
+  for l in lines
+    text = replace(l, '\t' => " "^e.indent)
+    parts = [p for t in tokens(text, lang, open) if !isempty(t.text) for p in spared(t.text, face(t.kind))]
+    open = left_open(text, lang, open)   # a docstring of several lines goes on in the next line
+    push!(rows, Row(width(grow=grow), height(lh), clip=true, background(RGBA(git_colour(:deleted), 0.13)), parts...))
+  end
+  Column(width(grow=grow), Alignment.Start, name="Gone", rows...)
+end
+
+"The geometry `g` of the item `it`, with the lines that went from under it, while the window shows what changed"
+gone_under(e, it, g) = begin
+  gone = gone_now(e)
+  rows = gone === nothing ? nothing : get(gone.after, it.last, nothing)
+  rows === nothing ? g : Column(width(grow=grow), Alignment.Start, g, gone_rows(e, rows, gone.lh))
+end
+
+"The room over the first item that the Document builds, with the lines that went from over the first line when that item is the first"
+gone_over(e, items, lo) = begin
+  gone = gone_now(e)
+  (lo == 1 && gone !== nothing && !isempty(gone.above)) || return (spacer(items[lo].top),)
+  (spacer(items[1].top - gone.lh * length(gone.above)), gone_rows(e, gone.above, gone.lh))
+end
+
+"True when the item `it` shows a line that's new or changed since the last commit"
+is_new(gone, it) = any(((_, n),) -> !isempty(n) && first(n) <= it.last && last(n) >= it.first, gone.diff.changes)
+
+"Draw a green background behind each line on screen that's new or changed since the last commit. The Document is at `ui`."
+tint_new(ctx, e, ui) = begin
+  gone = gone_now(e)
+  gone === nothing && return
+  tint = RGBA(git_colour(:new), 0.12)
+  for it in e.layout[e.shown]
+    is_new(gone, it) && rectangle(ctx, ui.left, ui.top + it.top, ui.width, it.tall, background=tint, border=0px)
+  end
+end
+
+"Draw a bar in the margin beside each line on screen that's new or changed, and beside the lines that went. The text starts at `left`, and its first line is at `top`."
+draw_diff_bars(ctx, e, left, top) = begin
+  gone = gone_now(e)
+  gone === nothing && return
+  green, red = RGBA(git_colour(:new), 0.8), RGBA(git_colour(:deleted), 0.8)
+  shown = e.layout[e.shown]
+  isempty(shown) && return
+  # Beside numbered lines the bar is in the gap between the numbers and the text
+  left = numbered(e.buf) ? left + 8px : left
+  if first(e.shown) == 1 && !isempty(gone.above)
+    h = gone.lh * length(gone.above)
+    rectangle(ctx, left - 16px, top + e.layout[1].top - h, 3px, h, background=red, border=0px)
+  end
+  for it in shown
+    is_new(gone, it) && rectangle(ctx, left - 16px, top + it.top, 3px, it.tall, background=green, border=0px)
+    rows = get(gone.after, it.last, nothing)
+    rows === nothing || rectangle(ctx, left - 16px, top + it.top + it.tall, 3px, gone.lh * length(rows), background=red, border=0px)
+  end
+end
+
+"""
+Put the last commit's lines back in place of change `k` of the file, from the
+top, as one edit that ⌘Z takes back. A change that only added lines takes
+them out, and one that only took lines away puts them back.
+"""
+put_change_back!(e, k::Int) = begin
+  d = diff_now(e)
+  (d === nothing || !(1 <= k <= length(d.changes))) && return e
+  o, n = d.changes[k]
+  b = e.buf
+  old, lines = d.old[o], b.lines
+  if isempty(n)
+    # The old lines go back over the line that's in their place now, or after the last line
+    at = first(n)
+    at <= length(lines) ? edit!(b, (at, 0), (at, 0), join(old, "\n") * "\n") :
+                          edit!(b, line_end(b, length(lines)), line_end(b, length(lines)), "\n" * join(old, "\n"))
+  elseif isempty(o)
+    # The new lines go, with the line break after them, or the one before them at the end of the file
+    lo, hi = (first(n), 0), line_end(b, last(n))
+    last(n) < length(lines) ? (hi = (last(n) + 1, 0)) : first(n) > 1 && (lo = line_end(b, first(n) - 1))
+    edit!(b, lo, hi, "")
+  else
+    edit!(b, (first(n), 0), line_end(b, last(n)), join(old, "\n"))
+  end
+  redraw_in!(e, 0)
+  e
+end
+
+"A button over the page that puts back one change of the file: the last commit's lines take its place"
+@def mutable struct PutBack <: SemanticUI
+  k::Int = 0   # which change of the file, from the top
+end
+
+describe(p::PutBack) =
+  Box(height(20px), padding(7px, 0px), radius(5px), name="PutBack", background(ishovered(p) ? colours.active : colours.hover),
+    Row(child_gap=4px, Icon("arrow-counterclockwise", size=11px, color=colours.dim), Box(label("Put back", 11px, color=colours.dim))))
+
+cursor(::PutBack) = :hand
+onkey(p::PutBack, ::KeyPress{Keys.mouse_left}) = (put_change_back!(editor(p), p.k); handled)
+
+"""
+The buttons that put back each change on screen, over the page at the right
+end of each change's first line: the first line that went, or else the first
+new line. A window that can't write its file has none.
+"""
+put_back_over(e) = begin
+  gone = gone_now(e)
+  (gone === nothing || !writes(e.buf)) && return ()
+  w, h = window_size(e)
+  right = text_left(e) + e.width
+  out = Any[]
+  for (k, y) in enumerate(gone.tops)
+    y = TOPBAR_H + page_top(e) + y - e.scroll.offset + 1px
+    TOPBAR_H <= y <= h - 20px || continue
+    push!(out, Row(width(grow=grow), height(grow=grow), Alignment.Start, justify=Alignment.End, padding(y, max(w - right, 0px), 0px, 0px),
+                   node!(() -> PutBack(k=k), e, (:put_back, k))))
+  end
+  out
+end
+
+"The button of the top bar that shows what changed in the file since the last commit, while it has a change to commit"
+diff_part(e) = commit_change(e, e.buf.path) === nothing ? () : (button(e, :diff, "file-diff"),)
+
+BUTTONS[:diff] = (run=toggle_diff!, off=e -> false, strong=false, on=diffing,
+                  tip=e -> (diffing(e) ? "Hide what changed in " : "Show what changed in ") * basename(e.buf.path) * " since the last commit")
+push!(BLOCK_ICONS, "arrow-counterclockwise")
+
+add_command!(toggle_diff!, name=:show_changes_in_place, title="Show or hide what changed in the file since the last commit, in the file itself")
+works_here(e, ::Val{:show_changes_in_place}) = diffing(e) || commit_change(e, e.buf.path) !== nothing
 
 # --- a folder of notes -------------------------------------------------------------------------
 #
