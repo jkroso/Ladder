@@ -244,6 +244,8 @@
 #     that has it. Those are the places that ⌘D goes to.
 #   - ⌘/ makes a comment of a line of code. ⌘L selects a line, ⌘⇧D copies it
 #     to the line under it, ⌘⇧K deletes it, and ⌘⌥[ and ⌘⌥] move it up and down.
+#   - ⌘N opens a new window on the folder that you're in, with the folder in
+#     its page.
 #   - ⌘W closes the file, and the window stays open with no file. ⌘W in a
 #     window with no file closes it. Ladder quits when its last window closes.
 #   - ⌘⌥I opens the layout inspector.
@@ -1415,13 +1417,19 @@ end
 "Open the editor on a file, or on the first Markdown file in a folder"
 build_editor(path) = begin
   path = abspath(expanduser(path))
+  e = blank_editor()
+  isdir(path) ? open_on_folder!(e, path) : open!(e, path)
+  e
+end
+
+"An editor that shows no file yet"
+blank_editor() = begin
   e = Editor()
   load_sheet_font()
   load_omni_font()
   load_site_font()
   e.nodes[:input] = own!(e, TextInput(placeholder="Find a file", font_family=SANS, font_size=15px,
                                       look=(_, text) -> Row(width(grow=grow), height(grow=grow), clip=true, text)))
-  isdir(path) ? open_on_folder!(e, path) : open!(e, path)
   e
 end
 
@@ -27943,6 +27951,7 @@ them. Each has its shortcuts in the bundle called Ladder.
 const COMMAND_GROUPS = [
   "Files and windows" => [
     Command(:save, "Save the file", :window, "cmd+s", (e, w, _) -> save_page!(e)),
+    Command(:new_window, "Open a new window on the folder that you're in", :window, "cmd+n", (e, w, _) -> new_window!(e)),
     Command(:open, "Find a file by name", :window, "cmd+o", (e, w, _) -> open_finder!(e)),
     Command(:open_project, "Find a project by name and open it", :window, "cmd+p", (e, w, _) -> open_projects!(e)),
     Command(:home, "Open your home folder in the page", :window, "cmd+shift+h", (e, w, _) -> go_home!(e)),
@@ -39957,6 +39966,39 @@ page_window(path, like) = begin
   e.remember = like.remember
   e.size = paper_window(screen_room(), e.side)
   window!(e, title="Ladder", size=e.size)
+end
+
+"""
+The folder that the window of `e` is in: the folder that its page shows, or
+the folder of the file that it shows. A window with no file is in the folder
+that its sidebar lists.
+"""
+current_folder(e) = begin
+  path = e.buf.path
+  isdir(path) && return path
+  !isempty(path) && isdir(dirname(path)) && return dirname(path)
+  isdir(e.folder) ? e.folder : homedir()
+end
+
+"""
+⌘N: open a new window on the folder that the window of `e` is in. Its page
+shows the folder, as a click on the folder in the top bar's path does, and its
+sidebar is closed. It's as big as the window of `e`, and a little lower and to
+the right, as the Mac puts a new window. It gives the new window's editor.
+"""
+new_window!(e) = begin
+  e = top_editor(e)
+  folder = current_folder(e)
+  shown = blank_editor()
+  foreach(name -> setfield!(shown, name, getfield(e, name)), SHARED)
+  shown.remember = e.remember
+  show_path!(shown, folder)
+  by = window_of(e)
+  size, at = by === nothing ? (paper_window(screen_room(), e.side), (0px, 0px)) :
+                              ((by.size[1], by.size[2]), (by.position[1] + 30px, by.position[2] + 30px))
+  shown.size = size
+  show_window!(window!(shown, title="Ladder", size=size, position=at), by)
+  shown
 end
 
 # --- settings -----------------------------------------------------------------------------

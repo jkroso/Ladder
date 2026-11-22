@@ -102,6 +102,7 @@ On a page with a `schedule` block, an item that repeats has a bar for each time 
 
 | Keys | What they do |
 |------|--------------|
+| ⌘N | Opens a new window on this folder. The page shows the folder, so you can choose a file there. |
 | ⌘O | Finds a file in this folder by name |
 | ⌘P | Finds a project by name and opens it in the window. A project is a folder that you made a favourite, or a git repository in your home folder. The one that git last wrote in comes first, after your favourites. |
 | ⌘⇧P | Opens the command palette. It lists the commands that have a use where you are. Type a command's name and press Return to run it. While you choose a Theme or a Text Size with ↑ or ↓, the page shows each choice at once, and Esc puts it back. |
