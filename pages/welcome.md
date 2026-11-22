@@ -557,7 +557,7 @@ Each block that would ask for today asks for the page's day:
 
 - A calendar shows the month of that day, with a circle round the day.
 - A time log adds up the hours to that day, when the day is past. A chart of the log draws those hours.
-- A schedule draws its line of today on that day, and shows the tasks that the plan has finished by then as done.
+- A schedule draws its line of today on that day, and shows the tasks that the plan has finished by then as done. The box of each of those tasks in the list of to-do items has a tick too. A click on a box does nothing until the page shows today again.
 - A board of a page with a schedule puts each card where the plan has its task on that day: to do, doing or done. Its cards stay where they are until the page shows today again.
 
 In a folder that git keeps, the text shows its past too. On a day before today, Ladder asks git for the page as its last commit of that day had it:
@@ -566,7 +566,7 @@ In a folder that git keeps, the text shows its past too. On a day before today, 
 - A line that wasn't on the page on that day is fainter, with a grey bar beside it. So is a line that read another way.
 - A board on a page with no schedule puts each card where its item was on that day.
 
-The slider goes back to the day of the page's first commit. On a page that git doesn't keep, the boxes of the to-do items stay as they are: only the plan says what's done. **Today** takes the day out of the block, so the page follows the real day again. The page [schedule.md](schedule.md) has a slider to try with a schedule and a board.
+The slider goes back to the day of the page's first commit. On a page that git doesn't keep, a day before today shows the plan's ticks in the boxes, as a day to come does. **Today** takes the day out of the block, so the page follows the real day again. The page [schedule.md](schedule.md) has a slider to try with a schedule and a board.
 
 ## Columns
 

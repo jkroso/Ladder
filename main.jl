@@ -2124,7 +2124,7 @@ pieces(e, text::String, line::Line, raw::Bool, i::Int=0) = begin
     if k == Kind.bullet && !raw
       push!(out, piece("•  ", line.level, mark, atomic=true, n=line.prefix - line.level))
     elseif k == Kind.todo && !raw
-      # On a day before today, the box shows what git has for that day: see `page_then`
+      # On another day than today, the box shows how the item stands then: see `ticked_then`
       push!(out, piece(something(ticked_then(e, i), isdone(text)) ? TODO_DONE : TODO_OPEN, line.level, base, atomic=true, n=line.prefix - line.level))
     else
       push!(out, piece(rest(lead, line.level), line.level, mark))
@@ -2700,7 +2700,7 @@ flow(e, i::Int, raw::Bool=israw(e.buf, i)) = begin
   # A footnote's number comes from the rest of the document, which `notes` reads once for each
   # version of it. So the line is kept for that version, and laid out again after a change.
   !raw && occursin("[^", text) && return get!(build, e.flows, (text, line, raw, :notes, e.buf.path, e.buf.version))
-  # On a day before today, the box of a to-do item shows the tick of that day, so the line is kept with it
+  # On another day than today, the box of a to-do item shows the tick of that day, so the line is kept with it
   then = line.kind == Kind.todo && !raw ? ticked_then(e, i) : nothing
   then === nothing || return get!(build, e.flows, (text, line, raw, :then, then))
   # A line of code inside a docstring has other colours than the same line outside it
@@ -20226,6 +20226,9 @@ end
 #
 #   - A schedule draws its line of today on that day. A task that the plan
 #     finishes before that day shows as done.
+#   - The box of each to-do item that the schedule has a task for shows the
+#     same: a tick when the plan has the task finished by then. A past day
+#     that git keeps the page for has git's ticks instead.
 #   - A board puts each card where the schedule's plan has its task on that
 #     day: to do, doing or done. Its cards stay where they are while it does.
 #   - A calendar shows the month of that day, with a circle round the day.
@@ -20559,11 +20562,28 @@ page_then(e, d::Date) = begin
   end
 end
 
-"True or false when the box of the to-do item on line `i` shows what git has for the page's day, ticked or not. It's nothing when the page shows today, and so the box shows the line's own tick."
+"""
+True or false when the box of the to-do item on line `i` shows how the item
+stands on the page's day, ticked or not. On a day before today that git has
+the page for, it's git's tick of that day. On any other day than today, it's
+the schedule's plan: a task that the plan has finished by then has a tick.
+It's nothing when the page shows today, and for an item that neither says
+anything about, and so the box shows the line's own tick.
+"""
 ticked_then(e, i::Int) = begin
   i > 0 || return nothing
   then = page_then(e)
-  then === nothing ? nothing : get(then.ticks, i, nothing)
+  then === nothing || return get(then.ticks, i, nothing)
+  get(planned_ticks(e), i, nothing)
+end
+
+"For the line of each to-do item that the page's schedule has a task for, true when the plan has that task finished by the page's day. There are none on the real day, and on a page with no schedule."
+planned_ticks(e) = begin
+  another_day(e) || return Dict{Int,Bool}()
+  b = e.buf
+  get!(e.flows, (:planned_ticks, b.path, b.version, page_day(e), calendar_today())) do
+    Dict{Int,Bool}(t.todo.line => finished(e, t) for t in planned_tasks(e))
+  end
 end
 
 "The to-do items of the page as they stand on the page's day: each is done if git has it ticked then. On the real day, and for a page that git doesn't keep, they're the page's own."
@@ -23255,7 +23275,7 @@ end
 "Tick the box of the to-do item on line `i`, or take its tick away. The caret stays where it is."
 tick!(e, i::Int) = begin
   b = e.buf
-  # On a day before today, the box shows the past, which a click can't change
+  # On another day than today, the box shows how the item stands then, which a click can't change
   ticked_then(e, i) === nothing || return e
   text = b.lines[i]
   col = findfirst('[', text)   # the column after the [, because only spaces and a - come before it

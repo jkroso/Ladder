@@ -9,7 +9,8 @@
 #
 # A block with no day in it means today. The other parts of the page ask for
 # the page's day where they would ask for today: a schedule draws its line of
-# today there and shows which tasks are finished by then, a board puts each
+# today there and shows which tasks are finished by then, the boxes of the
+# to-do items have a tick for those tasks, a board puts each
 # card in the column that the schedule's plan gives it on that day, a calendar
 # shows that day's month, and a time log adds up the hours to that day.
 #

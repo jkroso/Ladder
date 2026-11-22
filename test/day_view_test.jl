@@ -70,6 +70,9 @@ try
   button(key) = middle(rect(v.parts[(:button, key)]))
   click(place) = (press(place); release())
   rows() = K.shown!(chart)
+  line(words) = findfirst(l -> occursin(words, l), e.buf.lines)
+  "What the box of the item with `words` shows: true for a tick"
+  box(words) = (i = line(words); K.pieces(e, e.buf.lines[i], K.kinds(e.buf)[i], false, i)[1].text == K.TODO_DONE)
 
   @testset "a page with an empty block shows today" begin
     @test K.page_day(e) == TODAY && !K.another_day(e) && !K.planned(board)
@@ -79,6 +82,8 @@ try
     @test K.month_shown(calendar) == Date(2026, 11, 1)
     @test rows().labels == ["Dig the trench", "Lay the pipe"] && rows().series[1].values == [6.0, 1.0]
     @test any(en -> en.title == "Day", K.outline(e.buf)) && any(x -> x isa Tuple && x[1] == "Day", K.INSERTS)
+    # The boxes of the to-do items show the page's own ticks
+    @test box("Dig the trench") && !box("Lay the pipe") && !box("Test the pipe")
     shot("day-today.png")
   end
 
@@ -106,8 +111,17 @@ try
     press(middle(rect(board.parts[(:card, "Test the pipe")])))
     @test board.grab === nothing
     release()
-    # The item's box in the text is as it was: only the plan says that the pipe is laid
+    # The item's line in the file is as it was, but its box shows the plan's tick, as the schedule and the board do
     @test "- [ ] Lay the pipe" in e.buf.lines
+    @test box("Dig the trench") && box("Lay the pipe") && !box("Test the pipe")
+    # A click on a box changes nothing while the page shows another day
+    K.tick!(e, line("Test the pipe")); frames()
+    @test "- [ ] Test the pipe" in e.buf.lines && !box("Test the pipe")
+    # On a day after the plan's last day, every box has a tick
+    K.set_day!(v, Date(2026, 11, 30)); frames()
+    @test box("Dig the trench") && box("Lay the pipe") && box("Test the pipe")
+    shot("day-done.png")
+    K.set_day!(v, Date(2026, 11, 23)); frames()
   end
 
   @testset "a day that's past" begin
@@ -117,6 +131,8 @@ try
     @test names(1) == ["Lay the pipe", "Test the pipe"] && names(2) == ["Dig the trench"] && names(3) == String[]
     # The log and its chart have the hours to that day
     @test rows().labels == ["Dig the trench"] && rows().series[1].values == [4.0]
+    # git doesn't keep this page, so its boxes show the plan's ticks: the trench wasn't dug yet
+    @test !box("Dig the trench") && !box("Lay the pipe")
     shot("day-past.png")
   end
 
@@ -134,6 +150,7 @@ try
     click(button(:today))
     @test lines() == String[] && K.page_day(e) == TODAY && !K.planned(board)
     @test names(1) == ["Lay the pipe", "Test the pipe"] && rows().series[1].values == [6.0, 1.0]
+    @test box("Dig the trench") && !box("Lay the pipe")
     # ⌘Z puts the day back
     K.undo!(e.buf); frames()
     @test lines() == ["2026-11-18"] && K.page_day(e) == Date(2026, 11, 18)
