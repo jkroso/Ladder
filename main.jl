@@ -24462,14 +24462,6 @@ layout!(e, width=text_width(e)) = begin
         continue
       end
     end
-    # A line that holds only a comment takes no room either, unless the caret is on it
-    if ks[i].kind == Kind.paragraph && !alone(b, i) && comment_only(b.lines[i])
-      t = something(comment_fold(b, i), (i, i))[2]
-      (caretless(b) || !(i < b.caret[1] <= t || i < b.anchor[1] <= t)) || (t = i)
-      push!(items, flat(e, Item(i, t, top, 0px, nothing)))
-      i = t + 1
-      continue
-    end
     # A line that holds only a link like ![[Ideas#Plans]] shows that part of the other page, unless the caret is in the line
     if ks[i].kind == Kind.paragraph && !israw(b, i) && transcludes(b, i)
       parts += 1   # each one keeps its view by its place among the page's lines like it
@@ -24477,6 +24469,14 @@ layout!(e, width=text_width(e)) = begin
       push!(items, Item(i, i, top, content.tall, content))
       top += content.tall
       i += 1
+      continue
+    end
+    # A line that holds only a comment takes no room either, unless the caret is on it
+    if ks[i].kind == Kind.paragraph && !alone(b, i) && comment_only(b.lines[i])
+      t = something(comment_fold(b, i), (i, i))[2]
+      (caretless(b) || !(i < b.caret[1] <= t || i < b.anchor[1] <= t)) || (t = i)
+      push!(items, flat(e, Item(i, t, top, 0px, nothing)))
+      i = t + 1
       continue
     end
     # A line that holds only a picture shows the picture, unless the caret is on the line
@@ -31242,7 +31242,6 @@ relink!(e, found, old, new) = begin
   say_result!(e, "Changed $n link$(n == 1 ? "" : "s") in $pages page$(pages == 1 ? "" : "s") to the new $place")
   nothing
 end
-
 
 "Move the file or the folder at `path` to the Trash. It's true when it went there."
 trash(path) = begin
