@@ -44412,7 +44412,8 @@ page_title(icon, name, about) =
 #
 # A folder with a `.git` in it is the top folder of a repository, and Ladder
 # asks git about it (see git.jl). Ladder only reads from it, apart from the
-# commit of the file that shows (see "a commit of the file that shows").
+# commit of the file that shows (see "a commit of the file that shows"), and
+# the Pull and Push buttons of git's panel (see "push and pull").
 #
 #   - In the sidebar, each file that has changes since the last commit has a
 #     letter after its name: M for changed lines, A for a file that the next
@@ -44606,17 +44607,258 @@ cursor(::RepoView) = :arrow
   scroll::Scroll = Scroll(width(grow=grow), height(grow=grow))
 end
 
-"What git's panel says under the branch's name, in words: the branch that it follows, and how many commits there are to push and to pull"
-follow_words(s) = begin
-  s.known || return "Asking git…"
-  parts = String[isempty(s.follows) ? "Follows no other branch" : "Follows $(s.follows)"]
-  s.ahead > 0 && push!(parts, s.ahead == 1 ? "1 commit to push" : "$(s.ahead) commits to push")
-  s.behind > 0 && push!(parts, s.behind == 1 ? "1 commit to pull" : "$(s.behind) commits to pull")
-  join(parts, "  ·  ")
-end
+"What git's panel says under the branch's name, in words: the branch that it follows. The Pull and Push buttons say how many commits there are to pull and to push."
+follow_words(s) = !s.known ? "Asking git…" : isempty(s.follows) ? "Follows no other branch" : "Follows $(s.follows)"
 
 "What git's panel calls the change `kind` of a file. A change that git has for the next commit says so, as the letter can't."
 change_words(kind, staged) = staged ? "In the next commit" : GIT_WORDS[kind]
+
+# --- push and pull -------------------------------------------------------------------------
+#
+# The Pull and Push buttons at the right of the branch's name in git's panel.
+# Push sends the branch's new commits to the branch that it follows, like
+# origin/main. A branch that follows none goes to origin as a branch of the
+# same name, and follows it from then on. Pull brings the new commits of the
+# branch that it follows, and moves the branch on to them. Each button has the
+# number of commits that it would bring or send after its word.
+#
+# When each of the two branches has commits that the other hasn't, Pull can't
+# just move the branch on. An arrow at its right then shows a list of the ways
+# to join them, and a click on Pull shows it too:
+#
+#   - Merge: a new commit joins the other branch's commits to this one's.
+#   - Rebase: git makes this branch's commits again, after the other's.
+#
+# When the two change the same lines of a file, git can't join them by itself.
+# Ladder then undoes what git started, so nothing changes, and says which files
+# those are. git doesn't rebase while a file has changes that aren't committed,
+# and Ladder doesn't put them away for it, since another program can be
+# writing to those files.
+#
+# git runs while the window draws, and the button says "Pushing…" or
+# "Pulling…" until it ends. Then Ladder says what came of it under the top bar.
+# git never asks for a password here (see `Git.start`): with none to hand, it fails.
+
+"The push, the pull, the merge or the rebase that runs in each repository, by the repository's top folder"
+const GIT_RUNS = Dict{String,Any}()
+
+"What git runs for each of them, given what git says `s` of the repository"
+send_command(what, s) =
+  what == :pull ? `pull --ff-only` :
+  what == :merge ? `pull --no-rebase --no-edit` :
+  what == :rebase ? `pull --rebase` :
+  isempty(s.follows) ? `push -u origin HEAD` : `push`
+
+"What the Pull or the Push button says while git does `what`"
+const SENDING_WORDS = Dict(:pull => "Pulling…", :merge => "Merging…", :rebase => "Rebasing…", :push => "Pushing…")
+
+"""
+Start git's push (`what` is :push), pull (:pull), merge (:merge) or rebase
+(:rebase) in the repository at `root`, for the window `e`. One runs at a time
+in a repository.
+"""
+push_or_pull!(e, root, what) = begin
+  haskey(GIT_RUNS, root) && return e
+  s = Git.state(root)
+  job = try Git.start(root, send_command(what, s)) catch; return say_result!(e, "git didn't start.") end
+  GIT_RUNS[root] = (what=what, run=job, e=e, since=time(), branch=s.branch, follows=s.follows)
+  redraw_in!(e, 0)
+  e
+end
+
+"True when the branch and the branch that it follows each have commits that the other hasn't, as git last heard"
+diverged(s) = s.known && !isempty(s.follows) && s.ahead > 0 && s.behind > 0
+
+"`n` commits, in words"
+commits_words(n) = n == 1 ? "1 commit" : "$n commits"
+
+"Why git didn't do it, from what it printed `said`: its first error, or its last line"
+git_reason(said) = begin
+  lines = filter(l -> !isempty(l), strip.(split(said, '\n')))
+  k = findfirst(l -> startswith(l, "fatal:") || startswith(l, "error:"), lines)
+  k === nothing ? (isempty(lines) ? "it gave no reason" : String(last(lines))) : String(strip(split(lines[k], ':', limit=2)[2]))
+end
+
+"The files that a merge or a rebase found changed in both branches, from what git printed `said`"
+clashing_files(said) = unique([String(m[1]) for m in eachmatch(r"CONFLICT \([^)]*\): (?:Merge conflict in )?(\S+)", said)])
+
+"What Ladder says when the run `r` ends: `done` is whether git did it, and `said` is what git printed"
+git_said(r, done, said) = begin
+  there = isempty(r.follows) ? "origin" : r.follows
+  if r.what == :push
+    done && occursin("Everything up-to-date", said) && return "$there already has every commit of $(r.branch)."
+    done && return "Pushed $(r.branch) to $there."
+    occursin("does not appear to be a git repository", said) && return "This repository has no remote called origin, so Ladder has nowhere to push."
+    occursin("[rejected]", said) && return "$there has commits that $(r.branch) hasn't got, so git didn't push. Pull them first."
+    return "git couldn't push: " * git_reason(said)
+  end
+  done && occursin(r"Already up.to.date", said) && return "$(r.branch) already has every commit of $there."
+  done && r.what == :merge && return "Merged $there into $(r.branch)."
+  done && r.what == :rebase && return "Rebased $(r.branch) onto $there."
+  done && return "Pulled the new commits of $there into $(r.branch)."
+  occursin("Not possible to fast-forward", said) &&
+    return "$(r.branch) and $there each have commits that the other hasn't, so git didn't pull. Click the arrow at the right of Pull to merge or rebase them."
+  occursin("would be overwritten", said) &&
+    return "The new commits change files that have changes you haven't committed, so git didn't pull. Commit those changes first."
+  occursin("cannot pull with rebase", said) &&
+    return "git doesn't rebase while files have changes that aren't committed, so nothing changed. Commit them, or merge."
+  if occursin("CONFLICT", said)
+    files = clashing_files(said)
+    which = isempty(files) ? "the same files" : length(files) == 1 ? only(files) : join(files[1:end-1], ", ") * " and " * files[end]
+    return "$(r.branch) and $there change the same lines of $which, so Ladder undid the $(r.what). Nothing changed."
+  end
+  "git couldn't $(r.what): " * git_reason(said)
+end
+
+"Say what came of each run of git that has ended. Each window does this in each frame, and draws again while git runs."
+git_run_tick!(e) = for (root, r) in collect(GIT_RUNS)
+  p, out = r.run
+  late = time() - r.since > PUSH_LIMIT
+  process_running(p) && !late && (redraw_in!(e, 0.1); continue)
+  process_running(p) && kill(p)
+  wait(p)   # the last of what git printed can still be on its way
+  said = String(take!(out))
+  # A merge or a rebase that stopped at lines that both branches change goes back to where it started
+  !late && !success(p) && r.what in (:merge, :rebase) && occursin("CONFLICT", said) &&
+    Git.act(root, r.what == :merge ? `merge --abort` : `rebase --abort`)
+  delete!(GIT_RUNS, root)
+  Git.forget!()   # git's panel asks git again, for the commits to push and to pull
+  words = late ? "git didn't finish in $(round(Int, PUSH_LIMIT)) seconds, so Ladder stopped it." : git_said(r, success(p), said)
+  say_result!(r.e, words)
+  r.e === e || redraw_in!(e, 0)
+end
+
+EACH_FRAME[:git_runs] = git_run_tick!
+
+"""
+The Pull and Push buttons of git's panel for the repository at `root`, where
+git says `s` of it. Each has the number of commits that it would bring or send
+after its word, when there are any. The commits to pull are the ones that git
+saw when it last fetched: Pull fetches before it pulls. While the two branches
+have gone apart, Pull has an arrow at its right, and the two are one tab of
+the list of the ways to join them while it shows.
+"""
+send_buttons(e, root, s) = begin
+  r = get(GIT_RUNS, root, nothing)
+  apart = diverged(s)
+  button(what, icon, words; act=_ -> push_or_pull!(e, root, what), off=false) = begin
+    b = node!(PageButton, e, (:git_button, root, what))
+    b.act, b.icon = act, icon
+    running = r !== nothing && (r.what == what || (what == :pull && r.what in (:merge, :rebase)))
+    b.words = running ? SENDING_WORDS[r.what] : words
+    b.off = off || r !== nothing || !s.known
+    b
+  end
+  counted(word, n) = n > 0 ? "$word $n" : word
+  # With no branch to follow, there's nothing to pull from
+  pull = button(:pull, "arrow-down", counted("Pull", s.behind), off=isempty(s.follows),
+                act=apart ? (w -> open_pull_list!(e, w, root)) : (_ -> push_or_pull!(e, root, :pull)))
+  showing = apart && pull_list_open(e)
+  tab = !apart ? pull :
+    Row(Alignment.Center, child_gap=2px, radius(px(COMMIT_ROUND), px(COMMIT_ROUND), 0px, 0px),
+        background(showing ? found_colours().frame : clear),
+      pull, node!(() -> PullMore(root=root), e, (:pull_more, root)))
+  Row(child_gap=6px, tab, button(:push, "arrow-up", counted("Push", s.ahead)))
+end
+
+const PULL_LIST = :pull_list   # the key of the popup with the ways to join the two branches
+const PULL_LIST_W = 360px       # how wide it is
+const PULL_WAYS = (:merge, :rebase)
+
+"The arrow at the right of the Pull button while the two branches have gone apart: a click shows the ways to join them"
+@def mutable struct PullMore <: SemanticUI
+  root::String = ""
+end
+
+"The list of the ways to join the two branches, under the Pull button"
+@def mutable struct PullList <: SemanticUI
+  root::String = ""
+end
+
+"A row of that list, that joins the two branches one way"
+@def mutable struct PullWay <: SemanticUI
+  root::String = ""
+  way::Symbol = :merge
+end
+
+"What draws the envelope of that list, under its rows. It's as big as the list."
+@def mutable struct PullEnvelope <: SemanticUI
+  root::String = ""
+end
+
+describe(m::PullMore) =
+  Box(width(20px), height(28px), radius(6px), Alignment.Center, name="PullMore",
+      background(haskey(GIT_RUNS, m.root) ? clear : ishovered(m) ? colours.active : colours.hover),
+    Icon("chevron-down", size=10px, color=colours.dim))
+
+cursor(m::PullMore) = haskey(GIT_RUNS, m.root) ? :arrow : :hand
+onkey(m::PullMore, ev::KeyPress{Keys.mouse_left}) = (haskey(GIT_RUNS, m.root) || open_pull_list!(editor(m), ev.window, m.root); handled)
+
+"True while the list of the ways to join the two branches shows"
+pull_list_open(e) = (w = window_of(e); w !== nothing && any(p -> p.key == PULL_LIST, popups(w)))
+
+"Where the Pull button and its arrow are in the window, as one rectangle in px, or nothing before both are drawn"
+pull_target(e, root) = begin
+  b, m = get(e.nodes, (:git_button, root, :pull), nothing), get(e.nodes, (:pull_more, root), nothing)
+  (b === nothing || m === nothing) && return nothing
+  rb, rm = rect(b), rect(m)
+  (rb === nothing || rm === nothing) && return nothing
+  (x=num(rb.left), y=num(rb.top), w=num(rm.left + rm.width - rb.left), h=num(rb.height))
+end
+
+"Show the ways to join the two branches of the repository at `root` under the Pull button, or take them away when they show"
+open_pull_list!(e, w, root) = begin
+  pull_list_open(e) && return (close_popup!(w, PULL_LIST); redraw_in!(e, 0); handled)
+  t = pull_target(e, root)
+  t === nothing && return handled
+  list = node!(PullList, e, :pull_list)
+  list.root = root
+  # The list's right edge is in line with the arrow's, so the outline goes straight down that side
+  anchor = (px(t.x + t.w) - PULL_LIST_W, px(t.y), PULL_LIST_W, px(t.h))
+  popup!(w, list, anchor=anchor, placement=:below, gap=px(COMMIT_GAP), width=PULL_LIST_W, key=PULL_LIST, theme=component_theme(e.zoom))
+  redraw_in!(e, 0)   # the buttons take the list's colour
+  handled
+end
+
+"What the list says over its rows: the commits that each branch has and the other hasn't"
+apart_words(s) = "$(s.branch) has $(commits_words(s.ahead)) that $(s.follows) hasn't got, and $(s.follows) has $(s.behind) that $(s.branch) hasn't got."
+
+describe(l::PullList) = begin
+  e = editor(l)
+  s = Git.state(l.root)
+  ways = [node!(() -> PullWay(root=l.root, way=w), e, (:pull_way, l.root, w)) for w in PULL_WAYS]
+  # The envelope is under the rows, with its colour, its line and its shadow
+  Stack(width(grow=grow), Alignment.Start, name="PullList",
+    node!(() -> PullEnvelope(root=l.root), e, (:pull_envelope, l.root)),
+    Box(width(grow=grow), padding(6px),
+      Column(width(grow=grow), Alignment.Start, child_gap=2px,
+        Box(width(grow=grow), Alignment.Start, padding(8px, 6px, 8px, 8px),
+          Text(apart_words(s), size=12px, family=SANS, color=found_colours().dim, wrap=WrapMode.words)),
+        ways...)))
+end
+
+describe(::PullEnvelope) = Box(width(grow=grow), height(grow=grow), name="Envelope")
+draw(ctx, size, ui::ConcreteRect, l::PullEnvelope) = (t = pull_target(editor(l), l.root); t === nothing || draw_envelope(ctx, ui, t); nothing)
+
+"What the row of the way `r` says, and the words at its right, which say what it does to the commits"
+pull_way_words(r::PullWay) = begin
+  s = Git.state(r.root)
+  r.way == :merge ? ("Merge $(s.follows) into $(s.branch)", "adds a commit") :
+                    ("Rebase $(s.branch) onto $(s.follows)", "rewrites $(commits_words(s.ahead))")
+end
+
+describe(r::PullWay) = begin
+  words, note = pull_way_words(r)
+  float_row(words, note, picked=ishovered(r))
+end
+cursor(::PullWay) = :hand
+
+onkey(r::PullWay, ev::KeyPress{Keys.mouse_left}) = begin
+  e = editor(r)
+  close_popup!(ev.window, PULL_LIST)
+  push_or_pull!(e, r.root, r.way)
+  handled
+end
 
 describe(p::GitPanel) = begin
   e = editor(p)
@@ -44637,8 +44879,9 @@ describe(p::GitPanel) = begin
   # Nothing in the panel makes it wider than its column: a name that's too long is cut off at its edge
   reuse!(p.scroll, Column(width(grow=grow), Alignment.Start, padding(2px, 10px, 24px, 10px), clip_x=true, name="Git",
     Column(width(grow=grow), Alignment.Start, padding(8px, 4px, 12px, 8px), child_gap=4px,
-      Row(child_gap=8px, Icon("git", size=15px, color=colours.dim),
-        Box(label(s.known ? s.branch : "…", 15px, weight="Semibold"))),
+      Row(width(grow=grow), child_gap=8px, Icon("git", size=15px, color=colours.dim),
+        Row(width(grow=grow), clip=true, Box(label(s.known ? s.branch : "…", 15px, weight="Semibold"))),
+        send_buttons(e, p.path, s)),
       Box(width(grow=grow), Alignment.Start, Text(follow_words(s), size=12px, family=SANS, color=colours.dim, wrap=WrapMode.words))),
     page_heading(isempty(changes) ? "Changes" : "Changes  ·  $(length(changes))"),
     (!s.known ? (page_note("Asking git…"),) :
@@ -45501,10 +45744,14 @@ commit_envelope(frame, target) = begin
   (map(flip, outline), map(flip, inside), closed)
 end
 
-draw(ctx, size, ui::ConcreteRect, l::CommitEnvelope) = begin
-  e = editor(l)
-  t = commit_target(e)
-  t === nothing && return
+draw(ctx, size, ui::ConcreteRect, l::CommitEnvelope) = (t = commit_target(editor(l)); t === nothing || draw_envelope(ctx, ui, t); nothing)
+
+"""
+Draw the envelope of a list as big as `ui` under the buttons at `t`, a
+rectangle in px: the list's shadow, its colour, and its outline, which goes
+round the buttons too, as `commit_envelope` says
+"""
+draw_envelope(ctx, ui, t) = begin
   c = found_colours()
   f = (x=num(ui.left), y=num(ui.top), w=num(ui.width), h=num(ui.height))
   outline, inside, closed = commit_envelope(f, t)
