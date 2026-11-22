@@ -15,12 +15,14 @@ file(name, age=0) = begin
   age == 0 || run(`touch -t $(Libc.strftime("%Y%m%d%H%M.%S", time() - age)) $path`)
   path
 end
-names(found) = [p.name for p in found.pictures]
-found_in(lines) = G.pictures(G.gallery(lines), dir, kinds=KINDS)
+names(found) = [p.name for p in found.items]
+kinds(found) = [p.kind for p in found.items]
+found_in(lines; skip=()) = G.items(G.gallery(lines), dir, pictures=KINDS, skip=skip)
 
 file("photos/photo 10.png", 300); file("photos/photo 2.png", 100); file("photos/Photo 1.JPG", 200)
-file("photos/notes.txt"); file("photos/.hidden.png"); file("photos/deep/inside.png")
-file("front.png", 50); file("plans/site.png", 400); file("plans/list.txt")
+file("photos/.hidden.png"); file("front.png", 50); file("plans/site.png", 400); file("plans/list.txt")
+file("mixed/notes.txt", 30); file("mixed/plan.pdf", 20); file("mixed/deep/inside.png"); file("mixed/.hidden.png")
+file("mixed/page.md", 10)
 
 @testset "reading and writing" begin
   g = G.gallery(["in: photos/", "Sort: Newest", "size:large", "columns: 3", "", "plans/site.png", "  front.png "])
@@ -38,45 +40,69 @@ file("front.png", 50); file("plans/site.png", 400); file("plans/list.txt")
   @test G.next_size(:medium) == :large && G.next_size(:large) == :small && G.next_size(:small) == :medium
 end
 
-@testset "the pictures of a folder" begin
+@testset "the files of a folder" begin
   found = found_in(["in: photos"])
-  # In the order of their names as a person reads them. A hidden file, a file that isn't a picture and a folder are left out.
-  @test names(found) == ["Photo 1.JPG", "photo 2.png", "photo 10.png"]
-  @test found.folder == 3 && isempty(found.lost) && isempty(found.problem)
-  @test found.pictures[1].path == joinpath(dir, "photos", "Photo 1.JPG")
+  # In the order of their names as a person reads them. A hidden file is left out.
+  @test names(found) == ["Photo 1.JPG", "photo 2.png", "photo 10.png"] && all(==(:picture), kinds(found))
+  @test isempty(found.lost) && isempty(found.problem) && !any(p -> p.listed, found.items)
+  @test found.items[1].path == joinpath(dir, "photos", "Photo 1.JPG")
   @test G.summary(G.gallery(["in: photos"]), found) == "3 pictures in photos"
   # The newest first
   @test names(found_in(["in: photos", "sort: newest"])) == ["photo 2.png", "Photo 1.JPG", "photo 10.png"]
-  # An empty block shows the page's own folder
+  # Every kind of file shows, and a folder too
+  mixed = found_in(["in: mixed"])
+  @test names(mixed) == ["deep", "notes.txt", "page.md", "plan.pdf"] && kinds(mixed) == [:folder, :file, :file, :file]
+  @test G.summary(G.gallery(["in: mixed"]), mixed) == "3 files and 1 folder in mixed"
+  @test names(found_in(["in: mixed", "sort: newest"]))[2:end] == ["page.md", "plan.pdf", "notes.txt"]
+  # An empty block shows the page's own folder, and leaves out the page that holds it
   own = found_in(String[])
-  @test names(own) == ["front.png"] && G.summary(G.gallery(String[]), own) == "1 picture in this folder"
+  @test names(own) == ["front.png", "mixed", "photos", "plans"]
+  @test G.summary(G.gallery(String[]), own) == "1 file and 3 folders in this folder"
+  page = file("job.md")
+  @test "job.md" in names(found_in(String[])) && !("job.md" in names(found_in(String[], skip=(page,))))
+  rm(page)
 end
 
-@testset "pictures that the block lists" begin
-  lines = ["plans/site.png", "front.png", "plans/list.txt", "gone.png"]
+@testset "files that the block lists" begin
+  lines = ["plans/site.png", "front.png", "plans/list.txt", "gone.png", "plans/", "nowhere/"]
   found = found_in(lines)
-  # Only the ones that it lists, in the order of their lines
-  @test names(found) == ["site.png", "front.png"] && found.folder == 0
-  @test found.lost == ["plans/list.txt", "gone.png"]
-  @test G.lost_words(found.lost) == "No picture at plans/list.txt or gone.png" && G.lost_words(String[]) == ""
-  @test G.summary(G.gallery(lines), found) == "2 pictures"
-  # With a folder, they come after the folder's pictures. One that's in the folder shows once.
+  # Only the ones that it lists, in the order of their lines. A folder is one of them.
+  @test names(found) == ["site.png", "front.png", "list.txt", "plans"] && kinds(found) == [:picture, :picture, :file, :folder]
+  @test all(p -> p.listed, found.items) && found.items[4].path == joinpath(dir, "plans")
+  @test found.lost == ["gone.png", "nowhere/"]
+  @test G.lost_words(found.lost) == "Nothing at gone.png or nowhere/" && G.lost_words(String[]) == ""
+  @test G.lost_words(["a.png"]) == "Nothing at a.png"
+  @test G.summary(G.gallery(lines), found) == "3 files and 1 folder"
+  @test G.summary(G.gallery(lines[1:2]), found_in(lines[1:2])) == "2 pictures"
+  # With a folder, they come after the folder's files. One that's in the folder shows once.
   lines = ["in: photos", "plans/site.png", "photos/photo 2.png", joinpath(dir, "front.png")]
   found = found_in(lines)
   @test names(found) == ["Photo 1.JPG", "photo 2.png", "photo 10.png", "site.png", "front.png"]
   @test G.summary(G.gallery(lines), found) == "3 pictures in photos, and 2 more"
+  @test G.summary(G.gallery(["in: photos", "plans/list.txt"]), found_in(["in: photos", "plans/list.txt"])) == "3 pictures in photos, and 1 more"
   @test names(found_in([lines; "sort: newest"])) == ["front.png", "photo 2.png", "Photo 1.JPG", "photo 10.png", "site.png"]
+end
+
+@testset "how a gallery counts" begin
+  item(kind) = G.Item("x", "x", 0.0, kind, false)
+  @test G.count_words([item(:picture)]) == "1 picture" && G.count_words(fill(item(:picture), 2)) == "2 pictures"
+  @test G.count_words([item(:picture), item(:file)]) == "2 files"
+  @test G.count_words([item(:folder)]) == "1 folder" && G.count_words(fill(item(:folder), 3)) == "3 folders"
+  @test G.count_words([item(:file), item(:folder), item(:folder)]) == "1 file and 2 folders"
 end
 
 @testset "nothing to show" begin
   none = found_in(["in: plans/empty"])
-  @test isempty(none.pictures) && none.problem == "There's no folder called “plans/empty” beside this page."
+  @test isempty(none.items) && none.problem == "There's no folder called “plans/empty” beside this page."
   mkpath(joinpath(dir, "bare"))
   bare = found_in(["in: bare"])
-  @test bare.problem == "No pictures in bare" && G.summary(G.gallery(["in: bare"]), bare) == "No pictures in bare"
-  @test found_in(["gone.png"]).problem == "No pictures"
+  @test bare.problem == "Nothing in bare" && G.summary(G.gallery(["in: bare"]), bare) == "Nothing in bare"
+  @test found_in(["gone.png"]).problem == "Nothing to show"
+  # Only hidden files
+  file("hid/.secret.png")
+  @test found_in(["in: hid"]).problem == "Nothing in hid"
   # A page with no folder yet
-  @test isempty(G.pictures(G.gallery(String[]), "", kinds=KINDS).pictures)
+  @test isempty(G.items(G.gallery(String[]), "", pictures=KINDS).items)
 end
 
 @testset "the grid" begin
@@ -99,6 +125,9 @@ end
   @test G.pixels(80) == 256 && G.pixels(100) == 400 && G.pixels(133) == 400 && G.pixels(228) == 640 && G.pixels(600) == 1024
   # A square shows the middle of a picture
   @test G.crop(300, 100) == (100.0, 0.0, 100, 100) && G.crop(100, 300) == (0.0, 100.0, 100, 100) && G.crop(50, 50) == (0.0, 0.0, 50, 50)
+  # Or the whole picture, as big as fits, in the middle of its room
+  @test G.fit(300, 100, 120, 80) == (0.0, 20.0, 120.0, 40.0) && G.fit(100, 200, 120, 80) == (40.0, 0.0, 40.0, 80.0)
+  @test G.fit(10, 10, 100, 100) == (0.0, 0.0, 100.0, 100.0)
 end
 
 @testset "a file that's dropped is copied into the folder" begin
@@ -112,4 +141,10 @@ end
   # A folder that isn't there is made
   @test G.keep(joinpath(dir, "later", "site"), from) == joinpath(dir, "later", "site", "new.png")
   @test G.keep(joinpath(dir, "photos"), joinpath(dir, "no such file.png")) === nothing
+  # A folder is copied with what's in it, and a file of any kind is copied
+  file("drop/box/a.txt")
+  @test G.keep(joinpath(dir, "photos"), joinpath(dir, "drop", "box") * "/") == joinpath(dir, "photos", "box")
+  @test isfile(joinpath(dir, "photos", "box", "a.txt"))
+  @test G.keep(joinpath(dir, "photos"), joinpath(dir, "drop", "box")) == joinpath(dir, "photos", "box-2")
+  @test G.keep(joinpath(dir, "photos"), joinpath(dir, "drop", "box", "a.txt")) == joinpath(dir, "photos", "a.txt")
 end

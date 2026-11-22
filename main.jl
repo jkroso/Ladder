@@ -10632,6 +10632,8 @@ zoom_out!(v::ZoomView, refocus=true) = begin
   m === nothing || Diagrams.settle!(m)
   v.what = nothing
   what[1] == :node && v.home !== nothing && (what[2].height = v.home)
+  # A video of a gallery shows only while it fills the window, so it stops when it leaves
+  what[1] == :node && what[2] isa VideoPlayer && v.from isa GalleryView && pause!(what[2])
   v.from isa Pages && (v.from.page = v.page)   # the page in the document goes on from the page you looked at
   v.from = nothing
   e = editor(v)
@@ -10767,9 +10769,10 @@ describe(v::ZoomView) = begin
     shows = with_theme(() -> geometry(node), component_theme(e.zoom))
     # A video has a button that makes it fill the screen
     buttons = node isa VideoPlayer ? (button!(v, :screen, :screen, icon="arrows-fullscreen", tip="Fill the screen  F"), close) : (close,)
+    # A video or a model of a gallery says where it is in the gallery, with a button to each side
     return Stack(width(grow=grow), height(grow=grow), Alignment.Start,
       Column(width(grow=grow), height(grow=grow), Alignment.Center, padding(px(ZOOM_EDGE)), shows),
-      bar(buttons...))
+      gallery_edges(v)..., bar(gallery_buttons(v, rest=60 + 40length(buttons))..., buttons...))
   end
   what[1] == :diagram && lay_diagram!(v)
   # The view is the whole window under the top bar, so it's fitted here, and the bar says how big the picture is in this frame
@@ -10780,11 +10783,15 @@ describe(v::ZoomView) = begin
                     label(v.zoom > 0 ? "$(round(Int, 100v.zoom))%" : "", 12px, color=colours.dim)),
                 button!(v, :bigger, (:zoom, ZOOM_STEP), icon="zoom-in", tip="Bigger  pinch, or ⌘ and scroll"),
                 button!(v, :fit, :fit, icon="aspect-ratio", tip="Fit the window  ⌘0")]
-  prepend!(buttons, gallery_buttons(v))   # a picture of a gallery says where it is in the gallery, with a button to each side
-  if what[1] == :pdf && v.pages > 1
-    push!(buttons, button!(v, :back, (:page, -1), icon="chevron-left", tip="The page before  ←", off=v.page <= 1),
+  pages = what[1] == :pdf && v.pages > 1
+  # A file of a gallery says where it is in the gallery, with a button to each side
+  prepend!(buttons, gallery_buttons(v, rest=pages ? 450 : 281))
+  if pages
+    # In a gallery, ← and → go to the file before and the next one, so ↑ and ↓ turn the pages
+    before, next = v.from isa GalleryView ? ("↑", "↓") : ("←", "→")
+    push!(buttons, button!(v, :back, (:page, -1), icon="chevron-left", tip="The page before  $before", off=v.page <= 1),
           Box(Alignment.Center, padding(4px, 0px), label("Page $(v.page) of $(v.pages)", 12px, color=colours.dim)),
-          button!(v, :on, (:page, 1), icon="chevron-right", tip="The next page  →", off=v.page >= v.pages))
+          button!(v, :on, (:page, 1), icon="chevron-right", tip="The next page  $next", off=v.page >= v.pages))
   end
   push!(buttons, close)
   Stack(width(grow=grow), height(grow=grow), Alignment.Start, part!(() -> ZoomArea(of=v), v, :area), gallery_edges(v)..., bar(buttons...))
@@ -11091,6 +11098,8 @@ zoom_key!(v::ZoomView, K, w, command) = begin
   end
   K == Keys.escape && unmodified(w) && return zoom_out!(v)
   command in PAGE_COMMANDS && return nothing
+  # A file of a gallery: ← and → go to the file before it and the next one. A video that fills the screen keeps them.
+  unmodified(w) && v.from isa GalleryView && !v.screen && K in (Keys.left, Keys.right) && return step!(v.from, K == Keys.left ? -1 : 1)
   if v.what[1] == :node && v.what[2] isa VideoPlayer && unmodified(w)
     # F makes a video fill the screen, and puts it back. The keys of the video are its own here too.
     K == Keys.f && return screen!(v, !v.screen)
@@ -11100,9 +11109,8 @@ zoom_key!(v::ZoomView, K, w, command) = begin
   command == :bigger && return zoom_by!(v, ZOOM_STEP, view_middle(v)...)
   command == :smaller && return zoom_by!(v, 1 / ZOOM_STEP, view_middle(v)...)
   command == :usual_size && return fit_now!(v)
-  unmodified(w) && v.what[1] == :pdf && K in (Keys.left, Keys.right) && return turn!(v, K == Keys.left ? -1 : 1)
-  # A picture of a gallery: ← and → go to the picture before it and the next one
-  unmodified(w) && v.from isa GalleryView && K in (Keys.left, Keys.right) && return step!(v.from, K == Keys.left ? -1 : 1)
+  # ← and →, or ↑ and ↓, turn the pages of a PDF file. In a gallery only ↑ and ↓ do.
+  unmodified(w) && v.what[1] == :pdf && K in (Keys.left, Keys.right, Keys.up, Keys.down) && return turn!(v, K in (Keys.left, Keys.up) ? -1 : 1)
   handled
 end
 
@@ -17245,26 +17253,32 @@ end
 
 BLOCKS[FIND] = BlockKind("Find", "search", SearchView, find_html)
 
-# --- a gallery of a folder's pictures ----------------------------------------------------------
+# --- a gallery of a folder's files ------------------------------------------------------------
 #
-# A code block in the language `gallery` shows the pictures of a folder as a
-# grid of small squares. gallery.jl says how the block is written. A square
-# shows the middle of its picture, cut to fit. The top of the block says how
-# many pictures there are and where they are. A button there changes the size
-# of the squares, and writes the size into the block.
+# A code block in the language `gallery` shows the files and the folders of a
+# folder as a grid of small squares. gallery.jl says how the block is written.
+# The square of a picture or a video shows the middle of its picture, cut to
+# fit. The square of any other file shows the picture that the Finder has for
+# it, like the first page of a PDF file, with the file's name under it. A
+# folder shows the Finder's icon for it. The top of the block says how many
+# files there are and where they are. A button there changes the size of the
+# squares, and writes the size into the block.
 #
-#   - A click on a picture makes it fill the window, as a picture in the text
-#     does. There, ← and → go to the picture before it and the next one of
-#     the gallery, and Esc puts the page back.
-#   - While it fills the window, the bar under it says where it is in the
-#     gallery, like "2 of 6", and the name of its file. A button on each side
-#     of those words goes to the picture before and to the next one. While
-#     the mouse is near the left or the right edge of the window, a large
-#     arrow shows there that does the same.
-#   - The mouse over a picture shows the name of its file.
-#   - A picture that's dropped on the gallery from the Finder is copied into
-#     the gallery's folder. A gallery that only lists its pictures gets a
-#     line for the picture, and the file stays where it is.
+#   - A click on a picture, a PDF file, a video or a 3D model makes it fill
+#     the window, as the same file in the text does. There, ← and → go to the
+#     file before it and the next one of the gallery that fill the window too,
+#     ↑ and ↓ turn the pages of a PDF file, and Esc puts the page back.
+#   - A click on a folder or another kind of file opens it, as a link to it
+#     does.
+#   - While a file fills the window, the bar under it says where it is in the
+#     gallery, like "2 of 6", and the name of the file. A button on each side
+#     of those words goes to the file before and to the next one. While the
+#     mouse is near the left or the right edge of the window, a large arrow
+#     shows there that does the same.
+#   - The mouse over a square shows the name of its file.
+#   - A file or a folder that's dropped on the gallery from the Finder is
+#     copied into the gallery's folder. A gallery that only lists its files
+#     gets a line for it, and the file stays where it is.
 #
 # A big folder mustn't stop the window. macOS makes a small picture of each
 # file, as it does for the Finder, and Ladder asks for a few of them in each
@@ -17272,7 +17286,7 @@ BLOCKS[FIND] = BlockKind("Find", "search", SearchView, find_html)
 # folder is read again every few seconds while the window is drawn.
 
 const GALLERY = Galleries.GALLERY
-const GALLERY_KINDS = (PICTURES..., MAC_PICTURES...)   # the ends of the names of the files that a gallery shows
+const GALLERY_KINDS = (PICTURES..., MAC_PICTURES...)   # the ends of the names of the files that a gallery shows as pictures
 const GALLERY_EVERY = 3        # seconds between two looks at the folder, while the window is drawn
 const GALLERY_BUDGET = 0.012   # seconds of a frame that making small pictures can take. One is always made.
 const GALLERY_TOP = 38px       # how tall the line at the top of a gallery is
@@ -17281,11 +17295,13 @@ const GALLERY_ROUND = 6px      # how round the corners of a square are
 const GALLERY_EDGE = 44px      # how big the arrow is at an edge of the window, while a picture fills the window
 const GALLERY_NEAR = 140       # px: the mouse is this near an edge of the window when that edge's arrow shows
 const GALLERY_NAME = 200       # px: the most room that the name of a file has in the bar under a picture
+const GALLERY_INSET = 6px      # between the edge of a square and the picture and the name in it, where the picture doesn't fill the square
+const GALLERY_LABEL = 14px     # how tall the name under such a picture is
 "For each size of square: the icon of the button that changes the size, and what the button says"
 const GALLERY_SIZES = (small=("grid-3x3-gap", "Small"), medium=("grid", "Medium"), large=("square", "Large"))
 push!(BLOCK_ICONS, "images", "image", "grid-3x3-gap", "grid", "square")
 
-"What a `gallery` block shows: the pictures of a folder as a grid of squares"
+"What a `gallery` block shows: the files and the folders of a folder as a grid of squares"
 @def mutable struct GalleryView <: SemanticUI
   n::Int = 0                               # its place among the page's galleries
   first::Int = 0                           # the lines of its block, when the page was last laid out
@@ -17293,17 +17309,18 @@ push!(BLOCK_ICONS, "images", "image", "grid-3x3-gap", "grid", "square")
   data::Galleries.Gallery = Galleries.Gallery()
   lines::Vector{String} = String[]         # the lines that `data` was read from
   shown::Any = nothing                     # what the gallery showed when its folder was last read, and when to read it again
-  small::Dict{Any,Any} = Dict{Any,Any}()   # the key of the small picture of each file, or nothing for a file that has none
-  wanted::Vector{Galleries.Picture} = Galleries.Picture[]   # the pictures in the window whose small pictures aren't made yet
+  # The small picture of each file: its key and whether it fills its square. It's nothing for a file that has no picture.
+  small::Dict{Any,Any} = Dict{Any,Any}()
+  wanted::Vector{Galleries.Item} = Galleries.Item[]   # the files in the window whose small pictures aren't made yet
   side::px = 0px                           # how big each square was when the grid was last laid out
-  showing::String = ""                     # the file of the picture that fills the window, or that last did
-  parts::Dict{Any,Any} = Dict{Any,Any}()   # its squares and its button, kept between frames
+  showing::String = ""                     # the file that fills the window, or that last did
+  parts::Dict{Any,Any} = Dict{Any,Any}()   # its squares, its button, and the player of the video that fills the window, kept between frames
 end
 
-"A square of a gallery: one picture"
+"A square of a gallery: one file or folder"
 @def mutable struct GalleryThumb <: SemanticUI
   of::Any = nothing
-  i::Int = 0   # its place among the gallery's pictures
+  i::Int = 0   # its place among the gallery's files
 end
 
 reread!(v::GalleryView, lines) = begin
@@ -17318,35 +17335,50 @@ end
 on_paper(e) = e.buf.caret[1] == 0
 
 """
-What the gallery shows: its pictures, the lines that name no picture, and why
-there are no pictures. The folder is read again after a few seconds, and after
-longer when reading it takes long.
+What the gallery shows: its files and folders, the lines that name nothing,
+and why there's nothing to show. It leaves out the page that holds it. The
+folder is read again after a few seconds, and after longer when reading it
+takes long.
 """
 found!(v::GalleryView) = begin
-  dir = docdir(editor(v))
+  e = editor(v)
+  dir = docdir(e)
   key = (v.lines, dir)
   s = v.shown
   s !== nothing && s.key == key && time() < s.next && return s.found
   started = time()
-  found = Galleries.pictures(v.data, dir, kinds=GALLERY_KINDS)
+  found = Galleries.items(v.data, dir, pictures=GALLERY_KINDS, skip=(e.buf.path,))
   v.shown = (key=key, next=time() + max(GALLERY_EVERY, 20 * (time() - started)), found=found)
   found
 end
 
-"Picture `i` of the gallery, or nothing when it has no such picture"
-picture_at(v::GalleryView, i::Int) = get(found!(v).pictures, i, nothing)
+"Square `i` of the gallery: a file or a folder, or nothing when it has no such square"
+item_at(v::GalleryView, i::Int) = get(found!(v).items, i, nothing)
 
 "What the small picture of `p` is kept under: its file, when the file last changed, and how many pixels the squares need now"
 small_mark(v::GalleryView, p) = (p.path, p.at, Galleries.pixels(num(v.side)))
 
-"The key, for drawing, of the small picture of `p`. It's nothing for a file that has no picture, and `missing` until it's made."
+"""
+The small picture of `p`: its key, for drawing, and whether it fills the
+square. It's nothing for a file that has no picture, and `missing` until it's made.
+"""
 small(v::GalleryView, p) = get(v.small, small_mark(v, p), missing)
 
-"Make the small picture of `p`: the one that macOS makes for the Finder, or the whole picture when macOS has none"
+"True when the picture of `p` fills its square: a picture's own, and the picture that macOS makes of a video"
+fills_square(p) = p.kind == :picture || p.kind == :file && lowercase(splitext(p.path)[2]) in VIDEOS
+
+"""
+Make the small picture of `p`: the one that macOS makes for the Finder, like
+the first page of a Pages document. A picture that macOS has none for shows
+itself. A folder, and a file that has no picture, show the Finder's icon.
+"""
 small!(v::GalleryView, p) = begin
   mark = small_mark(v, p)
   key = thumbnail(p.path, mark[3])
-  v.small[mark] = key === nothing ? picture_key(p.path) : key
+  key === nothing && p.kind == :picture && (key = picture_key(p.path))
+  fills = key !== nothing && fills_square(p)
+  key === nothing && (key = finder_icon(p.path, mark[3]))
+  v.small[mark] = key === nothing ? nothing : (key=key, fills=fills)
 end
 
 """
@@ -17384,24 +17416,48 @@ end
 
 describe(t::GalleryThumb) = begin
   v = t.of
-  p = picture_at(v, t.i)
-  # A file that has no picture to show has an icon in its square
-  none = p !== nothing && small(v, p) === nothing
-  Box(fixed(v.side), height(v.side), radius(GALLERY_ROUND), Alignment.Center, justify=Alignment.Center, name="Picture", background(colours.block),
-      (none ? (Icon("image", size=20px, color=colours.faint),) : ())...)
+  p = item_at(v, t.i)
+  s = p === nothing ? missing : small(v, p)
+  # A picture or a video fills its square, in `draw`
+  (p === nothing || (s isa NamedTuple ? s.fills : ismissing(s) && fills_square(p))) &&
+    return Box(fixed(v.side), height(v.side), radius(GALLERY_ROUND), name="Picture", background(colours.block))
+  # Any other file has the whole of its picture in its square, with its name under it, as the Finder shows it
+  wide, high = v.side - 2GALLERY_INSET, v.side - 2GALLERY_INSET - GALLERY_LABEL - 4px
+  picture = if s isa NamedTuple
+    image = image_source(s.key)
+    _, _, w, h = Galleries.fit(image.width, image.height, num(wide), num(high))
+    (Image(s.key, fixed(px(w)), height(px(h))),)
+  elseif s === nothing
+    # A file that has no picture at all has the icon of its kind
+    (Icon(p.kind == :folder ? "folder" : file_icon(p.path), size=24px, color=colours.faint),)
+  else
+    ()   # its picture isn't made yet
+  end
+  Column(fixed(v.side), height(v.side), radius(GALLERY_ROUND), padding(GALLERY_INSET), child_gap=4px, Alignment.Center, name="Picture",
+         background(colours.block),
+    Box(fixed(wide), height(high), Alignment.Center, justify=Alignment.Center, picture...),
+    Box(height(GALLERY_LABEL), Alignment.Center, label(elide(p.name, 11px, wide), 11px, color=colours.dim)))
 end
 
-# The square shows the middle of the small picture, cut to fit, with round corners
+# The square of a picture or a video shows the middle of its picture, cut to fit, with round corners
 draw(ctx, size, ui::ConcreteRect, t::GalleryThumb) = begin
   v = t.of
-  p = picture_at(v, t.i)
+  p = item_at(v, t.i)
   p === nothing && return
-  key = small(v, p)
+  s = small(v, p)
   left, top, wide, tall = num(ui.left), num(ui.top), num(ui.width), num(ui.height)
-  if key isa String
-    image = image_source(key)
+  if s isa NamedTuple && s.fills
+    image = image_source(s.key)
     with_round_clip(ctx, ui.left, ui.top, ui.width, ui.height, GALLERY_ROUND) do
       paint_picture(ctx, image.raw, Galleries.crop(image.width, image.height), (left, top, wide, tall))
+    end
+    # A video has a mark that plays in its corner, so that it isn't taken for a picture
+    if p.kind == :file
+      r = 11.0
+      x, y = left + 8 + r, top + tall - 8 - r
+      disc(ctx, x, y, r, RGBA(0, 0, 0, 0.55))
+      white = RGBA(1, 1, 1, 1)
+      trace(ctx, [(x - 3.5, y - 5.5), (x + 5.5, y), (x - 3.5, y + 5.5)], white, 0.5; fill=white, closed=true)
     end
   end
   # The square under the mouse has a line round it
@@ -17413,96 +17469,147 @@ cursor(::GalleryThumb) = :hand
 cursor(::GalleryView) = :arrow
 
 onmouse(t::GalleryThumb, ev::MouseMove) = begin
-  p = picture_at(t.of, t.i)
+  p = item_at(t.of, t.i)
   p === nothing || show_tooltip!(ev.window, tip_label(p.name), t, placement=:bottom, gap=6px)
   nothing
 end
 
-onkey(t::GalleryThumb, ev::KeyPress{Keys.mouse_left}) = (hide_tooltip!(ev.window); show_picture!(t.of, t.i))
+onkey(t::GalleryThumb, ev::KeyPress{Keys.mouse_left}) = (hide_tooltip!(ev.window); open_item!(t.of, t.i))
 
-"Make picture `i` of the gallery fill the window. A file that can't be read as a picture stays in its square."
-show_picture!(v::GalleryView, i::Int) = begin
-  p = picture_at(v, i)
-  key = p === nothing ? nothing : picture_key(p.path)
-  key === nothing && return handled
-  v.showing = p.path
-  zoom_in!(editor(v), (:picture, key), v)
+"""
+True when `p`, a square of the gallery, is of a kind that fills the window on
+a click: a picture, a PDF file, a video or a 3D model. A picture whose square
+has no picture of its own can't be read, so it doesn't. This reads no file, so
+it's quick enough for each frame.
+"""
+fills_window(v::GalleryView, p) = begin
+  ext = lowercase(splitext(p.path)[2])
+  p.kind == :picture ? (s = small(v, p); ismissing(s) || s isa NamedTuple && s.fills) :
+  p.kind == :file && (ext in MODELS || Sys.isapple() && (ext == ".pdf" || ext in VIDEOS))
 end
 
 """
-While a picture of the gallery fills the window, go `by` pictures on: to the
-one before it, or to the next one. A file that can't be read as a picture is
-passed over. At the first picture and the last, nothing changes.
+What fills the window for `p`, a square of the gallery: its picture, the
+first page of its PDF file, the player of its video or the viewer of its 3D
+model. It's nothing for a folder, a file of another kind, and a file that
+can't be read as its kind. The gallery keeps one player and one viewer.
+"""
+item_fill(v::GalleryView, p) = begin
+  if p.kind == :picture
+    key = picture_key(p.path)
+    return key === nothing ? nothing : (:picture, key)
+  end
+  fills_window(v, p) || return nothing
+  ext = lowercase(splitext(p.path)[2])
+  ext == ".pdf" && return pdf_pages(p.path) > 0 ? (:pdf, p.path, 1) : nothing
+  if ext in VIDEOS
+    old = get(v.parts, :player, nothing)
+    old isa VideoPlayer && old.path == p.path && return (:node, old)
+    delete!(v.parts, :player)
+    return (:node, block_part!(() -> VideoPlayer(path=p.path, height=MODEL_HEIGHT), v, :player))
+  end
+  old = get(v.parts, :model, nothing)
+  (old isa STLViewer && old.path == p.path) || delete!(v.parts, :model)
+  m = block_part!(() -> STLViewer(path=p.path, height=MODEL_HEIGHT), v, :model)
+  load!(m) isa Mesh ? (:node, m) : nothing
+end
+
+"""
+Do what a click on square `i` of the gallery does. A picture, a PDF file, a
+video or a 3D model fills the window. A folder and any other file open, as a
+link to them does.
+"""
+open_item!(v::GalleryView, i::Int) = begin
+  p = item_at(v, i)
+  p === nothing && return handled
+  what = item_fill(v, p)
+  what === nothing || return show_item!(v, p, what)
+  show_path!(editor(v), p.path)
+  handled
+end
+
+"Make `what`, which shows `p` of the gallery, fill the window"
+show_item!(v::GalleryView, p, what) = begin
+  v.showing = p.path
+  zoom_in!(editor(v), what, v)
+end
+
+"""
+While a file of the gallery fills the window, go `by` files on: to the one
+before it, or to the next one. A folder, and a file that doesn't fill the
+window, are passed over. At the first file and the last, nothing changes.
 """
 step!(v::GalleryView, by::Int) = begin
-  pics = found!(v).pictures
-  i = something(findfirst(p -> p.path == v.showing, pics), 0) + by
-  while i in eachindex(pics)
-    picture_key(pics[i].path) === nothing || return show_picture!(v, i)
+  items = found!(v).items
+  i = something(findfirst(p -> p.path == v.showing, items), 0) + by
+  while i in eachindex(items)
+    what = item_fill(v, items[i])
+    what === nothing || return show_item!(v, items[i], what)
     i += by
   end
   handled
 end
 
 """
-Where the picture that fills the window is in its gallery: the gallery, the
-picture's place, how many pictures there are, and the name of its file. It's
-nothing for a picture that isn't from a gallery.
+Where the file that fills the window is in its gallery: the gallery, the
+file's place, how many files and folders the gallery has, and the name of the
+file. It's nothing for what isn't from a gallery.
 """
 gallery_place(z::ZoomView) = begin
   g = z.from
-  (g isa GalleryView && z.what !== nothing && z.what[1] == :picture) || return nothing
-  pics = found!(g).pictures
-  i = findfirst(p -> p.path == g.showing, pics)
-  i === nothing ? nothing : (gallery=g, i=i, n=length(pics), name=pics[i].name)
+  (g isa GalleryView && z.what !== nothing) || return nothing
+  items = found!(g).items
+  i = findfirst(p -> p.path == g.showing, items)
+  i === nothing ? nothing : (gallery=g, i=i, n=length(items), name=items[i].name)
 end
 
-"What the bar under a picture says of the picture's place, like “2 of 6”"
+"What the bar under a file of a gallery says of the file's place, like “2 of 6”"
 place_words(at) = "$(at.i) of $(at.n)"
 
 """
-True when the gallery has a picture to show `by` pictures on from picture `i`:
-one before it, or one after it. A file that's known to have no picture doesn't
-count, because `step!` passes over it.
+True when the gallery has a file to show `by` files on from square `i`: one
+before it, or one after it. A folder and a file that doesn't fill the window
+don't count, because `step!` passes over them.
 """
 can_step(v::GalleryView, i::Int, by::Int) = begin
-  pics = found!(v).pictures
-  any(k -> small(v, pics[k]) !== nothing, by < 0 ? (1:i-1) : (i+1:length(pics)))
+  items = found!(v).items
+  any(k -> fills_window(v, items[k]), by < 0 ? (1:i-1) : (i+1:length(items)))
 end
 
 """
-What the bar under a picture of a gallery starts with: a button for the
-picture before, the picture's place, a button for the next picture, the name
-of its file and a line. The bar of any other picture has none of them. In a
-window that's too narrow for them all, the name goes first, and then the place.
+What the bar under a file of a gallery starts with: a button for the file
+before, the file's place, a button for the next file, the file's name and a
+line. The bar of anything else has none of them. In a window that's too
+narrow for them all, the name goes first, and then the place.
 """
-gallery_buttons(z::ZoomView) = begin
+gallery_buttons(z::ZoomView; rest=281) = begin
   at = gallery_place(z)
   at === nothing && return ()
   g = at.gallery
   button(key, by, icon, tip) = begin
     b = part!(() -> PlanButton(of=g), z, (:button, key))
-    b.action, b.icon, b.tip, b.off = (:step, by), icon, tip, !can_step(g, at.i, by)
+    # The view keeps its buttons, and the gallery can be another one of the page than when they were made
+    b.of, b.action, b.icon, b.tip, b.off = g, (:step, by), icon, tip, !can_step(g, at.i, by)
     b
   end
   face = Face(SANS, "", 12px, colours.dim, false)
-  # The rest of the bar, with its two buttons here and the room on each side of it, is 281px wide
-  spare = num(window_size(editor(z))[1]) - 281
+  # `rest` is how wide the rest of the bar is, with the two buttons here and the room on each side of it
+  spare = num(window_size(editor(z))[1]) - rest
   place = place_words(at)
   placed = num(measure(face, place)) + 8
   room = min(spare - placed - 14, GALLERY_NAME)
   words(text) = label(text, 12px, color=colours.dim)
-  (button(:before, -1, "chevron-left", "The picture before  ←"),
+  (button(:before, -1, "chevron-left", "The file before  ←"),
    (spare >= placed ? (Box(Alignment.Center, padding(4px, 0px), words(place)),) : ())...,
-   button(:next, 1, "chevron-right", "The next picture  →"),
+   button(:next, 1, "chevron-right", "The next file  →"),
    (room >= 60 ? (Box(Alignment.Center, padding(6px, 0px), words(elide(at.name, 12px, px(room)))),) : ())...,
    rule())
 end
 
-"A large arrow at the left or the right edge of the window, while a picture of a gallery fills it. A click goes to the picture before, or to the next one."
+"A large arrow at the left or the right edge of the window, while a file of a gallery fills it. A click goes to the file before, or to the next one."
 @def mutable struct GalleryEdge <: SemanticUI
   of::Any = nothing   # the gallery
-  by::Int = 1         # -1 for the picture before, and 1 for the next one
+  by::Int = 1         # -1 for the file before, and 1 for the next one
 end
 
 describe(a::GalleryEdge) =
@@ -17514,10 +17621,10 @@ cursor(::GalleryEdge) = :hand
 onkey(a::GalleryEdge, ::KeyPress{Keys.mouse_left}) = step!(a.of, a.by)
 
 """
-The arrows at the left and the right edge of a picture of a gallery that
-fills the window, in the middle of the picture's height. Each one shows while
-the mouse is near its edge, and there's a picture to go to. Any other picture
-has none.
+The arrows at the left and the right edge of a file of a gallery that fills
+the window, in the middle of the window's height. Each one shows while the
+mouse is near its edge, and there's a file to go to. Anything else that fills
+the window has none.
 """
 gallery_edges(z::ZoomView) = begin
   at = gallery_place(z)
@@ -17527,15 +17634,18 @@ gallery_edges(z::ZoomView) = begin
   x, y = num(w.mouse[1]), num(w.mouse[2])
   arrow(by) = begin
     near = y > num(TOPBAR_H) && (by < 0 ? x < GALLERY_NEAR : x > wide - GALLERY_NEAR)
-    near && can_step(at.gallery, at.i, by) ? part!(() -> GalleryEdge(of=at.gallery, by=by), z, (:edge, by)) : Box(width(GALLERY_EDGE))
+    near && can_step(at.gallery, at.i, by) || return Box(width(GALLERY_EDGE))
+    a = part!(() -> GalleryEdge(by=by), z, (:edge, by))
+    a.of = at.gallery   # the view keeps its arrows, and the gallery can be another one of the page than when they were made
+    a
   end
   (Row(width(grow=grow), height(grow=grow), Alignment.Center, padding(0px, 16px, BAR_ROOM, 16px), arrow(-1), Box(width(grow=grow)), arrow(1)),)
 end
 
 """
 Do what a button of a gallery does. The one at its top gives its squares the
-next size, which goes into the block. The two under a picture that fills the
-window go to the picture before it and to the next one.
+next size, which goes into the block. The two under a file that fills the
+window go to the file before it and to the next one.
 """
 act!(v::GalleryView, action, w) = begin
   action isa Tuple && action[1] == :step && return step!(v, action[2])
@@ -17549,23 +17659,23 @@ end
 describe(v::GalleryView) = begin
   e = editor(v)
   found = found!(v)
-  pics = found.pictures
+  items = found.items
   paper = on_paper(e)
   with_theme(component_theme(e.zoom)) do
     lost = Galleries.lost_words(found.lost)
-    isempty(pics) && return Column(block_look()..., clip=true, name="Gallery", block_note(isempty(lost) ? found.problem : lost))
+    isempty(items) && return Column(block_look()..., clip=true, name="Gallery", block_note(isempty(lost) ? found.problem : lost))
     icon, words = GALLERY_SIZES[v.data.size]
     bigger = lowercase(GALLERY_SIZES[Galleries.next_size(v.data.size)][2])
     top = Row(width(grow=grow), height(GALLERY_TOP), padding(0px, 6px, 0px, GALLERY_PAD), Alignment.Center, clip=true,
               Box(label(Galleries.summary(v.data, found), 12px, color=colours.dim)), Box(width(grow=grow)),
-              (paper ? () : (block_button!(v, :size, :size, icon=icon, words=words, tip="Make the pictures $bigger"),))...)
-    g = Galleries.grid(length(pics), num(e.width - 2px - 2GALLERY_PAD), v.data.size)
+              (paper ? () : (block_button!(v, :size, :size, icon=icon, words=words, tip="Make the squares $bigger"),))...)
+    g = Galleries.grid(length(items), num(e.width - 2px - 2GALLERY_PAD), v.data.size)
     v.side = px(g.side)
     rows = rows_in_view(v, g)
-    places = [i for r in rows for i in Galleries.row_places(r, g.columns, length(pics))]
-    # On paper every picture shows, so each small picture is made now. In the window, the next frames make them.
-    paper && foreach(i -> ismissing(small(v, pics[i])) && small!(v, pics[i]), places)
-    v.wanted = [pics[i] for i in places if ismissing(small(v, pics[i]))]
+    places = [i for r in rows for i in Galleries.row_places(r, g.columns, length(items))]
+    # On paper every square shows, so each small picture is made now. In the window, the next frames make them.
+    paper && foreach(i -> ismissing(small(v, items[i])) && small!(v, items[i]), places)
+    v.wanted = [items[i] for i in places if ismissing(small(v, items[i]))]
     isempty(v.wanted) || redraw_in!(v, 0)
     gap, step = px(Galleries.GAP), g.side + Galleries.GAP
     # The rows that aren't built leave their room empty, so the block is as tall as the whole grid
@@ -17574,10 +17684,10 @@ describe(v::GalleryView) = begin
     grid = Column(width(grow=grow), Alignment.Start, padding(0px, GALLERY_PAD, GALLERY_PAD, GALLERY_PAD), child_gap=gap,
       (above > 0px ? (Box(width(grow=grow), height(above)),) : ())...,
       [Row(height(v.side), child_gap=gap, Alignment.Start,
-           [block_part!(() -> GalleryThumb(of=v, i=i), v, (:thumb, i)) for i in Galleries.row_places(r, g.columns, length(pics))]...)
+           [block_part!(() -> GalleryThumb(of=v, i=i), v, (:thumb, i)) for i in Galleries.row_places(r, g.columns, length(items))]...)
        for r in rows]...,
       (below > 0px ? (Box(width(grow=grow), height(below)),) : ())...)
-    # A line of the block that names no picture is named under the grid
+    # A line of the block that names nothing is named under the grid
     note = isempty(lost) ? () : (Row(width(grow=grow), padding(0px, GALLERY_PAD, GALLERY_PAD, GALLERY_PAD), Alignment.Start, clip=true,
                                      Box(width(grow=grow), Text(lost, size=12px, family=SANS, color=colours.dim, wrap=WrapMode.words))),)
     Column(block_look()..., clip=true, name="Gallery", top, grid, note...)
@@ -17597,16 +17707,16 @@ gallery_at(e, w) = begin
 end
 
 """
-Add the pictures among the files at `paths` to the gallery, as a drop on it
+Add the files and the folders at `paths` to the gallery, as a drop on it
 does. Each one is copied into the gallery's folder. A gallery that only lists
-its pictures gets a line for each one, and the files stay where they are.
-It's true when the gallery took a picture.
+its files gets a line for each one, and the files stay where they are. It's
+true when the gallery took a file or a folder.
 """
-add_pictures!(v::GalleryView, paths) = begin
+add_files!(v::GalleryView, paths) = begin
   e = editor(v)
   dir = docdir(e)
-  new = [rstrip(String(p), '/') for p in paths]
-  filter!(p -> isfile(p) && Galleries.ispicture(p, GALLERY_KINDS), new)
+  new = [String(rstrip(String(p), '/')) for p in paths]
+  filter!(ispath, new)
   (isempty(new) || readonly(e.buf) || !isdir(dir)) && return false
   to = Galleries.folder(v.data, dir)
   if to === nothing
@@ -17620,13 +17730,25 @@ add_pictures!(v::GalleryView, paths) = begin
   true
 end
 
-"The gallery as HTML: a grid of its pictures, each one named as a picture in the text names its file"
+"""
+The gallery as HTML: a grid of squares, each named as a link in the text names
+its file. A picture shows itself. Any other file or folder is a link with its
+name in it.
+"""
 gallery_html(e, v::GalleryView) = begin
   found = found!(v)
-  isempty(found.pictures) && return "<p>$(escape(isempty(found.lost) ? found.problem : Galleries.lost_words(found.lost)))</p>"
-  look = "width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: $(round(Int, num(GALLERY_ROUND)))px"
-  pictures = join(("<img src=\"$(escape(escaped(named(e, p.path))))\" alt=\"$(escape(splitext(p.name)[1]))\" loading=\"lazy\" style=\"$look\">" for p in found.pictures), "\n")
-  "<div class=\"gallery\" style=\"display: grid; grid-template-columns: repeat(auto-fill, minmax($(Galleries.SIDES[v.data.size])px, 1fr)); gap: $(Galleries.GAP)px\">\n$pictures\n</div>"
+  isempty(found.items) && return "<p>$(escape(isempty(found.lost) ? found.problem : Galleries.lost_words(found.lost)))</p>"
+  shape = "aspect-ratio: 1; border-radius: $(round(Int, num(GALLERY_ROUND)))px"
+  look = "width: 100%; object-fit: cover; $shape"
+  box = "display: flex; align-items: flex-end; justify-content: center; box-sizing: border-box; padding: 6px; $shape; " *
+        "background: rgba(128, 128, 128, 0.12); color: inherit; text-decoration: none; font-size: 12px; overflow: hidden; overflow-wrap: anywhere"
+  square(p) = begin
+    src = escape(escaped(named(e, p.path)))
+    p.kind == :picture ? "<img src=\"$src\" alt=\"$(escape(splitext(p.name)[1]))\" loading=\"lazy\" style=\"$look\">" :
+                         "<a href=\"$src\" style=\"$box\">$(escape(p.name))</a>"
+  end
+  squares = join((square(p) for p in found.items), "\n")
+  "<div class=\"gallery\" style=\"display: grid; grid-template-columns: repeat(auto-fill, minmax($(Galleries.SIDES[v.data.size])px, 1fr)); gap: $(Galleries.GAP)px\">\n$squares\n</div>"
 end
 
 BLOCKS[GALLERY] = BlockKind("Gallery", "images", GalleryView, gallery_html)
@@ -27000,9 +27122,9 @@ onfiledrop(e::Editor, w::Window, paths) = begin
   # A picture or a page that's dropped on a canvas goes on the board where it's dropped
   board = canvas_at(e, w)
   board === nothing || board.zoom <= 0 || return (put_on_board!(board, paths, board_place(board, num(w.mouse[1]), num(w.mouse[2]))); nothing)
-  # A picture that's dropped on a gallery goes into the gallery
+  # A file or a folder that's dropped on a gallery goes into the gallery
   g = gallery_at(e, w)
-  g !== nothing && add_pictures!(g, paths) && return nothing
+  g !== nothing && add_files!(g, paths) && return nothing
   # A vCard file that's dropped on a block of contacts joins the block
   c = contacts_at(e, w)
   if c !== nothing

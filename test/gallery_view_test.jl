@@ -1,8 +1,9 @@
-# Tests for the `gallery` block of main.jl: the pictures of a folder as a grid
-# of small squares. Run them with `julia -O0 --project=. test/gallery_view_test.jl`.
+# Tests for the `gallery` block of main.jl: the files of a folder as a grid of
+# small squares. Run them with `julia -O0 --project=. test/gallery_view_test.jl`.
 # They click and press keys in a window that isn't on the screen. The pictures
-# are small PNG files that the tests write into a temporary folder. Set
-# `LADDER_SHOTS` to a folder, and they save a picture of each step there.
+# are small PNG files that the tests write into a temporary folder, with a PDF
+# file, a video, a 3D model, a page, code and a folder. Set `LADDER_SHOTS` to a
+# folder, and they save a picture of each step there.
 
 @use Test: @test, @testset
 @use "../main" => K
@@ -53,6 +54,28 @@ write_png(path, w, h, colour) = begin
   path
 end
 
+"Write a PDF file with `n` empty pages, each 200 by 300 points"
+write_pdf(path, n) = begin
+  objects = ["<< /Type /Catalog /Pages 2 0 R >>", "<< /Type /Pages /Kids [$(join(("$(2 + k) 0 R" for k in 1:n), " "))] /Count $n >>"]
+  # Every page draws the one empty stream of drawing, which is the last object
+  append!(objects, fill("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 300] /Contents $(n + 3) 0 R >>", n))
+  push!(objects, "<< /Length 0 >>\nstream\n\nendstream")
+  io = IOBuffer()
+  print(io, "%PDF-1.4\n")
+  places = Int[]
+  for (k, o) in enumerate(objects)
+    push!(places, position(io))
+    print(io, "$k 0 obj\n$o\nendobj\n")
+  end
+  table = position(io)
+  print(io, "xref\n0 $(length(objects) + 1)\n0000000000 65535 f \n")
+  foreach(at -> print(io, lpad(at, 10, '0'), " 00000 n \n"), places)
+  print(io, "trailer\n<< /Size $(length(objects) + 1) /Root 1 0 R >>\nstartxref\n$table\n%%EOF\n")
+  mkpath(dirname(path))
+  write(path, take!(io))
+  path
+end
+
 const RED, GREEN, BLUE, SAND = (200, 40, 40), (40, 160, 70), (50, 90, 200), (210, 180, 120)
 plain(c) = (x, y) -> c
 
@@ -66,8 +89,16 @@ write_png(joinpath(photos, "photo 2.png"), 90, 120, plain(SAND))
 write_png(joinpath(photos, "photo 3 wide.png"), 300, 100, (x, y) -> 100 < x <= 200 ? GREEN : RED)
 write_png(joinpath(photos, "photo 10.png"), 64, 64, (x, y) -> (4x - 1, 4y - 1, 120))
 write(joinpath(photos, "photo 4 broken.png"), "This file isn't a picture.")
-write(joinpath(photos, "notes.txt"), "Not a picture")
 mkpath(joinpath(dir, "empty"))
+# A folder with every kind of file
+const mixed = joinpath(dir, "mixed")
+write_png(joinpath(mixed, "a shot.png"), 80, 60, plain(BLUE))
+write_pdf(joinpath(mixed, "b plan.pdf"), 3)
+cp(joinpath(K.pages_dir[], "knot.mp4"), joinpath(mixed, "c knot.mp4"))
+cp(joinpath(K.pages_dir[], "knot.stl"), joinpath(mixed, "d knot.stl"))
+write(joinpath(mixed, "e notes.md"), "# Notes\n\nNot a picture.\n")
+write(joinpath(mixed, "f code.jl"), "f(x) = x + 1\n")
+mkpath(joinpath(mixed, "inner"))
 write_png(joinpath(dir, "plans", "front.png"), 80, 60, plain(RED))
 for k in 1:300
   write_png(joinpath(dir, "many", "shot $k.png"), 8, 8, plain((k % 256, 120, 200)))
@@ -92,6 +123,10 @@ in: empty
 plans/front.png
 photos/photo 2.png
 plans/gone.png
+```
+
+```gallery
+in: mixed
 ```
 
 The end.
@@ -121,7 +156,7 @@ key(k) = (onkey(w, KeyPress{k}(0, w)); frames())
 middle(r) = (K.num(r.left + r.width / 2), K.num(r.top + r.height / 2))
 block(n=1) = (s = K.block_lines(e.buf, K.GALLERY, n); e.buf.lines[s[1]+1:s[2]-1])
 thumb(i, of=v) = of.parts[(:thumb, i)]
-names(of=v) = [p.name for p in K.found!(of).pictures]
+names(of=v) = [p.name for p in K.found!(of).items]
 "The colour of the window's picture at a place in the window, as red, green and blue"
 colour_at((x, y)) = begin
   file = joinpath(dir, "window.png")
@@ -146,10 +181,13 @@ said(r) = r === nothing ? String[] : hasproperty(r, :lines) ? [join(r.lines, " "
   # The grid takes all the room that the block has
   g = G.grid(5, K.num(e.width) - 2 - 2K.num(K.GALLERY_PAD), :medium)
   @test K.num(v.side) ≈ g.side && g.columns == 5
-  # Each picture that can be read has a small picture, and the file that can't has none
-  @test [K.small(v, p) isa String for p in K.found!(v).pictures] == [true, true, true, false, true]
+  # Each picture that can be read has a small picture that fills its square. The file that can't has the Finder's icon.
+  smalls = [K.small(v, p) for p in K.found!(v).items]
+  @test all(s -> s isa NamedTuple, smalls) && [s.fills for s in smalls] == [true, true, true, false, true]
   # macOS made them, as it does for the Finder
-  @test startswith(K.small(v, K.found!(v).pictures[1]), "thumbnail:")
+  @test startswith(smalls[1].key, "thumbnail:") && startswith(smalls[4].key, "icon:")
+  # Only the square whose picture doesn't fill it has its name
+  @test said(rect(thumb(4))) == ["photo 4 broken.png"] && isempty(said(rect(thumb(1))))
   shot("gallery.png")
   # A square shows the middle of its picture: the wide one shows no red, from edge to edge
   r = rs[3]
@@ -170,7 +208,7 @@ end
 
 @testset "the button at the top changes the size" begin
   b = v.parts[(:button, :size)]
-  @test b.words == "Medium" && b.tip == "Make the pictures large"
+  @test b.words == "Medium" && b.tip == "Make the squares large"
   click(middle(rect(b))); settle()
   @test block() == ["in: photos", "size: large"] && b.words == "Large" && K.num(v.side) >= G.SIDES.large
   @test rect(thumb(4)).top > rect(thumb(1)).top   # fewer squares fit in a row
@@ -191,7 +229,7 @@ end
   shot("gallery-zoom.png")
   key(Keys.right)
   @test shows() == "photo 3 wide.png"
-  # The file that isn't a picture is passed over
+  # The file that can't be read as a picture is passed over
   key(Keys.right)
   @test shows() == "photo 10.png"
   # The last picture stays
@@ -202,9 +240,11 @@ end
   # Esc puts the gallery back, and the text has the keyboard
   key(Keys.escape)
   @test K.zooming(e) === nothing && w.focus === e && rect(thumb(1)) !== nothing
-  # A click on the file that isn't a picture does nothing
+  # A click on the file that can't be read as a picture opens it, as a link to it does
   click(middle(rect(thumb(4))))
-  @test K.zooming(e) === nothing && !K.dirty(e.buf)
+  @test K.zooming(e) === nothing && e.buf.path == joinpath(photos, "photo 4 broken.png") && !K.dirty(e.buf)
+  K.open!(e, page); settle()
+  @test e.buf.path == page
 end
 
 @testset "the bar under a picture says where it is, and has a button to each side" begin
@@ -216,7 +256,7 @@ end
   # The first picture: its place and its name. The button for the picture before is faint and does nothing.
   @test "1 of 5" in bar() && "photo 1.png" in bar()
   @test button(:before).off && !button(:next).off
-  @test button(:before).tip == "The picture before  ←" && button(:next).tip == "The next picture  →"
+  @test button(:before).tip == "The file before  ←" && button(:next).tip == "The next file  →"
   # The two buttons are at the start of the bar, before the buttons that make the picture bigger and smaller
   @test rect(button(:before)).left < rect(button(:next)).left < rect(button(:smaller)).left
   click(middle(rect(button(:before))))
@@ -292,27 +332,93 @@ end
   at((5, 5))
 end
 
-@testset "a folder that isn't there, and one with no pictures" begin
+@testset "a folder that isn't there, and one with nothing in it" begin
   @test K.found!(gallery(2)).problem == "There's no folder called “nowhere” beside this page."
-  @test K.found!(gallery(3)).problem == "No pictures in empty"
+  @test K.found!(gallery(3)).problem == "Nothing in empty"
   @test rect(gallery(2)) !== nothing && rect(gallery(3)) !== nothing
   @test isempty(gallery(2).parts) && isempty(gallery(3).parts)
 end
 
-@testset "a gallery that lists its pictures" begin
+@testset "a gallery that lists its files" begin
   l = gallery(4)
   @test names(l) == ["front.png", "photo 2.png"] && K.found!(l).lost == ["plans/gone.png"]
   @test rect(thumb(1, l)) !== nothing && rect(thumb(2, l)) !== nothing
   @test G.summary(l.data, K.found!(l)) == "2 pictures"
 end
 
-@testset "a picture that's dropped on a gallery goes into its folder" begin
+@testset "a gallery of every kind of file" begin
+  x = gallery(5)
+  z() = K.zooming(e)
+  bar() = said(rect(z()))
+  @test names(x) == ["a shot.png", "b plan.pdf", "c knot.mp4", "d knot.stl", "e notes.md", "f code.jl", "inner"]
+  @test [p.kind for p in K.found!(x).items] == [:picture, :file, :file, :file, :file, :file, :folder]
+  @test G.summary(x.data, K.found!(x)) == "6 files and 1 folder in mixed"
+  # Both rows of its squares in the window
+  show_gallery() = (e.scroll.offset = K.item(e, findall(==("```gallery"), e.buf.lines)[5]).top + 300px; frames(); settle())
+  show_gallery()
+  @test all(i -> K.num(rect(thumb(i, x)).top + rect(thumb(i, x)).height) < 900, 1:7)
+  # A picture and a video fill their squares. The rest show the whole of their picture, with their name under it.
+  smalls = [K.small(x, p) for p in K.found!(x).items]
+  @test all(s -> s isa NamedTuple, smalls)
+  @test [s.fills for s in smalls] == [true, false, true, false, false, false, false]
+  @test isempty(said(rect(thumb(1, x)))) && isempty(said(rect(thumb(3, x))))
+  @test said(rect(thumb(2, x))) == ["b plan.pdf"] && said(rect(thumb(6, x))) == ["f code.jl"] && said(rect(thumb(7, x))) == ["inner"]
+  # The picture is in the square, above the name
+  r = rect(thumb(2, x))
+  inner = only(c for c in rect(thumb(2, x)).children[1].children)
+  @test r.left < inner.left && inner.left + inner.width < r.left + r.width && r.top < inner.top && inner.top + inner.height < r.top + r.height - K.GALLERY_LABEL
+  shot("gallery-kinds.png")
+  # A click on the PDF file makes its first page fill the window. ↓ and ↑ turn its pages.
+  click(middle(rect(thumb(2, x))))
+  @test z().what == (:pdf, joinpath(mixed, "b plan.pdf"), 1) && z().from === x
+  @test "2 of 7" in bar() && "b plan.pdf" in bar() && "Page 1 of 3" in bar()
+  @test z().parts[(:button, :back)].tip == "The page before  ↑" && z().parts[(:button, :on)].tip == "The next page  ↓"
+  key(Keys.down)
+  @test z().page == 2 && "Page 2 of 3" in bar()
+  key(Keys.up)
+  @test z().page == 1
+  shot("gallery-pdf.png")
+  # → goes to the video, with its player. Its bar says where it is in the gallery.
+  key(Keys.right)
+  @test z().what[1] == :node && z().what[2] isa K.VideoPlayer && z().what[2].path == joinpath(mixed, "c knot.mp4")
+  @test "3 of 7" in bar() && "c knot.mp4" in bar() && rect(z().parts[(:button, :before)]) !== nothing
+  shot("gallery-video.png")
+  player = z().what[2]
+  # → goes to the 3D model, and the video's player has its own height again
+  key(Keys.right)
+  @test z().what[1] == :node && z().what[2] isa K.STLViewer && "4 of 7" in bar() && player.height == K.MODEL_HEIGHT
+  # The page, the code and the folder don't fill the window, so the model is the last file that does
+  @test z().parts[(:button, :next)].off
+  key(Keys.right)
+  @test z().what[2] isa K.STLViewer
+  shot("gallery-model.png")
+  # The arrow at the left edge goes back to the video, with the same player
+  W, H = K.num.(K.window_size(e))
+  at((40, H / 2))
+  click(middle(rect(z().parts[(:edge, -1)])))
+  @test z().what[2] === player
+  key(Keys.left); key(Keys.left)
+  @test z().what[1] == :picture && "1 of 7" in bar()
+  key(Keys.escape)
+  @test K.zooming(e) === nothing
+  # A click on a page opens it, as a link to it does
+  click(middle(rect(thumb(5, x))))
+  @test e.buf.path == joinpath(mixed, "e notes.md") && K.zooming(e) === nothing
+  K.open!(e, page); show_gallery()
+  # A click on a folder shows it in the sidebar, and the page stays
+  click(middle(rect(thumb(7, x))))
+  @test realpath(e.folder) == realpath(joinpath(mixed, "inner")) && e.buf.path == page
+  K.go_folder!(e, dir); e.panel && K.toggle_panel!(e)
+  e.scroll.offset = 0px; settle()
+end
+
+@testset "a file that's dropped on a gallery goes into its folder" begin
   new = write_png(joinpath(dir, "elsewhere", "photo 5.png"), 60, 60, plain(GREEN))
   at(middle(rect(v)))
-  K.onfiledrop(e, w, [new, joinpath(photos, "notes.txt")]); settle()
+  K.onfiledrop(e, w, [new]); settle()
   @test isfile(joinpath(photos, "photo 5.png")) && isfile(new)
   @test names() == ["photo 1.png", "photo 2.png", "photo 3 wide.png", "photo 4 broken.png", "photo 5.png", "photo 10.png"]
-  @test rect(thumb(6)) !== nothing && K.small(v, K.found!(v).pictures[5]) isa String
+  @test rect(thumb(6)) !== nothing && K.small(v, K.found!(v).items[5]).fills
   @test block() == ["in: photos"] && !K.dirty(e.buf)   # the page's text stays as it was
   # A drop on a gallery that lists its pictures adds a line, and the file stays where it is
   l = gallery(4)
@@ -322,19 +428,23 @@ end
   @test names(l) == ["front.png", "photo 2.png", "photo 5.png"] && !isfile(joinpath(dir, "plans", "photo 5.png"))
   K.undo!(e.buf); settle()
   @test length(block(4)) == 3
-  # A file that isn't a picture goes into the text, as it does anywhere else on the page
+  # A file that isn't a picture goes into the gallery too, and so does a folder, with what's in it
   at(middle(rect(v)))
-  K.onfiledrop(e, w, [joinpath(photos, "notes.txt")]); frames()
-  @test any(l -> occursin("notes.txt", l), e.buf.lines) && !isfile(joinpath(photos, "notes-2.txt"))
-  K.undo!(e.buf); settle()
+  K.onfiledrop(e, w, [joinpath(mixed, "e notes.md"), joinpath(mixed, "inner")]); settle()
+  @test isfile(joinpath(photos, "e notes.md")) && isdir(joinpath(photos, "inner")) && isfile(joinpath(mixed, "e notes.md"))
+  @test names()[1:2] == ["e notes.md", "inner"] && !any(l -> occursin("notes.md", l), e.buf.lines) && !K.dirty(e.buf)
   shot("gallery-dropped.png")
+  rm(joinpath(photos, "e notes.md")); rm(joinpath(photos, "inner")); v.shown = nothing; settle()
+  @test length(names()) == 6
 end
 
 @testset "the page as HTML, and on paper" begin
   html = K.page_html(e)
   @test occursin("<img src=\"photos/photo%201.png\" alt=\"photo 1\"", html) && occursin("<img src=\"plans/front.png\"", html)
-  @test occursin("grid-template-columns", html) && count("<img ", html) == 8
-  @test occursin("<p>No pictures in empty</p>", html)
+  @test occursin("grid-template-columns", html) && count("<img ", html) == 9
+  # A file that isn't a picture, and a folder, is a link with its name
+  @test occursin(r"<a href=\"mixed/b%20plan.pdf\" style=\"[^\"]*\">b plan.pdf</a>", html) && occursin(">inner</a>", html)
+  @test occursin("<p>Nothing in empty</p>", html)
   @test occursin("There's no folder called “nowhere” beside this page.", html)
   bytes = K.print_pdf(e)
   @test String(bytes[1:5]) == "%PDF-" && e.buf.caret[1] > 0
@@ -364,7 +474,7 @@ end
   @test g.columns < 5 && K.num(n.side) ≈ g.side && rect(n.parts[(:thumb, 6)]).top > rect(n.parts[(:thumb, 1)]).top
   # The bar under a picture still fits. It has the place and the name here.
   fits(z, wide) = K.num(rect(z.parts[(:button, :before)]).left) >= 8 && (c = rect(z.parts[(:button, :close)]); K.num(c.left + c.width) <= wide - 8)
-  K.show_picture!(n, 2); frame(small); frame(small)
+  K.open_item!(n, 2); frame(small); frame(small)
   z = K.zooming(narrow)
   @test "2 of 6" in said(rect(z)) && "photo 2.png" in said(rect(z)) && fits(z, 420)
   haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(shots, "gallery-bar-narrow.png"), small)
@@ -373,7 +483,7 @@ end
   tight = K.build_editor(page)
   tiny = Window(tight, size=(340px, 700px))
   frame(tiny); frame(tiny)
-  K.show_picture!(tight.nodes[(:block, K.GALLERY, page, 1)], 2); frame(tiny); frame(tiny)
+  K.open_item!(tight.nodes[(:block, K.GALLERY, page, 1)], 2); frame(tiny); frame(tiny)
   z = K.zooming(tight)
   @test "2 of 6" in said(rect(z)) && !any(t -> startswith(t, "photo"), said(rect(z))) && fits(z, 340)
   haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(shots, "gallery-bar-tiny.png"), tiny)
@@ -383,7 +493,7 @@ end
 @testset "a big folder: only the rows in the window are built" begin
   K.open!(e, long); settle()
   m = gallery(1, long)
-  @test length(K.found!(m).pictures) == 300
+  @test length(K.found!(m).items) == 300
   built() = count(k -> k isa Tuple && k[1] == :thumb, keys(m.parts))
   g = G.grid(300, K.num(e.width) - 2 - 2K.num(K.GALLERY_PAD), :small)
   @test built() < 300 && built() >= g.columns && length(m.small) <= built()
@@ -393,7 +503,7 @@ end
   shot("gallery-many.png")
   # Further down the page, the last rows are built
   e.scroll.offset = 99999px; frames(); settle()
-  @test rect(thumb(300, m)) !== nothing && K.small(m, K.found!(m).pictures[300]) isa String && length(m.small) < 300
+  @test rect(thumb(300, m)) !== nothing && K.small(m, K.found!(m).items[300]) isa NamedTuple && length(m.small) < 300
   shot("gallery-many-end.png")
   # A frame makes a few small pictures, not all that the window shows
   empty!(m.small); frames(1)
@@ -414,7 +524,12 @@ end
   e.scroll.offset = K.item(e, i).top - 100px; frames(); settle()
   shot("gallery-welcome.png")
   @test names(gallery(1, welcome)) == ["1 footings.png", "2 frame.png", "3 roof.png", "4 bricks.png", "5 window.png", "6 finished.png"]
-  @test all(p -> K.small(gallery(1, welcome), p) isa String, K.found!(gallery(1, welcome)).pictures)
+  @test all(p -> K.small(gallery(1, welcome), p) isa NamedTuple, K.found!(gallery(1, welcome)).items)
+  # Its second gallery lists a file of each kind, and a folder
+  @test names(gallery(2, welcome)) == ["plan.pdf", "knot.mp4", "knot.stl", "costs.csv", "photos"]
+  @test G.summary(gallery(2, welcome).data, K.found!(gallery(2, welcome))) == "4 files and 1 folder"
+  e.scroll.offset = K.item(e, findnext(==("```gallery"), e.buf.lines, i + 1)).top - 100px; frames(); settle()
+  shot("gallery-welcome-kinds.png")
 end
 
 close(w)

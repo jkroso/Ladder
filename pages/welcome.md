@@ -520,13 +520,23 @@ A row of a table is marked with its bar of a chart in the same way. So is a cont
 
 ## Galleries
 
-A code block in the language `gallery` shows the pictures of a folder as a grid of small squares. This one shows the folder `photos` beside this page. Click a picture, and it fills the window. Press ← and → there to see the others, or click the arrows in the bar under it. The bar says which picture shows, like “2 of 6”. Press Esc to come back. The button at the top right of the gallery changes the size of the squares.
+A code block in the language `gallery` shows the files of a folder as a grid of small squares. This one shows the folder `photos` beside this page. Click a picture, and it fills the window. Press ← and → there to see the others, or click the arrows in the bar under it. The bar says which picture shows, like “2 of 6”. Press Esc to come back. The button at the top right of the gallery changes the size of the squares.
 
 ```gallery
 in: photos
 ```
 
-An empty block shows the pictures in the page's own folder. `sort: newest` puts the newest file first, and `size: small` or `size: large` sets the size. Any other line is the path of one picture, so a block can list its pictures by hand. Drop a picture on the gallery from the Finder, and Ladder copies it into the folder.
+A gallery shows every kind of file, and folders too. This one lists a PDF file, a video, a 3D model, a table and a folder. A PDF file, a video and a 3D model fill the window when you click them, as a picture does, and ← and → go from one to the next. In a PDF file, ↑ and ↓ turn the pages. A click on any other file or on a folder opens it.
+
+```gallery
+plan.pdf
+knot.mp4
+knot.stl
+costs.csv
+photos
+```
+
+An empty block shows what's in the page's own folder. `sort: newest` puts the newest file first, and `size: small` or `size: large` sets the size. Any other line is the path of one file or folder, so a block can list what it shows by hand. Drop a file on the gallery from the Finder, and Ladder copies it into the folder.
 
 ## Calendars
 

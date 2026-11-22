@@ -83,7 +83,7 @@ Exit code 3 means that Ladder is not installed, or that it is too old to send a 
 | Sums that the user can change | A `sheet` or a `spreadsheet` code block. See below. |
 | Maths | TeX between dollar signs: `$x^2$` in a line of text, and on lines of its own between a line of `$$` and another. A dollar sign before a number, like `$5`, stays a dollar sign. |
 | A picture | `![what it shows](picture.png)` on a line of its own. The path starts at the page's folder. A web address works too. |
-| Several pictures as a grid | A `gallery` code block. See below. |
+| Several pictures or files as a grid | A `gallery` code block. See below. |
 | A web page as a card, with its title, its description and its picture | A `card` code block with the page's address on a line, like `https://julialang.org`. One card for each address. Ladder gets the page. A bare address outside the block stays text. |
 | A footnote | `[^1]` in the text, and a line that starts with `[^1]:`. |
 | Another page | A link to another `.md` file. The user holds ⌘ and clicks it. |
@@ -353,7 +353,7 @@ The first line of a contact is its name. Each other line is a label, a colon and
 
 ### A gallery
 
-A `gallery` code block shows pictures as a grid of small squares. The user clicks one to see it big. There, ← and →, or the arrows under the picture, go to the others. The bar under it says which picture shows, like “2 of 6”.
+A `gallery` code block shows files as a grid of small squares: pictures, PDF files, videos, 3D models, pages, code, tables and folders. The square of a picture or a video shows its picture. Any other file shows the picture that the Finder has for it, with its name under it. The user clicks a picture, a PDF file, a video or a model to see it big. There, ← and →, or the arrows under it, go to the others. The bar under it says which file shows, like “2 of 6”. A click on any other file or on a folder opens it.
 
 ````
 ```gallery
@@ -361,7 +361,7 @@ in: screenshots
 ```
 ````
 
-`in: screenshots` names a folder beside the page, and the block shows every picture in it, in the order of their names. To show only some pictures, leave `in:` out. Write the path of each picture on a line of its own. The paths start at the page's folder. `sort: newest` puts the newest file first. `size: small` or `size: large` sets how big the squares are.
+`in: screenshots` names a folder beside the page, and the block shows every file and folder in it, in the order of their names. It leaves out hidden files. To show only some files, leave `in:` out. Write the path of each file or folder on a line of its own. The paths start at the page's folder. `sort: newest` puts the newest file first. `size: small` or `size: large` sets how big the squares are.
 
 ### A calendar
 

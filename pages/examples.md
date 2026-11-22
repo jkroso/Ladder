@@ -77,7 +77,7 @@ The block at the top of this page is front matter: lines at the very top of a fi
 - [A schedule to try](schedule.md)
 - [A board of a page's to-do items](welcome.md#boards)
 - [A board of every page of a folder, which ticks an item in its own page](welcome.md#boards)
-- [A gallery of a folder's pictures](welcome.md#galleries)
+- [A gallery of a folder's files](welcome.md#galleries)
 - [A calendar: a month with a page's tasks, its to-do items that have a day, and events](welcome.md#calendars)
 - [A calendar of every page of a folder, which writes a new day into an item's own page](welcome.md#calendars)
 - [The day of a page: a slider that shows the page as it stands on another day](welcome.md#the-day-of-a-page)
