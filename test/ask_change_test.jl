@@ -692,12 +692,26 @@ end
   @test picker().asked === a && endswith(K.asked_label(a), "Click to hide this")
   click_label()
   @test picker().asked === nothing
-  # Esc leaves a change that Claude hasn't got. A click on its label takes it back, and the page isn't shared any more.
+  # Esc leaves a change that Claude hasn't got. A click on its label opens a field to change its words.
   K.ask_for_change!(e, level, "make it blue")
-  @test !picker().asked.sent && endswith(K.asked_label(picker().asked), "Click to take it back")
+  a = picker().asked
+  @test !a.sent && endswith(K.asked_label(a), "Click to change it")
   esc!()
-  @test picker().asked !== nothing && K.sharer(e) != ""
+  @test picker().asked === a && K.sharer(e) != ""
   click_label()
+  f = only(K.ask_boxes(e))
+  @test f.editing === a && f.parts[:text].buf.lines == ["make it blue"]
+  @test K.waits_note(e, a) == "Return changes the request. Claude gets it when it waits for the page again."
+  K.edit!(f.parts[:text].buf, (1, 0), (1, 12), "make it purple")
+  K.send_ask!(f, w)
+  @test isempty(K.ask_boxes(e)) && picker().asked === a && a.words == "make it purple" && !a.sent
+  # Take Back takes it back, and the page isn't shared any more
+  click_label()
+  f = only(K.ask_boxes(e))
+  @test f.parts[:text].buf.lines == ["make it purple"]
+  K.take_back!(e, a)
+  K.close_ask!(f, w)
+  frames(w, 2)
   @test picker().asked === nothing && K.sharer(e) == ""
   # So the next change goes to a new agent
   K.ask_for_change!(e, level, "make it blue")
@@ -949,19 +963,48 @@ end
   press(w, Keys.enter)
   q = K.ask_queue(e)
   @test !asking() && length(q) == 1 && q[1][1].words == "and this?" && picker().asked.words == "something else"
-  @test K.queued_label(1, "and this?") == "Number 1 in the queue: and this?  ·  Click to take it back"
+  @test K.queued_label(1, "and this?") == "Number 1 in the queue: and this?  ·  Click to change it"
   K.ask_agent!(e, c, "and that?")
   frames(w, 2)
   @test [a.words for (a, _) in q] == ["and this?", "and that?"] && all(((a, _),) -> a.label !== nothing, q)
-  # A click on a label takes that request out, and the others move up
-  left, top, wide, tall = q[2][1].label
-  click(w, px(left + wide / 2), px(top + tall / 2))
-  @test [a.words for (a, _) in q] == ["and this?"] && picker().asked.ended == 0
-  # When the agent ends, the next request starts, and the label of the one before stays a while
+  # A click on a label opens a field with the request's words. Return gives the request the field's words, and it keeps its place.
+  "Click the label of the request `a`"
+  click_on(a) = (frames(w, 2); (left, top, wide, tall) = a.label; click(w, px(left + wide / 2), px(top + tall / 2)); frames(w, 2))
+  click_on(q[1][1])
+  f = only(K.ask_boxes(e))
+  @test f.editing === q[1][1] && f.parts[:text].buf.lines == ["and this?"] && w.focus === f.parts[:text]
+  @test K.waits_note(e, q[1][1]) == "Return changes the request. It stays number 1 in the queue."
+  @test any(p -> p.key == K.box_key(f), popups(w))
+  typed(w, " and these?")
+  press(w, Keys.enter)
+  @test isempty(K.ask_boxes(e)) && [a.words for (a, _) in q] == ["and this? and these?", "and that?"]
+  # × leaves the request as it was
+  click_on(q[2][1])
+  f = only(K.ask_boxes(e))
+  typed(w, " no")
+  x = rect(f.parts[:close])
+  click(w, x.left + x.width / 2, x.top + x.height / 2)
+  @test isempty(K.ask_boxes(e)) && [a.words for (a, _) in q] == ["and this? and these?", "and that?"]
+  # Take Back takes it out, and the others move up
+  click_on(q[2][1])
+  f = only(K.ask_boxes(e))
+  @test f.parts[:text].buf.lines == ["and that?"]
+  x = rect(f.parts[:take_back])
+  click(w, x.left + x.width / 2, x.top + x.height / 2)
+  @test isempty(K.ask_boxes(e)) && [a.words for (a, _) in q] == ["and this? and these?"] && picker().asked.ended == 0
+  # When the agent ends, the next request starts with its new words, and the label of the one before stays a while.
+  # A field that was open on it says so, and Return then asks with its words as a new request.
+  click_on(q[1][1])
+  f = only(K.ask_boxes(e))
   K.stop_agent!(e)
   finish()
   frames(w, 2)
-  @test isempty(q) && picker().asked.words == "and this?" && picker().asked.ended == 0 && last(K.asks_ended(e)).words == "something else"
+  @test isempty(q) && picker().asked.words == "and this? and these?" && picker().asked.ended == 0 && last(K.asks_ended(e)).words == "something else"
+  @test f.editing === nothing && startswith(f.error, "Claude started on it before you changed it.")
+  K.close_ask!(f, w)
+  # The words of the Fix It of a check go to the agent too, when you change them
+  @test K.reworded("Fix it.\n", "Fix the check", "Fix the check") == "Fix it.\n"
+  @test K.reworded("Fix it.\n", "Fix the check", "Fix the check, not the code") == "Fix it.\n\nThe user's own words about this: Fix the check, not the code\n"
   K.stop_agent!(e)
   finish()
   picker().asked = nothing

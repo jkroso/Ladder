@@ -397,7 +397,7 @@
 @use "./blog" => Blogs
 @use "github.com/jkroso/UI.jl/Interface/draw" Bubble
 @use "github.com/jkroso/UI.jl/Interface/draw" popups sync_mouse!
-@use "github.com/jkroso/UI.jl/Interface/draw" set_tool! window_tool draw_tool tool_input tool_cursor invalidate_layout!
+@use "github.com/jkroso/UI.jl/Interface/draw" set_tool! window_tool draw_tool draw_tool_under tool_input tool_cursor invalidate_layout!
 @use "github.com/jkroso/URI.jl/FSPath" FSPath
 @use "github.com/jkroso/URI.jl/FS" => FS FSObject AbstractDirectory
 @use Colors: @colorant_str, RGBA, Colorant
@@ -42133,23 +42133,24 @@ tool_input(t::CodePicker, w, ::KeyPress{Keys.mouse_left}) = begin
     left, top, wide, tall = q.label
     left <= x <= left + wide && top <= y <= top + tall && (t.swallow = true; stop_agents!(t.editor, Any[q]); return true)
   end
-  # A click on the label of an agent stops it while it works, and shows the change that it made after
+  # A click on the label of an agent stops it while it works, and shows the change that it made after. A change that
+  # waits for the page's agent to wait again gets a field to change it.
   a = t.asked
   if a !== nothing && (a.ended == 0 || a.changed) && a.label !== nothing
     x, y = num(w.mouse[1]), num(w.mouse[2])
     left, top, wide, tall = a.label
     if left <= x <= left + wide && top <= y <= top + tall
       t.swallow = true
-      a.ended == 0 ? stop_agents!(t.editor, Any[a]) : show_change!(t.editor)
+      waiting(t.editor, a) ? edit_request!(t.editor, a) : a.ended == 0 ? stop_agents!(t.editor, Any[a]) : show_change!(t.editor)
       return true
     end
   end
-  # A click on the label of a request that waits takes it out of the queue, and one on the label of a change that ended shows it
+  # A click on the label of a request that waits opens a field to change it, and one on the label of a change that ended shows it
   x, y = num(w.mouse[1]), num(w.mouse[2])
   on(r) = r !== nothing && r[1] <= x <= r[1] + r[3] && r[2] <= y <= r[2] + r[4]
   q = ask_queue(t.editor)
   k = findfirst(((a, _),) -> on(a.label), q)
-  k === nothing || (deleteat!(q, k); t.swallow = true; redraw_in!(t.editor, 0); return true)
+  k === nothing || (edit_request!(t.editor, q[k][1]); t.swallow = true; return true)
   any(a -> a.changed && on(a.label), asks_ended(t.editor)) && (t.swallow = true; show_change!(t.editor); return true)
   # A button of a check of a file of Julia code, like Fix It: see "a check that fails"
   check_button!(t.editor, w) && (t.swallow = true; return true)
@@ -42291,12 +42292,11 @@ spin_ring(ctx, x, y, r, colour; wide=1.5) = begin
   Skia.sk_paint_delete(arc)
 end
 
-# A line round the thing that a click would show the code of, and a label over its top left corner.
 # A thing or a block of code that an agent is changing keeps its line, with what was asked, and then what the agent said.
-draw_tool(ctx, w, t::CodePicker, scene) = begin
+# These lines and labels are under the window's popups, so that the field of a request and its answers cover them.
+draw_tool_under(ctx, w, t::CodePicker, scene) = begin
   mark_chips(ctx, w, t.editor)
   mark_preview(ctx, w, t.editor)
-  draw_answer(ctx, w, t)
   # The words that each request in place is about, while you type it and while its answers show
   for k in copy(ask_boxes(t.editor))
     ask_box_tick!(ctx, w, t.editor, k)
@@ -42326,6 +42326,13 @@ draw_tool(ctx, w, t::CodePicker, scene) = begin
     x.label = pick_mark(ctx, w, r, label_words(words); colour, busy=turns, avoid=placed)
   end
   busy && redraw_in!(t.editor, SPIN_FRAME)   # the ring turns, and the colour pulses
+  nothing
+end
+
+# The card of an agent's answer, and a line round the thing that a click would show the code of, with a label over
+# its top left corner. These are over the window's popups.
+draw_tool(ctx, w, t::CodePicker, scene) = begin
+  draw_answer(ctx, w, t)
   draw_chosen(ctx, w, t)
   draw_drag(ctx, w, t)
   picks(t, w) || return nothing
@@ -43690,8 +43697,8 @@ ask_for_change!(e, node::Union{ToChange,Things}, request::String) = begin
   # What you asked about the things before, from the card of an answer, goes with your words
   talk = talk_words(follow_up!(e, places))
   # It waits while an agent works on a request before it: see "a queue of requests"
-  queue_ask!(e, words, places, isempty(name) ? () -> ask_change!(e, places, words, prompt=change_prompt(places, words) * talk) :
-                                               () -> ask_sharer!(e, name, places, words, talk=talk))
+  queue_ask!(e, words, places, isempty(name) ? said -> ask_change!(e, places, said, prompt=change_prompt(places, said) * talk) :
+                                               said -> ask_sharer!(e, name, places, said, talk=talk))
 end
 
 # --- ask an agent ---
@@ -43837,6 +43844,7 @@ line to line, ⌘Z takes a change back, and long lines wrap.
   error::String = ""                      # why the last request didn't go, or ""
   parts::Dict{Any,Any} = Dict{Any,Any}()  # the editor of its text, as :text
   answers::Vector{Any} = Any[]            # the agent's answers about the words, oldest first, over the field: see `box_answer`
+  editing::Any = nothing                  # the request that waits, whose words the field changes, or nothing: see "change a request that waits"
 end
 
 "An answer of an agent in the field of a request in place: the question `asked`, the agent's `answer` in Markdown, and who answered"
@@ -43849,7 +43857,7 @@ ask_boxes(e) = get(e.nodes, ASK_BOXES, AskBox[])
 box_key(a::AskBox) = Symbol("ask_box_", objectid(a))
 
 "The field of the request in place about the thing `c`, or nothing when `c` has none"
-box_about(e, c) = (k = findfirst(a -> same_things([a.thing], [c]), ask_boxes(e)); k === nothing ? nothing : ask_boxes(e)[k])
+box_about(e, c) = (k = findfirst(a -> a.editing === nothing && same_things([a.thing], [c]), ask_boxes(e)); k === nothing ? nothing : ask_boxes(e)[k])
 
 "True when the field `a` has something that you'd lose if it went: an answer, or words typed in it"
 worth_keeping(a::AskBox) = !isempty(a.answers) || get(a.parts, :text, nothing) isa Editor && a.parts[:text].buf.lines != [""]
@@ -44008,7 +44016,7 @@ end
 describe(a::AskBox) = begin
   c = found_colours()
   e = a.of
-  note = isempty(a.error) ? "Return asks $(asks_whom(e)). ⇧Return adds a line." : a.error
+  note = !isempty(a.error) ? a.error : a.editing !== nothing ? waits_note(e, a.editing) : "Return asks $(asks_whom(e)). ⇧Return adds a line."
   face = Face(SANS, "", 12px, isempty(a.error) ? c.dim : PICK_FAILED, false)
   rows = [Row(height(17px), Alignment.Center, label(l, 12px, color=face.color)) for l in wrapped(face, note, num(ASK_BOX_W) - 70)]
   # The text is laid out as a page is, as wide as the field
@@ -44027,7 +44035,9 @@ describe(a::AskBox) = begin
       shadow(0, 6, 16, RGBA(60 / 255, 45 / 255, 20 / 255, 0.2)), name="Ask",
     Column(width(grow=grow), Alignment.Start, child_gap=4px, (isempty(a.answers) ? () : (answer_part(a),))..., field,
       Row(width(grow=grow), padding(4px, 2px, 4px, 8px), Alignment.Center,   # top, right, bottom, left
-        Column(width(grow=grow), Alignment.Start, rows...), get!(() -> own!(a, AskClose(of=a)), a.parts, :close))))
+        Column(width(grow=grow), Alignment.Start, rows...),
+        (a.editing === nothing ? () : (get!(() -> own!(a, AskTakeBack(of=a)), a.parts, :take_back),))...,
+        get!(() -> own!(a, AskClose(of=a)), a.parts, :close))))
 end
 
 "The button at the bottom right of the field of a request in place, that takes the field and its box away"
@@ -44042,12 +44052,85 @@ onkey(x::AskClose, ev::KeyPress{Keys.mouse_left}) = close_ask!(x.of, ev.window)
 # A tooltip in a popup is put by its rectangle: the form that takes a node closes at once there
 onmouse(x::AskClose, ev::MouseMove) = begin
   r = rect(x)
-  r === nothing || show_tooltip!(ev.window, tip_label("Close without asking"), r.left, r.top, r.width, r.height; placement=:bottom, gap=6px)
+  tip = x.of.editing === nothing ? "Close without asking" : "Close, and leave the request as it was"
+  r === nothing || show_tooltip!(ev.window, tip_label(tip), r.left, r.top, r.width, r.height; placement=:bottom, gap=6px)
   handled
 end
 
 placed!(a::AskBox, side) = (a.side = side; nothing)
 draw(ctx, size, ui::ConcreteRect, a::AskBox) = caret(ctx, ui, a.side, asked_rect(a.of, a.thing))
+
+# --- change a request that waits ---
+#
+# A request waits while an agent works on one before it (see "a queue of
+# requests"), or until the agent of the page waits for it again (see "ask the
+# agent of the page"). A click on its label opens a field under its thing, as
+# a request in place has, with its words in it. Return gives the request the
+# words of the field, and it keeps its place. Take Back takes the request
+# out, and × leaves it as it was. If the request starts before you press
+# Return, the field says so, and Return then asks with the field's words as a
+# new request.
+
+"True while the request `a` of the window of `e` waits, so that its words can change: in the queue, or for the agent of the page to wait again"
+waiting(e, a::AskedChange) =
+  any(((x, _),) -> x === a, ask_queue(e)) || (code_picker(e).asked === a && a.ended == 0 && !isempty(a.by) && !a.sent && !a.stopped)
+
+"Open a field under the thing of the request `a`, which waits, with its words in it, or give the keyboard to the field that it has"
+edit_request!(e, a::AskedChange) = begin
+  isempty(a.places) && return nothing
+  k = findfirst(o -> o.editing === a, ask_boxes(e))
+  o = k === nothing ? open_ask!(e, AskBox(of=e, thing=first(a.places), editing=a); anyway=true) : ask_boxes(e)[k]
+  k === nothing && edit!(o.parts[:text].buf, (1, 0), (1, 0), a.words)
+  # A thing that doesn't show has its field when it shows
+  asked_rect(e, o.thing) === nothing || focus(o.parts[:text])
+  redraw_in!(e, 0)
+  nothing
+end
+
+"""
+True while the request of the field `a` waits. Once it has started, the field
+says so, and becomes a field for a new request, with the words that it has.
+"""
+still_waits!(a::AskBox) = begin
+  waiting(a.of, a.editing) && return true
+  a.error = "$(asks_whom(a.of)) started on it before you changed it. Return asks again with these words."
+  a.editing = nothing
+  redraw_in!(a.of, 0)
+  false
+end
+
+"What the field of the request `a`, which waits, says under its words"
+waits_note(e, a::AskedChange) = begin
+  k = findfirst(((x, _),) -> x === a, ask_queue(e))
+  k === nothing ? "Return changes the request. $(a.by) gets it when it waits for the page again." :
+                  "Return changes the request. It stays number $k in the queue."
+end
+
+"The prompt `prompt` of a request whose words were `words`, after you changed them to `said` while it waited: it ends with your words"
+reworded(prompt, words, said) = said == words ? prompt : prompt * "\nThe user's own words about this: $said\n"
+
+"Take the request `a` back while it waits: out of the queue, or from the agent of the page, which then no longer shares the page"
+take_back!(e, a::AskedChange) = begin
+  q = ask_queue(e)
+  k = findfirst(((x, _),) -> x === a, q)
+  k === nothing ? (waiting(e, a) && stop_agents!(e, Any[a])) : deleteat!(q, k)
+  redraw_in!(e, 0)
+  nothing
+end
+
+"The button beside × in the field of a request that waits, that takes the request back"
+@def mutable struct AskTakeBack <: SemanticUI
+  of::Any = nothing
+end
+
+describe(x::AskTakeBack) = Box(height(22px), padding(0px, 8px), radius(5px), Alignment.Center, name="Take Back",
+                               background(ishovered(x) ? colours.hover : clear), label("Take Back", 12px, color=colours.dim))
+cursor(::AskTakeBack) = :hand
+onkey(x::AskTakeBack, ev::KeyPress{Keys.mouse_left}) = begin
+  a = x.of
+  a.editing === nothing || take_back!(a.of, a.editing)
+  close_ask!(a, ev.window)
+end
 
 # The keys go to the editor of its text: see `ask_key!`
 
@@ -44060,6 +44143,12 @@ its × takes them away.
 send_ask!(a::AskBox, w) = begin
   words = String(strip(join(a.parts[:text].buf.lines, "\n")))
   isempty(words) && return handled
+  # The field of a request that waits gives it the new words: see "change a request that waits"
+  if a.editing !== nothing
+    still_waits!(a) || return handled
+    a.editing.words = words
+    return close_ask!(a, w)
+  end
   # A question after an answer goes with the questions and the answers before it: see `follow_up!`
   isempty(a.answers) || (a.of.nodes[:follow_up] = (places=[a.thing], talk=[(x.asked, x.answer) for x in a.answers]))
   try
@@ -44095,7 +44184,8 @@ ask_box_tick!(ctx, w, e, a::AskBox) = begin
     return nothing
   end
   r = asked_rect(e, a.thing)
-  pick_mark(ctx, w, r, isempty(a.answers) ? "Ask $(asks_whom(e))" : "")
+  # A request that waits has its own line and label
+  a.editing === nothing ? pick_mark(ctx, w, r, isempty(a.answers) ? "Ask $(asks_whom(e))" : "") : still_waits!(a)
   r === nothing && return nothing
   shown || (show_ask!(e, w, a, r); redraw_in!(e, 0); return nothing)
   for p in popups(w)
@@ -44130,8 +44220,8 @@ ask_agent!(e, node::Union{ToChange,Things}, request::String) = begin
   # What you asked about the things before, from the card of an answer, goes with your words
   talk = talk_words(follow_up!(e, places))
   # It waits while an agent works on a request before it: see "a queue of requests"
-  queue_ask!(e, words, places, isempty(name) ? () -> ask_change!(e, places, words, prompt=either_prompt(places, words) * talk, asks=true) :
-                                               () -> ask_sharer!(e, name, places, words, asks=true, talk=talk))
+  queue_ask!(e, words, places, isempty(name) ? said -> ask_change!(e, places, said, prompt=either_prompt(places, said) * talk, asks=true) :
+                                               said -> ask_sharer!(e, name, places, said, asks=true, talk=talk))
 end
 
 """
@@ -44164,8 +44254,9 @@ agent_free(e; command=true) = (command && agent_command(e); nothing)
 # A request that you make while an agent still works on one in the same
 # window waits in a queue, and starts when the one before it ends. Its thing
 # has a grey line round it, with its place in the queue on its label, like
-# "Number 1 in the queue". A click on that label takes it out. When a request
-# ends while others wait, its label stays a few seconds with what came of it,
+# "Number 1 in the queue". A click on that label opens a field under its thing
+# with its words, to change them: see "change a request that waits". When a
+# request ends while others wait, its label stays a few seconds with what came of it,
 # as it does when none wait. A click on the label of the request that an agent
 # works on stops that agent, and the next request then starts.
 
@@ -44178,7 +44269,7 @@ ask_queue(e) = get!(() -> Tuple{AskedChange,Function}[], e.nodes, :ask_queue)::V
 asks_ended(e) = get!(() -> AskedChange[], e.nodes, :asks_ended)::Vector{AskedChange}
 
 "What the label on the thing of the request that's number `n` in the queue says"
-queued_label(n, words) = "Number $n in the queue: $(request_words(words))  ·  Click to take it back"
+queued_label(n, words) = "Number $n in the queue: $(request_words(words))  ·  Click to change it"
 
 "Words for a label, cut to 140 characters"
 label_words(words) = length(words) > 140 ? first(words, 139) * "…" : words
@@ -44186,7 +44277,8 @@ label_words(words) = length(words) > 140 ? first(words, 139) * "…" : words
 """
 Start a request with `start` now, or put it in the queue while an agent still
 works on one in the window of `e`. `words` and `places` are what the request
-says and what it's about, for its label while it waits.
+says and what it's about, for its label while it waits. `start` takes the
+words, which you can change while the request waits.
 """
 queue_ask!(e, words, places, start::Function) = begin
   t = code_picker(e)
@@ -44194,7 +44286,7 @@ queue_ask!(e, words, places, start::Function) = begin
   if (t.asked === nothing || t.asked.ended > 0) && isempty(q)
     # The label of the request before stays as long as it would have
     t.asked === nothing || (push!(asks_ended(e), t.asked); t.asked = nothing)
-    start()
+    start(String(words))
   else
     push!(q, (AskedChange(words=String(words), places=collect(places)), start))
     redraw_in!(e, 0)
@@ -44213,8 +44305,8 @@ queue_tick!(e, t::CodePicker) = begin
   (a === nothing || a.ended > 0) || return nothing
   a === nothing || push!(done, a)
   t.asked = nothing
-  _, start = popfirst!(q)
-  start()
+  next, start = popfirst!(q)
+  start(next.words)
   redraw_in!(e, 0)
   nothing
 end
@@ -44232,7 +44324,8 @@ end
 #
 # An agent that's still working on what you sent last gets the change when it
 # waits for the page again. Until then the label on the thing says so, and a
-# click on the label takes the change back. After that click, Ladder no longer
+# click on the label opens a field to change the words, or take the change
+# back: see "change a request that waits". After Take Back, Ladder no longer
 # counts the page as shared, so the next change goes to a new agent.
 
 "Lines `from` to `to` of `lines`, each indented, for an agent to read: no more than 12 lines, and no more than 400 characters of each"
@@ -44349,7 +44442,7 @@ asked_label(a::AskedChange) =
   a.ended > 0 ? (a.changed ? "$(a.said)  ·  Show Change" : a.said) :
   isempty(a.by) ? asking_words(a.words, a.step) * "  ·  Click to stop it" :
   a.sent ? "Asked $(a.by): $(request_words(a.words)) …  ·  Click to hide this" :
-  "For $(a.by) when it waits for the page again: $(request_words(a.words))  ·  Click to take it back"
+  "For $(a.by) when it waits for the page again: $(request_words(a.words))  ·  Click to change it"
 
 # --- stop an agent ---
 #
@@ -44923,7 +45016,8 @@ fix_check!(e, check::FileCheck) = begin
 
     Change that code, or the code that it uses, so that the check passes. If the check is what's wrong, as when it expects a value that the code shouldn't give, change the check, and say so. Change only files in $(dirname(c.file)). Keep the change small, and write code that looks like the code around it. Ladder runs the changed code as soon as you end, so leave the file in a state that runs. Then say what you changed, in one short sentence.
     """
-  queue_ask!(e, "Fix the check $(r.code)", [c], () -> ask_change!(e, [c], "Fix the check $(r.code)"; prompt))
+  words = "Fix the check $(r.code)"
+  queue_ask!(e, words, [c], said -> ask_change!(e, [c], said; prompt=reworded(prompt, words, said)))
 end
 
 works_here(e, ::Val{:fix_check}) = julia_file(e) && any(((_, r),) -> r.went != :pass, file_results(e))
@@ -44953,7 +45047,7 @@ ask_for_checks!(e, node::ToChange) = begin
 
     Write two to four checks of each function in that code. Choose calls that show what the function is for, and one at an edge of what it takes. Work out the value that each call should give from what the function is for: its name, its documentation, and the code that calls it. Don't copy what the code does now, because a check finds a fault only when it says what the code should do. Put each check on a line of its own, after the function's documentation and the checks that it has, just over its first line of code. Each check is one line of Julia. Change nothing else. Then say what the checks check, in one short sentence.
     """
-  queue_ask!(e, "Write checks", [node], () -> ask_change!(e, [node], "Write checks"; prompt))
+  queue_ask!(e, "Write checks", [node], said -> ask_change!(e, [node], said; prompt=reworded(prompt, "Write checks", said)))
 end
 
 works_here(e, ::Val{:ask_for_checks}) = julia_file(e)

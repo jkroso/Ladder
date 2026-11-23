@@ -264,7 +264,7 @@ To ask about some words, select them, right-click them and choose Ask Claude….
 
 An answer to a question shows under the words, with a field under it to ask more. When an agent works on the page with you, it answers there too.
 
-While the agent works on a request, a ring turns in its label and the box pulses. A request that you make while the agent still works waits in a queue. Its label says its place, like "Number 1 in the queue", and a click on that label takes it back. Each request starts when the one before it ends.
+While the agent works on a request, a ring turns in its label and the box pulses. A request that you make while the agent still works waits in a queue. Its label says its place, like "Number 1 in the queue". Click that label to change the request. A field opens under the words with the request in it. Change it and press Return, and it keeps its place. Take Back takes the request out, and × leaves it as it was. Each request starts when the one before it ends. The field of a request and its answers always cover the labels and boxes of other requests.
 
 Before you press Return, you can choose more:
 
@@ -981,7 +981,7 @@ An agent like Claude Code can write a page and show it to you here: a plan with 
 
 To ask an agent about one part of the window, no agent has to wait. Run Ask For Change or Ask About, and Ladder starts Claude Code with that part and your words. [Ask an agent about one thing](#ask-an-agent-about-one-thing) says how.
 
-When an agent works on the page with you, Ask For Change and Ask Agent ask that agent, not a new one, because it knows what the page is for. It answers a question in its own window, not in a card. It gets your words, the part that you marked and the lines that you changed. If it's still working on what you sent before, it gets them when it waits for the page again. Until then, a click on the label takes them back.
+When an agent works on the page with you, Ask For Change and Ask Agent ask that agent, not a new one, because it knows what the page is for. It answers a question in its own window, not in a card. It gets your words, the part that you marked and the lines that you changed. If it's still working on what you sent before, it gets them when it waits for the page again. Until then, click the label to change your words or take them back.
 
 An agent can ask a question in a block of its own. Click an answer, or type one in the field, and then send the page. A round mark means that you choose one answer, and a square box means that you choose as many as you like.
 
