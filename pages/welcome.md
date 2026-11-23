@@ -260,7 +260,7 @@ Claude Code changes the function, and the thing is drawn the new way. While it w
 
 To start from the thing itself, hold ⌘ and ⌥, click it, and click the agent's logo on its blue line. That runs Ask Agent, which takes a change or a question. The A is already round the thing, so type what you want and press Return. A change shows as below, and an answer shows in a card beside the thing.
 
-To ask about some words, select them, right-click them and choose Ask Claude…. The menu names the agent that Settings chose, or the one that shares the page. A box goes round the words, with a field under them. Type a change or a question, and press Return. The box stays round the words while the agent works, and its label says how the request goes. With nothing selected, the box goes round the line that the caret is on. Esc takes the field away.
+To ask about some words, select them, right-click them and choose Ask Claude…. The menu names the agent that Settings chose, or the one that shares the page. A box goes round the words, with a field under them. Type a change or a question, and press Return. The box stays round the words while the agent works, and its label says how the request goes. With nothing selected, the box goes round the line that the caret is on. The × button under the field takes it away. Esc and a click on the page leave it as it is, with what you typed.
 
 While the agent works on a request, a ring turns in its label and the box pulses. A request that you make while the agent still works waits in a queue. Its label says its place, like "Number 1 in the queue", and a click on that label takes it back. Each request starts when the one before it ends.
 

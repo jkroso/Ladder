@@ -803,11 +803,30 @@ end
   @test length(sub.buf.lines) == 1
   press(w, Keys.a, Keys.cmd); press(w, Keys.backspace)
   @test sub.buf.lines == [""]
-  # Return with nothing typed does nothing. Esc takes the field and the box away.
-  press(w, Keys.enter)
-  @test haskey(e.nodes, K.ASK_KEY) && picker().asked === nothing
+  # Esc does nothing, as it's easy to press by mistake: the field keeps what's typed
+  typed(w, "half a request")
   press(w, Keys.escape)
-  @test !haskey(e.nodes, K.ASK_KEY) && !any(p -> p.key == K.ASK_KEY, popups(w))
+  @test haskey(e.nodes, K.ASK_KEY) && w.focus === sub && sub.buf.lines == ["half a request"]
+  press(w, Keys.a, Keys.cmd); press(w, Keys.backspace)
+  # Return with nothing typed does nothing
+  press(w, Keys.enter)
+  @test haskey(e.nodes, K.ASK_KEY) && w.focus === sub && picker().asked === nothing
+  # Nor does a click on the page: the field keeps what's typed, and a click in it gives it the keyboard again
+  typed(w, "half a request")
+  click(w, on_line(e, 1)...)
+  @test haskey(e.nodes, K.ASK_KEY) && w.focus === e && sub.buf.lines == ["half a request"]
+  r = rect(K.node!(K.Document, sub, :document))
+  click(w, r.left + 4px, r.top + r.height / 2)
+  @test w.focus === sub
+  press(w, Keys.a, Keys.cmd); press(w, Keys.backspace)
+  # The field is put under its words in each frame, so it follows them as the page scrolls
+  r = K.asked_rect(e, c)
+  @test only(filter(p -> p.key == K.ASK_KEY, popups(w))).anchor == (r.left, r.top, r.width, r.height)
+  # The × button takes the field and the box away
+  x = rect(a.parts[:close])
+  click(w, x.left + x.width / 2, x.top + x.height / 2)
+  @test !haskey(e.nodes, K.ASK_KEY) && !any(p -> p.key == K.ASK_KEY, popups(w)) && w.focus === e
+  b.anchor, b.caret = (7, 0), (7, 8)
   # What's typed goes to the agent with the words, and its answer shows in a card beside them
   K.page_act!(e, 1)
   frames(w, 2)
@@ -831,11 +850,12 @@ end
   @test e.nodes[K.ASK_KEY].error == "Ladder can't find the command `no-such-agent-command` of Nobody. Install it, or choose another agent in Settings."
   K.preferred_agent!(e, "Claude")
   pop!(K.AGENT_KINDS)
-  # Esc in the field takes the field away, and leaves a working agent working
+  # Esc in the field leaves a working agent working, and the field as it is
   K.AGENT_COMMAND[] = `sh -c "exec sleep 30"`
   K.ask_agent!(e, c, "something else")
   press(w, Keys.escape)
-  @test !haskey(e.nodes, K.ASK_KEY) && picker().asked.ended == 0
+  @test haskey(e.nodes, K.ASK_KEY) && picker().asked.ended == 0
+  K.close_ask!(e.nodes[K.ASK_KEY], w)
   # A request while the agent works waits in the queue, and its label says its place
   K.page_act!(e, 1)
   frames(w, 2)
@@ -867,7 +887,7 @@ end
   @test K.selected_thing(e) === nothing && K.line_thing(e).node.text == "The end."
   K.page_act!(e, 1)
   @test e.nodes[K.ASK_KEY].thing.node.text == "The end."
-  press(w, Keys.escape)
+  K.close_ask!(e.nodes[K.ASK_KEY], w)
 end
 
 @testset "the words that the agent of a page reads, of a margin comment and of a block of code" begin

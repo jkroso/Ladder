@@ -11726,7 +11726,10 @@ describe(v::ChartView) = begin
     bar = block_bar(
       [block_button!(v, k, (:kind, k), icon=icon, tip=tip, on=v.spec.kind == k) for (k, icon, tip) in CHART_KINDS]...,
       rule(), source_button(v),
-      (isempty(v.spec.title) ? () : (rule(), Row(width(grow=grow), padding(6px, 0px), clip=true, Box(label(v.spec.title, 13px, weight="Semibold")))))...)
+      # The title's row is as tall as the bar, so what it clips is only a title too long for it. A row as tall as the text
+      # would clip the tails of letters like p and y, which hang under the text's box.
+      (isempty(v.spec.title) ? () : (rule(), Row(width(grow=grow), height(grow=grow), padding(6px, 0px), Alignment.Center, clip=true,
+                                                 Box(label(v.spec.title, 13px, weight="Semibold")))))...)
     Column(block_look()..., clip=true, name="Chart", bar, (v.sourcing ? from_picker_section(v) : ())...,
            isempty(d.problem) ? block_part!(() -> PlotArea(of=v), v, :area) : block_note(d.problem))
   end
@@ -41918,7 +41921,7 @@ tool_input(t::CodePicker, w, ::MouseMove) = dragging(t) ? (redraw_in!(t.editor, 
 # agent that's working, and takes the card of an agent's answer away, while no popup and no search shows. The field of a
 # request in place takes its own Esc: see "a request in place".
 tool_input(t::CodePicker, w, ::KeyPress{Keys.escape}) = begin
-  (unmodified(w) && t.editor.popup == :none && !finding(t.editor) && !haskey(t.editor.nodes, ASK_KEY)) || return false
+  (unmodified(w) && t.editor.popup == :none && !finding(t.editor) && !typing_ask(t.editor, w)) || return false
   dragging(t) && (block_drag(t.editor).lines = nothing; redraw_in!(t.editor, 0); return true)
   t.chosen === nothing || (unchoose!(t); return true)
   isempty(working_agents(t.editor)) || (stop_agent!(t.editor); return true)
@@ -41992,7 +41995,7 @@ draw_tool(ctx, w, t::CodePicker, scene) = begin
   draw_answer(ctx, w, t)
   # The words that a request in place is about, while you type it
   k = get(t.editor.nodes, ASK_KEY, nothing)
-  k isa AskBox && pick_mark(ctx, w, asked_rect(t.editor, k.thing), "Ask $(asks_whom(t.editor))")
+  k isa AskBox && ask_box_tick!(ctx, w, t.editor, k)
   a = t.asked
   if a !== nothing
     # Each thing has its letter, and the first has what was asked, then what the agent said
@@ -43480,8 +43483,11 @@ end
 # selected, or round the caret's line when none are, and a field under them for
 # what you want. Return gives the words and what you typed to the agent, as Ask
 # Agent does. The box stays round the words while the agent works, with a
-# label that says how it goes, and then what the agent did or its answer. Esc,
-# or a click anywhere else, takes the field and the box away.
+# label that says how it goes, and then what the agent did or its answer. The
+# × button takes the field and the box away. Esc doesn't, and nor does a
+# click on the page, as both are easy to do by mistake: the field stays, with
+# what you typed, and a click in it gives it the keyboard again. The field
+# follows its words as the page scrolls.
 
 const ASK_KEY = :ask_box   # the key of the popup with the field
 const ASK_BOX_W = 380px
@@ -43518,13 +43524,14 @@ ask_box_of(e) = get(e.nodes, :ask_box, nothing)
 """
 What a key does in the text of a request in place, before its editor does
 what it does with a key. True when the key is done with. Return gives the
-request to the agent, and ⇧Return starts a new line. Esc takes the field away.
-A command for the window runs in the window's page.
+request to the agent, and ⇧Return starts a new line.
+A command for the window runs in the window's page. Esc does nothing: the ×
+button closes the field.
 """
 ask_key!(e, w, K, command) = begin
   a = ask_box_of(e)
   K == Keys.enter && unmodified(w) && (send_ask!(a, w); return true)
-  K == Keys.escape && unmodified(w) && (close_ask!(a, w); return true)
+  K == Keys.escape && return true
   command !== nothing && COMMANDS[command].kind == :window && (run!(a.of, w, command, false); return true)
   false
 end
@@ -43546,8 +43553,9 @@ ask_selected!(e) = begin
   sub.nodes[:ask_box] = a
   a.parts[:text] = sub
   e.nodes[ASK_KEY] = a
+  # It isn't modal, so a click on the page goes to the page and leaves the field as it is
   popup!(w, a, anchor=(r.left, r.top, r.width, r.height), placement=:bottom, gap=9px, width=ASK_BOX_W, key=ASK_KEY,
-         theme=component_theme(), onclose=() -> (delete!(e.nodes, ASK_KEY); redraw_in!(e, 0)))
+         theme=component_theme(), modal=false, onclose=() -> (delete!(e.nodes, ASK_KEY); redraw_in!(e, 0)))
   focus(sub)
   redraw_in!(e, 0)
   nothing
@@ -43557,9 +43565,9 @@ end
 describe(a::AskBox) = begin
   c = found_colours()
   e = a.of
-  note = isempty(a.error) ? "Return asks $(asks_whom(e)). ⇧Return adds a line. Esc closes." : a.error
+  note = isempty(a.error) ? "Return asks $(asks_whom(e)). ⇧Return adds a line." : a.error
   face = Face(SANS, "", 12px, isempty(a.error) ? c.dim : PICK_FAILED, false)
-  rows = [Row(height(17px), Alignment.Center, label(l, 12px, color=face.color)) for l in wrapped(face, note, num(ASK_BOX_W) - 40)]
+  rows = [Row(height(17px), Alignment.Center, label(l, 12px, color=face.color)) for l in wrapped(face, note, num(ASK_BOX_W) - 70)]
   # The text is laid out as a page is, as wide as the field
   sub = a.parts[:text]
   layout!(sub, ASK_TEXT_W * e.zoom)
@@ -43574,7 +43582,25 @@ describe(a::AskBox) = begin
               Box(width(grow=grow), padding(8px, 7px), radius(6px), border(1px, :solid, c.line), background(c.frame), text))
   Box(width(grow=grow), padding(6px), radius(8px), background(c.frame), border(1px, :solid, c.line),
       shadow(0, 6, 16, RGBA(60 / 255, 45 / 255, 20 / 255, 0.2)), name="Ask",
-    Column(width(grow=grow), Alignment.Start, child_gap=4px, field, Column(width(grow=grow), padding(8px, 4px), Alignment.Start, rows...)))
+    Column(width(grow=grow), Alignment.Start, child_gap=4px, field,
+      Row(width(grow=grow), padding(4px, 2px, 4px, 8px), Alignment.Center,   # top, right, bottom, left
+        Column(width(grow=grow), Alignment.Start, rows...), get!(() -> own!(a, AskClose(of=a)), a.parts, :close))))
+end
+
+"The button at the bottom right of the field of a request in place, that takes the field and its box away"
+@def mutable struct AskClose <: SemanticUI
+  of::Any = nothing
+end
+
+describe(x::AskClose) = Box(width(22px), height(22px), radius(5px), Alignment.Center, name="Close",
+                            background(ishovered(x) ? colours.hover : clear), Icon("x-lg", size=11px, color=colours.dim))
+cursor(::AskClose) = :hand
+onkey(x::AskClose, ev::KeyPress{Keys.mouse_left}) = close_ask!(x.of, ev.window)
+# A tooltip in a popup is put by its rectangle: the form that takes a node closes at once there
+onmouse(x::AskClose, ev::MouseMove) = begin
+  r = rect(x)
+  r === nothing || show_tooltip!(ev.window, tip_label("Close without asking"), r.left, r.top, r.width, r.height; placement=:bottom, gap=6px)
+  handled
 end
 
 placed!(a::AskBox, side) = (a.side = side; nothing)
@@ -43594,6 +43620,30 @@ send_ask!(a::AskBox, w) = begin
   end
   close_ask!(a, w)
 end
+
+"""
+In each frame while the field of a request in place, `a`, shows: draw the
+box round its words, and keep the field under them as the page scrolls. The
+field goes when the window shows another file.
+"""
+ask_box_tick!(ctx, w, e, a::AskBox) = begin
+  b = e.buf
+  if isempty(b.path) || page_key(b.path) != a.thing.file
+    close_popup!(w, ASK_KEY)
+    delete!(e.nodes, ASK_KEY)
+    return nothing
+  end
+  r = asked_rect(e, a.thing)
+  pick_mark(ctx, w, r, "Ask $(asks_whom(e))")
+  r === nothing && return nothing
+  for p in popups(w)
+    p.key == ASK_KEY && (p.anchor = (r.left, r.top, r.width, r.height))
+  end
+  nothing
+end
+
+"True while the field of a request in place, in the window `w` of `e`, has the keyboard"
+typing_ask(e, w) = (a = get(e.nodes, ASK_KEY, nothing); a isa AskBox && w.focus === a.parts[:text])
 
 "Take the field of `a` and its box away, and give the keyboard back to the page"
 close_ask!(a::AskBox, w) = begin
