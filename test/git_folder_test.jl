@@ -98,6 +98,7 @@ end
   v = e.nodes[(:repo, repo)]
   @test v isa K.RepoView
   @test rect(v) !== nothing
+  @test v.scroll.scrollbar_inset == e.scroll.scrollbar_inset == 0px   # its scrollbar is at the page's right edge, as the editor's is
   # The page has the folder's table, with a row for each folder and file of the top folder that the sidebar lists
   tb = e.nodes[(:folder_table, repo)]
   @test tb isa K.FolderTable && rect(tb) !== nothing

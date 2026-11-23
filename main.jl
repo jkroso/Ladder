@@ -44546,7 +44546,7 @@ see `GitPanel`.
 """
 @def mutable struct RepoView <: SemanticUI
   path::String = ""
-  scroll::Scroll = Scroll(width(grow=grow), height(grow=grow))
+  scroll::Scroll = Scroll(width(grow=grow), height(grow=grow), scrollbar_inset=0px)   # its scrollbar is at the page's right edge, as the editor's is
 end
 
 page_view(e, d::GitDirectory) = begin
@@ -45022,7 +45022,7 @@ const OPEN_ALL = 5000
   tallies::Dict{Int,Tuple{Int,Int}} = Dict{Int,Tuple{Int,Int}}()   # how many lines each file gains and loses
   rows::Dict{Any,PageRow} = Dict{Any,PageRow}()
   parts::Dict{Any,Any} = Dict{Any,Any}()     # its buttons
-  scroll::Scroll = Scroll(width(grow=grow), height(grow=grow))
+  scroll::Scroll = Scroll(width(grow=grow), height(grow=grow), scrollbar_inset=0px)   # its scrollbar is at the page's right edge, as the editor's is
   wide::Float64 = 0.0                        # how wide the lines of the changes are, in this frame
 end
 

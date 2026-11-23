@@ -115,6 +115,7 @@ end
   @test v.hash == second
   @test e.buf.path == repo   # the window still shows the repository
   @test rect(v) !== nothing
+  @test v.scroll.scrollbar_inset == 0px   # its scrollbar is at the page's right edge, as the editor's is
   words = texts(K.describe(v))
   @test "Change a, and add a big file" in words
   @test "The first paragraph is wrapped by hand, as git's messages are." in words
