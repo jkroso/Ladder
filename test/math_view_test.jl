@@ -116,10 +116,12 @@ end
   caret!((roots, close + 1))
   key(Keys.left)
   @test e.buf.caret == (roots, open + 1)
-  # As plain text, the line with the caret shows the TeX and its dollar signs
-  caret!((roots, 3))
+  # As plain text, the formula with the caret shows its TeX and its dollar signs, and the line's other formula still shows as a formula
   K.plain!(e, true); frames()
-  @test isempty(formulas(roots)) && any(seg -> occursin("ax^2", seg.text), [s for vl in K.item(e, roots).content.lines for s in vl.segs])
+  caret!((roots, 3))
+  @test length(formulas(roots)) == 2
+  caret!((roots, open + 2))
+  @test length(formulas(roots)) == 1 && any(seg -> occursin("ax^2", seg.text), [s for vl in K.item(e, roots).content.lines for s in vl.segs])
   @test length(formulas(line("- An item"))) == 2   # the other lines still show their formulas
   K.plain!(e, false); frames()
   @test length(formulas(roots)) == 2

@@ -280,8 +280,13 @@ end
   e.buf.caret = e.buf.anchor = (4, 8)
   at(line_place(4))
   @test !isempty(K.task_over(e))
-  # As plain text, that item shows its markup, and no days
+  # As plain text, the item still shows its box while the caret is in its words, and its days with it
   e.plain = true
+  frames()
+  at(line_place(4))
+  @test !isempty(K.task_over(e))
+  # With the caret in the - [ ] that starts it, the item shows that markup, and no days
+  e.buf.caret = e.buf.anchor = (4, 1)
   frames()
   at(line_place(4))
   @test isempty(K.task_over(e))

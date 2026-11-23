@@ -163,10 +163,14 @@ end
 
 @testset "the marks as they're written" begin
   K.plain!(e, true)
-  # The line with the caret shows its ==, and its comment in dim words
+  # The run with the caret shows its ==, and a comment with the caret shows in dim words. In plain words they don't.
   caret!((bright, 2))
+  @test !any(s -> s.text == "==", segs(bright))
+  caret!((bright, 8))
   @test any(s -> s.text == "==", segs(bright))
   caret!((before, 2))
+  @test !any(s -> s.text == "a note", segs(before))
+  caret!((before, 10))
   note = only(s for s in segs(before) if s.text == "a note")
   @test note.face.color == K.colours.dim
   @test count(s -> s.text == "%%" && s.face.color == K.colours.faint, segs(before)) == 2

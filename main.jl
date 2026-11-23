@@ -2151,6 +2151,9 @@ const TODO_OPEN, TODO_DONE = "[ ] ", "] [ "
 "True when `seg` is the box of a to-do item"
 isbox(seg) = seg.atomic && (seg.text == TODO_OPEN || seg.text == TODO_DONE)
 
+"True when `f` is the layout of a to-do item that shows its box, and not the - [ ] that makes the box"
+shows_box(f) = f isa Flow && f.kind == Kind.todo && !f.raw && any(isbox, first(f.lines).segs)
+
 """
 The runs of text that line `text` is drawn as. With `raw`, the markup shows.
 With `open`, only the runs of the line in those columns show it: see `raw_part`.
@@ -10664,7 +10667,7 @@ todo_line(e, x, y) = begin
   dy >= 0px || return nothing
   it = e.layout[item_under(e, dx, dy)]
   f = it.content
-  dy < it.top + it.tall && f isa Flow && f.kind == Kind.todo && !f.raw ? it.first : nothing
+  dy < it.top + it.tall && shows_box(f) ? it.first : nothing
 end
 
 """
@@ -10690,7 +10693,7 @@ task_over(e) = begin
   i === nothing && return hide()
   it = item(e, items[i].line)
   f = it.content
-  (f isa Flow && f.kind == Kind.todo && !f.raw) || return hide()
+  shows_box(f) || return hide()
   d.of, d.key = something(v, log), items[i].key
   wide = describe(Row(Alignment.Start, geometry(d)), (9999px, 9999px)).width
   # They go at the right end of the first of the item's lines that has room for them, or under the item when none has
@@ -22375,7 +22378,7 @@ mark_pointed(ctx, e, ui) = begin
     across, wide = item_room(e, it)
     left, top = num(ui.left + across), num(ui.top + it.top)
     f = it.content
-    if f isa Flow && f.kind == Kind.todo && !f.raw && it.first != from
+    if shows_box(f) && it.first != from
       todos === nothing && (todos = page_todos(e))
       k = findfirst(t -> t.line == it.first, todos)
       k !== nothing && plain_name(todos[k].key) == name && round_box(ctx, left - 6, top, num(wide) + 12, num(it.tall), 5; fill)
@@ -25888,7 +25891,7 @@ todo_at(e, (x, y)) = begin
   dx, dy = x - e.origin[1], y - e.origin[2]
   it = e.layout[item_under(e, dx, dy)]
   f = it.content
-  (f isa Flow && f.kind == Kind.todo && !f.raw) || return nothing
+  shows_box(f) || return nothing
   # The box is on the item's first line
   it.top + f.above <= dy < it.top + f.above + first(f.lines).high || return nothing
   for seg in first(f.lines).segs
