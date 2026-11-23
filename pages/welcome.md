@@ -49,7 +49,7 @@ A comment can show beside the text too, as one does in Word or Google Docs. Writ
 
 A word that the Mac's dictionary doesn't have, like teh, gets a line of red dots under it. Right-click the word to choose the word you meant. Press ⌘F to find text in the page.
 
-A line can point to a footnote[^note]. The footnote is a line of its own, anywhere in the file, and the page gives each footnote a number. Hold ⌘ and click the number to go to the footnote.
+A line can point to a footnote[^note]. The footnote is a line of its own, anywhere in the file, and the page gives each footnote a number. Hold ⌘ and click the number to go to the footnote. To read it without going there, rest the mouse on the number: a card under it shows the footnote.
 
 [^note]: This is the footnote. Its line starts with the same name in square brackets, and a colon.
 
@@ -259,6 +259,10 @@ To ask for a change:
 Claude Code changes the function, and the thing is drawn the new way. While it works, a label on the thing says what it's doing, like `Reading progress.jl`. The label then says what changed.
 
 To start from the thing itself, hold ⌘ and ⌥, click it, and click the agent's logo on its blue line. That runs Ask Agent, which takes a change or a question. The A is already round the thing, so type what you want and press Return. A change shows as below, and an answer shows in a card beside the thing.
+
+To ask about some words, select them, right-click them and choose Ask Claude…. The menu names the agent that Settings chose, or the one that shares the page. A box goes round the words, with a field under them. Type a change or a question, and press Return. The box stays round the words while the agent works, and its label says how the request goes. With nothing selected, the box goes round the line that the caret is on. Esc takes the field away.
+
+While the agent works on a request, a ring turns in its label and the box pulses. A request that you make while the agent still works waits in a queue. Its label says its place, like "Number 1 in the queue", and a click on that label takes it back. Each request starts when the one before it ends.
 
 Before you press Return, you can choose more:
 

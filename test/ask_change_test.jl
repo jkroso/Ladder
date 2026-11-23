@@ -10,7 +10,7 @@
 @use Test: @test, @testset, @test_throws
 @use "../main" => K
 @use "github.com/jkroso/MiniFB.jl" Window KeyPress KeyRelease MouseMove Keys onkey onmouse Typed ontype
-@use "github.com/jkroso/UI.jl/Interface/draw" frame rect window_tool
+@use "github.com/jkroso/UI.jl/Interface/draw" frame rect window_tool popups
 @use GeometryBasics: Vec2
 const px = K.px
 
@@ -348,11 +348,13 @@ end
   @test a.failed && a.said == "The agent stopped. No network."
   a = ask(quiet, level, "is it blue?")
   @test !a.failed && a.said == "Nothing changed. I looked, and it's as you say."
-  # A second change can't be asked for while the agent is at work
+  # A second change while the agent is at work waits in the queue
   K.AGENT_COMMAND[] = `sh -c "sleep 5"`
   K.ask_for_change!(e, level, "make it red")
   @test picker().asked.ended == 0
-  @test_throws ErrorException K.ask_for_change!(e, level, "and blue")
+  K.ask_for_change!(e, level, "and blue")
+  @test picker().asked.words == "make it red" && [a.words for (a, _) in K.ask_queue(e)] == ["and blue"]
+  empty!(K.ask_queue(e))
   kill(picker().asked.process)
   finish()
   picker().asked = nothing
@@ -638,15 +640,27 @@ end
   @test occursin("Ladder draws it with the code in the file $(level.file), lines $(level.first) to $(level.last).", told)
   frames(w, 2)
   @test startswith(K.asked_label(a), "Asked Claude: make the bar shorter")
-  # Another change waits until Claude has done this one
-  @test_throws ErrorException K.ask_for_change!(e, level, "and red")
-  # Claude changes the code, and waits for the page again. Ladder runs the new code.
+  # Another change waits in the queue until Claude has done this one, and its label says its place
+  K.ask_for_change!(e, level, "and red")
+  q = K.ask_queue(e)
+  @test length(q) == 1 && q[1][1].words == "and red" && picker().asked === a && !isfile(sent)
+  frames(w, 2)
+  @test q[1][1].label !== nothing
+  # Claude changes the code, and waits for the page again. Ladder runs the new code, and Claude gets the next change.
   write(source, replace(read(source, String), r"height\(\d+px\)" => "height(22px)"))
   waits()
   @test a.ended > 0 && a.changed && a.said == "Claude has done it." && last(K.AGENT_CHANGES) === a
+  @test isempty(q)
+  @test last(K.asks_ended(e)) === a
+  @test picker().asked.words == "and red"
+  @test picker().asked.sent
+  @test occursin("The user's words: and red", got())
   frames(w, 2)
   @test rect(node()).height == 22px
+  waits()
+  @test picker().asked.ended > 0
   picker().asked = nothing
+  empty!(K.asks_ended(e))
   # The Nudge button gives Claude the page, so it waits no more. A change waits for it.
   K.send!(e)
   got()
@@ -750,7 +764,117 @@ end
   K.preferred_agent!(e, "Claude")
 end
 
-@testset "the words that the agent of a page reads, of a block of code" begin
+@testset "the page's menu asks the agent about the words that are selected" begin
+  picker().asked = picker().about = nothing
+  b = e.buf
+  @test b.lines[7] == "The end." && first(K.PAGE_MENU) == "Ask Agent…"
+  b.anchor, b.caret = (7, 0), (7, 8)
+  c = K.selected_thing(e)
+  @test c.words == "“The end.”" && c.note == "selected · line 7" && (c.file, c.first, c.last) == (K.page_key(b.path), 7, 7)
+  @test c.node isa K.PickedText && c.node.text == "The end." && K.chip_wider(c, e) === nothing
+  frames(w, 2)
+  @test K.asked_rect(e, c) !== nothing
+  # Lines that are selected whole end at the start of the next line, which isn't one of them
+  b.anchor, b.caret = (7, 0), (8, 0)
+  @test K.selected_thing(e).last == 7
+  b.anchor, b.caret = (7, 0), (7, 8)
+  # The menu's item draws a box round the words, and opens a field under them, with the keyboard in it
+  K.page_act!(e, 1)
+  frames(w, 2)
+  a = e.nodes[K.ASK_KEY]
+  @test a isa K.AskBox && a.thing == c && w.focus === a.parts[:text] && any(p -> p.key == K.ASK_KEY, popups(w))
+  r = K.asked_rect(e, c)
+  @test r.width < 120px && r.height < 40px   # round the words, not the whole line
+  # The text is an editor of its own, as a page's is. A long request goes on under itself, and the field grows taller.
+  sub = a.parts[:text]
+  tall = K.lowest(sub, sub.layout)
+  typed(w, "a request that is much too long to fit on one line of the field, so it goes on under itself")
+  @test sub.buf.lines == ["a request that is much too long to fit on one line of the field, so it goes on under itself"]
+  @test K.lowest(sub, sub.layout) > tall && b.lines[7] == "The end."
+  # ↑ goes up a line of the wrapped text, as it does in a page
+  at = sub.buf.caret[2]
+  press(w, Keys.up)
+  @test sub.buf.caret[1] == 1 && 0 < sub.buf.caret[2] < at
+  # ⇧Return starts a new line, and sends nothing
+  press(w, Keys._end); press(w, Keys.enter, Keys.shft)
+  @test length(sub.buf.lines) == 2 && haskey(e.nodes, K.ASK_KEY) && picker().asked === nothing
+  # ⌘Z takes it back
+  press(w, Keys.z, Keys.cmd)
+  @test length(sub.buf.lines) == 1
+  press(w, Keys.a, Keys.cmd); press(w, Keys.backspace)
+  @test sub.buf.lines == [""]
+  # Return with nothing typed does nothing. Esc takes the field and the box away.
+  press(w, Keys.enter)
+  @test haskey(e.nodes, K.ASK_KEY) && picker().asked === nothing
+  press(w, Keys.escape)
+  @test !haskey(e.nodes, K.ASK_KEY) && !any(p -> p.key == K.ASK_KEY, popups(w))
+  # What's typed goes to the agent with the words, and its answer shows in a card beside them
+  K.page_act!(e, 1)
+  frames(w, 2)
+  K.AGENT_COMMAND[] = `sh $quiet`
+  typed(w, "is this right?")
+  press(w, Keys.enter)
+  @test !haskey(e.nodes, K.ASK_KEY) && picker().asked.words == "is this right?" && picker().asked.places == [c]
+  finish()
+  @test occursin("A: words that the user selected in a file, in the file $(c.file), lines 7 to 7. It starts:\n\n    The end.", asked())
+  @test picker().about.answer == "I looked, and it's as you say."
+  picker().about = nothing
+  # When the agent can't take it, the field stays and says why
+  push!(K.AGENT_KINDS, K.AgentKind("Nobody", "no-such-agent-command", String[], String[], String[]))
+  K.preferred_agent!(e, "Nobody")
+  K.AGENT_COMMAND[] = nothing
+  b.anchor, b.caret = (7, 0), (7, 8)
+  K.page_act!(e, 1)
+  frames(w, 2)
+  typed(w, "and this?")
+  press(w, Keys.enter)
+  @test e.nodes[K.ASK_KEY].error == "Ladder can't find the command `no-such-agent-command` of Nobody. Install it, or choose another agent in Settings."
+  K.preferred_agent!(e, "Claude")
+  pop!(K.AGENT_KINDS)
+  # Esc in the field takes the field away, and leaves a working agent working
+  K.AGENT_COMMAND[] = `sh -c "exec sleep 30"`
+  K.ask_agent!(e, c, "something else")
+  press(w, Keys.escape)
+  @test !haskey(e.nodes, K.ASK_KEY) && picker().asked.ended == 0
+  # A request while the agent works waits in the queue, and its label says its place
+  K.page_act!(e, 1)
+  frames(w, 2)
+  typed(w, "and this?")
+  press(w, Keys.enter)
+  q = K.ask_queue(e)
+  @test !haskey(e.nodes, K.ASK_KEY) && length(q) == 1 && q[1][1].words == "and this?" && picker().asked.words == "something else"
+  @test K.queued_label(1, "and this?") == "Number 1 in the queue: and this?  ·  Click to take it back"
+  K.ask_agent!(e, c, "and that?")
+  frames(w, 2)
+  @test [a.words for (a, _) in q] == ["and this?", "and that?"] && all(((a, _),) -> a.label !== nothing, q)
+  # A click on a label takes that request out, and the others move up
+  left, top, wide, tall = q[2][1].label
+  click(w, px(left + wide / 2), px(top + tall / 2))
+  @test [a.words for (a, _) in q] == ["and this?"] && picker().asked.ended == 0
+  # When the agent ends, the next request starts, and the label of the one before stays a while
+  K.stop_agent!(e)
+  finish()
+  frames(w, 2)
+  @test isempty(q) && picker().asked.words == "and this?" && picker().asked.ended == 0 && last(K.asks_ended(e)).words == "something else"
+  K.stop_agent!(e)
+  finish()
+  picker().asked = nothing
+  empty!(K.asks_ended(e))
+  # The agent that shares the page reads where the words are
+  @test K.thing_told(e, c) == "Words that the user selected, on line 7 of the page:\n\n    The end."
+  # With nothing selected, the box goes round the caret's line
+  b.anchor = b.caret = (7, 3)
+  @test K.selected_thing(e) === nothing && K.line_thing(e).node.text == "The end."
+  K.page_act!(e, 1)
+  @test e.nodes[K.ASK_KEY].thing.node.text == "The end."
+  press(w, Keys.escape)
+end
+
+@testset "the words that the agent of a page reads, of a margin comment and of a block of code" begin
+  b = e.buf
+  card = K.CommentCard(line=7, lines=["Is this", "right?"])
+  c = K.ToChange("Comment", "", "/x/main.jl", 10, 20, card, nothing)
+  @test K.thing_told(e, c) == "A comment in the margin of the page, on line 7. It says: Is this right?\n\nLadder draws it with the code in the file /x/main.jl, lines 10 to 20."
   block = only(filter(c -> c.note == "julia block · line 10", offered(e, (3, 0))))
   @test K.thing_told(e, block) == "a block of Julia code on a page of Markdown, in the file $(block.file), lines 10 to 10. It starts:\n\n    x = 1"
   @test K.quoted_lines(["a", "b", "c"], 2, 3) == "    b\n    c"

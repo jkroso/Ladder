@@ -9050,8 +9050,19 @@ caret(ctx, ui::ConcreteRect, side, aim) = begin
   c = found_colours()
   left, top, wide, high = num(ui.left), num(ui.top), num(ui.width), num(ui.height)
   x = clamp(num(aim.left + aim.width / 2), left + 16, max(left + 16, left + wide - 16))
-  base, tip = side == :top ? (top + high - 1, top + high + 6) : (top + 1, top - 6)
-  trace(ctx, [(x - 7, base), (x, tip), (x + 7, base)], c.line, 1; fill=c.frame)
+  # The box's border is a line 1px wide along the middle of the first px of its edge. The arrow's sides start on
+  # that line, so they join it with nothing past it.
+  edge, way = side == :top ? (top + high - 0.5, 1) : (top + 0.5, -1)
+  half, tall = 7.0, 6.5
+  tip = edge + way * tall
+  # Its inside goes 1px past that line into the box, on the same slant, so that no border shows across the arrow
+  inner, spread = edge - way, half * (1 + 1 / tall)
+  shape = path_through([(x - spread, inner), (x, tip), (x + spread, inner)], true)
+  paint = ink(c.frame)
+  Skia.sk_canvas_draw_path(ctx, shape, paint)
+  Skia.sk_paint_delete(paint)
+  Skia.sk_path_delete(shape)
+  trace(ctx, [(x - half, edge), (x, tip), (x + half, edge)], c.line, 1)
 end
 
 draw(ctx, size, ui::ConcreteRect, l::FoundList) = caret(ctx, ui, l.side, rect(plan_input(l.of)))
@@ -25230,6 +25241,7 @@ draw(ctx, size, ui::ConcreteRect, d::Document) = begin
   mark_pointed(ctx, e, ui)
   underline_scrubs(ctx, e, ui)
   mark_clickable(ctx, e, ui)
+  note_peek!(e)   # the card of a footnote whose number the mouse is on
   mark_checks(ctx, e, ui)
   mark_steps(ctx, e, ui)
   ring_part(ctx, e, ui)
@@ -26603,7 +26615,13 @@ end
 
 onkey(d::Document, ev::KeyPress{Keys.mouse_left}) = press!(editor(d), ev.window.mouse)
 onkey(p::Page, ev::KeyPress{Keys.mouse_left}) = press!(editor(p), ev.window.mouse)
-onmouse(d::Document, ev::MouseMove) = (Base.invokelatest(hover_check!, editor(d), ev.position); drag!(editor(d), ev.position))
+onmouse(d::Document, ev::MouseMove) = begin
+  e = editor(d)
+  Base.invokelatest(hover_check!, e, ev.position)
+  # The window draws again as the mouse goes on to a footnote's number or off it, for its card: see `note_peek!`
+  (haskey(e.nodes, :note_peek) || Base.invokelatest(note_at, e, ev.position) !== nothing) && redraw_in!(e, 0)
+  drag!(e, ev.position)
+end
 onmouse(p::Page, ev::MouseMove) = drag!(editor(p), ev.position)
 
 # --- editing -----------------------------------------------------------------------------
@@ -28461,6 +28479,8 @@ onkey(e::Editor, ev::KeyPress{K}) where K = begin
   command == :wait && return
   # In a part of another page, a key for the window is the window's page's, and esc goes back to that page
   hosted(e) === nothing || !part_key!(e, w, K, command, select) || return handled
+  # In the text of a request in place, Return gives the request to the agent and esc takes the field away
+  ask_box_of(e) === nothing || !ask_key!(e, w, K, command) || return handled
   # While the command palette shows, every key is its own, whatever part of it has the keyboard
   e.popup == :commands && return (palette_key!(e, w, K, command); K == Keys.tab ? handled : nothing)
   kind = command === nothing ? :none : COMMANDS[command].kind
@@ -32673,7 +32693,8 @@ const INSERTS = [
   ("Front Matter",  ["---", "title: ", "---"],      (2, 7)),
 ]
 
-const PAGE_MENU = ["Cut", "Copy", "Paste", "-", "Select All", "-", "Find…", "Export as HTML…", "-",
+# Ask Agent… shows with the name of the agent that it asks, like "Ask Claude…": see `page_menu!`
+const PAGE_MENU = ["Ask Agent…", "-", "Cut", "Copy", "Paste", "-", "Select All", "-", "Find…", "Export as HTML…", "-",
                    "Insert" => [x isa String ? x : x[1] for x in INSERTS], "-", "Show as Slides"]
 
 cut!(e) = begin
@@ -32755,7 +32776,9 @@ end
 "Do what the item at `i` of the page's menu does. `j` is the item's place in the Insert menu, when it's one of those."
 page_act!(e, i::Int, j::Int=0) = begin
   name = PAGE_MENU[i] isa Pair ? first(PAGE_MENU[i]) : PAGE_MENU[i]
-  if name == "Cut"
+  if name == "Ask Agent…"
+    ask_selected!(e)
+  elseif name == "Cut"
     cut!(e)
   elseif name == "Copy"
     # While an email as it was sent has the keyboard, what's selected is its words
@@ -32819,7 +32842,7 @@ page_menu!(e, w) = begin
   # Cut and Copy are grey with nothing selected, and Front Matter is grey in a document that has it
   off = Any[]
   wrong !== nothing && isempty(fixes) && push!(off, 1)
-  selecting(b) || push!(off, n + 1, n + 2)
+  selecting(b) || append!(off, n .+ findall(in(("Cut", "Copy")), PAGE_MENU))
   front_matter(b.lines) == 0 || push!(off, (n + findfirst(x -> x isa Pair, PAGE_MENU), length(INSERTS)))
   # Each item that would change the text is grey for a file that's only shown
   readonly(b) && append!(off, n .+ findall(x -> (x isa Pair ? first(x) : x) in ("Cut", "Paste", "Export as HTML…", "Insert", "Show as Slides"), PAGE_MENU))
@@ -32828,7 +32851,8 @@ page_menu!(e, w) = begin
   b.view == :code && append!(off, n .+ findall(x -> (x isa Pair ? first(x) : x) in ("Export as HTML…", "Insert", "Show as Slides"), PAGE_MENU))
   # A part of another page isn't the page that the window shows
   hosted(e) === nothing || append!(off, n .+ findall(x -> (x isa Pair ? first(x) : x) in ("Find…", "Export as HTML…", "Show as Slides"), PAGE_MENU))
-  items = Any[spell..., PAGE_MENU...]
+  # Ask Agent… names the agent that it asks
+  items = Any[spell..., (x == "Ask Agent…" ? "Ask $(asks_whom(e))…" : x for x in PAGE_MENU)...]
   system_menu(w, items, act; off) || drawn_menu!(w, items, act; off)
   nothing
 end
@@ -36052,6 +36076,99 @@ follow_note!(e, name) = begin
   to === nothing && return
   b.caret = b.anchor = to
   touch!(e)
+end
+
+# When the mouse rests on a footnote's number in the text, a card under the
+# number shows the footnote, as the page reads, so you can read it without
+# going to the end of the page. The card goes when the mouse leaves the number,
+# when a key like ⌘ is held, and while the mouse button is down.
+
+const NOTE_KEY = :footnote   # the key of the popup with a footnote's card
+const NOTE_WAIT = 0.25       # seconds that the mouse rests on a number before its card shows
+const NOTE_CARD_W = 380px    # how wide the card is
+
+"""
+The footnote number under the mouse at `pos`, in a line that points to the
+footnote: the footnote's name, and where the number is in the page's text, or
+nothing. The number at the start of the footnote's own line isn't one.
+"""
+note_at(e, pos) = begin
+  (isempty(e.layout) || e.buf.view != :markdown) && return nothing
+  line, _ = locate(e, pos)
+  it = item(e, line)
+  f = it.content
+  (f isa Flow && it.first == it.last) || return nothing
+  x, y = pos[1] - e.origin[1], pos[2] - e.origin[2] - it.top
+  for (k, vl) in enumerate(f.lines)
+    top = line_top(f, k)
+    top <= y < top + vl.high || continue
+    for s in vl.segs
+      (startswith(s.link, '^') && s.x - 2px <= x < s.x + s.w + 2px) || continue
+      name = String(s.link[2:end])
+      m = match(NOTE, e.buf.lines[it.first])
+      m !== nothing && m[1] == name && return nothing
+      return (line=it.first, name=name, x=s.x, top=it.top + top, w=s.w, high=vl.high)
+    end
+  end
+  nothing
+end
+
+"""
+The card of the footnote `name` of the page of `e`: its number, over its text
+as the page reads, a little smaller than the page's own text. It's nothing
+when the page has no line that holds the footnote.
+"""
+note_card(e, name) = begin
+  b = e.buf
+  i = findfirst(l -> (m = match(NOTE, l); m !== nothing && m[1] == name), b.lines)
+  i === nothing && return nothing
+  line = b.lines[i]
+  text = String(SubString(line, ncodeunits(match(NOTE, line).match) + 1))
+  isempty(strip(text)) && return nothing
+  wide = NOTE_CARD_W - 2 * 6px - 2 * 14px   # the card has 6px of room on each side, and the text 14px inside that
+  zoom = e.zoom
+  e.zoom = zoom * PAGE_ZOOM
+  # -1 says that the line isn't one of the document's, so its inline code isn't run
+  f = try laid(e, text, classify([text])[1], false, -1, wide) finally e.zoom = zoom end
+  Column(fixed(NOTE_CARD_W), Alignment.Start, padding(6px), radius(8px), background(colours.block),
+         border(1px, :solid, colours.line), lifted, child_gap=4px, name="Footnote",
+    Row(width(grow=grow), height(22px), padding(8px, 0px), child_gap=6px, Alignment.Center,
+      Icon("superscript", size=12px, color=colours.dim), label("Footnote $(note_mark(e, name))", 12px, color=colours.dim)),
+    Box(width(grow=grow), height(tall(f) + 2TEXT_PAD), padding(14px, 0px), radius(5px), background(colours.bg),
+      Column(width(grow=grow), Alignment.Start, spacer(TEXT_PAD), describe(e, Item(0, 0, 0px, tall(f), f), f))))
+end
+
+"""
+In each frame: show the card of the footnote whose number the mouse has
+rested on, and take it away when the mouse leaves the number.
+"""
+note_peek!(e) = begin
+  w = window_of(e)
+  w === nothing && return nothing
+  over = e.popup == :none && unmodified(w) && !(Keys.mouse_left in w.keys) && ishovered(node!(Document, e, :document))
+  found = over ? note_at(e, w.mouse) : nothing
+  was = get(e.nodes, :note_peek, nothing)
+  if found === nothing
+    was === nothing && return nothing
+    delete!(e.nodes, :note_peek)
+    close_popup!(w, NOTE_KEY)
+    return nothing
+  end
+  if was === nothing || was.at != found
+    was === nothing || close_popup!(w, NOTE_KEY)
+    e.nodes[:note_peek] = (at=found, since=time(), shown=false)
+    redraw_in!(e, NOTE_WAIT)
+    return nothing
+  end
+  was.shown && return nothing
+  wait = NOTE_WAIT - (time() - was.since)
+  wait > 0 && return (redraw_in!(e, wait); nothing)
+  e.nodes[:note_peek] = (at=found, since=was.since, shown=true)
+  card = note_card(e, found.name)
+  card === nothing && return nothing
+  popup!(w, card, anchor=(e.origin[1] + found.x, e.origin[2] + found.top, max(found.w, 4px), found.high),
+         placement=:below, gap=4px, key=NOTE_KEY, input=false)
+  nothing
 end
 
 # --- find in the page ----------------------------------------------------------------------
@@ -41717,6 +41834,13 @@ tool_input(t::CodePicker, w, ::KeyPress{Keys.mouse_left}) = begin
       return true
     end
   end
+  # A click on the label of a request that waits takes it out of the queue, and one on the label of a change that ended shows it
+  x, y = num(w.mouse[1]), num(w.mouse[2])
+  on(r) = r !== nothing && r[1] <= x <= r[1] + r[3] && r[2] <= y <= r[2] + r[4]
+  q = ask_queue(t.editor)
+  k = findfirst(((a, _),) -> on(a.label), q)
+  k === nothing || (deleteat!(q, k); t.swallow = true; redraw_in!(t.editor, 0); return true)
+  any(a -> a.changed && on(a.label), asks_ended(t.editor)) && (t.swallow = true; show_change!(t.editor); return true)
   # A button of a check of a file of Julia code, like Fix It: see "a check that fails"
   check_button!(t.editor, w) && (t.swallow = true; return true)
   picks(t, w) || return false
@@ -41791,9 +41915,10 @@ end
 # While a block is dragged by its handle, the mouse selects no text, and the line where the block would go follows it
 tool_input(t::CodePicker, w, ::MouseMove) = dragging(t) ? (redraw_in!(t.editor, 0); true) : false
 # Esc stops the drag of a block, takes the line of a thing that a click with ⌘ and ⌥ down chose away, stops an
-# agent that's working, and takes the card of an agent's answer away, while no popup and no search shows
+# agent that's working, and takes the card of an agent's answer away, while no popup and no search shows. The field of a
+# request in place takes its own Esc: see "a request in place".
 tool_input(t::CodePicker, w, ::KeyPress{Keys.escape}) = begin
-  (unmodified(w) && t.editor.popup == :none && !finding(t.editor)) || return false
+  (unmodified(w) && t.editor.popup == :none && !finding(t.editor) && !haskey(t.editor.nodes, ASK_KEY)) || return false
   dragging(t) && (block_drag(t.editor).lines = nothing; redraw_in!(t.editor, 0); return true)
   t.chosen === nothing || (unchoose!(t); return true)
   isempty(working_agents(t.editor)) || (stop_agent!(t.editor); return true)
@@ -41810,23 +41935,53 @@ const PICK_LINE = colorant"rgb(48,128,236)"
 const PICK_FAILED = colorant"rgb(200,60,50)"
 
 "Draw a line round the place `r` of the window `w`, and a label with `words` over its top left corner. With no place, the label is under the top bar. With no words, there's no label. `room` is the width that something after the label, on the same line, needs in the window."
-pick_mark(ctx, w, r, words; colour=PICK_LINE, room=0.0) = begin
+pick_mark(ctx, w, r, words; colour=PICK_LINE, room=0.0, lift=0.0, busy=false, avoid=nothing) = begin
   x, y = 16.0, 64.0
   if r !== nothing
     x, y, wide, tall = num(r.left), num(r.top), num(r.width), num(r.height)
-    round_box(ctx, x + 0.5, y + 0.5, max(1, wide - 1), max(1, tall - 1), 3; fill=RGBA(colour.r, colour.g, colour.b, 0.08), line=colour, wide=1.5)
+    # While an agent works on the thing, the colour inside the line pulses
+    fill = busy ? 0.08 + 0.14 * (0.5 - 0.5 * cos(2π * time() / PULSE_TIME)) : 0.08
+    round_box(ctx, x + 0.5, y + 0.5, max(1, wide - 1), max(1, tall - 1), 3; fill=RGBA(colour.r, colour.g, colour.b, fill), line=colour, wide=1.5)
   end
   isempty(words) && return nothing
   face = Face(SANS, "", 11px, colorant"white", false)
-  across = num(measure(face, words)) + 12
+  # and the label has a ring that turns before its words
+  turn = busy ? 15.0 : 0.0
+  across = num(measure(face, words)) + 12 + turn
   # The label sits on the thing's top edge, and comes down into the thing where the window has no room over it.
   # A thing whose top is above the window, like a whole file, has its label at the top of the window.
   # `room` is how much more the label needs after it, for the buttons that follow it
   left = clamp(x, 0.0, max(0.0, num(w.size[1]) - across - room))
-  top = y >= 18 ? y - 18 : max(y, 0.0)
+  # `lift` puts it that much higher, over the label of another request about the same thing, or lower where there's no room
+  top = y >= 18 + lift ? y - 18 - lift : max(y, 0.0) + lift
+  # `avoid` has the labels drawn already. One that this one would cover pushes it up a row, or down where there's no room.
+  if avoid !== nothing
+    covers(at) = any(o -> left < o[1] + o[3] && o[1] < left + across && at < o[2] + o[4] && o[2] < at + 18, avoid)
+    tries = 0
+    while covers(top) && tries < 8
+      top = top >= 20 ? top - 20 : top + 20
+      tries += 1
+    end
+    push!(avoid, (left, top, across, 18.0))
+  end
   round_box(ctx, left, top, across, 18, 3; fill=colour)
-  write_ink(ctx, words, left + 6, top + 13, face)
+  busy && spin_ring(ctx, left + 11, top + 9, 4.0, colorant"white")
+  write_ink(ctx, words, left + 6 + turn, top + 13, face)
   (left, top, across, 18.0)   # where the label is, for a click on it
+end
+
+"How many seconds the colour inside the line round a thing that an agent works on takes to pulse once"
+const PULSE_TIME = 1.6
+
+"A ring of radius `r` round (`x`, `y`) in `colour`: faint, with a quarter of it in full that goes round once in `SPIN_TURN` seconds, as a `Spinner`'s does"
+spin_ring(ctx, x, y, r, colour; wide=1.5) = begin
+  ring = ink(RGBA(colour, 0.35), wide)
+  Skia.sk_canvas_draw_circle(ctx, Float32(x), Float32(y), Float32(r), ring)
+  Skia.sk_paint_delete(ring)
+  oval = Ref(Skia.sk_rect_t(Float32(x - r), Float32(y - r), Float32(x + r), Float32(y + r)))
+  arc = ink(colour, wide)
+  Skia.sk_canvas_draw_arc(ctx, oval, Float32(360 * mod(time(), SPIN_TURN) / SPIN_TURN), 90f0, false, arc)
+  Skia.sk_paint_delete(arc)
 end
 
 # A line round the thing that a click would show the code of, and a label over its top left corner.
@@ -41835,6 +41990,9 @@ draw_tool(ctx, w, t::CodePicker, scene) = begin
   mark_chips(ctx, w, t.editor)
   mark_preview(ctx, w, t.editor)
   draw_answer(ctx, w, t)
+  # The words that a request in place is about, while you type it
+  k = get(t.editor.nodes, ASK_KEY, nothing)
+  k isa AskBox && pick_mark(ctx, w, asked_rect(t.editor, k.thing), "Ask $(asks_whom(t.editor))")
   a = t.asked
   if a !== nothing
     # Each thing has its letter, and the first has what was asked, then what the agent said
@@ -41843,10 +42001,23 @@ draw_tool(ctx, w, t::CodePicker, scene) = begin
       r = asked_rect(t.editor, c)
       r === nothing || pick_mark(ctx, w, r, string('A' + n - 1); colour=CHIP_MARKS[mod1(n, length(CHIP_MARKS))])
     end
-    words = asked_label(a)
-    words = length(words) > 140 ? first(words, 139) * "…" : words
-    a.label = pick_mark(ctx, w, asked_rect(t.editor, isempty(a.places) ? nothing : first(a.places)), words; colour=a.failed ? PICK_FAILED : PICK_LINE)
   end
+  # The request that an agent works on, those that wait, with their places in the queue, and those that ended while
+  # others waited: see "a queue of requests". A label that would cover one drawn before it goes a row higher.
+  shown = Any[]
+  # The request that an agent works on has a ring that turns, and a colour that pulses. One that waits for the page's agent to wait again has neither.
+  busy = a !== nothing && a.ended == 0 && (isempty(a.by) || a.sent)
+  a === nothing || push!(shown, (a, asked_label(a), a.failed ? PICK_FAILED : PICK_LINE, busy))
+  for (n, (q, _)) in enumerate(ask_queue(t.editor))
+    push!(shown, (q, queued_label(n, q.words), QUEUED_LINE, false))
+  end
+  foreach(d -> push!(shown, (d, asked_label(d), d.failed ? PICK_FAILED : PICK_LINE, false)), asks_ended(t.editor))
+  placed = NTuple{4,Float64}[]
+  for (x, words, colour, turns) in shown
+    r = asked_rect(t.editor, isempty(x.places) ? nothing : first(x.places))
+    x.label = pick_mark(ctx, w, r, label_words(words); colour, busy=turns, avoid=placed)
+  end
+  busy && redraw_in!(t.editor, SPIN_FRAME)   # the ring turns, and the colour pulses
   draw_chosen(ctx, w, t)
   draw_drag(ctx, w, t)
   picks(t, w) || return nothing
@@ -42690,7 +42861,10 @@ end
 json_field(o, key) = o isa JSONObject && (k = findfirst(==(key), o.keys); k !== nothing) ? o.values[k] : nothing
 
 "What the label of a thing says while an agent works on it: what was asked, and what the agent is doing"
-asking_words(words, step) = isempty(step) ? "Asked: $words …" : "Asked: $words  ·  $step …"
+asking_words(words, step) = isempty(step) ? "Asked: $(request_words(words)) …" : "Asked: $(request_words(words))  ·  $step …"
+
+"The words of a request as its label has them: the first 60 characters"
+request_words(words) = length(words) > 60 ? first(words, 59) * "…" : words
 
 "A line that an agent printed, read as JSON, or nothing for a line that isn't JSON"
 agent_json(line::AbstractString) = startswith(line, '{') ? (try json_value(Vector{UInt8}(line)) catch; nothing end) : nothing
@@ -42926,6 +43100,7 @@ the same place on the screen, like one that only holds another, is passed
 over, so each ⌥↑ shows a bigger line.
 """
 chip_wider(c::ToChange, e) = begin
+  c.node isa PickedText && return nothing
   if c.node !== nothing
     place(x) = (r = try rect(x) catch; nothing end; r === nothing ? nothing : (r.left, r.top, r.width, r.height))
     was = place(c.node)
@@ -42945,6 +43120,7 @@ end
 
 "What the thing `c` of Ask For Change is, in words for an agent, and the first line of its code"
 thing_words(c::ToChange) = begin
+  c.node isa PickedText && return ("words that the user selected in a file", picked_words(c.node))
   lines = text(c.file)
   start = 1 <= c.first <= length(lines) ? lines[code_start(lines, c.first)] : ""
   what = c.node !== nothing ? "a part of its window, a $(pick_name(c.node)). The function that draws that part" :
@@ -43072,6 +43248,7 @@ window, or the lines of the block while the window shows its file. It's
 nothing when the window shows neither.
 """
 asked_rect(e, c::ToChange) = begin
+  c.node isa PickedText && return picked_box(e, c)
   if c.node !== nothing
     # A paragraph or a heading of the page is made again on each frame, so it's this frame's one that shows
     node = shown_now(c.node)
@@ -43141,7 +43318,9 @@ end
 "In each frame: when the agent that was asked for a change has ended, run the code that it changed, and say how it went"
 ask_tick!(e) = begin
   t = get(e.nodes, :code_picker, nothing)
-  (t isa CodePicker && t.asked !== nothing) || return nothing
+  t isa CodePicker || return nothing
+  queue_tick!(e, t)
+  t.asked === nothing && return nothing
   a = t.asked
   a.ended == 0 && !isempty(a.by) && return sharer_tick!(e, t, a)
   if a.ended == 0
@@ -43186,12 +43365,17 @@ than one, and the words can name each by its letter: "make A look like B".
 See "ask for a change to a thing".
 """
 ask_for_change!(e, node::Union{ToChange,Things}, request::String) = begin
-  isempty(strip(request)) && error("Say what should change, in a few words.")
+  words = String(strip(request))
+  isempty(words) && error("Say what should change, in a few words.")
   # The agent that works on the page with you gets it, when there's one: see "ask the agent of the page"
   name = sharer(e)
   agent_free(e, command=isempty(name))
   places = collect(each_thing(node))
-  isempty(name) ? ask_change!(e, places, String(strip(request))) : ask_sharer!(e, name, places, String(strip(request)))
+  # What you asked about the things before, from the card of an answer, goes with your words
+  talk = talk_words(follow_up!(e, places))
+  # It waits while an agent works on a request before it: see "a queue of requests"
+  queue_ask!(e, words, places, isempty(name) ? () -> ask_change!(e, places, words, prompt=change_prompt(places, words) * talk) :
+                                               () -> ask_sharer!(e, name, places, words, talk=talk))
 end
 
 # --- ask an agent ---
@@ -43217,10 +43401,207 @@ either_prompt(cs::AbstractVector, words) = begin
   $(join(parts, "\n"))
   The user's words: $words
 
-  The words ask for a change, or ask a question. For a change, change that code, or the code that it uses. Change only files in $(join(unique(dirname(c.file) for c in cs), " and ")). Keep the change small, and write code that looks like the code around it. Ladder runs the changed code as soon as you end, so leave the file in a state that runs. Then say what you changed, in one short sentence.
+  The words ask for a change, or ask a question. For a change, change that, or the code that it uses. Change only files in $(join(unique(dirname(c.file) for c in cs), " and ")). Keep the change small, and write code that looks like the code around it. Ladder runs the changed code as soon as you end, so leave the file in a state that runs. Then say what you changed, in one short sentence.
 
   For a question, don't change any file. Read the code to find the answer. Answer in a few short sentences of plain words, with no Markdown, as the answer shows in a small card beside the thing.
   """
+end
+
+"""
+Words of a file that you selected, as a thing of Ask Agent: the words, and
+where they start and end. The page's menu gives them: see `ask_selected!`.
+"""
+struct PickedText
+  text::String
+  from::Tuple{Int,Int}
+  to::Tuple{Int,Int}
+end
+
+"The words of `t` for an agent to read, each line after the first indented, and no more than 2,000 characters"
+picked_words(t::PickedText) = (s = length(t.text) > 2000 ? first(t.text, 1999) * "…" : t.text; replace(s, "\n" => "\n    "))
+
+"The words of the page in `b` from `lo` to `hi`, as a thing of Ask Agent, or nothing when they're only spaces"
+words_thing(b, lo, hi) = begin
+  text = excerpt(b, lo, hi)
+  isempty(strip(text)) && return nothing
+  short = replace(strip(text), r"\s+" => " ")
+  # A selection of whole lines ends at the start of the line after them
+  stop = hi[2] == 0 && hi[1] > lo[1] ? hi[1] - 1 : hi[1]
+  ToChange("“" * (length(short) > 40 ? first(short, 39) * "…" : short) * "”", "selected · line $(lo[1])",
+           page_key(b.path), lo[1], stop, PickedText(text, lo, hi), nothing)
+end
+
+"The words that are selected in the window of `e`, as a thing of Ask Agent, or nothing when none are"
+selected_thing(e) = (b = e.buf; selecting(b) && !isempty(b.path) ? words_thing(b, selection(b)...) : nothing)
+
+"The words of the line that the caret is on, as a thing of Ask Agent, or nothing for a line with no words"
+line_thing(e) = (b = e.buf; i = b.caret[1]; isempty(b.path) ? nothing : words_thing(b, (i, 0), line_end(b, i)))
+
+"""
+The places in the window of `e` that show the words of `c`, which you
+selected: a rectangle for each run of them on a line as it's laid out. A part of
+the page that doesn't show its line as words, like a table, gives all of its place.
+"""
+picked_rects(e, c::ToChange) = begin
+  t = c.node::PickedText
+  b = e.buf
+  out = NamedTuple{(:left, :top, :width, :height),NTuple{4,px}}[]
+  (!isempty(b.path) && page_key(b.path) == c.file && !isempty(e.layout) && t.to[1] <= length(b.lines)) || return out
+  x, y = e.origin
+  seen = Set{Int}()
+  for i in t.from[1]:t.to[1]
+    it = item(e, i)
+    f = it.content
+    if f isa Flow && it.first == it.last
+      from, to = i == t.from[1] ? t.from[2] : 0, i == t.to[1] ? t.to[2] : length(b.lines[i])
+      for (x1, x2, top, high) in stretches(f, from, to)
+        push!(out, (left=x + x1, top=y + it.top + top, width=x2 - x1, height=high))
+      end
+    elseif !(it.first in seen)
+      push!(seen, it.first)
+      push!(out, (left=x, top=y + it.top, width=e.width, height=it.tall))
+    end
+  end
+  out
+end
+
+"The box round the words of `c`, which you selected, in the window of `e`, or nothing when they don't show"
+picked_box(e, c::ToChange) = begin
+  rs = picked_rects(e, c)
+  isempty(rs) && return nothing
+  left, top = minimum(r.left for r in rs) - 3px, minimum(r.top for r in rs) - 1px
+  right, bottom = maximum(r.left + r.width for r in rs) + 3px, maximum(r.top + r.height for r in rs) + 1px
+  (left=left, top=top, width=right - left, height=bottom - top)
+end
+
+# --- a request in place ---
+#
+# Ask Claude… in the page's menu draws a box round the words that are
+# selected, or round the caret's line when none are, and a field under them for
+# what you want. Return gives the words and what you typed to the agent, as Ask
+# Agent does. The box stays round the words while the agent works, with a
+# label that says how it goes, and then what the agent did or its answer. Esc,
+# or a click anywhere else, takes the field and the box away.
+
+const ASK_KEY = :ask_box   # the key of the popup with the field
+const ASK_BOX_W = 380px
+const ASK_TEXT_W = ASK_BOX_W - 32px   # how wide the text of the field is, inside the popup's padding and the field's
+const ASK_TEXT = 13px                 # how big the text of the field is, before the page's zoom
+
+"""
+The field under the words that you selected, for a request to the agent. Its
+text is an editor of its own, as a part of another page has (see
+`part_editor`), so the keys work in it as they do in a page: ↑ and ↓ go from
+line to line, ⌘Z takes a change back, and long lines wrap.
+"""
+@def mutable struct AskBox <: SemanticUI
+  of::Any = nothing                       # the editor
+  thing::Any = nothing                    # the words, as a thing of Ask Agent
+  side::Symbol = :bottom                  # the side of the words that it's on
+  error::String = ""                      # why the last request didn't go, or ""
+  parts::Dict{Any,Any} = Dict{Any,Any}()  # the editor of its text, as :text
+end
+
+"The editor of the text of a request in place, which `e` shows: lines that no file holds, in the window's colours, at a field's size"
+ask_editor(e) = begin
+  sub = Editor()
+  sub.buf = Buffer()
+  sub.nodes[:input] = own!(sub, TextInput())
+  follow_host!(sub, e)
+  sub.font, sub.zoom, sub.look = SANS, e.zoom * ASK_TEXT / TEXT_SIZE, :own
+  sub
+end
+
+"The field of a request in place that the editor `e` is the text of, or nothing for any other editor"
+ask_box_of(e) = get(e.nodes, :ask_box, nothing)
+
+"""
+What a key does in the text of a request in place, before its editor does
+what it does with a key. True when the key is done with. Return gives the
+request to the agent, and ⇧Return starts a new line. Esc takes the field away.
+A command for the window runs in the window's page.
+"""
+ask_key!(e, w, K, command) = begin
+  a = ask_box_of(e)
+  K == Keys.enter && unmodified(w) && (send_ask!(a, w); return true)
+  K == Keys.escape && unmodified(w) && (close_ask!(a, w); return true)
+  command !== nothing && COMMANDS[command].kind == :window && (run!(a.of, w, command, false); return true)
+  false
+end
+
+"""
+Draw a box round the words that are selected, or the caret's line, and open
+a field under them for a request to the agent. The item Ask Agent… of the
+page's menu does this, with the agent's name. See "a request in place".
+"""
+ask_selected!(e) = begin
+  w = window_of(e)
+  c = something(selected_thing(e), Some(line_thing(e)))
+  (w === nothing || c === nothing) && return nothing
+  r = asked_rect(e, c)
+  r === nothing && return nothing
+  a = AskBox(of=e, thing=c)
+  sub = ask_editor(e)
+  setfield!(sub, :parent, a)
+  sub.nodes[:ask_box] = a
+  a.parts[:text] = sub
+  e.nodes[ASK_KEY] = a
+  popup!(w, a, anchor=(r.left, r.top, r.width, r.height), placement=:bottom, gap=9px, width=ASK_BOX_W, key=ASK_KEY,
+         theme=component_theme(), onclose=() -> (delete!(e.nodes, ASK_KEY); redraw_in!(e, 0)))
+  focus(sub)
+  redraw_in!(e, 0)
+  nothing
+end
+
+# It looks as the floating lists do (see `float_list`), with a field that's as tall as its lines
+describe(a::AskBox) = begin
+  c = found_colours()
+  e = a.of
+  note = isempty(a.error) ? "Return asks $(asks_whom(e)). ⇧Return adds a line. Esc closes." : a.error
+  face = Face(SANS, "", 12px, isempty(a.error) ? c.dim : PICK_FAILED, false)
+  rows = [Row(height(17px), Alignment.Center, label(l, 12px, color=face.color)) for l in wrapped(face, note, num(ASK_BOX_W) - 40)]
+  # The text is laid out as a page is, as wide as the field
+  sub = a.parts[:text]
+  layout!(sub, ASK_TEXT_W * e.zoom)
+  tall = isempty(sub.layout) ? ASK_TEXT * e.zoom : lowest(sub, sub.layout)
+  doc = Box(width(grow=grow), height(tall), Alignment.Start, node!(Document, sub, :document))
+  # With nothing typed, the field says what it's for, under where the text goes
+  empty = sub.buf.lines == [""]
+  text = empty ? Stack(width(grow=grow), height(tall), Alignment.Start,
+                       Row(width(grow=grow), height(tall), Alignment.Center,
+                           label("Ask $(asks_whom(e)) for a change, or ask a question", ASK_TEXT * e.zoom, color=colours.faint)), doc) : doc
+  field = Box(width(grow=grow), padding(2px, 2px),
+              Box(width(grow=grow), padding(8px, 7px), radius(6px), border(1px, :solid, c.line), background(c.frame), text))
+  Box(width(grow=grow), padding(6px), radius(8px), background(c.frame), border(1px, :solid, c.line),
+      shadow(0, 6, 16, RGBA(60 / 255, 45 / 255, 20 / 255, 0.2)), name="Ask",
+    Column(width(grow=grow), Alignment.Start, child_gap=4px, field, Column(width(grow=grow), padding(8px, 4px), Alignment.Start, rows...)))
+end
+
+placed!(a::AskBox, side) = (a.side = side; nothing)
+draw(ctx, size, ui::ConcreteRect, a::AskBox) = caret(ctx, ui, a.side, asked_rect(a.of, a.thing))
+
+# The keys go to the editor of its text: see `ask_key!`
+
+"Give the agent what was typed in the field of `a`, about its words. If the agent can't take it, the field stays and says why."
+send_ask!(a::AskBox, w) = begin
+  words = String(strip(join(a.parts[:text].buf.lines, "\n")))
+  isempty(words) && return handled
+  try
+    ask_agent!(a.of, a.thing, words)
+  catch err
+    a.error = trouble(err)
+    return handled
+  end
+  close_ask!(a, w)
+end
+
+"Take the field of `a` and its box away, and give the keyboard back to the page"
+close_ask!(a::AskBox, w) = begin
+  close_popup!(w, ASK_KEY)
+  delete!(a.of.nodes, ASK_KEY)
+  focus(a.of)
+  redraw_in!(a.of, 0)
+  handled
 end
 
 """
@@ -43234,12 +43615,12 @@ ask_agent!(e, node::Union{ToChange,Things}, request::String) = begin
   isempty(words) && error("Say what you want, in a few words.")
   name = sharer(e)
   agent_free(e, command=isempty(name))
-  q = code_picker(e).about
-  q !== nothing && q.ended == 0 && error("The agent is still answering the last question.")
   places = collect(each_thing(node))
   # What you asked about the things before, from the card of an answer, goes with your words
-  isempty(name) ? ask_change!(e, places, words, prompt=either_prompt(places, words) * talk_words(follow_up!(e, places)), asks=true) :
-                  ask_sharer!(e, name, places, words, asks=true)
+  talk = talk_words(follow_up!(e, places))
+  # It waits while an agent works on a request before it: see "a queue of requests"
+  queue_ask!(e, words, places, isempty(name) ? () -> ask_change!(e, places, words, prompt=either_prompt(places, words) * talk, asks=true) :
+                                               () -> ask_sharer!(e, name, places, words, asks=true, talk=talk))
 end
 
 """
@@ -43260,14 +43641,70 @@ ask_with!(e, command::Symbol, x) = begin
   nothing
 end
 
-"It's an error while an agent is still making a change in the window of `e`, or, with `command` true, when this Mac has no agent"
-agent_free(e; command=true) = begin
-  a = code_picker(e).asked
-  if a !== nothing && a.ended == 0
-    isempty(a.by) && error("The agent is still making the last change. Esc stops it.")
-    error("$(a.by) still has the last change that you asked for. Ask again when it waits for the page.")
+"""
+It's an error, with `command` true, when this Mac has no agent that Ladder
+can start. A request while an agent works isn't one: it waits in the queue.
+See "a queue of requests".
+"""
+agent_free(e; command=true) = (command && agent_command(e); nothing)
+
+# --- a queue of requests ---
+#
+# A request that you make while an agent still works on one in the same
+# window waits in a queue, and starts when the one before it ends. Its thing
+# has a grey line round it, with its place in the queue on its label, like
+# "Number 1 in the queue". A click on that label takes it out. When a request
+# ends while others wait, its label stays a few seconds with what came of it,
+# as it does when none wait. Esc stops only the agent that works, and the next
+# request then starts.
+
+const QUEUED_LINE = colorant"rgb(128,146,176)"   # the line round a thing whose request waits
+
+"The requests that wait in the window of `e`, the next first: each as its label shows it, with what starts it"
+ask_queue(e) = get!(() -> Tuple{AskedChange,Function}[], e.nodes, :ask_queue)::Vector{Tuple{AskedChange,Function}}
+
+"The requests of the window of `e` that ended while others waited. Each shows what came of it for a few seconds."
+asks_ended(e) = get!(() -> AskedChange[], e.nodes, :asks_ended)::Vector{AskedChange}
+
+"What the label on the thing of the request that's number `n` in the queue says"
+queued_label(n, words) = "Number $n in the queue: $(request_words(words))  ·  Click to take it back"
+
+"Words for a label, cut to 140 characters"
+label_words(words) = length(words) > 140 ? first(words, 139) * "…" : words
+
+"""
+Start a request with `start` now, or put it in the queue while an agent still
+works on one in the window of `e`. `words` and `places` are what the request
+says and what it's about, for its label while it waits.
+"""
+queue_ask!(e, words, places, start::Function) = begin
+  t = code_picker(e)
+  q = ask_queue(e)
+  if (t.asked === nothing || t.asked.ended > 0) && isempty(q)
+    # The label of the request before stays as long as it would have
+    t.asked === nothing || (push!(asks_ended(e), t.asked); t.asked = nothing)
+    start()
+  else
+    push!(q, (AskedChange(words=String(words), places=collect(places)), start))
+    redraw_in!(e, 0)
   end
-  command && agent_command(e)   # it says so now if this Mac has no agent
+  nothing
+end
+
+"In each frame: start the next request of the queue once the one before it has ended, and take away the labels of those that ended a while ago"
+queue_tick!(e, t::CodePicker) = begin
+  done = asks_ended(e)
+  filter!(a -> time() - a.ended <= (a.failed ? 15 : 8), done)
+  isempty(done) || redraw_in!(e, 0.5)
+  q = ask_queue(e)
+  isempty(q) && return nothing
+  a = t.asked
+  (a === nothing || a.ended > 0) || return nothing
+  a === nothing || push!(done, a)
+  t.asked = nothing
+  _, start = popfirst!(q)
+  start()
+  redraw_in!(e, 0)
   nothing
 end
 
@@ -43304,7 +43741,7 @@ on_page_lines(e, x) = begin
   x = something(shown_now(x), x)
   while x !== nothing
     at = findfirst(it -> it.content isa Live && it.content.node === x, e.layout)
-    found = x isa TextRun ? (x.line, x.line) :
+    found = x isa Union{TextRun,CommentCard} ? (x.line, x.line) :
             x isa Union{Block,FileBlock} ? (x.first, x.last) :
             at === nothing ? nothing : (e.layout[at].first, e.layout[at].last)
     found !== nothing && 1 <= found[1] <= found[2] <= length(b.lines) && return found
@@ -43315,6 +43752,11 @@ end
 
 "The thing `c` of Ask For Change, in words for the agent of the page of `e`: what it is, the page's lines that show it, and the code that draws it"
 thing_told(e, c::ToChange) = begin
+  if c.node isa PickedText
+    where = c.first == c.last ? "line $(c.first)" : "lines $(c.first) to $(c.last)"
+    of = !isempty(e.buf.path) && page_key(e.buf.path) == c.file ? "the page" : "the file $(c.file)"
+    return "Words that the user selected, on $where of $of:\n\n    $(picked_words(c.node))"
+  end
   lines = c.node === nothing ? nothing : on_page_lines(e, c.node)
   if lines === nothing
     what, start = thing_words(c)
@@ -43322,7 +43764,8 @@ thing_told(e, c::ToChange) = begin
   end
   from, to = lines
   where = from == to ? "line $from" : "lines $from to $to"
-  shows = "A $(pick_name(c.node)) of the page, on $where:\n\n$(quoted_lines(e.buf.lines, from, to))"
+  shows = c.node isa CommentCard ? "A comment in the margin of the page, on $where. It says: $(join(c.node.lines, " "))" :
+                                   "A $(pick_name(c.node)) of the page, on $where:\n\n$(quoted_lines(e.buf.lines, from, to))"
   "$shows\n\nLadder draws it with the code in the file $(c.file), lines $(c.first) to $(c.last)."
 end
 
@@ -43332,10 +43775,10 @@ change that `words` say to the things `places`. It gets them now if it waits
 for the page, and when it waits again if it doesn't. See "ask the agent of the
 page".
 """
-ask_sharer!(e, name, places::AbstractVector, words::AbstractString; asks=false) = begin
+ask_sharer!(e, name, places::AbstractVector, words::AbstractString; asks=false, talk=talk_words(follow_up!(e, places))) = begin
   t = code_picker(e)
   # What you asked about the things before, from the card of an answer, goes with your words
-  a = AskedChange(words=words, places=collect(places), by=name, page=e.buf.path, talk=talk_words(follow_up!(e, places)), asks=asks)
+  a = AskedChange(words=words, places=collect(places), by=name, page=e.buf.path, talk=talk, asks=asks)
   t.asked = a
   hand_change!(e, a)
   redraw_in!(e, 0)
@@ -43386,8 +43829,8 @@ end
 asked_label(a::AskedChange) =
   a.ended > 0 ? (a.changed ? "$(a.said)  ·  Show Change" : a.said) :
   isempty(a.by) ? asking_words(a.words, a.step) * "  ·  Esc stops it" :
-  a.sent ? "Asked $(a.by): $(a.words) …  ·  Esc hides this" :
-  "For $(a.by) when it waits for the page again: $(a.words)  ·  Esc takes it back"
+  a.sent ? "Asked $(a.by): $(request_words(a.words)) …  ·  Esc hides this" :
+  "For $(a.by) when it waits for the page again: $(request_words(a.words))  ·  Esc takes it back"
 
 # --- stop an agent ---
 #
@@ -43591,9 +44034,9 @@ draw_answer(ctx, w, t::CodePicker) = begin
   for (n, c) in enumerate(q.places)
     r = asked_rect(e, c)
     label = n == 1 && q.ended == 0 ? asking_words(q.words, q.step) * "  ·  Esc stops it" : length(q.places) > 1 ? string('A' + n - 1) : ""
-    r === nothing || pick_mark(ctx, w, r, label; colour=CHIP_MARKS[mod1(n, length(CHIP_MARKS))])
+    r === nothing || pick_mark(ctx, w, r, label; colour=CHIP_MARKS[mod1(n, length(CHIP_MARKS))], busy=n == 1 && q.ended == 0)
   end
-  q.ended == 0 && (q.card = nothing; return nothing)
+  q.ended == 0 && (q.card = nothing; redraw_in!(e, SPIN_FRAME); return nothing)
   W, H = num(w.size[1]), num(w.size[2])
   wide = min(ANSWER_WIDE, W - 32)
   lines = answer_lines(q, wide - 24, max(3, floor(Int, (H - 120) / ANSWER_LINE)))
@@ -43930,7 +44373,7 @@ fix_check!(e, check::FileCheck) = begin
 
     Change that code, or the code that it uses, so that the check passes. If the check is what's wrong, as when it expects a value that the code shouldn't give, change the check, and say so. Change only files in $(dirname(c.file)). Keep the change small, and write code that looks like the code around it. Ladder runs the changed code as soon as you end, so leave the file in a state that runs. Then say what you changed, in one short sentence.
     """
-  ask_change!(e, [c], "Fix the check $(r.code)"; prompt)
+  queue_ask!(e, "Fix the check $(r.code)", [c], () -> ask_change!(e, [c], "Fix the check $(r.code)"; prompt))
 end
 
 works_here(e, ::Val{:fix_check}) = julia_file(e) && any(((_, r),) -> r.went != :pass, file_results(e))
@@ -43960,7 +44403,7 @@ ask_for_checks!(e, node::ToChange) = begin
 
     Write two to four checks of each function in that code. Choose calls that show what the function is for, and one at an edge of what it takes. Work out the value that each call should give from what the function is for: its name, its documentation, and the code that calls it. Don't copy what the code does now, because a check finds a fault only when it says what the code should do. Put each check on a line of its own, after the function's documentation and the checks that it has, just over its first line of code. Each check is one line of Julia. Change nothing else. Then say what the checks check, in one short sentence.
     """
-  ask_change!(e, [node], "Write checks"; prompt)
+  queue_ask!(e, "Write checks", [node], () -> ask_change!(e, [node], "Write checks"; prompt))
 end
 
 works_here(e, ::Val{:ask_for_checks}) = julia_file(e)
