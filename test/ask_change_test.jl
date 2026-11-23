@@ -724,13 +724,27 @@ end
   write(joinpath(K.Agent.folder(), "$(getpid()).wait"), realpath(page) * "\nClaude\n")
   sleep(0.6); frames(w, 2)
   @test K.asks_whom(e) == "Claude"
+  # The level's part is made again when its code changes, so it's found again
+  level = first(offered(e, (3, 0)))
   K.ask_agent!(e, level, "why is it blue?")
   sent = joinpath(K.Agent.folder(), "$(getpid()).sent")
   told = read(sent, String)
   @test picker().asked.asks && picker().asked.by == "Claude"
   @test startswith(told, "The user asked you for a change, or asked you a question, from Ladder, on the page ")
-  @test endswith(told, "If the words ask a question, answer it in your reply, and change no file.\n")
-  press(w, Keys.escape)
+  reply = picker().asked.reply
+  @test startswith(basename(reply), "answer-") && dirname(reply) == K.Agent.folder()
+  @test endswith(told, "If the words ask a question, write your answer to the file $reply, in a few short sentences of Markdown, and change no other file. Ladder shows the answer under what the user marked. Then run `ladder wait` again.\n")
+  # The agent writes its answer to that file, and it shows under the thing
+  write(reply, "It's blue for the **sky**.\n")
+  sleep(0.4); frames(w, 2)
+  a = e.nodes[K.ASK_KEY]
+  @test a.answer == "It's blue for the **sky**." && a.by == "Claude" && !isfile(reply) && picker().asked.said == "Claude answered."
+  K.close_ask!(a, w)
+  # An answer about a thing that doesn't show now is in a card, so that it isn't lost
+  gone = K.ToChange("Spinner", "", level.file, level.first, level.last, K.Spinner(), nothing)   # a part that was never drawn
+  K.show_answer!(e, K.AskedChange(words="and now?", places=[gone]), "Still blue.")
+  @test !haskey(e.nodes, K.ASK_KEY) && picker().about.answer == "Still blue."
+  picker().about = nothing
   delete!(e.nodes, :sent)
   K.Agent.place[] = ""
 end
@@ -827,7 +841,7 @@ end
   click(w, x.left + x.width / 2, x.top + x.height / 2)
   @test !haskey(e.nodes, K.ASK_KEY) && !any(p -> p.key == K.ASK_KEY, popups(w)) && w.focus === e
   b.anchor, b.caret = (7, 0), (7, 8)
-  # What's typed goes to the agent with the words, and its answer shows in a card beside them
+  # What's typed goes to the agent with the words, and its answer shows under them, in place
   K.page_act!(e, 1)
   frames(w, 2)
   K.AGENT_COMMAND[] = `sh $quiet`
@@ -836,8 +850,19 @@ end
   @test !haskey(e.nodes, K.ASK_KEY) && picker().asked.words == "is this right?" && picker().asked.places == [c]
   finish()
   @test occursin("A: words that the user selected in a file, in the file $(c.file), lines 7 to 7. It starts:\n\n    The end.", asked())
-  @test picker().about.answer == "I looked, and it's as you say."
-  picker().about = nothing
+  a = e.nodes[K.ASK_KEY]
+  @test a.answer == "I looked, and it's as you say." && a.asked == "is this right?" && a.thing == c && picker().about === nothing
+  @test any(p -> p.key == K.ASK_KEY, popups(w)) && w.focus !== a.parts[:text]   # the keyboard stays where it was
+  frames(w, 2)
+  @test picker().asked.said == "Claude answered."
+  # A question after the answer goes with the question and the answer before it
+  K.focus(a.parts[:text])
+  typed(w, "and why?")
+  press(w, Keys.enter)
+  finish()
+  @test occursin("Question: is this right?\nAnswer: I looked, and it's as you say.", asked()) && occursin("The user's words: and why?", asked())
+  K.close_ask!(e.nodes[K.ASK_KEY], w)
+  picker().asked = nothing
   # When the agent can't take it, the field stays and says why
   push!(K.AGENT_KINDS, K.AgentKind("Nobody", "no-such-agent-command", String[], String[], String[]))
   K.preferred_agent!(e, "Nobody")

@@ -19,6 +19,8 @@
 #     send(waiter, text)          # give one of them what you changed
 #     report(path, told, lines)   # what you changed, as the agent reads it
 #     request(path, told, lines, words, things)   # a change you asked for, as the agent reads it
+#     answer-….md  an agent wrote it: its answer to a question that you asked
+#                  in place. The request names the file. See `answer_file`.
 
 @use "./merge" unified
 
@@ -130,9 +132,11 @@ your words `words`. `things` are what you marked in the window, each already
 in words for the agent, and the first is A. `talk` is what you asked about
 them before, or "". Then come the lines that you changed since the text that
 the agent last knew, `told`. `lines` is the page as it is now. With
-`question` true, the words can ask a question as well as for a change.
+`question` true, the words can ask a question as well as for a change. The
+agent then writes its answer to the file `reply`, and Ladder shows it under
+the things.
 """
-request(path, told, lines, words, things, talk=""; question=false) = begin
+request(path, told, lines, words, things, talk=""; question=false, reply="") = begin
   io = IOBuffer()
   println(io, question ? "The user asked you for a change, or asked you a question, from Ladder, on the page " :
                          "The user asked you for a change from Ladder, on the page ", path, ".")
@@ -157,7 +161,17 @@ request(path, told, lines, words, things, talk=""; question=false) = begin
   end
   if question
     println(io)
-    println(io, "If the words ask a question, answer it in your reply, and change no file.")
+    if isempty(reply)
+      println(io, "If the words ask a question, answer it in your reply, and change no file.")
+    else
+      println(io, "If the words ask a question, write your answer to the file ", reply, ", in a few short sentences of Markdown, and change no other file. Ladder shows the answer under what the user marked. Then run `ladder wait` again.")
+    end
   end
   String(take!(io))
 end
+
+"""
+A new file in the agents' folder for an agent's answer to a question. Its
+name doesn't start with a number, so `waiters` leaves it alone.
+"""
+answer_file(dir=folder()) = joinpath(dir, "answer-$(getpid())-$(round(Int, time() * 1000)).md")

@@ -88,4 +88,43 @@ end
   @test K.shown!(chart).labels == ["Wall height", "Wall length", "Area", "Litres"]
 end
 
+@testset "the sheet keeps its height while it shows one value, so a chart under it doesn't shake" begin
+  # A value is narrower than the range that the sheet shows the rest of the time. If a long expression wrapped
+  # for the narrower one, the sheet would get shorter, and the chart under it would move away from the mouse.
+  long = joinpath(dir, "chips.md")
+  write(long, """
+  # Chips
+
+  ```sheet
+  Fail = 0.006
+  Ageing = 0
+  Age = 0 to 50
+  Chips that work = 100 * (ageing == 0 ? exp(-fail * age) : exp(-fail / log(1 + ageing) * ((1 + ageing)^age - 1)))
+  ```
+
+  ```chart
+  show: Chips that work
+  ```
+  """)
+  e2 = K.build_editor(long)
+  w2 = Window(e2, size=(1000px, 900px))
+  frames2(n=2) = foreach(_ -> frame(w2), 1:n)
+  frames2()
+  c2 = e2.nodes[(:block, K.CHART, long, 1)]
+  move((x, y)) = (w2.mouse = typeof(w2.mouse)(px(x), px(y)); onmouse(w2, MouseMove(Vec2{px}(px(x), px(y)), w2)); frames2())
+  tall() = K.item(e2, findfirst(==("```sheet"), e2.buf.lines) + 1).tall
+  shook = Int[]
+  for wide in 420:20:900
+    e2.widest = px(wide); empty!(e2.flows); frames2()
+    before = tall()
+    m = c2.marks[findfirst(m -> m.kind in (:dot, :bar), c2.marks) + 10]
+    move((c2.box[1] + m.at[1] + m.at[3] / 2, c2.box[2] + m.at[2] + m.at[4] / 2))
+    K.pointed(e2) === nothing && continue
+    tall() == before || push!(shook, wide)
+    move((990, 10))
+  end
+  @test isempty(shook)
+  close(w2)
+end
+
 close(w)

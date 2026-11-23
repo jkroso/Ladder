@@ -73,7 +73,7 @@ Ladder draws it with the code in the file /Applications/Ladder.app/.../main.jl, 
 - A block of code has its file and its lines. Change that code.
 - What the user changed in the page comes after the things, as it does when they send the page.
 - Ladder knows that you have done the change when you run `ladder wait` again. So when you're done, run it again in the background, even if the work on the page is done.
-- If the first line says "or asked you a question", the user clicked your logo in Ladder, and the words can be a question, like "why is this number so big?". Answer a question in your reply, and change no file. Then run `ladder wait` again.
+- If the first line says "or asked you a question", the words can be a question, like "why is this number so big?". The output names a file for your answer, in Ladder's own folder. Write the answer to that file, in a few short sentences of Markdown, and change no other file. Ladder shows it under what the user marked, with a field to ask you more. Then run `ladder wait` again.
 
 Exit code 3 means that Ladder is not installed, or that it is too old to send a page. Tell the user, and carry on in the terminal.
 

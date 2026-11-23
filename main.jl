@@ -3462,9 +3462,13 @@ sheetgrid(e, from::Int, to::Int) = begin
     name_w = clamp(maximum(ps -> sum(p -> measure(p.face, p.text), ps, init=0px), names, init=0px) + 2px, 3size, e.width * 0.4)
     # An expression has the room that its row's name and result leave it
     room = e.width - 3px - 4SHEET_X - name_w
+    # While the sheet shows itself at one value, a result is narrower than the range that it shows the rest of the
+    # time. The expressions wrap for the wider of the two, so the sheet keeps its height. If it got shorter, a chart
+    # under it would move away from the mouse, the sheet would show the range again, and the two would shake.
+    ends = at === nothing ? results : get!(() -> tally(texts; given, at=nothing), e.flows, (:sheetrun, texts, given, nothing))
     exprs = map(enumerate(rows)) do (r, i)
       c = cells[r][end]
-      chip = chip_w(ink, results[r])
+      chip = max(chip_w(ink, results[r]), chip_w(ink, ends[r]))
       wrap(exprpieces(b.lines[i], c.lo, upto(i, c), known(texts, r, given), ink), max(80px, room - chip - (chip > 0px ? SHEET_X : 0px)); lh, size)
     end
     nameflows = [wrap(ps, name_w; lh, size) for ps in names]
@@ -43240,6 +43244,7 @@ in a card, as Ask About's does.
   sent::Bool = false
   talk::String = ""
   asks::Bool = false
+  reply::String = ""         # the file that the page's agent writes its answer to, for words that can be a question
 end
 
 "Each change that an agent made since Ladder started, the last last, for Show Change and Undo Change"
@@ -43345,9 +43350,16 @@ ask_tick!(e) = begin
       a.changed && push!(AGENT_CHANGES, a)
       # Words that asked a question get the agent's answer in a card beside the thing
       if a.asks && !a.changed && !a.failed && !a.stopped
-        said = strip(replace(printed, "**" => ""))
-        t.about = AskedAbout(words=a.words, places=a.places, answer=isempty(said) ? "The agent said nothing." : String(said), ended=time())
-        t.asked = nothing
+        said = String(strip(printed))
+        if !isempty(a.places) && first(a.places).node isa PickedText
+          # A question asked in place is answered in place, under its words: see "a request in place"
+          a.said = "$(e.ai) answered."
+          show_answer!(e, a, isempty(said) ? "The agent said nothing." : said)
+        else
+          said = strip(replace(said, "**" => ""))
+          t.about = AskedAbout(words=a.words, places=a.places, answer=isempty(said) ? "The agent said nothing." : String(said), ended=time())
+          t.asked = nothing
+        end
       end
     end
     redraw_in!(e, 0.1)
@@ -43506,6 +43518,9 @@ line to line, ⌘Z takes a change back, and long lines wrap.
   side::Symbol = :bottom                  # the side of the words that it's on
   error::String = ""                      # why the last request didn't go, or ""
   parts::Dict{Any,Any} = Dict{Any,Any}()  # the editor of its text, as :text
+  answer::String = ""                     # the agent's answer to the question `asked`, in Markdown, over the field
+  asked::String = ""
+  by::String = ""                         # who answered
 end
 
 "The editor of the text of a request in place, which `e` shows: lines that no file holds, in the window's colours, at a field's size"
@@ -43542,12 +43557,32 @@ a field under them for a request to the agent. The item Ask Agent… of the
 page's menu does this, with the agent's name. See "a request in place".
 """
 ask_selected!(e) = begin
-  w = window_of(e)
   c = something(selected_thing(e), Some(line_thing(e)))
-  (w === nothing || c === nothing) && return nothing
-  r = asked_rect(e, c)
+  c === nothing && return nothing
+  a = open_ask!(e, AskBox(of=e, thing=c))
+  a === nothing || focus(a.parts[:text])
+  nothing
+end
+
+"""
+Show the agent's answer `said` to the question of the request `a` under its
+words, with a field under the answer to ask more. The keyboard stays where it
+is. When the thing doesn't show now, the answer is in a card, as Ask About's
+is, so that it's never lost. See "a request in place".
+"""
+show_answer!(e, a::AskedChange, said) = begin
+  isempty(a.places) && return nothing
+  shown = open_ask!(e, AskBox(of=e, thing=first(a.places), answer=said, asked=a.words, by=isempty(a.by) ? e.ai : a.by))
+  shown === nothing && (code_picker(e).about = AskedAbout(words=a.words, places=a.places, answer=said, ended=time()))
+  nothing
+end
+
+"Show the field `a` under its words, in place of any other: it gives `a`, or nothing when the words don't show"
+open_ask!(e, a::AskBox) = begin
+  w = window_of(e)
+  w === nothing && return nothing
+  r = asked_rect(e, a.thing)
   r === nothing && return nothing
-  a = AskBox(of=e, thing=c)
   sub = ask_editor(e)
   setfield!(sub, :parent, a)
   sub.nodes[:ask_box] = a
@@ -43556,9 +43591,36 @@ ask_selected!(e) = begin
   # It isn't modal, so a click on the page goes to the page and leaves the field as it is
   popup!(w, a, anchor=(r.left, r.top, r.width, r.height), placement=:bottom, gap=9px, width=ASK_BOX_W, key=ASK_KEY,
          theme=component_theme(), modal=false, onclose=() -> (delete!(e.nodes, ASK_KEY); redraw_in!(e, 0)))
-  focus(sub)
   redraw_in!(e, 0)
-  nothing
+  a
+end
+
+const ANSWER_MAX_H = 320px   # the most of an answer that shows over the field at once. A longer one scrolls.
+
+"The lines of the answer of `a`, laid out as the page's text is, a little smaller, as wide as the field"
+answer_flows(a::AskBox) = begin
+  e = a.of
+  lines = String.(split(a.answer, '\n'))
+  ks = classify(lines)
+  zoom = e.zoom
+  e.zoom = zoom * PAGE_ZOOM
+  try
+    [laid(e, lines[i], ks[i], false, -1, ASK_TEXT_W * zoom) for i in eachindex(lines)]
+  finally
+    e.zoom = zoom
+  end
+end
+
+"What shows over the field of `a` when it has the agent's answer: who answered, and the answer, which scrolls when it's long"
+answer_part(a::AskBox) = begin
+  e = a.of
+  flows = get!(() -> answer_flows(a), a.parts, (:answer, a.answer, e.zoom, e.theme))
+  total = sum(tall, flows, init=0px)
+  scroll = get!(() -> Scroll(width(grow=grow)), a.parts, :answer_scroll)
+  scroll.height = height(min(total, ANSWER_MAX_H))
+  reuse!(scroll, Column(width(grow=grow), Alignment.Start, [describe(e, Item(0, 0, 0px, tall(f), f), f) for f in flows]...))
+  Column(width(grow=grow), Alignment.Start, child_gap=2px, padding(4px, 8px, 6px, 10px),   # top, right, bottom, left
+    Row(height(20px), Alignment.Center, label("$(a.by)'s answer", 12px, color=found_colours().dim)), scroll)
 end
 
 # It looks as the floating lists do (see `float_list`), with a field that's as tall as its lines
@@ -43575,14 +43637,14 @@ describe(a::AskBox) = begin
   doc = Box(width(grow=grow), height(tall), Alignment.Start, node!(Document, sub, :document))
   # With nothing typed, the field says what it's for, under where the text goes
   empty = sub.buf.lines == [""]
+  prompt = isempty(a.answer) ? "Ask $(asks_whom(e)) for a change, or ask a question" : "Ask $(asks_whom(e)) more, or for a change"
   text = empty ? Stack(width(grow=grow), height(tall), Alignment.Start,
-                       Row(width(grow=grow), height(tall), Alignment.Center,
-                           label("Ask $(asks_whom(e)) for a change, or ask a question", ASK_TEXT * e.zoom, color=colours.faint)), doc) : doc
+                       Row(width(grow=grow), height(tall), Alignment.Center, label(prompt, ASK_TEXT * e.zoom, color=colours.faint)), doc) : doc
   field = Box(width(grow=grow), padding(2px, 2px),
               Box(width(grow=grow), padding(8px, 7px), radius(6px), border(1px, :solid, c.line), background(c.frame), text))
   Box(width(grow=grow), padding(6px), radius(8px), background(c.frame), border(1px, :solid, c.line),
       shadow(0, 6, 16, RGBA(60 / 255, 45 / 255, 20 / 255, 0.2)), name="Ask",
-    Column(width(grow=grow), Alignment.Start, child_gap=4px, field,
+    Column(width(grow=grow), Alignment.Start, child_gap=4px, (isempty(a.answer) ? () : (answer_part(a),))..., field,
       Row(width(grow=grow), padding(4px, 2px, 4px, 8px), Alignment.Center,   # top, right, bottom, left
         Column(width(grow=grow), Alignment.Start, rows...), get!(() -> own!(a, AskClose(of=a)), a.parts, :close))))
 end
@@ -43612,6 +43674,8 @@ draw(ctx, size, ui::ConcreteRect, a::AskBox) = caret(ctx, ui, a.side, asked_rect
 send_ask!(a::AskBox, w) = begin
   words = String(strip(join(a.parts[:text].buf.lines, "\n")))
   isempty(words) && return handled
+  # A question after an answer goes with the question and the answer before it: see `follow_up!`
+  isempty(a.answer) || (a.of.nodes[:follow_up] = (places=[a.thing], talk=[(a.asked, a.answer)]))
   try
     ask_agent!(a.of, a.thing, words)
   catch err
@@ -43624,17 +43688,19 @@ end
 """
 In each frame while the field of a request in place, `a`, shows: draw the
 box round its words, and keep the field under them as the page scrolls. The
-field goes when the window shows another file.
+field of words of a page goes when the window shows another file.
 """
 ask_box_tick!(ctx, w, e, a::AskBox) = begin
   b = e.buf
-  if isempty(b.path) || page_key(b.path) != a.thing.file
+  # Words of the page are in its file. A part of the window is in the file of the code that draws it.
+  gone = a.thing.node isa PickedText && (isempty(b.path) || page_key(b.path) != a.thing.file)
+  if gone
     close_popup!(w, ASK_KEY)
     delete!(e.nodes, ASK_KEY)
     return nothing
   end
   r = asked_rect(e, a.thing)
-  pick_mark(ctx, w, r, "Ask $(asks_whom(e))")
+  pick_mark(ctx, w, r, isempty(a.answer) ? "Ask $(asks_whom(e))" : "")
   r === nothing && return nothing
   for p in popups(w)
     p.key == ASK_KEY && (p.anchor = (r.left, r.top, r.width, r.height))
@@ -43849,7 +43915,9 @@ hand_change!(e, a::AskedChange) = begin
     !isempty(o.buf.path) && page_key(o.buf.path) in files && dirty(o.buf) && writes(o.buf) && save!(o.buf)
   end
   a.before = Dict(f => read(f, String) for f in files if isfile(f))
-  hand_over!(e, ws, Agent.request(b.path, b.told, b.lines, a.words, [thing_told(e, c) for c in a.places], a.talk, question=a.asks))
+  # Words that can be a question get a file for the answer, which shows under the things: see `show_answer!`
+  a.asks && isempty(a.reply) && (a.reply = Agent.answer_file())
+  hand_over!(e, ws, Agent.request(b.path, b.told, b.lines, a.words, [thing_told(e, c) for c in a.places], a.talk, question=a.asks, reply=a.reply))
   a.by, a.sent = first(ws).name, true
   true
 end
@@ -43862,6 +43930,12 @@ sharer_tick!(e, t::CodePicker, a::AskedChange) = begin
     a.sent || delete!(e.nodes, :sent)
   elseif !a.sent
     hand_change!(e, a)
+  elseif !isempty(a.reply) && isfile(a.reply) && time() - mtime(a.reply) > 0.3
+    # The agent answered the question. A file that's still being written is left a moment.
+    said = String(strip(read(a.reply, String)))
+    rm(a.reply, force=true)
+    a.said, a.ended = "$(a.by) answered.", time()
+    show_answer!(e, a, said)
   elseif !isempty(agents(e, a.page))
     ran, failed = reload_files!(a.places, a.before)
     a.after = Dict(f => read(f, String) for f in keys(a.before) if isfile(f))
