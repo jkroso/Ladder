@@ -194,7 +194,7 @@ A block can use UI.jl's components and layout with no line that loads them: `Sli
 
 A file path shows as a breadcrumb. Click its last name to list what's in the folder, and click a file in the list to make it the path. Under a file is what's in it: a picture, its text, which you can scroll through, a 3D model that you can drag to turn, a player for a sound or a video, the pages of a PDF, a CSV file as a table, or the picture that the Finder shows for a file like a Word file. Click `knot.stl` to see a model.
 
-To show the file in the window, click the square button at the right end of the path. For a folder, the button shows it in the sidebar. A click on a name or a file in the list with ⌘ held opens that one.
+To show the file or the folder in the window, put the mouse over the path and click the square button at its right end. A click on a name or a file in the list with ⌘ held opens that one.
 
 ```ui
 fs"."

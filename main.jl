@@ -4325,7 +4325,7 @@ end
   files::Any = nothing   # a function of a file's name that's true for the files the list shows, when it picks a file of some kinds. Folders always show.
 end
 
-"The button at the right end of a breadcrumb's names that shows its file in the window, or its folder in the sidebar"
+"The button at the right end of a breadcrumb's names that shows its file or its folder in the window. It shows while the mouse is over the breadcrumb."
 @def mutable struct OpenButton <: SemanticUI
   rect::NTuple{4,px} = (0px, 0px, 0px, 0px)   # where it was last drawn, to put its tooltip under it
   quiet::Bool = false                         # clicked, so no tooltip until the mouse leaves it
@@ -4382,6 +4382,7 @@ describe(l::Breadcrumb) = begin
   # An open breadcrumb that isn't in a line of text is in a panel with what's under it, so it has less room
   panel = l.open && !l.inline
   # A path to a file or a folder has a button at the right end of its names that shows it in the window.
+  # The button shows only while the mouse is over the breadcrumb. Its room is kept, so the names don't move.
   # A breadcrumb in a line of text has no room for it: a click with ⌘ held does the same.
   opens = !l.inline && !l.folders && l.files === nothing && ispath(l.at)
   opens && l.button === nothing && (l.button = own!(l, OpenButton()))
@@ -4390,7 +4391,7 @@ describe(l::Breadcrumb) = begin
   parts = Iterators.flatten(i == 1 ? (c,) : (arrow(), c) for (i, c) in enumerate(kept))
   l.inline && return Row(height(24px), child_gap=CRUMB_GAP, clip=true, parts...)
   trail = Row(width(grow=grow), height(30px), child_gap=CRUMB_GAP, clip=true, parts...,
-              (opens ? (Box(width(grow=grow)), l.button) : ())...)
+              (opens ? (Box(width(grow=grow)), ishovered(l) ? l.button : Box(width(FILL_SIDE), height(FILL_SIDE))) : ())...)
   panel || return Column(width(grow=grow), Alignment.Start, trail)
   # One background goes round the names and what's under them, to show that they're one thing
   Column(width(grow=grow), Alignment.Start, padding(PANEL_PAD), radius(8px), background(colours.block), child_gap=1px,
@@ -4479,7 +4480,7 @@ draw(ctx, size, ui::ConcreteRect, b::OpenButton) = (b.rect = (ui.left, ui.top, u
 
 onmouse(b::OpenButton, ev::MouseMove) = begin
   b.quiet && return handled
-  tip = isdir((b.parent::Breadcrumb).at) ? "Show this folder in the sidebar" : "Show this file in the window"
+  tip = isdir((b.parent::Breadcrumb).at) ? "Show this folder in the window" : "Show this file in the window"
   show_tooltip!(ev.window, tip_label(tip), b.rect..., placement=:bottom, gap=6px)
   handled
 end
@@ -4492,13 +4493,13 @@ onkey(b::OpenButton, ev::KeyPress{Keys.mouse_left}) = begin
 end
 
 """
-Show the file or the folder at `path` in the window, as a link to it does.
-The breadcrumb `l` holds the path. When it's in a line of text, its list
-closes first.
+Show the file or the folder at `path` in the window, as the path in the top
+bar does. The breadcrumb `l` holds the path. When it's in a line of text, its
+list closes first. A breadcrumb in a part of another page shows it in the window too.
 """
 show_crumb!(l::Breadcrumb, path, window) = begin
   l.inline && l.open && (l.open = false; list!(l, window))
-  show_path!(editor(l), path)
+  open_folder!(top_editor(editor(l)), path)
   handled
 end
 

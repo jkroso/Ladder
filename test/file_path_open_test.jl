@@ -52,6 +52,8 @@ right(r) = K.num(r.left) + K.num(r.width)
 
 "The breadcrumb of the path `at` on the page that shows"
 crumb(at) = only(n.value for n in values(e.nodes) if n isa K.Shown && n.value isa K.Breadcrumb && n.value.at == at)
+"Where the Open button of the breadcrumb `l` is, once the mouse is over the breadcrumb so that the button shows"
+button_at(l) = (at(middle(rect(l))); middle(rect(l.button)))
 "Go back to the page with the paths on it"
 back!() = (K.go_back!(e); frames(3); @test e.buf.path == page)
 
@@ -59,6 +61,7 @@ back!() = (K.go_back!(e); frames(3); @test e.buf.path == page)
   l = crumb(notes)
   b = l.button
   @test b isa K.OpenButton
+  at(middle(rect(l)))
   r = rect(b)
   @test r !== nothing
   # It's after the last name, at the right end of the row
@@ -66,8 +69,20 @@ back!() = (K.go_back!(e); frames(3); @test e.buf.path == page)
   @test right(r) ≈ right(rect(l)) atol=2
 end
 
+@testset "the Open button shows only while the mouse is over the path, and the names stay where they are" begin
+  l, s = crumb(notes), crumb(sub)
+  at(middle(rect(l)))
+  @test rect(l.button) !== nothing
+  @test rect(s.button) === nothing
+  name = rect(l.crumbs[notes])
+  at(middle(rect(s)))
+  @test rect(l.button) === nothing
+  @test rect(s.button) !== nothing
+  @test rect(l.crumbs[notes]).left == name.left
+end
+
 @testset "the Open button shows the file in the window" begin
-  click(middle(rect(crumb(notes).button)))
+  click(button_at(crumb(notes)))
   @test e.buf.path == notes
   back!()
 end
@@ -117,7 +132,7 @@ end
   l = crumb(inner)
   click(middle(rect(l.crumbs[sub])))
   @test l.at == sub
-  click(middle(rect(l.button)))
+  click(button_at(l))
   @test e.folder == sub
   @test e.buf.path == sub
   back!()
