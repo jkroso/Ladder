@@ -13,6 +13,7 @@ This page plans a job. Each to-do item is a task. The schedule under the tasks s
 - [ ] Pour and finish the concrete
 - [ ] Cut the joints
 - [ ] Take the forms off and clean up
+- [ ] water slab every day for 3 days
 
 Move the mouse over a task. Its days show at the end of its line: its first and last day, how many working days it takes, and the task that it waits for. The − and + buttons there make it a day shorter or a day longer.
 
@@ -29,6 +30,8 @@ Drag the slider to see the job as the schedule plans it on another day. The line
 ## Schedule
 
 ```schedule
+start: 2026-11-23
+
 Mark out the driveway | 2 days
 Dig out the soil and cart it away | 3 days | after Mark out the driveway
 Set the forms along the edges | 2 days | after Dig out the soil and cart it away
@@ -37,6 +40,7 @@ Fix the steel mesh | 2 days | after Set the drain across the garage door
 Pour and finish the concrete | after Fix the steel mesh | after Book the concrete and the pump
 Cut the joints | after Pour and finish the concrete
 Take the forms off and clean up | after Cut the joints
+water slab every day for 3 days | from 2026-11-24 | after Pour and finish the concrete
 ```
 
 A code block in the language `schedule` shows every to-do item of its page as a bar on a line of days. A task takes one day and starts when the work starts, until you say more:
