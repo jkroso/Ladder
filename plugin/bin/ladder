@@ -26,7 +26,8 @@ Usage:
       Wait until the user presses "Nudge" in Ladder. Then print the lines that
       the user changed in the file, and stop.
       --as <name>          What Ladder calls you on its Nudge button. The button
-                           shows the logo of Claude, Grok, Codex or Gemini.
+                           shows the logo of Claude, Grok, Codex or Gemini. Without
+                           it, the name is Claude in Claude Code and Grok in Grok.
       --timeout <seconds>  Stop waiting after this long. The exit code is then 2.
 
   <command> | ladder [--as <kind>] [--name <name>]
@@ -80,8 +81,14 @@ wait_for() {
   [ -n "$page" ] || { usage >&2; exit 1; }
   [ -f "$page" ] || fail "there's no file at $page. Write the page first."
   case "$limit" in ''|*[!0-9]*) fail "--timeout needs a whole number of seconds" ;; esac
-  # Claude Code sets CLAUDECODE in the commands that it runs
-  [ -n "$name" ] || { [ -n "${CLAUDECODE:-}" ] && name="Claude" || name="the agent"; }
+  # Claude Code sets CLAUDECODE in the commands that it runs, and Grok sets GROK_AGENT. Grok is
+  # looked for first: a Grok that was started from inside Claude Code has both.
+  if [ -z "$name" ]; then
+    if [ -n "${GROK_AGENT:-}" ]; then name="Grok"
+    elif [ -n "${CLAUDECODE:-}" ]; then name="Claude"
+    else name="the agent"
+    fi
+  fi
   page="$(real "$page")"
 
   dir="$HOME/Library/Application Support/Ladder/agents"

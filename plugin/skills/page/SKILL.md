@@ -5,7 +5,7 @@ description: Show the user a page in Ladder, a Markdown app on their Mac that dr
 
 # Show a page in Ladder
 
-Ladder is a Markdown app on the user's Mac. It draws a Markdown file as a page: a `mermaid` code block is a diagram, a table is a table, `- [ ]` is a box that the user can tick. The user can type anywhere on the page. A button at the top right of Ladder, called "Nudge Claude", sends you the lines that the user changed. It shows your logo.
+Ladder is a Markdown app on the user's Mac. It draws a Markdown file as a page: a `mermaid` code block is a diagram, a table is a table, `- [ ]` is a box that the user can tick. The user can type anywhere on the page. A button at the top right of Ladder sends you the lines that the user changed. It shows your logo: Claude's, Grok's, Codex's or Gemini's.
 
 So a page does two jobs. It shows the user more than the terminal can. And it is the form that the user answers on.
 
@@ -13,8 +13,11 @@ So a page does two jobs. It shows the user more than the terminal can. And it is
 
 1. Write the page as a Markdown file. Its name must end in `.md`. Put it where the user says. If the user names no place, put it in a `.ladder` folder in the project.
 2. Run `ladder show <file>`. Ladder opens the page in front of the other windows.
-3. Run `ladder wait <file>` in the background (in Claude Code: the Bash tool with `run_in_background: true`). Do not poll, and do not run it in the foreground, because the user can take any length of time.
-4. Tell the user, in one or two sentences, what is on the page and what you need from them. Tell them to click the Claude logo at the top right of Ladder, or press ⌘Return, when they are done. Then end your turn.
+3. Run `ladder wait <file>` in the background. Do not poll, and do not run it in the foreground, because the user can take any length of time. When the command stops, you get its output in a new turn.
+   - In Claude Code, use the Bash tool with `run_in_background: true`.
+   - In Grok, run `ladder wait <file> --as Grok` with `run_terminal_command` and `block_until_ms: 0`.
+   - Another agent adds its own name in the same way, like `--as Codex`, so that the button shows its logo.
+4. Tell the user, in one or two sentences, what is on the page and what you need from them. Tell them to click your logo at the top right of Ladder, or press ⌘Return, when they are done. Then end your turn.
 5. When `ladder wait` stops, its output is what the user changed. Read it, and do what it asks.
 6. If you change the page, edit the file. Ladder shows your change in less than a second, so do not run `ladder show` again.
 7. If the work on the page goes on, run `ladder wait <file>` in the background again. If the work is done, do not, unless the user asked for a change with Ask For Change (see below). The Nudge button shows in Ladder only while a `ladder wait` runs.
@@ -46,13 +49,15 @@ How to read it:
 - `[accepted]` or `[rejected]` at the end of an `@@` line of a `changes` block is the user's choice for that change. Ladder has already made each accepted change in its file.
 - Two new lines that start with `#` at the end of a `changes` block are the user's comment on one line of the diff. The first starts with `# Comment on change 2, line 3:` and has that line of the diff after it. The second has the user's words.
 - A new line that talks to you, like the question above, is a note. Do what it asks, or answer it, and then take the note out of the page.
+- `{==some words==}{>>a comment<<}` is a comment in the margin: Ladder shows the comment as a card beside those words. A new one is a note about those words. Do what it asks, or answer it. Then take out the comment and the four marks, and keep the words.
+- Words between two `%%` marks, or lines between a line of `%%` and another, are hidden in the page. The user can keep notes for themselves there. Read a new one as a note only if it talks to you, and leave the others as they are.
 - Any other changed text is the user's own wording. Keep it. Do not put your wording back.
 - "The user changed nothing in it" means that the user read the page and has nothing to add. If the page asked for approval, that is approval.
 - If the output ends with "The user selected this text", the user's note or their words in the terminal are about that text.
 
 ### A change that the user asks for
 
-While you wait, the user can also ask you for a change in their own words, with the command Ask For Change in Ladder. Then `ladder wait` prints this:
+While you wait, the user can also ask you for a change in their own words. They select words and right-click them, or click your logo beside a block, or use the command Ask Agent or Ask For Change. Then `ladder wait` prints this:
 
 ```
 The user asked you for a change from Ladder, on the page /Users/sam/shop/.ladder/plan.md.
@@ -69,6 +74,8 @@ Ladder draws it with the code in the file /Applications/Ladder.app/.../main.jl, 
 ```
 
 - The words can name each thing by its letter, like "make A look like B".
+- A thing can also be words that the user selected, with their line, or a comment in the margin of the page. For a comment, do what it says, and then take the comment out of the page as above.
+- Ladder gives you one request at a time. The user's next requests wait in Ladder until you run `ladder wait` again.
 - A thing on the page has its lines. Change those lines of the page, unless the words ask for a change to how Ladder draws it.
 - A block of code has its file and its lines. Change that code.
 - What the user changed in the page comes after the things, as it does when they send the page.
@@ -90,6 +97,9 @@ Exit code 3 means that Ladder is not installed, or that it is too old to send a 
 | Headings, **bold**, *italic*, `code`, links, quotes, lists, a rule | Markdown, as usual. The headings are also the page's list of contents. |
 | A note, a tip or a warning that stands out | A callout: a quote whose first line is `> [!NOTE]`, `> [!TIP]`, `> [!IMPORTANT]`, `> [!WARNING]` or `> [!CAUTION]`. Its text is on the lines under that one, each after a `>`. |
 | A task | `- [ ] Text`. The user clicks the box. |
+| A task that comes back, like every week | A task that ends with `every day`, `every 2 weeks`, `every month`, `every Monday`, `every weekday`, `weekly` and the like, after its day or before it: `- [ ] Test the smoke alarms 2026-12-01 every 3 months`. When the user ticks it, Ladder adds the next one under it. A limit after those words ends it: `for 3 days`, `for 6 months`, `4 times` or `once`. |
+| A comment on some words, in the margin | `{==the words==}{>>the comment<<}`. The words get a highlighter's colour, and the comment shows as a card at the right of the text. |
+| A note that the page hides | `%%the note%%` in a line, or lines between a line of `%%` and another. |
 | A question with answers to choose | An `ask` code block. See below. |
 | Changes to a file, to accept or reject | A `changes` code block. See below. |
 | Numbers as bars, lines or a pie | A `chart` code block. See below. |
@@ -106,16 +116,29 @@ Exit code 3 means that Ladder is not installed, or that it is too old to send a 
 | A flow, a sequence, states, classes, shares, a mind map, the tables of a database, tasks with dates, a timeline | A `mermaid` code block. See below. |
 | Code | A code block with its language. Ladder colours it. |
 | Sums that the user can change | A `sheet` or a `spreadsheet` code block. See below. |
+| Numbers in a sentence that the user drags, and sums that follow them | A sum in a line of text, like `` !`area = l * h` ``. See below. |
 | Maths | TeX between dollar signs: `$x^2$` in a line of text, and on lines of its own between a line of `$$` and another. A dollar sign before a number, like `$5`, stays a dollar sign. |
 | A picture | `![what it shows](picture.png)` on a line of its own. The path starts at the page's folder. A web address works too. |
+| A picture across the top of the page | `cover: picture.png` in the front matter: the lines between two lines of `---` at the very top of the file. |
+| A video or a sound | `![what it is](walk.mov)` on a line of its own, as for a picture. `walk.mov#t=61,86` plays only from second 61 to second 86. |
 | Several pictures or files as a grid | A `gallery` code block. See below. |
-| A web page as a card, with its title, its description and its picture | A `card` code block with the page's address on a line, like `https://julialang.org`. One card for each address. Ladder gets the page. A bare address outside the block stays text. |
+| A web page as a card, with its title, its description and its picture | `![what it is](https://julialang.org)` on a line of its own. Ladder gets the page. An address that ends as a picture's does, like `.png`, shows the picture. A bare address stays text. |
+| A web page that the user can use in the page | A `web` code block with the address in it, or with a page of HTML that starts with a tag. Ladder draws the page and runs its scripts. Use it only when the user must see a page work. |
 | A footnote | `[^1]` in the text, and a line that starts with `[^1]:`. |
 | Words with a highlighter's colour behind them | `==the words==`. |
-| Another page | A link to another `.md` file. The user holds ⌘ and clicks it. |
+| Another page | `[[name]]` links to the page `name.md`, wherever it is in the project. `[[name#Heading]]` goes to a heading of it, and `[[name|other words]]` shows other words. A Markdown link to a `.md` file works too. The user holds ⌘ and clicks the link. |
+| Cards that the user puts anywhere, with lines between them, like a mind map | A `canvas` code block. See below. |
+| A drawing of boxes, ovals, arrows and words | A `sketch` code block. See below. |
+| A field for each column of a table, to add a row | A `form` code block under the table. See below. |
+| Only the rows of a table, a CSV file or a JSON file that meet some conditions | A `filter` code block. See below. |
+| The rows of a file or of a server, as a table | A `load` code block. See below. |
+| A button that writes a table into a file, or sends it to a server | A `save` code block under the table. See below. |
+| The to-do items, headings or other lines of every page in the folder | A `find` code block. With nothing in it, it lists each to-do item that isn't ticked. `what: headings` lists another kind of line, `with: plumber` keeps the lines that have those words, and `in: jobs` looks in the folder `jobs` beside the page. |
+| A slider that shows the page on another day | A `day` code block with nothing in it. The calendars, time logs, schedules and boards of the page show the day that the user chooses. In a git repository, the text shows its past too. |
+| A plan to measure from: a page of a PDF, or a picture | A `takeoff` code block with the lines `plan: plan.pdf`, `page: 1` and `scale: 1:100`. The user counts and measures on the plan, and Ladder writes the measures into the block. |
 | A part of another page, which the user can change in this page | `![[name#Heading]]` on a line of its own shows the heading and the lines under it from the page `name.md`. `![[name#table 2]]` shows its second table, and `![[name]]` the whole page. What the user types there changes `name.md`. |
 
-Ladder does not draw HTML tags. Do not use them.
+Ladder does not draw HTML tags, except in a `web` block. Do not use them.
 
 The user can show a page as slides, one part at a time, with ⌃⌘⇧P. Each heading of level 1 or 2 starts a slide, and so does a line of `---`.
 
@@ -217,6 +240,20 @@ Hours = shops * checks per shop * seconds per check / 3600
 ```
 ````
 
+- A row can be a range of values, with `to` between its two ends: `Side of a tile = 0.2m to 0.6m`. Each row under it shows what it comes to at the two ends, and a `chart` under the sheet draws a line through the values between.
+- A row that starts with `?` is worked out backwards. Write the answer that you want after a second `=`, in a row under it. In this sheet, Ladder finds the length of the wall that 6 litres of paint cover:
+
+````
+```sheet
+Wall length = ? 12m
+Wall height = 2.4m
+Area = wall length * wall height
+Litres = area * 2 / (16m^2 / litre) = 6litre
+```
+````
+
+- A row can use the rows of the sheets above it, a measure of a `takeoff` by its name, and a task of a `timelog`, which is the hours of that task.
+
 A `spreadsheet` is a grid. Column letters and row numbers name the cells, and a cell that starts with `=` is a formula.
 
 ````
@@ -227,6 +264,21 @@ A `spreadsheet` is a grid. Column letters and row numbers name the cells, and a 
 | Total    |      |            | = sum(D2:D3) |
 ```
 ````
+
+#### Sums in a line of text
+
+A sum can go in a line of text: a `!`, and then the sum between backticks. The page shows what the sum comes to. A sum that is only a number has a line of dashes under it, and the user drags it to change it. Each sum that uses its name follows while the mouse moves. Use it to explain how numbers depend on each other, in sentences.
+
+```
+A wall that is !`l = 16m` long and !`h = 2.4m` high has an area of !`wall_area = l * h`.
+Two coats of paint that covers !`per_litre = 16m²` a litre take !`wall_area * 2 / (per_litre / litre)`.
+```
+
+- A name of a sum is a Julia name, like `wall_area`. A later sum uses it.
+- A sum can use the rows of each sheet of the page, with a `_` for each space: `` !`wall_length` ``. A sheet under the sum can use the sum's name, with a space for each `_`.
+- A sum can give words: `` !`farm_cost > 2e9USD ? "it needs more than one company" : "one company can pay"` ``.
+- The units are those of Units.jl: `m`, `km`, `ft`, `inch`, `s`, `minute`, `hr`, `kg`, `litre`, `kW`, `GW`, `kWh`, `TWh`, and money like `USD`, `AUD` and `EUR`. A sheet has the same units.
+- A cell of a table can hold a sum, and a `chart` of the table draws what the sums show.
 
 ### A schedule
 
@@ -247,6 +299,8 @@ Move the price checks to the queue | from 2026-11-25 | after Write the worker
 ````
 
 After the name: `3 days` is how many working days the task takes, `after` and a task's name makes it wait for that task, and `from` and a day is the first day that it can start. A task can have several `after` parts. `start` is the day that the work starts. Saturday and Sunday aren't working days, unless the block has the line `days: every day`. Write a `\` before a `|` in a task's name.
+
+A task that comes back, like `- [ ] Water the slab every day for 3 days`, has a bar for each time. `time 2 of Water the slab` names one of those times, in the place of a task's name. `after Water the slab` waits for the last time when the task has a limit, and for the first time when it has none.
 
 ### A question
 
@@ -314,7 +368,7 @@ title: Sales and costs
 ```
 ````
 
-`kind` is `bars`, `lines` or `pie`. `show: Sales` draws only that column. `by: Month` names the column whose words name the bars. `from: Budget` draws the first table under the heading "Budget". To draw numbers that are in no table, put the rows in the block, under an empty line, with a `|` between the cells and the names of the columns in the first row. Do not draw two measures with different units in one chart.
+`kind` is `bars`, `lines` or `pie`. `show: Sales` draws only that column. `by: Month` names the column whose words name the bars. `from: Budget` draws the first table under the heading "Budget". A chart under a `filter` or a `load` block draws the rows that the block shows. To draw numbers that are in no table, put the rows in the block, under an empty line, with a `|` between the cells and the names of the columns in the first row. Do not draw two measures with different units in one chart.
 
 ### A table from a CSV file
 
@@ -449,6 +503,73 @@ rate: 85
 
 A line with no stop time, like `2026-11-18 08:10- | Roofing`, is the one that runs now. Write no more than one. `rate: 85` is the dollars for each hour, and makes the totals show money. `round: 15` rounds each stretch to the nearest 15 minutes in the totals. A `chart` block under the log draws the hours of each task.
 
+### A canvas
+
+A `canvas` code block is a board of cards that the user puts anywhere, as in the app Muse. Each line is a card: its kind, its place as `x,y`, and what it holds. `join 2 3` draws a line from the 2nd card to the 3rd. Use a canvas for a mind map, or for ideas that the user will move round.
+
+````
+```canvas
+text size 28 0,0 The bathroom
+note 0,60 Tiles to the ceiling
+note 300,0 Grey tiles on the walls
+note 300,120 White grout
+join 2 3
+join 2 4
+```
+````
+
+- The kinds are `note` (words on a card), `text` (words with no card round them), `picture` (a file, from the page's folder), `page` (one of the user's pages, by its name, as in `[[name]]`) and `link` (a web address).
+- After the kind can come a colour, `red`, `blue`, `green` or `orange`, and then `width 260` for how wide a card is, or `size 28` for how big the words of a `text` are.
+- A line that starts with two spaces goes on with the words of the card above it.
+- The cards are counted in the order of their lines, from 1. If you add a card, add it after the others, so that the numbers of the `join` lines stay right.
+- A place can be anywhere, and below or left of 0.
+
+### A sketch
+
+A `sketch` code block is a drawing. Each line is a shape: its kind, a colour if you want one, and its places as `x,y`. The sketch is 720 wide, and as tall as its shapes need.
+
+````
+```sketch
+box 60,50 330,190
+text 70,38 Bathroom
+oval blue 90,80 180,150
+text blue 100,174 Basin
+arrow red 450,80 336,110
+text red 458,84 The door opens in
+```
+````
+
+- `line` and `arrow` go from the first place to the second. `box` and `oval` have the two places as opposite corners. `text` starts at its place, and its words are the rest of the line. `pen` goes through each of its places.
+- The colours are `red`, `blue`, `green` and `orange`. Without one, a shape is the colour of the text.
+- Before the places, `width 4` makes the line thicker, `radius 12` makes the corners of a box rounder, and `size 24` makes the words of a text bigger.
+
+### Rows of data
+
+Four blocks work with the rows of a table. A `filter`, a `form` and a `save` use the table that is nearest above them, and the rows of a `load` block above them are a table too. In this page, the filter keeps some of the orders that the load block gets, and the save block writes them into a file:
+
+````
+```load
+from: orders.json
+at: data.orders
+```
+
+```filter
+where: total > 100
+where: status is shipped, packed
+sort: total, largest first
+show: customer.name, total
+```
+
+```save
+to: big orders.csv
+```
+````
+
+- `load` shows the rows of a file, or of a server when `from` is a web address. `at: data.orders` names the list in a JSON file. `key: orders-api` names a password in the user's Keychain, which Ladder sends to the server. The page holds only the name.
+- `filter` shows only the rows that meet every `where` line. A `from` line can name its rows: a CSV, TSV or JSON file beside the page, or the heading that a table of the page is under, like `from: Costs`. A condition is `is` or `is not` with values, `has` or `has no` with letters, `>`, `<`, `>=` or `<=` with a number or a day like 2026-11-21, `is empty`, `is not empty`, `starts with` or `ends with`. Capitals don't count. In a JSON file, a key inside an object is a column with a dot, like `customer.city`.
+- `save` writes the rows of the table above it into a file, when the user clicks its button. The end of the file's name says how: `.csv`, `.tsv` or `.json`. When `to` is a web address, it sends the rows to that server as JSON. `method: PUT` and `key: …` say how.
+- `form` shows a field for each column of the table above it, and adds a row to the table. `title: New job` is the words at its top, and `to: Jobs` adds the rows to the first table under the heading Jobs.
+
 ### Columns
 
 A `columns` code block holds a number. That many of the blocks after it show side by side. Use it to compare options, or to put a picture beside its text. The blocks are ordinary lines of the page, so the user types in them as anywhere else.
@@ -503,7 +624,7 @@ length(rooms) == 4
 
 ### Code that runs
 
-A code block in the language `ui`, and code between backticks straight after a `!`, is Julia code that Ladder runs when the page opens. Use these only if the user asks for a live block.
+A code block in the language `ui` is Julia code that Ladder runs when the page opens. It shows what the code makes, like a slider or a 3D model. Code between backticks straight after a `!` runs too. Use it for sums, as in "Sums in a line of text". Use other code that runs only if the user asks for it.
 
 ## Show what a command prints
 
@@ -521,3 +642,5 @@ git log --stat -20 | ladder --name "last 20 commits"
 - Ask each question in an `ask` block. Use `( )` answers when the user picks one, and `[ ]` answers when they can pick many.
 - Show changes to code in a `changes` block before you make them, when the user may want only some of them. Ladder makes the ones that the user accepts.
 - Use a diagram for how things connect, a table to compare options, and a sheet for numbers that the user may want to change.
+- To ask about a few words of the page, put a comment in the margin on them, like `{==3 days==}{>>Is that long enough for the slab to cure?<<}`. Then the question stays beside what it is about.
+- To show how a result follows from numbers that the user may change, write sums in a line of text. The user drags a number and reads how the rest changes.

@@ -40948,6 +40948,21 @@ worded(b::Bundle) = b.name
 "Use the keys of a bundle"
 key_bindings!(e, bundle::Bundle) = bundle!(e, bundle.name)
 
+"An agent that Ladder can start, for a command to take: Claude, Codex, Gemini or Grok. See \"the agents that Ladder can start\"."
+struct AgentChoice
+  name::String
+end
+choices_for(::Type{AgentChoice}, e) = [AgentChoice(k.name) for k in AGENT_KINDS]
+chip_kind(::Type{AgentChoice}) = :choice
+worded(a::AgentChoice) = a.name
+sidenote(a::AgentChoice) = try agent_path(agent_kind(a.name)); "" catch; "not installed" end
+"""
+Make `agent` the one that Ladder asks for a change or a question, as Settings
+does. A page that an agent shares still asks that agent.
+"""
+switch_agent!(e, agent::AgentChoice) = preferred_agent!(e, agent.name)
+runs_at_once(::Val{:switch_agent}) = true
+
 "A kind of block that the Insert menu adds, for a command to take"
 struct InsertKind
   name::String
@@ -41468,6 +41483,7 @@ add_command!(insert_block!, name=:insert, title="Add a block to the page: a tabl
 add_command!(theme!, title="Use other colours for the page")
 add_command!(text_size!, title="Make the page's text a number of pixels tall")
 add_command!(key_bindings!, title="Use the keys of another editor")
+add_command!(switch_agent!, title="Choose the agent that Ladder asks for a change or a question: Claude, Codex, Gemini or Grok")
 add_command!(spelling!, title="Turn the spelling check on or off")
 # The command palette asks whether it's on or off. See "the start of a page in a link's card".
 add_command!(peeks!, title="Turn on or off showing a page when you hold ⌘ over its link")
@@ -42821,7 +42837,7 @@ agent_path(k::AgentKind) = begin
     file = joinpath(expanduser(dir), k.command)
     isfile(file) && return file
   end
-  error("Ladder can't find the command `$(k.command)` of $(k.name). Install it, or choose another agent in Settings.")
+  error("Ladder can't find the command `$(k.command)` of $(k.name). Install it, or choose another agent with the command Switch Agent.")
 end
 
 """

@@ -778,6 +778,23 @@ end
   K.preferred_agent!(e, "Claude")
 end
 
+@testset "the palette's Switch Agent chooses the agent, as Settings does" begin
+  press(w, Keys.p, Keys.cmd, Keys.shft)
+  typed(w, "switch agent")
+  press(w, Keys.enter)
+  p = K.palette(e)
+  @test e.popup == :commands && p.command.name == :switch_agent
+  # The agents are a list over the chip. One whose command isn't on this Mac says so.
+  rows = K.palette_rows(e, p)
+  @test [r.name for r in rows] == ["Claude", "Codex", "Gemini", "Grok"]
+  @test [r.note for r in rows] == [(try K.agent_path(k); "" catch; "not installed" end) for k in K.AGENT_KINDS]
+  # Return takes the row, and the command runs at once: it changes no file
+  foreach(_ -> press(w, Keys.down), 1:3)
+  press(w, Keys.enter)
+  @test e.popup == :none && e.ai == "Grok" && K.asks_whom(e) == "Grok"
+  K.preferred_agent!(e, "Claude")
+end
+
 @testset "the page's menu asks the agent about the words that are selected" begin
   picker().asked = picker().about = nothing
   b = e.buf
@@ -872,7 +889,7 @@ end
   frames(w, 2)
   typed(w, "and this?")
   press(w, Keys.enter)
-  @test e.nodes[K.ASK_KEY].error == "Ladder can't find the command `no-such-agent-command` of Nobody. Install it, or choose another agent in Settings."
+  @test e.nodes[K.ASK_KEY].error == "Ladder can't find the command `no-such-agent-command` of Nobody. Install it, or choose another agent with the command Switch Agent."
   K.preferred_agent!(e, "Claude")
   pop!(K.AGENT_KINDS)
   # Esc in the field leaves a working agent working, and the field as it is
