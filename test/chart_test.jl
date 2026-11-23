@@ -3,6 +3,7 @@
 @use Test: @test, @testset
 @use "../chart" => C
 @use "github.com/jkroso/Units.jl/Money" USD
+@use "github.com/jkroso/Units.jl" Percent yr
 
 const TABLE = [["Month", "Sales", "Costs", "Note"],
                ["Jan", "\$1,200", "\$800", "slow"],
@@ -29,6 +30,9 @@ const TABLE = [["Month", "Sales", "Costs", "Note"],
   # The unit is on the value. The words in the cell are not what the chart measures.
   @test C.reading(22.4e9USD)[1] == Float64((22.4e9USD).value) && C.reading(100e6USD) == (1.0e8, "", " USD")
   @test C.reading(100e6USD)[1] < C.reading(22.4e9USD)[1] / 100
+  # A rate goes right after its number, as the page writes it
+  @test C.reading(1.0Percent/yr) == (1.0, "", "%/yr") && C.reading(0.5/yr) == (0.5, "", "/yr")
+  @test C.number("1%/yr") == (1.0, "", "%/yr") && C.number("0.5/yr") == (0.5, "", "/yr")
 end
 
 @testset "the numbers beside a chart" begin

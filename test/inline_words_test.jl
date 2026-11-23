@@ -86,7 +86,8 @@ end
 
 @testset "a character that the page's font lacks is drawn in a font that has it" begin
   minus = joinpath(dir, "minus.md")
-  write(minus, "# Minus\n\nThey lose !`fade = 1.0Percent/yr` of it each year.\n")
+  # A rate shows as 1%/yr now, so the sum gives the raised minus as text
+  write(minus, "# Minus\n\nThey lose !`fade = \"0.01yr⁻¹\"` of it each year.\n")
   e = K.build_editor(minus)
   e.font = "Charter"
   K.restyle!(e)

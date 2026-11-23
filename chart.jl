@@ -131,7 +131,8 @@ const SCALES = (("trillion", 1e12), ("billion", 1e9), ("million", 1e6), ("thousa
 """
 The number that a cell holds, with what's written before it and after it, or
 nothing when the cell isn't a number. `\$1,200` is 1200 with a \$ before it,
-`45%` is 45 with a % after it, and `2.4 m` is 2.4 with ` m` after it.
+`45%` is 45 with a % after it, `1%/yr` is 1 with %/yr after it, and `2.4 m`
+is 2.4 with ` m` after it.
 `22.4 billion USD` is 22.4 billion, and `100 million USD` is 100 million.
 `2.6e-8%` is 2.6 × 10⁻⁸ with a % after it, as Julia writes a very small number.
 """
@@ -140,7 +141,7 @@ number(text::AbstractString) = begin
   m = match(r"^([-−–+]?)\s*([$€£¥]?)\s*((?:\d[\d,]*(?:\.\d+)?|\.\d+)(?:[eE][-+]?\d+)?)\s*(%|[^\d\s,.][^\d]{0,11})?$", s)
   m === nothing && return nothing
   x = parse(Float64, replace(m[3], "," => ""))
-  after = m[4] === nothing ? "" : m[4] == "%" ? "%" : " " * m[4]
+  after = m[4] === nothing ? "" : tight(m[4]) ? String(m[4]) : " " * m[4]
   x, after = scaled(x, after)
   (m[1] in ("-", "−", "–") ? -x : x, String(m[2]), after)
 end
@@ -158,8 +159,11 @@ reading(x::Units.Unit) = begin
   v = try Float64(x.value) catch; return nothing end
   isfinite(v) || return nothing
   unit = Units.abbr(typeof(x))
-  isempty(unit) ? (v, "", "") : unit == "%" ? (v, "", "%") : (v, "", " " * unit)
+  isempty(unit) ? (v, "", "") : tight(unit) ? (v, "", unit) : (v, "", " " * unit)
 end
+
+"Whether a unit goes right after its number, as % and %/yr and /yr do, with no space between them"
+tight(unit::AbstractString) = startswith(unit, '%') || startswith(unit, '/')
 
 "`x` times the thousand, million, billion or trillion at the front of `after`. That word comes off `after`."
 scaled(x, after) = begin

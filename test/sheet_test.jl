@@ -81,6 +81,9 @@ end
   @test texts([("Fade", "1Percent"), ("Left", "round(exp(-fade * 3), digits=4)"), ("Rate", "round(log(1 + 50Percent), digits=4)")])[2:3] == ["0.9704", "0.4055"]
   # A % with other units goes into the number
   @test texts([("Panels", "1GW / 100Percent"), ("Work", "1GW * 85Percent * 20yr"), ("Upkeep", "22e9USD * 1Percent * 11")]) == ["1GW", "17GW·yr", "2.42 billion USD"]
+  # A rate with only a % on top keeps its %, and a single unit with a negative power shows as a number over it
+  @test texts([("Fade", "1.0Percent/yr"), ("Spread", "2.5Percent/m^2"), ("Grow", "1Percent * 3m/yr")]) == ["1%/yr", "2.5%/m²", "0.03m/yr"]
+  @test texts([("Rate", "0.01/yr")]) == ["0.01/yr"]
 end
 
 @testset "a sheet under another sheet with a range has a range of its own" begin
@@ -98,7 +101,7 @@ end
   @test texts([("A", "22USD"), ("B", "1500.5USD"), ("C", "0.5AUD"), ("D", "-3e9USD"), ("E", "2.5e6EUR")]) ==
         ["22 USD", "1,500.50 USD", "0.50 AUD", "-3 billion USD", "€2.5 million"]
   @test texts([("Energy", "convert(TWh, 1GW * 5yr)"), ("Each", "1GW / 1MW")]) == ["43.8TWh", "1,000"]
-  @test texts([("Per watt", "22/W")]) == ["22W⁻¹"]
+  @test texts([("Per watt", "22/W")]) == ["22/W"]
   # Money over money is a number
   @test texts([("Orbit", "10USD"), ("Ground", "3USD"), ("Times", "orbit / ground")])[3] == "3.3333"
   @test texts([("Each", "convert(USD/MWh, 48.3e9USD / 43.8TWh)")]) == ["1,102.74USD/MW·hr"]

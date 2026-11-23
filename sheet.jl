@@ -277,7 +277,8 @@ end
 """
 `x` without the units of it that have no dimension, like the % of
 1,700GW·%·yr, which go into its number: 17GW·yr. A value with only such
-units, like 85%, stays as it is, and so does any other value.
+units, like 85%, stays as it is, and so does any other value. So does a
+rate with only a % on top, like 1%/yr, which would be 0.01/yr.
 """
 folded(x) = begin
   x isa Units.AbstractCombination || return x
@@ -285,6 +286,7 @@ folded(x) = begin
   plain(u) = Units.abstract_dimension(u) == Units.NullDimension
   (any(plain, parts) && !all(plain, parts)) || return x
   rest = filter(!plain, parts)
+  all(u -> Units.power(u) > 0, filter(plain, parts)) && all(u -> Units.power(u) < 0, rest) && return x
   # One unit to the power 1, like the USD of USD·%, is that unit itself, so the value shows as money does
   T = length(rest) == 1 && Units.power(rest[1]) == 1 ? Units.unwrap(rest[1]) : prod(u -> Units.unwrap(u)^Units.power(u), rest)
   try convert(T, x) catch; x end
