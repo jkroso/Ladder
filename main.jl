@@ -2151,8 +2151,11 @@ const TODO_OPEN, TODO_DONE = "[ ] ", "] [ "
 "True when `seg` is the box of a to-do item"
 isbox(seg) = seg.atomic && (seg.text == TODO_OPEN || seg.text == TODO_DONE)
 
-"The runs of text that line `text` is drawn as. With `raw`, the markup shows."
-pieces(e, text::String, line::Line, raw::Bool, i::Int=0) = begin
+"""
+The runs of text that line `text` is drawn as. With `raw`, the markup shows.
+With `open`, only the runs of the line in those columns show it: see `raw_part`.
+"""
+pieces(e, text::String, line::Line, raw::Bool, i::Int=0; open=nothing) = begin
   base = face(e, line)
   out = Piece[]
   k = line.kind
@@ -2214,49 +2217,54 @@ pieces(e, text::String, line::Line, raw::Bool, i::Int=0) = begin
     isempty(text) || push!(out, piece(text, 0, k == Kind.table ? base : Face(base, color=colours.faint)))
     return out
   end
+  # True when the columns `lo` to `hi` show their markup
+  written(lo, hi) = raw || markup_shows(open, lo, hi)
   lead = head(text, line.prefix)
+  bare = written(0, line.prefix)   # true when what starts the line shows as it's written
   if k in (Kind.bullet, Kind.ordered, Kind.todo)
     line.level > 0 && push!(out, piece(head(lead, line.level), 0, base))
     mark = Face(emboldened(base), color=colours.marker)
-    if k == Kind.bullet && !raw
+    if k == Kind.bullet && !bare
       push!(out, piece("•  ", line.level, mark, atomic=true, n=line.prefix - line.level))
-    elseif k == Kind.todo && !raw
+    elseif k == Kind.todo && !bare
       # On another day than today, the box shows how the item stands then: see `ticked_then`
       push!(out, piece(something(ticked_then(e, i), isdone(text)) ? TODO_DONE : TODO_OPEN, line.level, base, atomic=true, n=line.prefix - line.level))
     else
       push!(out, piece(rest(lead, line.level), line.level, mark))
     end
     # A to-do item that's done reads fainter
-    k == Kind.todo && something(raw ? nothing : ticked_then(e, i), isdone(text)) && (base = Face(base, color=colours.dim))
+    k == Kind.todo && something(bare ? nothing : ticked_then(e, i), isdone(text)) && (base = Face(base, color=colours.dim))
   elseif k == Kind.paragraph
     isempty(lead) || push!(out, piece(lead, 0, base))
-  elseif opens_callout(line) && !raw
+  elseif opens_callout(line) && !bare
     # The line that names a callout's kind shows the kind's icon, and its name when the line has no title of its own
     push!(out, callout_mark(e, line, base, length(text) > line.prefix))
-  elseif raw && !isempty(lead)
+  elseif bare && !isempty(lead)
     push!(out, piece(lead, 0, Face(base, color=colours.faint)))
   end
   start = line.prefix
-  note = k == Kind.paragraph && !raw ? match(NOTE, text) : nothing
+  note = k == Kind.paragraph ? match(NOTE, text) : nothing
+  note === nothing || written(0, length(note.match)) && (note = nothing)
   if note !== nothing
     # The line that holds a footnote's text starts with the footnote's number
     start = length(note.match)
     push!(out, piece(note_mark(e, note[1]) * ".  ", 0, Face(base, color=colours.accent), atomic=true, n=start, link="^" * note[1]))
   end
   for s in spans(rest(text, start), start)
-    (s.markup || s.comment) && !raw && continue
-    if startswith(s.link, '^') && !raw
+    shown = written(s.col, s.col + length(s.text))
+    (s.markup || s.comment) && !shown && continue
+    if startswith(s.link, '^') && !shown
       # [^name] shows as the footnote's number, small and raised
       push!(out, piece(note_mark(e, s.text), s.col, Face(base, size=base.size * 0.7, color=colours.accent), atomic=true, n=length(s.text), link=s.link))
       continue
     end
     # $x^2$ shows as the formula that its TeX describes
-    if s.math && !raw && Maths.available()
+    if s.math && !shown && Maths.available()
       push!(out, equation(e, s, base))
       continue
     end
     # Line -1 isn't one of the document's lines: it's a line of a file under a path. Its inline code shows as code.
-    s.live && !raw && i >= 0 ? push!(out, inline(e, i, s, base)) : symbols!(out, s.text, s.col, face(base, s), s.link)
+    s.live && !shown && i >= 0 ? push!(out, inline(e, i, s, base)) : symbols!(out, s.text, s.col, face(base, s), s.link)
   end
   out
 end
@@ -2492,9 +2500,16 @@ end
 # its text was typed there, and it stays as text until the caret leaves.
 # Without that, a line like ```mermaid could never be typed.
 #
-# As plain text, the part of the page that the caret is in shows its markup:
-# its line, the cell of a table, the whole of a code block or a diagram. The
-# caret goes anywhere. Every other part of the page still shows as rich text.
+# As plain text, the part of the page nearest the caret shows its markup. In a
+# line of text, that's the run that the caret is in: bold words, a link, inline
+# code, a formula. With the caret in plain words, no run shows its markup. With
+# the caret in what starts the line, like the # of a heading, that shows. The
+# rest of the line still reads as rich text, so a long paragraph keeps its look
+# while it's changed. The same goes for the cell of a table. A line that shows
+# as one thing, like a picture, shows all its markup, and so does the whole of a
+# code block or a diagram. The caret goes anywhere: the run that it goes into
+# shows its markup, so it never stops among characters that don't show. Every
+# other part of the page still shows as rich text.
 
 "The kinds of line whose text shows without its markup in rich text"
 const TEXT_KINDS = (Kind.paragraph, Kind.heading, Kind.bullet, Kind.ordered, Kind.todo, Kind.blockquote)
@@ -2509,13 +2524,98 @@ alone(b::Buffer, i::Int) = !caretless(b) && i == b.caret[1] == b.anchor[1]
 pictured(b::Buffer, i::Int) = kinds(b)[i].kind == Kind.paragraph && occursin("![", b.lines[i]) && occursin(PICTURE_LINE, b.lines[i])
 
 """
-True when line `i` shows its markup. It has to have the caret. As plain text
-that's enough. As rich text, the line also has to be one that shows as
-something other than its text, which is only so while it's typed: a ``` line,
-a line across the page, a picture, a table's line of dashes.
+True when all of line `i` shows its markup. It has to have the caret. As plain
+text that's enough, unless it's a line of text, which shows the markup of one
+run at a time: see `raw_part`. As rich text, the line also has to be one that
+shows as something other than its text, which is only so while it's typed: a
+``` line, a line across the page, a picture, a table's line of dashes.
 """
 israw(b::Buffer, i::Int) =
-  alone(b, i) && (!rich(b) || (picked(b) === nothing && (kinds(b)[i].kind in (Kind.fence, Kind.rule, Kind.table) || pictured(b, i) || maths_line(b, i) || transcludes(b, i) || only_id(b.lines[i]))))
+  alone(b, i) && (!rich(b) ? !by_runs(b, i) : (picked(b) === nothing && (kinds(b)[i].kind in (Kind.fence, Kind.rule, Kind.table) || pictured(b, i) || maths_line(b, i) || transcludes(b, i) || only_id(b.lines[i]))))
+
+"""
+True when line `i`, as plain text, shows its markup a run at a time, and not
+all at once: a line of text, but not one that shows as one thing, like a
+picture or a formula on a line of its own.
+"""
+by_runs(b::Buffer, i::Int) =
+  b.view == :markdown && kinds(b)[i].kind in TEXT_KINDS && !(pictured(b, i) || maths_line(b, i) || transcludes(b, i) || only_id(b.lines[i]))
+
+"""
+The columns of line `i` that show their markup as plain text, as a list of the
+first and last column of each run, or nothing when none do. They're the run
+that the caret is in, like bold words, a link or inline code, or what starts
+the line when the caret is in that, like the # of a heading. The rest of the
+line reads as rich text. With a selection, the run at its other end shows its
+markup too, so that neither end moves. It's always nothing as rich text, and
+for a line that shows all its markup: see `israw`.
+"""
+raw_part(b::Buffer, i::Int) = begin
+  (alone(b, i) && !rich(b) && b.view == :markdown) || return nothing
+  if kinds(b)[i].kind == Kind.table
+    # A row of a table that's drawn as a grid shows the run that the caret is in, inside its cell
+    run = table(b, i)
+    (run !== nothing && i != run[1] + 1) || return nothing
+  else
+    by_runs(b, i) || return nothing
+  end
+  lead, runs = marked_runs(b, i)
+  out = Tuple{Int,Int}[]
+  for col in (b.anchor[2], b.caret[2])
+    # What starts the line shows while the caret is in it. At its end the caret is at the start of the text, which shows anyway.
+    found = col < lead ? [(0, lead)] : runs_at(runs, col)
+    foreach(r -> r in out || push!(out, r), found)
+  end
+  isempty(out) ? nothing : out
+end
+
+"True when the columns `lo` to `hi` of a line show their markup, where `open` is what `raw_part` gave for the line"
+markup_shows(open, lo::Int, hi::Int) = open !== nothing && any(r -> r[1] <= lo && hi <= r[2], open)
+
+"""
+The runs of line `i` that show their markup as one, each as the column where
+its markup starts and the column where it ends: bold words, a link, inline
+code, a formula, the number of a footnote, a comment, and markup that's alone,
+like the \\ before a *. A run inside another comes before it. Before them, the
+column where the line's text starts after what starts the line, like the # of
+a heading, or 0 when nothing that starts the line is hidden in rich text.
+"""
+marked_runs(b::Buffer, i::Int) = begin
+  start, ss = richspans(b, i)
+  line = kinds(b)[i]
+  lead = line.kind == Kind.paragraph && start == line.prefix ? 0 : start
+  out = Tuple{Int,Int}[]
+  opened = Int[]
+  for (k, s) in enumerate(ss)
+    s.markup || continue
+    if !isempty(opened) && closes_run(ss[last(opened)].text, s.text)
+      push!(out, (ss[pop!(opened)].col, s.col + length(s.text)))
+    elseif s.text == "\\" || occursin(r"^\s*\^", s.text)
+      # The \ before a character, and the name of a block at the end of its line, are runs by themselves
+      push!(out, (s.col, s.col + length(s.text)))
+    else
+      push!(opened, k)
+    end
+  end
+  # Markup that's never closed is a run by itself
+  foreach(k -> push!(out, (ss[k].col, ss[k].col + length(ss[k].text))), opened)
+  (lead, out)
+end
+
+"True when the markup `c` closes a run that the markup `o` opened, as `spans` reads them"
+closes_run(o::AbstractString, c::AbstractString) =
+  o == "[" ? startswith(c, "](") : o == "[^" ? c == "]" : o == "!`" ? c == "`" : startswith(o, "[[") ? endswith(c, "]]") :
+  o == "{==" ? c == "==}" : o == "{>>" ? c == "<<}" : o == c
+
+"""
+The runs among `runs` that show their markup while the caret is at `col`: the
+innermost one that it's inside, or each one that it's at an edge of. At an
+edge, the run's markup shows which side of it the caret is on.
+"""
+runs_at(runs, col::Int) = begin
+  inside = filter(r -> r[1] < col < r[2], runs)
+  isempty(inside) ? filter(r -> r[1] == col || r[2] == col, runs) : [argmin(r -> r[2] - r[1], inside)]
+end
 
 """
 The spans of line `i` as rich text reads them: the text after what starts the
@@ -2862,25 +2962,30 @@ flow(e, i::Int, raw::Bool=israw(e.buf, i)) = begin
   # The lines that open and close a code block show while the caret is in the block. As rich text, one only shows while it's typed.
   # A comment's first and last lines have its words, so they show with the rest of it
   line.kind == Kind.fence && (raw = rich(e.buf) && line.lang != COMMENT ? israw(e.buf, i) : incode(e.buf, i))
-  build() = laid(e, text, line, raw, i)
+  # As plain text, a line of text shows the markup of the run that the caret is in, and the rest of it reads as rich text
+  open = raw ? nothing : raw_part(e.buf, i)
+  build() = laid(e, text, line, raw, i; open)
   # What inline code made can change its size, so its line is laid out again each time
   !raw && occursin(INLINE, text) && !(line.kind in (Kind.code, Kind.fence, Kind.rule)) && return build()
   spare_flows!(e)
   # A footnote's number comes from the rest of the document, which `notes` reads once for each
   # version of it. So the line is kept for that version, and laid out again after a change.
-  !raw && occursin("[^", text) && return get!(build, e.flows, (text, line, raw, :notes, e.buf.path, e.buf.version))
+  !raw && occursin("[^", text) && return get!(build, e.flows, (text, line, raw, open, :notes, e.buf.path, e.buf.version))
   # On another day than today, the box of a to-do item shows the tick of that day, so the line is kept with it
   then = line.kind == Kind.todo && !raw ? ticked_then(e, i) : nothing
-  then === nothing || return get!(build, e.flows, (text, line, raw, :then, then))
+  then === nothing || return get!(build, e.flows, (text, line, raw, open, :then, then))
   # A line of code inside a docstring has other colours than the same line outside it
   line.kind == Kind.code && return get!(build, e.flows, (text, line, raw, string_opens(e.buf)[i]))
-  get!(build, e.flows, (text, line, raw))
+  get!(build, e.flows, (text, line, raw, open))
 end
 
-"Lay out `text`, line `i` of the document, which is a line of the kind `line`, for a page that's `wide`"
-laid(e, text, line::Line, raw::Bool, i::Int, wide=e.width) = begin
+"""
+Lay out `text`, line `i` of the document, which is a line of the kind `line`,
+for a page that's `wide`. `open` is what `raw_part` gives for the line.
+"""
+laid(e, text, line::Line, raw::Bool, i::Int, wide=e.width; open=nothing) = begin
   base = face(e, line)
-  ps = spare(pieces(e, text, line, raw, i))
+  ps = spare(pieces(e, text, line, raw, i; open))
   k = line.kind
   # A hidden ``` line leaves a little room at the top or bottom of its block, and so does a line that only names the block over it
   lh = k == Kind.heading ? base.size * 1.35 : body(e).size * ((k == Kind.fence || (k == Kind.paragraph && only_id(text))) && !raw ? 0.6 : 1.65)
@@ -2999,13 +3104,18 @@ row_edge(b::Buffer, i::Int, by::Int) = begin
   isempty(cs) ? (i, 0) : by < 0 ? (i, cs[1].lo) : (i, cs[end].hi)
 end
 
-"The runs of text in a cell that shows columns `lo` to `hi` of `text`"
-cellpieces(e, i::Int, text::String, lo::Int, hi::Int, base::Face, raw::Bool) = begin
+"""
+The runs of text in a cell that shows columns `lo` to `hi` of `text`. With
+`raw`, the markup shows. With `open`, only the runs in those columns show it:
+see `raw_part`.
+"""
+cellpieces(e, i::Int, text::String, lo::Int, hi::Int, base::Face, raw::Bool; open=nothing) = begin
   out = Piece[]
   for s in spans(rest(head(text, hi), lo), lo)
-    (s.markup || s.comment) && !raw && continue
-    s.math && !raw && Maths.available() ? push!(out, equation(e, s, base)) :
-    s.live && !raw ? push!(out, inline(e, i, s, base)) : symbols!(out, s.text, s.col, face(base, s), s.link)
+    shown = raw || markup_shows(open, s.col, s.col + length(s.text))
+    (s.markup || s.comment) && !shown && continue
+    s.math && !shown && Maths.available() ? push!(out, equation(e, s, base)) :
+    s.live && !shown ? push!(out, inline(e, i, s, base)) : symbols!(out, s.text, s.col, face(base, s), s.link)
   end
   out
 end
@@ -3045,6 +3155,8 @@ end
 grid(e, from::Int, to::Int) = begin
   b = e.buf
   caret = from <= b.caret[1] <= to ? b.caret : nothing
+  # As plain text, the run that the caret is in shows its markup, inside the caret's cell
+  open = caret === nothing ? nothing : raw_part(b, caret[1])
   build() = begin
     base = Face(body(e), size=body(e).size * 0.94)
     lh = base.size * 1.5
@@ -3055,10 +3167,10 @@ grid(e, from::Int, to::Int) = begin
       map(1:ncols) do c
         c <= length(cells[r]) || return Piece[]
         cell = cells[r][c]
-        # The cell with the caret shows the spaces typed after its text, and as plain text its markup
+        # The cell with the caret shows the spaces typed after its text, and as plain text the markup of the run that the caret is in
         active = caret !== nothing && caret[1] == i && within(cell, caret[2])
         cellpieces(e, i, b.lines[i], cell.lo, active ? max(cell.hi, caret[2]) : cell.hi,
-                   r == 1 ? emboldened(base) : base, active && b.plain)
+                   r == 1 ? emboldened(base) : base, false; open=active ? open : nothing)
       end
     end
     # Each column gets room in proportion to its longest cell
@@ -3074,7 +3186,7 @@ grid(e, from::Int, to::Int) = begin
   end
   # What inline code made can change its size, so a table with some in it is laid out again each time
   any(text -> occursin(INLINE, text), @view b.lines[from:to]) && return build()
-  get!(build, e.flows, (:grid, from, b.lines[from:to], caret, b.plain))
+  get!(build, e.flows, (:grid, from, b.lines[from:to], caret, b.plain, open))
 end
 
 const TABLE_GAP = 8px   # above and below a table
@@ -3743,12 +3855,12 @@ vertical(e, it::Item, s::Sheet, by::Int) = begin
   1 <= r <= length(s.rows) && return place(s, r, by, x)
   if by < 0
     it.first == 1 && return b.caret
-    f = flow(e, it.first - 1, b.plain)
+    f = flow(e, it.first - 1, b.plain && !by_runs(b, it.first - 1))
     return (it.first - 1, colat(f, length(f.lines), x))
   end
   # ↓ on the last row of a sheet at the end of the document starts a line below it
   it.last == length(b.lines) && edit!(b, line_end(b, it.last), line_end(b, it.last), "\n")
-  (it.last + 1, colat(flow(e, it.last + 1, e.buf.plain), 1, x))
+  (it.last + 1, colat(flow(e, it.last + 1, b.plain && !by_runs(b, it.last + 1)), 1, x))
 end
 
 "Return in a sheet starts a row under the caret's row. In a last row that's empty, it ends the sheet instead."
@@ -17202,7 +17314,8 @@ land(e, j::Int, by::Int, x::px, from::Int) = begin
   1 <= j <= length(b.lines) || return nothing
   into = item(e, j)
   into.content isa Sheet && return enter(e, into, into.content, by, x - item_room(e, into)[1])
-  f = flow(e, j, b.plain)
+  # A line of text shows little of its markup as plain text, so it's laid out as it reads
+  f = flow(e, j, b.plain && !by_runs(b, j))
   (j, colat(f, by < 0 ? length(f.lines) : 1, x))
 end
 
@@ -24853,7 +24966,9 @@ keep_plain!(kept::Vector{Union{Nothing,PlainLine}}, b::Buffer, i::Int, line::Lin
   text = b.lines[i]
   # A picture, what inline code made, and a footnote's number each come from more than the line's text
   # ... and a line with a comment can take no room, which isn't a layout of its own
-  plain = line.kind in PLAIN_KINDS && !occursin("![", text) && !occursin(INLINE, text) && !occursin("[^", text) && !occursin("%%", text)
+  # ... and a line that shows the markup of one of its runs goes with where the caret is in it
+  plain = line.kind in PLAIN_KINDS && !occursin("![", text) && !occursin(INLINE, text) && !occursin("[^", text) && !occursin("%%", text) &&
+          raw_part(b, i) === nothing
   kept[i] = plain ? PlainLine(text, line, flow.raw, flow, tall) : nothing
 end
 
@@ -24902,7 +25017,7 @@ layout!(e, width=text_width(e)) = begin
     columns === nothing || (top = column_turn!(columns, e, items, i, top))
     if kept !== nothing
       was = kept[i]
-      if was !== nothing && pointer(was.text) == pointer(b.lines[i]) && was.line === ks[i] && was.raw == israw(b, i)
+      if was !== nothing && pointer(was.text) == pointer(b.lines[i]) && was.line === ks[i] && was.raw == israw(b, i) && raw_part(b, i) === nothing
         push!(items, Item(i, i, top, was.tall, was.flow))
         top += was.tall
         i += 1
@@ -27046,8 +27161,8 @@ line_step(e, by::Int) = begin
   # Into a sheet, the caret goes to the cell that's under it or over it
   into = item(e, j)
   into.content isa Sheet && return enter(e, into, into.content, by, x)
-  # The line is laid out as it will show with the caret on it
-  f = flow(e, j, b.plain)
+  # The line is laid out as it will show with the caret on it. A line of text shows little of its markup as plain text, so it's laid out as it reads.
+  f = flow(e, j, b.plain && !by_runs(b, j))
   (j, colat(f, by < 0 ? length(f.lines) : 1, x))
 end
 
@@ -30789,9 +30904,10 @@ letter to just after its last, inside its markup.
 caret_run(b) = begin
   line, col = b.caret
   kinds(b)[line].kind in (TEXT_KINDS..., Kind.table) || return nothing
+  open = raw_part(b, line)
   for s in richspans(b, line)[2]
     (!s.markup && s.col <= col <= s.col + length(s.text)) || continue
-    kind = span_kind(s.link, s, israw(b, line))
+    kind = span_kind(s.link, s, israw(b, line) || markup_shows(open, s.col, s.col + length(s.text)))
     kind === nothing || return Entry(line, 8, kind, RUN_ICONS[kind], line)
   end
   nothing
@@ -36819,8 +36935,10 @@ page_comments(e) = begin
     (occursin("{>>", text) && !(ks[it.first].kind in (Kind.code, Kind.fence, Kind.table))) || continue
     start = ks[it.first].prefix
     ss = spans(rest(text, start), start)
+    open = raw_part(b, it.first)   # a comment that the caret is in shows in the text, as it's written
     for k in comments_in(ss)
       s = ss[k]
+      markup_shows(open, s.col, s.col + length(s.text)) && continue
       # The words that it's about are between the {== and ==} just before it
       lo = hi = ss[k-1].col
       if k > 2 && ss[k-2].markup && ss[k-2].text == "==}"

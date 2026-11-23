@@ -103,13 +103,27 @@ end
 @testset "the caret's line shows its markup as plain text, and the page is still right" begin
   e.plain = true
   i = line("## Section 20")
-  b.caret = b.anchor = (i, 4)
+  drawn(i) = join(seg.text for vl in e.layout[findfirst(it -> it.first == i, e.layout)].content.lines for seg in vl.segs)
+  # In what starts the heading, the heading shows its # marks. A line that shows the markup of a run of it isn't kept.
+  b.caret = b.anchor = (i, 1)
   frames()
-  @test kept()[i].raw && e.layout[findfirst(it -> it.first == i, e.layout)].content.raw
+  @test kept()[i] === nothing && startswith(drawn(i), "## Section 20")
   @test fresh()
+  # In the paragraph's bold words, their ** show, and the heading is kept again as it reads
+  b.caret = b.anchor = (i + 2, first(findfirst("bold", b.lines[i+2])))
+  frames()
+  @test !kept()[i].raw && kept()[i+2] === nothing && occursin("**bold**", drawn(i + 2)) && !occursin("](", drawn(i + 2))
+  @test fresh()
+  # In plain words, the paragraph reads as rich text, and it's kept
   b.caret = b.anchor = (i + 2, 4)
   frames()
-  @test !kept()[i].raw && kept()[i+2].raw
+  @test kept()[i+2] !== nothing && !kept()[i+2].raw
+  @test fresh()
+  # A line across the page shows all its markup
+  j = findnext(==("---"), b.lines, i)
+  b.caret = b.anchor = (j, 1)
+  frames()
+  @test kept()[j].raw
   @test fresh()
   e.plain = false
   frames()

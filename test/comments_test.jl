@@ -99,7 +99,8 @@ end
   click(w, middle(rect(cards(e)[2])))
   second = line_of(e, "second paragraph")
   @test e.buf.caret == (second, notes[2].col) && e.plain
-  @test K.item(e, second).content.raw
+  # The comment is the run that the caret is in, so it shows as it's written, and the rest of the line reads as rich text
+  @test !K.item(e, second).content.raw
   @test occursin("{>>A comment with no words before it.<<}", join(seg.text for vl in K.item(e, second).content.lines for seg in vl.segs))
   # That line shows its comment in the text, so the margin has no card for it
   @test [n.text for n in K.page_comments(e)] == ["A comment about those words, long enough to wrap onto more than one line of its card.", "Short."]

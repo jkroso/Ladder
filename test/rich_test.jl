@@ -44,8 +44,10 @@ click(w, node) = begin
   w.keys ⊻= Keys.mouse_left
   frame(w); frame(w)
 end
-"True when line `i` shows its markup"
+"True when all of line `i` shows its markup"
 raw(e, i) = (c = K.item(e, i).content; c isa K.Flow && c.raw)
+"The text that line `i` is drawn as"
+drawn(e, i) = join(seg.text for vl in K.item(e, i).content.lines for seg in vl.segs)
 const cmd, opt, shift = Keys.cmd, Keys.opt, Keys.shft
 
 @testset "rich text and plain text" begin
@@ -480,19 +482,20 @@ end
   K.plain!(e, true)
   frame(w); frame(w)
   @test e.buf.plain
-  # Only the caret's line changes. Every other part of the page still shows as it reads.
-  @test raw(e, 3)
-  @test !any(i -> raw(e, i), (1, 5, 6, 8, 10, 12))
+  # Only the run that the caret is in shows its markup: the bold words, and not the link after them.
+  # Every other part of the page still shows as it reads. test/plain_runs_test.jl has more.
+  @test occursin("Some **bold** words", drawn(e, 3)) && !occursin("](", drawn(e, 3))
+  @test !any(i -> raw(e, i), (1, 3, 5, 6, 8, 10, 12))
   @test !(K.item(e, 15).content isa K.Flow)
   @test K.item(e, 21).content isa K.Grid
   caret!(e, w, 3, 6)
   @test e.buf.caret == (3, 6)
   press(w, Keys.right)
   @test e.buf.caret == (3, 7)
-  # The caret takes the markup with it to the line that it goes to
+  # The caret takes the markup with it to the line that it goes to. In what starts a list item, the - shows.
   caret!(e, w, 5, 1)
   @test e.buf.caret == (5, 1)
-  @test raw(e, 5) && !raw(e, 3)
+  @test startswith(drawn(e, 5), "- first item") && !occursin("**", drawn(e, 3))
   # A code block shows its ``` lines while the caret is in it
   caret!(e, w, 11, 2)
   @test raw(e, 10) && raw(e, 12)
@@ -526,7 +529,7 @@ end
   press(w, Keys.e, cmd)
   @test e.plain
   frame(w)
-  @test raw(e, 3) && !raw(e, 1)
+  @test occursin("**bold**", drawn(e, 3)) && !raw(e, 1)
   press(w, Keys.e, cmd)
   @test !e.plain
   frame(w)
