@@ -396,7 +396,7 @@
 @use "./folders" => Folders
 @use "./blog" => Blogs
 @use "github.com/jkroso/UI.jl/Interface/draw" Bubble
-@use "github.com/jkroso/UI.jl/Interface/draw" popups sync_mouse!
+@use "github.com/jkroso/UI.jl/Interface/draw" popups sync_mouse! popup_at
 @use "github.com/jkroso/UI.jl/Interface/draw" set_tool! window_tool draw_tool draw_tool_under tool_input tool_cursor invalidate_layout!
 @use "github.com/jkroso/URI.jl/FSPath" FSPath
 @use "github.com/jkroso/URI.jl/FS" => FS FSObject AbstractDirectory
@@ -42127,6 +42127,9 @@ tool_input(t::CodePicker, w, ::KeyPress{Keys.mouse_left}) = begin
       return true
     end
   end
+  # The labels of requests and the buttons of checks are under the window's popups, as the field of a request in
+  # place is. A click on a popup goes to the popup, and never to a label that it covers.
+  picks(t, w) || popup_at(w, w.mouse) === nothing || return false
   # A click on the label of an agent that answers a question stops it
   if q !== nothing && q.ended == 0 && q.label !== nothing
     x, y = num(w.mouse[1]), num(w.mouse[2])
@@ -43813,18 +43816,20 @@ end
 # what you want. Return gives the words and what you typed to the agent, as Ask
 # Agent does. The box stays round the words while the agent works, with a
 # label that says how it goes, and then what the agent did or its answer. The
-# × button takes the field and the box away. Esc doesn't, and nor does a
-# click on the page, as both are easy to do by mistake: the field stays, with
-# what you typed, and a click in it gives it the keyboard again. The field
+# Close button takes the field and the box away, and nothing else does: not
+# Esc, not a click on the page or on the field, and not another field that
+# opens, as all are easy to do by mistake. The field stays, with what you
+# typed, and a click in it gives it the keyboard again. A click on the field
+# goes to the field, even where a request's label is under it. The field
 # follows its words as the page scrolls.
 #
-# An answer stays until you click its ×, so that you never lose one that you
-# haven't read. Each of the words that you asked about has a field of its
-# own, and the fields of other words stay open while you ask about these. A
-# question that you ask in the field of an answer leaves the answer where it
-# is, and its answer goes under it, as does an answer to another question
-# about the same words. When the window shows another file, a field with an
-# answer, or with words typed in it, hides until the page shows again.
+# An answer stays until you click its Close button, so that you never lose
+# one that you haven't read. Each of the words that you asked about has a
+# field of its own, and the fields of other words stay open while you ask
+# about these. A question that you ask in the field of an answer leaves the
+# answer where it is, and its answer goes under it, as does an answer to
+# another question about the same words. When the window shows another file,
+# each field hides until the page shows again.
 
 const ASK_BOXES = :ask_boxes   # the key in a page's editor of its fields of requests in place
 const ASK_BOX_W = 380px
@@ -43859,9 +43864,6 @@ box_key(a::AskBox) = Symbol("ask_box_", objectid(a))
 "The field of the request in place about the thing `c`, or nothing when `c` has none"
 box_about(e, c) = (k = findfirst(a -> a.editing === nothing && same_things([a.thing], [c]), ask_boxes(e)); k === nothing ? nothing : ask_boxes(e)[k])
 
-"True when the field `a` has something that you'd lose if it went: an answer, or words typed in it"
-worth_keeping(a::AskBox) = !isempty(a.answers) || get(a.parts, :text, nothing) isa Editor && a.parts[:text].buf.lines != [""]
-
 "Put the agent's answer `x` under the answers of the field `a`, and scroll to it"
 add_answer!(a::AskBox, x) = (push!(a.answers, x); a.parts[:to_end] = true; redraw_in!(a.of, 0); a)
 
@@ -43882,8 +43884,8 @@ ask_box_of(e) = get(e.nodes, :ask_box, nothing)
 What a key does in the text of a request in place, before its editor does
 what it does with a key. True when the key is done with. Return gives the
 request to the agent, and ⇧Return starts a new line.
-A command for the window runs in the window's page. Esc does nothing: the ×
-button closes the field.
+A command for the window runs in the window's page. Esc does nothing: only
+the Close button closes the field.
 """
 ask_key!(e, w, K, command) = begin
   a = ask_box_of(e)
@@ -43927,19 +43929,15 @@ end
 
 """
 Show the field `a` under its words: it gives `a`, or nothing when the words
-don't show. A new field takes the place of a field that has nothing in it,
-but never of one that has an answer or words typed in it. `anyway` keeps `a`
-when its words don't show, and it shows when they do.
+don't show. The fields that show already stay, even those with nothing in
+them: only a field's Close button takes it away, so that no click by mistake
+loses what you typed. `anyway` keeps `a` when its words don't show, and it
+shows when they do.
 """
 open_ask!(e, a::AskBox; anyway=false) = begin
   w = window_of(e)
   r = w === nothing ? nothing : asked_rect(e, a.thing)
   r === nothing && !anyway && return nothing
-  if isempty(a.answers)
-    for o in copy(ask_boxes(e))
-      worth_keeping(o) || (w === nothing || close_popup!(w, box_key(o)); forget_ask!(e, o))
-    end
-  end
   new_field!(a)
   push!(get!(Vector{AskBox}, e.nodes, ASK_BOXES), a)
   r === nothing || show_ask!(e, w, a, r)
@@ -44018,7 +44016,9 @@ describe(a::AskBox) = begin
   e = a.of
   note = !isempty(a.error) ? a.error : a.editing !== nothing ? waits_note(e, a.editing) : "Return asks $(asks_whom(e)). ⇧Return adds a line."
   face = Face(SANS, "", 12px, isempty(a.error) ? c.dim : PICK_FAILED, false)
-  rows = [Row(height(17px), Alignment.Center, label(l, 12px, color=face.color)) for l in wrapped(face, note, num(ASK_BOX_W) - 70)]
+  # The note wraps before the buttons at its right: Close, and Take Back for a request that waits
+  room = num(ASK_BOX_W) - (a.editing === nothing ? 110 : 200)
+  rows = [Row(height(17px), Alignment.Center, label(l, 12px, color=face.color)) for l in wrapped(face, note, room)]
   # The text is laid out as a page is, as wide as the field
   sub = a.parts[:text]
   layout!(sub, ASK_TEXT_W * e.zoom)
@@ -44034,19 +44034,28 @@ describe(a::AskBox) = begin
   Box(width(grow=grow), padding(6px), radius(8px), background(c.frame), border(1px, :solid, c.line),
       shadow(0, 6, 16, RGBA(60 / 255, 45 / 255, 20 / 255, 0.2)), name="Ask",
     Column(width(grow=grow), Alignment.Start, child_gap=4px, (isempty(a.answers) ? () : (answer_part(a),))..., field,
-      Row(width(grow=grow), padding(4px, 2px, 4px, 8px), Alignment.Center,   # top, right, bottom, left
+      Row(width(grow=grow), padding(4px, 2px, 4px, 8px), Alignment.Center, child_gap=6px,   # top, right, bottom, left
         Column(width(grow=grow), Alignment.Start, rows...),
         (a.editing === nothing ? () : (get!(() -> own!(a, AskTakeBack(of=a)), a.parts, :take_back),))...,
         get!(() -> own!(a, AskClose(of=a)), a.parts, :close))))
 end
 
-"The button at the bottom right of the field of a request in place, that takes the field and its box away"
+"""
+The button at the bottom right of the field of a request in place, that takes
+the field and its box away. Nothing else closes the field: not Esc, not a
+click on the page, and not another field that opens.
+"""
 @def mutable struct AskClose <: SemanticUI
   of::Any = nothing
 end
 
-describe(x::AskClose) = Box(width(22px), height(22px), radius(5px), Alignment.Center, name="Close",
-                            background(ishovered(x) ? colours.hover : clear), Icon("x-lg", size=11px, color=colours.dim))
+"A button at the bottom of the field of a request in place, with a line round it so that it looks like one: `inside` is what it shows"
+field_button(x, name, inside...) =
+  Box(height(24px), padding(10px, 0px), radius(6px), Alignment.Center, name=name, border(1px, :solid, colours.line),   # across, down
+      background(ishovered(x) ? colours.hover : clear), inside...)
+
+describe(x::AskClose) = field_button(x, "Close",
+  Row(height(24px), Alignment.Center, child_gap=6px, Icon("x-lg", size=10px, color=colours.ink), label("Close", 12px)))
 cursor(::AskClose) = :hand
 onkey(x::AskClose, ev::KeyPress{Keys.mouse_left}) = close_ask!(x.of, ev.window)
 # A tooltip in a popup is put by its rectangle: the form that takes a node closes at once there
@@ -44067,7 +44076,7 @@ draw(ctx, size, ui::ConcreteRect, a::AskBox) = caret(ctx, ui, a.side, asked_rect
 # agent of the page"). A click on its label opens a field under its thing, as
 # a request in place has, with its words in it. Return gives the request the
 # words of the field, and it keeps its place. Take Back takes the request
-# out, and × leaves it as it was. If the request starts before you press
+# out, and Close leaves it as it was. If the request starts before you press
 # Return, the field says so, and Return then asks with the field's words as a
 # new request.
 
@@ -44118,13 +44127,12 @@ take_back!(e, a::AskedChange) = begin
   nothing
 end
 
-"The button beside × in the field of a request that waits, that takes the request back"
+"The button beside Close in the field of a request that waits, that takes the request back"
 @def mutable struct AskTakeBack <: SemanticUI
   of::Any = nothing
 end
 
-describe(x::AskTakeBack) = Box(height(22px), padding(0px, 8px), radius(5px), Alignment.Center, name="Take Back",
-                               background(ishovered(x) ? colours.hover : clear), label("Take Back", 12px, color=colours.dim))
+describe(x::AskTakeBack) = field_button(x, "Take Back", label("Take Back", 12px))
 cursor(::AskTakeBack) = :hand
 onkey(x::AskTakeBack, ev::KeyPress{Keys.mouse_left}) = begin
   a = x.of
@@ -44138,7 +44146,7 @@ end
 Give the agent what was typed in the field of `a`, about its words. If the
 agent can't take it, the field stays and says why. A field with answers stays
 too, with nothing typed in it, and the answer to this goes under them: only
-its × takes them away.
+its Close button takes them away.
 """
 send_ask!(a::AskBox, w) = begin
   words = String(strip(join(a.parts[:text].buf.lines, "\n")))
@@ -44169,8 +44177,8 @@ end
 In each frame, for the field of a request in place `a`: draw the box round
 its words, and keep the field under them as the page scrolls. When the window
 shows another file, the field of words of that page hides, and shows again
-with the page. One with nothing in it goes. A field that opened while its
-words didn't show shows when they do.
+with the page. A field that opened while its words didn't show shows when
+they do.
 """
 ask_box_tick!(ctx, w, e, a::AskBox) = begin
   b = e.buf
@@ -44180,7 +44188,6 @@ ask_box_tick!(ctx, w, e, a::AskBox) = begin
   away = a.thing.node isa PickedText && (isempty(b.path) || page_key(b.path) != a.thing.file)
   if away
     shown && close_popup!(w, key)
-    worth_keeping(a) || forget_ask!(e, a)
     return nothing
   end
   r = asked_rect(e, a.thing)

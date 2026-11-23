@@ -892,7 +892,7 @@ end
   # The field is put under its words in each frame, so it follows them as the page scrolls
   r = K.asked_rect(e, c)
   @test only(filter(p -> p.key == K.box_key(a), popups(w))).anchor == (r.left, r.top, r.width, r.height)
-  # The × button takes the field and the box away
+  # The Close button takes the field and the box away
   x = rect(a.parts[:close])
   click(w, x.left + x.width / 2, x.top + x.height / 2)
   @test !asking() && !any(p -> p.key == K.box_key(a), popups(w)) && w.focus === e
@@ -978,7 +978,7 @@ end
   typed(w, " and these?")
   press(w, Keys.enter)
   @test isempty(K.ask_boxes(e)) && [a.words for (a, _) in q] == ["and this? and these?", "and that?"]
-  # × leaves the request as it was
+  # Close leaves the request as it was
   click_on(q[2][1])
   f = only(K.ask_boxes(e))
   typed(w, " no")
@@ -1030,7 +1030,7 @@ end
   K.close_ask!(box(), w)
 end
 
-@testset "an answer in place stays until its × takes it away" begin
+@testset "an answer in place stays until its Close button takes it away" begin
   b = e.buf
   picker().asked = picker().about = nothing
   K.AGENT_COMMAND[] = `sh $quiet`
@@ -1056,9 +1056,13 @@ end
   # A field for other words opens, and the answer stays
   empty = field((1, 2), (1, 8))
   @test are(answer, empty) && w.focus === empty.parts[:text] && shows(answer) && shows(empty)
-  # A field with nothing in it goes when another opens. One with words typed in it stays.
+  # A field with nothing in it stays when another opens: only its Close button takes it away
   typing = field((7, 0), (7, 3))
+  @test are(answer, empty, typing) && shows(empty) && shows(answer) && shows(typing)
+  x = rect(empty.parts[:close])
+  click(w, x.left + x.width / 2, x.top + x.height / 2)
   @test are(answer, typing) && !shows(empty) && shows(answer)
+  K.focus(typing.parts[:text])
   typed(w, "half a question")
   # The same words again give their field the keyboard, and open no other
   K.focus(e)
@@ -1079,7 +1083,7 @@ end
   @test length(K.ask_boxes(e)) == 3 && !any(shows, K.ask_boxes(e))
   K.open!(e, page); frames(w, 3)
   @test are(answer, typing, tank) && all(shows, K.ask_boxes(e))
-  # The × takes each away. The newest is on top of the others.
+  # The Close button takes each away. The newest is on top of the others.
   for a in reverse(copy(K.ask_boxes(e)))
     x = rect(a.parts[:close])
     click(w, x.left + x.width / 2, x.top + x.height / 2)
@@ -1087,6 +1091,48 @@ end
     @test !any(o -> o === a, K.ask_boxes(e)) && !shows(a)
   end
   @test isempty(K.ask_boxes(e))
+end
+
+@testset "a click on a field goes to the field, never to a label that the field covers" begin
+  b = e.buf
+  picker().asked = picker().about = nothing
+  K.focus(e)
+  # An agent works on the block of code under the words "The end.", and the label of its request is on the block's top edge
+  K.AGENT_COMMAND[] = `sh -c "exec sleep 30"`
+  K.ask_agent!(e, first(offered(e, (10, 0))), "make it two")
+  frames(w, 3)
+  working = picker().asked
+  b.anchor, b.caret = (7, 0), (7, 8)
+  K.page_act!(e, 1)
+  frames(w, 2)
+  a = only(K.ask_boxes(e))
+  # The field of the words "The end." covers that label
+  s = only(filter(p -> p.key == K.box_key(a), popups(w))).scene
+  left, top, wide, tall = working.label
+  x, y = px(left + wide / 2), px(top + tall / 2)
+  @test s.left <= x <= s.left + s.width && s.top <= y <= s.top + s.height
+  # A click there goes to the field: the agent works on, and the field stays with the keyboard
+  typed(w, "half a request")
+  K.focus(e)
+  click(w, x, y)
+  @test picker().asked === working && working.ended == 0 && !working.stopped
+  @test only(K.ask_boxes(e)) === a && a.parts[:text].buf.lines == ["half a request"]
+  # The page's file and back, and the field is still there
+  K.open!(e, source); frames(w, 2)
+  K.open!(e, page); frames(w, 3)
+  @test only(K.ask_boxes(e)) === a && any(p -> p.key == K.box_key(a), popups(w))
+  # A field with nothing in it stays too, when the window shows another file
+  K.focus(a.parts[:text])
+  press(w, Keys.a, Keys.cmd); press(w, Keys.backspace)
+  @test a.parts[:text].buf.lines == [""]
+  K.open!(e, source); frames(w, 2)
+  K.open!(e, page); frames(w, 3)
+  @test only(K.ask_boxes(e)) === a && any(p -> p.key == K.box_key(a), popups(w))
+  K.close_ask!(a, w)
+  K.stop_agent!(e)
+  finish()
+  picker().asked = nothing
+  empty!(K.asks_ended(e))
 end
 
 @testset "the card of an answer stays until a click on it, and a new question keeps it under its thing" begin
