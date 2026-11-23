@@ -32834,6 +32834,9 @@ page_menu!(e, w) = begin
   e.popup = :none
   focus(e)
   at = settle(b, locate(e, w.mouse))
+  # A right-click on a part that shows as one thing, like a formula or a diagram, puts the caret on it as a whole, as a click does
+  it = isempty(e.layout) ? nothing : e.layout[item_under(e, w.mouse[1] - e.origin[1], w.mouse[2] - e.origin[2])]
+  it !== nothing && it.content isa Live && rich(b) && !b.fixed && part(b, it.first) == (it.first, it.last) && (at = (it.first, 0))
   lo, hi = selection(b)
   # A right-click on the selection keeps it. Anywhere else, it puts the caret there.
   if !(selecting(b) && lo <= at <= hi)
@@ -43449,8 +43452,17 @@ end
 "The words that are selected in the window of `e`, as a thing of Ask Agent, or nothing when none are"
 selected_thing(e) = (b = e.buf; selecting(b) && !isempty(b.path) ? words_thing(b, selection(b)...) : nothing)
 
-"The words of the line that the caret is on, as a thing of Ask Agent, or nothing for a line with no words"
-line_thing(e) = (b = e.buf; i = b.caret[1]; isempty(b.path) ? nothing : words_thing(b, (i, 0), line_end(b, i)))
+"""
+The words of the line that the caret is on, as a thing of Ask Agent, or nothing
+for a line with no words. When the caret is on a part as a whole, like a
+formula on lines of its own, it's all of the part's lines.
+"""
+line_thing(e) = begin
+  b = e.buf
+  isempty(b.path) && return nothing
+  s, t = something(picked(b), (b.caret[1], b.caret[1]))
+  words_thing(b, (s, 0), line_end(b, t))
+end
 
 """
 The places in the window of `e` that show the words of `c`, which you

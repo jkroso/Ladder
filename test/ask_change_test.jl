@@ -913,6 +913,17 @@ end
   K.page_act!(e, 1)
   @test e.nodes[K.ASK_KEY].thing.node.text == "The end."
   K.close_ask!(e.nodes[K.ASK_KEY], w)
+  # A right-click on a block that shows as one thing, like a formula, puts the caret on it as a whole, as a click does.
+  # The menu's first item then puts the box round all of the block's lines, not round an empty line beside it.
+  w.mouse = typeof(w.mouse)(on_line(e, 4)...)
+  K.page_menu!(e, w)
+  frames(w, 1)
+  @test b.caret == b.anchor == (3, 0) && K.picked(b) == (3, 5)
+  press(w, Keys.down); press(w, Keys.enter)
+  frames(w, 2)
+  t = e.nodes[K.ASK_KEY].thing
+  @test (t.first, t.last) == (3, 5) && t.node.text == "```level\n3\n```" && K.asked_rect(e, t) !== nothing
+  K.close_ask!(e.nodes[K.ASK_KEY], w)
 end
 
 @testset "the words that the agent of a page reads, of a margin comment and of a block of code" begin
