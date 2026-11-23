@@ -41964,19 +41964,21 @@ tool_input(t::CodePicker, w, ::KeyPress{Keys.mouse_left}) = begin
     end
     unchoose!(t)
   end
-  # A click takes the card of an agent's answer away. A click on the card does nothing else.
+  # A click on the card of an agent's answer takes it away, and does nothing else. A click anywhere else leaves
+  # it, so that an answer stays until you've read it.
   q = t.about
-  if q !== nothing && q.ended > 0
-    t.about = nothing
-    redraw_in!(t.editor, 0)
+  if q !== nothing && q.ended > 0 && q.card !== nothing
     x, y = num(w.mouse[1]), num(w.mouse[2])
-    # A button on the card asks again, or asks for a change, about the same things
-    for (action, (left, top, wide, tall)) in q.buttons
-      left <= x <= left + wide && top <= y <= top + tall && (t.swallow = true; follow_up_on!(t.editor, q, action); return true)
-    end
-    if q.card !== nothing
-      left, top, wide, tall = q.card
-      left <= x <= left + wide && top <= y <= top + tall && (t.swallow = true; return true)
+    left, top, wide, tall = q.card
+    if left <= x <= left + wide && top <= y <= top + tall
+      t.about = nothing
+      t.swallow = true
+      redraw_in!(t.editor, 0)
+      # A button on the card asks again, or asks for a change, about the same things
+      for (action, (left, top, wide, tall)) in q.buttons
+        left <= x <= left + wide && top <= y <= top + tall && (follow_up_on!(t.editor, q, action); break)
+      end
+      return true
     end
   end
   # A click on the label of an agent stops it while it works, and shows the change that it made after
@@ -42146,9 +42148,10 @@ draw_tool(ctx, w, t::CodePicker, scene) = begin
   mark_chips(ctx, w, t.editor)
   mark_preview(ctx, w, t.editor)
   draw_answer(ctx, w, t)
-  # The words that a request in place is about, while you type it
-  k = get(t.editor.nodes, ASK_KEY, nothing)
-  k isa AskBox && ask_box_tick!(ctx, w, t.editor, k)
+  # The words that each request in place is about, while you type it and while its answers show
+  for k in copy(ask_boxes(t.editor))
+    ask_box_tick!(ctx, w, t.editor, k)
+  end
   a = t.asked
   if a !== nothing
     # Each thing has its letter, and the first has what was asked, then what the agent said
@@ -43506,7 +43509,7 @@ ask_tick!(e) = begin
           show_answer!(e, a, isempty(said) ? "The agent said nothing." : said)
         else
           said = strip(replace(said, "**" => ""))
-          t.about = AskedAbout(words=a.words, places=a.places, answer=isempty(said) ? "The agent said nothing." : String(said), ended=time())
+          card!(e, AskedAbout(words=a.words, places=a.places, answer=isempty(said) ? "The agent said nothing." : String(said), ended=time()))
           t.asked = nothing
         end
       end
@@ -43658,8 +43661,16 @@ end
 # click on the page, as both are easy to do by mistake: the field stays, with
 # what you typed, and a click in it gives it the keyboard again. The field
 # follows its words as the page scrolls.
+#
+# An answer stays until you click its ×, so that you never lose one that you
+# haven't read. Each of the words that you asked about has a field of its
+# own, and the fields of other words stay open while you ask about these. A
+# question that you ask in the field of an answer leaves the answer where it
+# is, and its answer goes under it, as does an answer to another question
+# about the same words. When the window shows another file, a field with an
+# answer, or with words typed in it, hides until the page shows again.
 
-const ASK_KEY = :ask_box   # the key of the popup with the field
+const ASK_BOXES = :ask_boxes   # the key in a page's editor of its fields of requests in place
 const ASK_BOX_W = 380px
 const ASK_TEXT_W = ASK_BOX_W - 32px   # how wide the text of the field is, inside the popup's padding and the field's
 const ASK_TEXT = 13px                 # how big the text of the field is, before the page's zoom
@@ -43676,10 +43687,26 @@ line to line, ⌘Z takes a change back, and long lines wrap.
   side::Symbol = :bottom                  # the side of the words that it's on
   error::String = ""                      # why the last request didn't go, or ""
   parts::Dict{Any,Any} = Dict{Any,Any}()  # the editor of its text, as :text
-  answer::String = ""                     # the agent's answer to the question `asked`, in Markdown, over the field
-  asked::String = ""
-  by::String = ""                         # who answered
+  answers::Vector{Any} = Any[]            # the agent's answers about the words, oldest first, over the field: see `box_answer`
 end
+
+"An answer of an agent in the field of a request in place: the question `asked`, the agent's `answer` in Markdown, and who answered"
+box_answer(asked, answer, by) = (asked=String(asked), answer=String(answer), by=String(by))
+
+"The fields of requests in place that the editor `e` of a page shows, in the order they opened"
+ask_boxes(e) = get(e.nodes, ASK_BOXES, AskBox[])
+
+"The key of the popup of the field `a`. Each field has a popup of its own."
+box_key(a::AskBox) = Symbol("ask_box_", objectid(a))
+
+"The field of the request in place about the thing `c`, or nothing when `c` has none"
+box_about(e, c) = (k = findfirst(a -> same_things([a.thing], [c]), ask_boxes(e)); k === nothing ? nothing : ask_boxes(e)[k])
+
+"True when the field `a` has something that you'd lose if it went: an answer, or words typed in it"
+worth_keeping(a::AskBox) = !isempty(a.answers) || get(a.parts, :text, nothing) isa Editor && a.parts[:text].buf.lines != [""]
+
+"Put the agent's answer `x` under the answers of the field `a`, and scroll to it"
+add_answer!(a::AskBox, x) = (push!(a.answers, x); a.parts[:to_end] = true; redraw_in!(a.of, 0); a)
 
 "The editor of the text of a request in place, which `e` shows: lines that no file holds, in the window's colours, at a field's size"
 ask_editor(e) = begin
@@ -43717,48 +43744,74 @@ page's menu does this, with the agent's name. See "a request in place".
 ask_selected!(e) = begin
   c = something(selected_thing(e), Some(line_thing(e)))
   c === nothing && return nothing
-  a = open_ask!(e, AskBox(of=e, thing=c))
+  # Words that have a field already, with an answer or with what you typed, give it the keyboard
+  a = box_about(e, c)
+  a === nothing && (a = open_ask!(e, AskBox(of=e, thing=c)))
   a === nothing || focus(a.parts[:text])
   nothing
 end
 
 """
 Show the agent's answer `said` to the question of the request `a` under its
-words, with a field under the answer to ask more. The keyboard stays where it
-is. When the thing doesn't show now, the answer is in a card, as Ask About's
-is, so that it's never lost. See "a request in place".
+words, with a field under the answer to ask more. When the words have a
+field already, the answer goes in it, under the answers before. The keyboard
+stays where it is. When the thing doesn't show now, the answer is in a card,
+as Ask About's is, so that it's never lost. See "a request in place".
 """
 show_answer!(e, a::AskedChange, said) = begin
   isempty(a.places) && return nothing
-  shown = open_ask!(e, AskBox(of=e, thing=first(a.places), answer=said, asked=a.words, by=isempty(a.by) ? e.ai : a.by))
-  shown === nothing && (code_picker(e).about = AskedAbout(words=a.words, places=a.places, answer=said, ended=time()))
+  x = box_answer(a.words, said, isempty(a.by) ? e.ai : a.by)
+  had = box_about(e, first(a.places))
+  had === nothing || (add_answer!(had, x); return nothing)
+  shown = open_ask!(e, AskBox(of=e, thing=first(a.places), answers=Any[x]))
+  shown === nothing && card!(e, AskedAbout(words=a.words, places=a.places, answer=said, ended=time()))
   nothing
 end
 
-"Show the field `a` under its words, in place of any other: it gives `a`, or nothing when the words don't show"
-open_ask!(e, a::AskBox) = begin
+"""
+Show the field `a` under its words: it gives `a`, or nothing when the words
+don't show. A new field takes the place of a field that has nothing in it,
+but never of one that has an answer or words typed in it. `anyway` keeps `a`
+when its words don't show, and it shows when they do.
+"""
+open_ask!(e, a::AskBox; anyway=false) = begin
   w = window_of(e)
-  w === nothing && return nothing
-  r = asked_rect(e, a.thing)
-  r === nothing && return nothing
-  sub = ask_editor(e)
-  setfield!(sub, :parent, a)
-  sub.nodes[:ask_box] = a
-  a.parts[:text] = sub
-  e.nodes[ASK_KEY] = a
-  # It isn't modal, so a click on the page goes to the page and leaves the field as it is
-  popup!(w, a, anchor=(r.left, r.top, r.width, r.height), placement=:bottom, gap=9px, width=ASK_BOX_W, key=ASK_KEY,
-         theme=component_theme(), modal=false, onclose=() -> (delete!(e.nodes, ASK_KEY); redraw_in!(e, 0)))
+  r = w === nothing ? nothing : asked_rect(e, a.thing)
+  r === nothing && !anyway && return nothing
+  if isempty(a.answers)
+    for o in copy(ask_boxes(e))
+      worth_keeping(o) || (w === nothing || close_popup!(w, box_key(o)); forget_ask!(e, o))
+    end
+  end
+  new_field!(a)
+  push!(get!(Vector{AskBox}, e.nodes, ASK_BOXES), a)
+  r === nothing || show_ask!(e, w, a, r)
   redraw_in!(e, 0)
   a
 end
 
+"Give the field `a` a new editor for its text, with nothing in it"
+new_field!(a::AskBox) = begin
+  sub = ask_editor(a.of)
+  setfield!(sub, :parent, a)
+  sub.nodes[:ask_box] = a
+  a.parts[:text] = sub
+end
+
+"Show the popup of the field `a` in the window `w` of `e`, under the place `r` of its words"
+show_ask!(e, w, a::AskBox, r) =
+  # It isn't modal, so a click on the page goes to the page and leaves the field as it is
+  popup!(w, a, anchor=(r.left, r.top, r.width, r.height), placement=:bottom, gap=9px, width=ASK_BOX_W, key=box_key(a),
+         theme=component_theme(), modal=false, onclose=() -> forget_ask!(e, a))
+
+"Stop keeping the field `a` of `e`"
+forget_ask!(e, a::AskBox) = (haskey(e.nodes, ASK_BOXES) && filter!(o -> o !== a, e.nodes[ASK_BOXES]); redraw_in!(e, 0); nothing)
+
 const ANSWER_MAX_H = 320px   # the most of an answer that shows over the field at once. A longer one scrolls.
 
-"The lines of the answer of `a`, laid out as the page's text is, a little smaller, as wide as the field"
-answer_flows(a::AskBox) = begin
-  e = a.of
-  lines = String.(split(a.answer, '\n'))
+"The lines of the answer `text`, laid out as the page's text is, a little smaller, as wide as the field of a request in place of `e`"
+answer_flows(e, text) = begin
+  lines = String.(split(text, '\n'))
   ks = classify(lines)
   zoom = e.zoom
   e.zoom = zoom * PAGE_ZOOM
@@ -43769,16 +43822,37 @@ answer_flows(a::AskBox) = begin
   end
 end
 
-"What shows over the field of `a` when it has the agent's answer: who answered, and the answer, which scrolls when it's long"
+"""
+What shows over the field of `a` when it has the agent's answers: who
+answered, and the answers, which scroll when they're long. With more than one,
+each has the question that it answers over it, and a new one scrolls into
+sight.
+"""
 answer_part(a::AskBox) = begin
   e = a.of
-  flows = get!(() -> answer_flows(a), a.parts, (:answer, a.answer, e.zoom, e.theme))
-  total = sum(tall, flows, init=0px)
+  dim = found_colours().dim
+  face = Face(SANS, "", 12px, dim, false)
+  several = length(a.answers) > 1
+  rows, total = Any[], 0px
+  for (k, x) in enumerate(a.answers)
+    if several
+      k > 1 && (push!(rows, Box(width(grow=grow), height(12px))); total += 12px)
+      for l in wrapped(face, "You asked: " * replace(x.asked, r"\s+" => " "), num(ASK_TEXT_W))
+        push!(rows, Row(height(17px), Alignment.Center, label(l, 12px, color=dim)))
+        total += 17px
+      end
+    end
+    flows = get!(() -> answer_flows(e, x.answer), a.parts, (:answer, k, x.answer, e.zoom, e.theme))
+    append!(rows, [describe(e, Item(0, 0, 0px, tall(f), f), f) for f in flows])
+    total += sum(tall, flows, init=0px)
+  end
   scroll = get!(() -> Scroll(width(grow=grow)), a.parts, :answer_scroll)
   scroll.height = height(min(total, ANSWER_MAX_H))
-  reuse!(scroll, Column(width(grow=grow), Alignment.Start, [describe(e, Item(0, 0, 0px, tall(f), f), f) for f in flows]...))
+  pop!(a.parts, :to_end, false) && (scroll.offset = max(0px, total - ANSWER_MAX_H))
+  reuse!(scroll, Column(width(grow=grow), Alignment.Start, rows...))
+  who = last(a.answers).by
   Column(width(grow=grow), Alignment.Start, child_gap=2px, padding(4px, 8px, 6px, 10px),   # top, right, bottom, left
-    Row(height(20px), Alignment.Center, label("$(a.by)'s answer", 12px, color=found_colours().dim)), scroll)
+    Row(height(20px), Alignment.Center, label(several ? "$(who)'s answers" : "$(who)'s answer", 12px, color=dim)), scroll)
 end
 
 # It looks as the floating lists do (see `float_list`), with a field that's as tall as its lines
@@ -43795,14 +43869,14 @@ describe(a::AskBox) = begin
   doc = Box(width(grow=grow), height(tall), Alignment.Start, node!(Document, sub, :document))
   # With nothing typed, the field says what it's for, under where the text goes
   empty = sub.buf.lines == [""]
-  prompt = isempty(a.answer) ? "Ask $(asks_whom(e)) for a change, or ask a question" : "Ask $(asks_whom(e)) more, or for a change"
+  prompt = isempty(a.answers) ? "Ask $(asks_whom(e)) for a change, or ask a question" : "Ask $(asks_whom(e)) more, or for a change"
   text = empty ? Stack(width(grow=grow), height(tall), Alignment.Start,
                        Row(width(grow=grow), height(tall), Alignment.Center, label(prompt, ASK_TEXT * e.zoom, color=colours.faint)), doc) : doc
   field = Box(width(grow=grow), padding(2px, 2px),
               Box(width(grow=grow), padding(8px, 7px), radius(6px), border(1px, :solid, c.line), background(c.frame), text))
   Box(width(grow=grow), padding(6px), radius(8px), background(c.frame), border(1px, :solid, c.line),
       shadow(0, 6, 16, RGBA(60 / 255, 45 / 255, 20 / 255, 0.2)), name="Ask",
-    Column(width(grow=grow), Alignment.Start, child_gap=4px, (isempty(a.answer) ? () : (answer_part(a),))..., field,
+    Column(width(grow=grow), Alignment.Start, child_gap=4px, (isempty(a.answers) ? () : (answer_part(a),))..., field,
       Row(width(grow=grow), padding(4px, 2px, 4px, 8px), Alignment.Center,   # top, right, bottom, left
         Column(width(grow=grow), Alignment.Start, rows...), get!(() -> own!(a, AskClose(of=a)), a.parts, :close))))
 end
@@ -43828,53 +43902,67 @@ draw(ctx, size, ui::ConcreteRect, a::AskBox) = caret(ctx, ui, a.side, asked_rect
 
 # The keys go to the editor of its text: see `ask_key!`
 
-"Give the agent what was typed in the field of `a`, about its words. If the agent can't take it, the field stays and says why."
+"""
+Give the agent what was typed in the field of `a`, about its words. If the
+agent can't take it, the field stays and says why. A field with answers stays
+too, with nothing typed in it, and the answer to this goes under them: only
+its × takes them away.
+"""
 send_ask!(a::AskBox, w) = begin
   words = String(strip(join(a.parts[:text].buf.lines, "\n")))
   isempty(words) && return handled
-  # A question after an answer goes with the question and the answer before it: see `follow_up!`
-  isempty(a.answer) || (a.of.nodes[:follow_up] = (places=[a.thing], talk=[(a.asked, a.answer)]))
+  # A question after an answer goes with the questions and the answers before it: see `follow_up!`
+  isempty(a.answers) || (a.of.nodes[:follow_up] = (places=[a.thing], talk=[(x.asked, x.answer) for x in a.answers]))
   try
     ask_agent!(a.of, a.thing, words)
   catch err
     a.error = trouble(err)
     return handled
   end
-  close_ask!(a, w)
+  isempty(a.answers) && return close_ask!(a, w)
+  a.error = ""
+  new_field!(a)
+  focus(a.of)
+  redraw_in!(a.of, 0)
+  handled
 end
 
 """
-In each frame while the field of a request in place, `a`, shows: draw the
-box round its words, and keep the field under them as the page scrolls. The
-field of words of a page goes when the window shows another file.
+In each frame, for the field of a request in place `a`: draw the box round
+its words, and keep the field under them as the page scrolls. When the window
+shows another file, the field of words of that page hides, and shows again
+with the page. One with nothing in it goes. A field that opened while its
+words didn't show shows when they do.
 """
 ask_box_tick!(ctx, w, e, a::AskBox) = begin
   b = e.buf
+  key = box_key(a)
+  shown = any(p -> p.key == key, popups(w))
   # Words of the page are in its file. A part of the window is in the file of the code that draws it.
-  gone = a.thing.node isa PickedText && (isempty(b.path) || page_key(b.path) != a.thing.file)
-  if gone
-    close_popup!(w, ASK_KEY)
-    delete!(e.nodes, ASK_KEY)
+  away = a.thing.node isa PickedText && (isempty(b.path) || page_key(b.path) != a.thing.file)
+  if away
+    shown && close_popup!(w, key)
+    worth_keeping(a) || forget_ask!(e, a)
     return nothing
   end
   r = asked_rect(e, a.thing)
-  pick_mark(ctx, w, r, isempty(a.answer) ? "Ask $(asks_whom(e))" : "")
+  pick_mark(ctx, w, r, isempty(a.answers) ? "Ask $(asks_whom(e))" : "")
   r === nothing && return nothing
+  shown || (show_ask!(e, w, a, r); redraw_in!(e, 0); return nothing)
   for p in popups(w)
-    p.key == ASK_KEY && (p.anchor = (r.left, r.top, r.width, r.height))
+    p.key == key && (p.anchor = (r.left, r.top, r.width, r.height))
   end
   nothing
 end
 
 "True while the field of a request in place, in the window `w` of `e`, has the keyboard"
-typing_ask(e, w) = (a = get(e.nodes, ASK_KEY, nothing); a isa AskBox && w.focus === a.parts[:text])
+typing_ask(e, w) = any(a -> w.focus === a.parts[:text], ask_boxes(e))
 
 "Take the field of `a` and its box away, and give the keyboard back to the page"
 close_ask!(a::AskBox, w) = begin
-  close_popup!(w, ASK_KEY)
-  delete!(a.of.nodes, ASK_KEY)
+  close_popup!(w, box_key(a))
+  forget_ask!(a.of, a)
   focus(a.of)
-  redraw_in!(a.of, 0)
   handled
 end
 
@@ -44158,9 +44246,11 @@ works_here(e, ::Val{:stop_agent}) = !isempty(working_agents(e))
 # the code and answers, and changes no file. The answer shows in a card beside
 # the thing. Ask More on the card asks another question about the same
 # thing, and Change It asks for a change to it: the agent gets the questions
-# and answers so far with the new words. A click anywhere else, or Esc, takes
-# the card away. While an agent works, the label on the thing says what it's
-# doing, like "Reading main.jl": see `agent_step`.
+# and answers so far with the new words. A click on the card, or Esc, takes
+# it away. A click anywhere else leaves it, and so does a new question: the
+# answer then goes to a field under its thing, as an answer in place does.
+# While an agent works, the label on the thing says what it's doing, like
+# "Reading main.jl": see `agent_step`.
 
 """
 A question that an agent was asked about `places`, the things of Ask About.
@@ -44248,9 +44338,26 @@ ask_about!(e, node::Union{ToChange,Things}, question::String) = begin
   catch err
     q.answer, q.failed, q.ended = "The agent didn't start. " * trouble(err), true, time()
   end
-  t.about = q
+  card!(e, q)
   redraw_in!(e, 0)
   nothing
+end
+
+"""
+Show the card of the question `q` and its answer. The answer of a card that
+shows already goes to a field under its thing, as an answer in place does, so
+that a new question never takes the place of an answer that you haven't
+read. See "a request in place".
+"""
+card!(e, q::AskedAbout) = begin
+  t = code_picker(e)
+  was = t.about
+  t.about = q
+  (was === nothing || was === q || was.ended == 0 || isempty(was.places)) && return q
+  x = box_answer(was.words, was.answer, e.ai)
+  had = box_about(e, first(was.places))
+  had === nothing ? open_ask!(e, AskBox(of=e, thing=first(was.places), answers=Any[x]), anyway=true) : add_answer!(had, x)
+  q
 end
 
 "In each frame: when the agent that was asked a question has ended, keep its answer"

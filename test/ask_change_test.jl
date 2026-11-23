@@ -737,13 +737,13 @@ end
   # The agent writes its answer to that file, and it shows under the thing
   write(reply, "It's blue for the **sky**.\n")
   sleep(0.4); frames(w, 2)
-  a = e.nodes[K.ASK_KEY]
-  @test a.answer == "It's blue for the **sky**." && a.by == "Claude" && !isfile(reply) && picker().asked.said == "Claude answered."
+  a = only(K.ask_boxes(e))
+  @test a.answers == [(asked="why is it blue?", answer="It's blue for the **sky**.", by="Claude")] && !isfile(reply) && picker().asked.said == "Claude answered."
   K.close_ask!(a, w)
   # An answer about a thing that doesn't show now is in a card, so that it isn't lost
   gone = K.ToChange("Spinner", "", level.file, level.first, level.last, K.Spinner(), nothing)   # a part that was never drawn
   K.show_answer!(e, K.AskedChange(words="and now?", places=[gone]), "Still blue.")
-  @test !haskey(e.nodes, K.ASK_KEY) && picker().about.answer == "Still blue."
+  @test isempty(K.ask_boxes(e)) && picker().about.answer == "Still blue."
   picker().about = nothing
   delete!(e.nodes, :sent)
   K.Agent.place[] = ""
@@ -796,6 +796,10 @@ end
 end
 
 @testset "the page's menu asks the agent about the words that are selected" begin
+  "The field of a request in place that shows"
+  box() = only(K.ask_boxes(e))
+  "True while a field of a request in place shows"
+  asking() = !isempty(K.ask_boxes(e))
   picker().asked = picker().about = nothing
   b = e.buf
   @test b.lines[7] == "The end." && first(K.PAGE_MENU) == "Ask Agent…"
@@ -812,8 +816,8 @@ end
   # The menu's item draws a box round the words, and opens a field under them, with the keyboard in it
   K.page_act!(e, 1)
   frames(w, 2)
-  a = e.nodes[K.ASK_KEY]
-  @test a isa K.AskBox && a.thing == c && w.focus === a.parts[:text] && any(p -> p.key == K.ASK_KEY, popups(w))
+  a = only(K.ask_boxes(e))
+  @test a isa K.AskBox && a.thing == c && w.focus === a.parts[:text] && any(p -> p.key == K.box_key(a), popups(w))
   r = K.asked_rect(e, c)
   @test r.width < 120px && r.height < 40px   # round the words, not the whole line
   # The text is an editor of its own, as a page's is. A long request goes on under itself, and the field grows taller.
@@ -828,7 +832,7 @@ end
   @test sub.buf.caret[1] == 1 && 0 < sub.buf.caret[2] < at
   # ⇧Return starts a new line, and sends nothing
   press(w, Keys._end); press(w, Keys.enter, Keys.shft)
-  @test length(sub.buf.lines) == 2 && haskey(e.nodes, K.ASK_KEY) && picker().asked === nothing
+  @test length(sub.buf.lines) == 2 && asking() && picker().asked === nothing
   # ⌘Z takes it back
   press(w, Keys.z, Keys.cmd)
   @test length(sub.buf.lines) == 1
@@ -837,26 +841,26 @@ end
   # Esc does nothing, as it's easy to press by mistake: the field keeps what's typed
   typed(w, "half a request")
   press(w, Keys.escape)
-  @test haskey(e.nodes, K.ASK_KEY) && w.focus === sub && sub.buf.lines == ["half a request"]
+  @test asking() && w.focus === sub && sub.buf.lines == ["half a request"]
   press(w, Keys.a, Keys.cmd); press(w, Keys.backspace)
   # Return with nothing typed does nothing
   press(w, Keys.enter)
-  @test haskey(e.nodes, K.ASK_KEY) && w.focus === sub && picker().asked === nothing
+  @test asking() && w.focus === sub && picker().asked === nothing
   # Nor does a click on the page: the field keeps what's typed, and a click in it gives it the keyboard again
   typed(w, "half a request")
   click(w, on_line(e, 1)...)
-  @test haskey(e.nodes, K.ASK_KEY) && w.focus === e && sub.buf.lines == ["half a request"]
+  @test asking() && w.focus === e && sub.buf.lines == ["half a request"]
   r = rect(K.node!(K.Document, sub, :document))
   click(w, r.left + 4px, r.top + r.height / 2)
   @test w.focus === sub
   press(w, Keys.a, Keys.cmd); press(w, Keys.backspace)
   # The field is put under its words in each frame, so it follows them as the page scrolls
   r = K.asked_rect(e, c)
-  @test only(filter(p -> p.key == K.ASK_KEY, popups(w))).anchor == (r.left, r.top, r.width, r.height)
+  @test only(filter(p -> p.key == K.box_key(a), popups(w))).anchor == (r.left, r.top, r.width, r.height)
   # The × button takes the field and the box away
   x = rect(a.parts[:close])
   click(w, x.left + x.width / 2, x.top + x.height / 2)
-  @test !haskey(e.nodes, K.ASK_KEY) && !any(p -> p.key == K.ASK_KEY, popups(w)) && w.focus === e
+  @test !asking() && !any(p -> p.key == K.box_key(a), popups(w)) && w.focus === e
   b.anchor, b.caret = (7, 0), (7, 8)
   # What's typed goes to the agent with the words, and its answer shows under them, in place
   K.page_act!(e, 1)
@@ -864,21 +868,40 @@ end
   K.AGENT_COMMAND[] = `sh $quiet`
   typed(w, "is this right?")
   press(w, Keys.enter)
-  @test !haskey(e.nodes, K.ASK_KEY) && picker().asked.words == "is this right?" && picker().asked.places == [c]
+  @test !asking() && picker().asked.words == "is this right?" && picker().asked.places == [c]
   finish()
   @test occursin("A: words that the user selected in a file, in the file $(c.file), lines 7 to 7. It starts:\n\n    The end.", asked())
-  a = e.nodes[K.ASK_KEY]
-  @test a.answer == "I looked, and it's as you say." && a.asked == "is this right?" && a.thing == c && picker().about === nothing
-  @test any(p -> p.key == K.ASK_KEY, popups(w)) && w.focus !== a.parts[:text]   # the keyboard stays where it was
+  a = only(K.ask_boxes(e))
+  @test a.answers == [(asked="is this right?", answer="I looked, and it's as you say.", by="Claude")] && a.thing == c && picker().about === nothing
+  @test any(p -> p.key == K.box_key(a), popups(w)) && w.focus !== a.parts[:text]   # the keyboard stays where it was
   frames(w, 2)
   @test picker().asked.said == "Claude answered."
-  # A question after the answer goes with the question and the answer before it
+  # The keys of the page are the page's while the answer shows: Return starts a new line there
+  before = copy(b.lines)
+  b.anchor = b.caret = (8, 0)
+  press(w, Keys.enter)
+  @test length(b.lines) == length(before) + 1 && only(K.ask_boxes(e)) === a
+  press(w, Keys.z, Keys.cmd)
+  @test b.lines == before
+  # A question after the answer goes with the question and the answer before it. The answer stays, and the field is
+  # empty again. The new answer goes under the first.
   K.focus(a.parts[:text])
   typed(w, "and why?")
   press(w, Keys.enter)
+  @test only(K.ask_boxes(e)) === a && a.parts[:text].buf.lines == [""] && length(a.answers) == 1 && w.focus === e
+  @test any(p -> p.key == K.box_key(a), popups(w))
   finish()
   @test occursin("Question: is this right?\nAnswer: I looked, and it's as you say.", asked()) && occursin("The user's words: and why?", asked())
-  K.close_ask!(e.nodes[K.ASK_KEY], w)
+  @test only(K.ask_boxes(e)) === a && [x.asked for x in a.answers] == ["is this right?", "and why?"]
+  frames(w, 2)
+  @test !haskey(a.parts, :to_end)   # it scrolled to the new answer
+  # A third question goes with both questions and answers before it
+  K.focus(a.parts[:text])
+  typed(w, "and then?")
+  press(w, Keys.enter)
+  finish()
+  @test occursin("Question: is this right?", asked()) && occursin("Question: and why?", asked()) && length(a.answers) == 3
+  K.close_ask!(a, w)
   picker().asked = nothing
   # When the agent can't take it, the field stays and says why
   push!(K.AGENT_KINDS, K.AgentKind("Nobody", "no-such-agent-command", String[], String[], String[]))
@@ -889,22 +912,22 @@ end
   frames(w, 2)
   typed(w, "and this?")
   press(w, Keys.enter)
-  @test e.nodes[K.ASK_KEY].error == "Ladder can't find the command `no-such-agent-command` of Nobody. Install it, or choose another agent with the command Switch Agent."
+  @test box().error == "Ladder can't find the command `no-such-agent-command` of Nobody. Install it, or choose another agent with the command Switch Agent."
   K.preferred_agent!(e, "Claude")
   pop!(K.AGENT_KINDS)
   # Esc in the field leaves a working agent working, and the field as it is
   K.AGENT_COMMAND[] = `sh -c "exec sleep 30"`
   K.ask_agent!(e, c, "something else")
   press(w, Keys.escape)
-  @test haskey(e.nodes, K.ASK_KEY) && picker().asked.ended == 0
-  K.close_ask!(e.nodes[K.ASK_KEY], w)
+  @test asking() && picker().asked.ended == 0
+  K.close_ask!(box(), w)
   # A request while the agent works waits in the queue, and its label says its place
   K.page_act!(e, 1)
   frames(w, 2)
   typed(w, "and this?")
   press(w, Keys.enter)
   q = K.ask_queue(e)
-  @test !haskey(e.nodes, K.ASK_KEY) && length(q) == 1 && q[1][1].words == "and this?" && picker().asked.words == "something else"
+  @test !asking() && length(q) == 1 && q[1][1].words == "and this?" && picker().asked.words == "something else"
   @test K.queued_label(1, "and this?") == "Number 1 in the queue: and this?  ·  Click to take it back"
   K.ask_agent!(e, c, "and that?")
   frames(w, 2)
@@ -928,8 +951,8 @@ end
   b.anchor = b.caret = (7, 3)
   @test K.selected_thing(e) === nothing && K.line_thing(e).node.text == "The end."
   K.page_act!(e, 1)
-  @test e.nodes[K.ASK_KEY].thing.node.text == "The end."
-  K.close_ask!(e.nodes[K.ASK_KEY], w)
+  @test box().thing.node.text == "The end."
+  K.close_ask!(box(), w)
   # A right-click on a block that shows as one thing, like a formula, puts the caret on it as a whole, as a click does.
   # The menu's first item then puts the box round all of the block's lines, not round an empty line beside it.
   w.mouse = typeof(w.mouse)(on_line(e, 4)...)
@@ -938,9 +961,103 @@ end
   @test b.caret == b.anchor == (3, 0) && K.picked(b) == (3, 5)
   press(w, Keys.down); press(w, Keys.enter)
   frames(w, 2)
-  t = e.nodes[K.ASK_KEY].thing
+  t = box().thing
   @test (t.first, t.last) == (3, 5) && t.node.text == "```level\n3\n```" && K.asked_rect(e, t) !== nothing
-  K.close_ask!(e.nodes[K.ASK_KEY], w)
+  K.close_ask!(box(), w)
+end
+
+@testset "an answer in place stays until its × takes it away" begin
+  b = e.buf
+  picker().asked = picker().about = nothing
+  K.AGENT_COMMAND[] = `sh $quiet`
+  K.focus(e)
+  "Open a field under the words from `from` to `to` of the page, as the page's menu does"
+  field(from, to) = begin
+    b.anchor, b.caret = from, to
+    K.page_act!(e, 1)
+    frames(w, 2)
+    last(K.ask_boxes(e))
+  end
+  shows(a) = any(p -> p.key == K.box_key(a), popups(w))
+  "True when the fields that show are `xs`, in that order"
+  are(xs...) = (bs = K.ask_boxes(e); length(bs) == length(xs) && all(map(===, bs, collect(xs))))
+  asking = field((7, 0), (7, 8))
+  typed(w, "is this right?")
+  press(w, Keys.enter)
+  # The field of a question with no answer goes when it's sent. The answer opens a new one.
+  @test isempty(K.ask_boxes(e)) && !shows(asking)
+  finish()
+  answer = only(K.ask_boxes(e))
+  @test answer !== asking && length(answer.answers) == 1 && shows(answer)
+  # A field for other words opens, and the answer stays
+  empty = field((1, 2), (1, 8))
+  @test are(answer, empty) && w.focus === empty.parts[:text] && shows(answer) && shows(empty)
+  # A field with nothing in it goes when another opens. One with words typed in it stays.
+  typing = field((7, 0), (7, 3))
+  @test are(answer, typing) && !shows(empty) && shows(answer)
+  typed(w, "half a question")
+  # The same words again give their field the keyboard, and open no other
+  K.focus(e)
+  b.anchor, b.caret = (7, 0), (7, 8)
+  K.page_act!(e, 1)
+  @test are(answer, typing) && w.focus === answer.parts[:text]
+  # An answer about words whose field has words typed in it goes over them, and the words stay
+  K.show_answer!(e, K.AskedChange(words="which word?", places=[typing.thing]), "The first.")
+  @test typing.answers == [(asked="which word?", answer="The first.", by="Claude")] && typing.parts[:text].buf.lines == ["half a question"]
+  # An answer about other words opens a field for them, and closes none
+  b.anchor, b.caret = (1, 2), (1, 8)
+  K.show_answer!(e, K.AskedChange(words="what tank?", places=[K.selected_thing(e)]), "A water tank.")
+  frames(w, 2)
+  tank = last(K.ask_boxes(e))
+  @test are(answer, typing, tank) && tank.answers[1].answer == "A water tank." && all(shows, K.ask_boxes(e))
+  # When the window shows another file, the fields hide. They show again with their page.
+  K.open!(e, source); frames(w, 2)
+  @test length(K.ask_boxes(e)) == 3 && !any(shows, K.ask_boxes(e))
+  K.open!(e, page); frames(w, 3)
+  @test are(answer, typing, tank) && all(shows, K.ask_boxes(e))
+  # The × takes each away. The newest is on top of the others.
+  for a in reverse(copy(K.ask_boxes(e)))
+    x = rect(a.parts[:close])
+    click(w, x.left + x.width / 2, x.top + x.height / 2)
+    frames(w)
+    @test !any(o -> o === a, K.ask_boxes(e)) && !shows(a)
+  end
+  @test isempty(K.ask_boxes(e))
+end
+
+@testset "the card of an answer stays until a click on it, and a new question keeps it under its thing" begin
+  level = first(offered(e, (3, 0)))
+  picker().asked = picker().about = nothing
+  K.AGENT_COMMAND[] = `sh $quiet`
+  "Ask the question `words` about the level, and wait for the answer"
+  ask(words) = begin
+    K.ask_about!(e, level, words)
+    from = time()
+    while picker().about.ended == 0 && time() - from < 20
+      frames(w, 1); sleep(0.05)
+    end
+    frames(w)
+    picker().about
+  end
+  q = ask("why is it blue?")
+  @test q.answer == "I looked, and it's as you say." && q.card !== nothing
+  # A click on the page leaves the card
+  click(w, on_line(e, 1)...)
+  frames(w)
+  @test picker().about === q && q.card !== nothing
+  # A new question puts the answer of the card in a field under its thing
+  r = ask("and why short?")
+  @test r !== q && r.words == "and why short?"
+  a = only(K.ask_boxes(e))
+  @test a.answers == [(asked="why is it blue?", answer="I looked, and it's as you say.", by="Claude")] && K.same_things([a.thing], [level])
+  frames(w, 2)
+  @test any(p -> p.key == K.box_key(a), popups(w))
+  # So does an answer of Ask Agent, which shows in a card too
+  K.ask_agent!(e, level, "and why there?")
+  finish()
+  @test [x.asked for x in a.answers] == ["why is it blue?", "and why short?"] && picker().about.words == "and why there?"
+  K.close_ask!(a, w)
+  picker().asked = picker().about = nothing
 end
 
 @testset "the words that the agent of a page reads, of a margin comment and of a block of code" begin
