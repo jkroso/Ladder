@@ -4131,7 +4131,7 @@ evaluate(e, code::String; key=(:live, e.buf.path, code), inline=false) = begin
     # Kip finds a path like "./widgets.jl" from the folder of the document, and so does a relative FSPath
     cd(isdir(docdir(e)) ? docdir(e) : pwd()) do
       # The code runs in the page's module, with the page's other code
-      value = running_code(m -> run_in(m, code, isempty(path) ? joinpath(e.folder, "untitled.md") : path), e)
+      value = running_code(m -> (inline ? run_sum : run_in)(m, code, isempty(path) ? joinpath(e.folder, "untitled.md") : path), e)
       node = inline ? present_inline(value) : present(value)
       node !== nothing ? node : inline ? (said(value), false) : note(repr("text/plain", value), colours.ink)
     end
@@ -23762,6 +23762,76 @@ a page has the units with `using`, so Julia takes the code as a new way to make
 the unit. A name that the page loads or makes itself is as Julia has it.
 """
 run_in(m::Module, code::AbstractString, path::AbstractString) = include_string(ex -> own_units(m, ex), m, code, path)
+
+# --- a sum that makes a function --------------------------------------------------------------
+#
+# Julia compiles code that makes a function each time the code runs, like
+# the generator of !`years = sum(exp(-fade * t) for t in 0:0.05:2000)` or the
+# `t -> …` of a findfirst. That takes far longer than the sum itself, and a
+# drag on a number that the sum reads runs it again on each step. So such a
+# sum is made into a function with no arguments the first time, and that
+# function runs each time after. It reads the page's names as it runs, so it
+# follows them, and Julia compiles it only once.
+#
+# Only code that means the same in a function does this: code that gives no
+# name a value, except inside a `let`, a function or a generator, where the
+# name is the code's own. Any other sum runs as the code of a file does.
+
+"""
+Run the code of a sum in a line of text in the module `m`, as `run_in` does.
+A sum that makes a function runs as a function that's made once: see "a sum
+that makes a function".
+"""
+run_sum(m::Module, code::AbstractString, path::AbstractString) = begin
+  f = sum_function(m, code)
+  f === nothing && return run_in(m, code, path)
+  value = Base.invokelatest(f)
+  name = sum_name(code)
+  name === nothing || Core.eval(m, Expr(:(=), name, QuoteNode(value)))
+  value
+end
+
+const SUM_FUNCTIONS = Dict{Tuple{Module,String},Any}()   # by the module and the code of a sum
+
+"The function that the code of a sum in the module `m` runs as, or nothing when the code runs as code"
+sum_function(m::Module, code::AbstractString) = begin
+  key = (m, String(code))
+  haskey(SUM_FUNCTIONS, key) && return SUM_FUNCTIONS[key]
+  ex = try Meta.parse(code, raise=false) catch; nothing end
+  sum_name(code) === nothing || (ex = ex.args[2])
+  f = makes_function(ex) && in_function(ex, true) ? Core.eval(m, Expr(:->, Expr(:tuple), Expr(:block, ex))) : nothing
+  # Typing makes a new sum with each key, so the functions of old sums are forgotten now and then
+  length(SUM_FUNCTIONS) >= 500 && empty!(SUM_FUNCTIONS)
+  SUM_FUNCTIONS[key] = f
+end
+
+"True when the code `ex` makes a function as it runs, or has a loop, which Julia compiles too"
+makes_function(ex) = ex isa Expr && (ex.head in (:generator, :comprehension, :typed_comprehension, :->, :do, :function, :for, :while) || any(makes_function, ex.args))
+
+"""
+True when the code `ex` means the same in a function as it does on its own.
+`top` is true outside a `let`, a function or a generator: there, code that gives
+a name a value would give the page's name a value, and in a function it
+wouldn't. Code that declares or loads anything, or has a macro, doesn't either.
+"""
+in_function(ex, top::Bool) = begin
+  ex isa Expr || return true
+  h = ex.head
+  h in (:global, :const, :local, :using, :import, :export, :module, :struct, :abstract, :primitive, :toplevel, :macrocall, :quote) && return false
+  # The names in a let, a function or a generator are their own
+  h in (:let, :->, :do, :generator, :comprehension, :typed_comprehension) && return all(x -> in_function(x, false), ex.args)
+  if h == :function
+    # A function with a name gives that name a value
+    sig = ex.args[1]
+    top && !(sig isa Expr && sig.head == :tuple) && return false
+    return all(x -> in_function(x, false), ex.args)
+  end
+  # The names of a named tuple, and of the keywords of a call, aren't names that get a value
+  h in (:tuple, :parameters) && return all(x -> Meta.isexpr(x, :(=)) ? in_function(x.args[2], top) : in_function(x, top), ex.args)
+  h == :kw && return in_function(ex.args[2], top)
+  top && (h == :(=) || (endswith(string(h), "=") && !(h in (:(==), :(!=), :(<=), :(>=), :(===), :(!==))))) && return false
+  all(x -> in_function(x, top), ex.args)
+end
 
 "The expression `ex` of a page's code, with `function bar end` before it for each unit, like `bar`, that it defines a function of. See `run_in`."
 own_units(m::Module, ex) = begin

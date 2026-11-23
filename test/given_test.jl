@@ -214,3 +214,31 @@ close(w)
   @test costs() == ["1 to 3", "15 to 45"] && runs[] == 1
   close(w2)
 end
+
+@testset "a sum that makes a function is compiled once" begin
+  ok(code) = K.in_function(Meta.parse(code), true)
+  @test ok("sum(k^2 for k in 1:n)") && ok("let a = n * 2; findfirst(t -> t > a, 1:100) end") && ok("round(x, digits=2)") && ok("(a=1, b=2)")
+  # Code that gives a name a value, defines a function or has a macro means something else in a function
+  @test !ok("begin w = 5; w * 2 end") && !ok("function f(x) x end") && !ok("@show x") && !ok("for k in 1:3; s += k end")
+  @test K.makes_function(Meta.parse("sum(k for k in 1:n)")) && !K.makes_function(Meta.parse("let a = 2; a * n end"))
+  p = joinpath(dir, "function.md")
+  write(p, """
+  There are !`n = 3` of them, which add up to !`total = sum(k for k in 1:n)`. This one gives two names: !`z = begin w = 5; w * 2 end`.
+  """)
+  e3 = K.build_editor(p)
+  w3 = Window(e3, size=(1000px, 600px))
+  foreach(_ -> frame(w3), 1:2)
+  m = K.workspace(e3)
+  @test K.made(e3, "total = sum(k for k in 1:n)", 1)[1] == "6" && Base.invokelatest(getglobal, m, :total) == 6
+  f = K.sum_function(m, "total = sum(k for k in 1:n)")
+  @test f isa Function
+  # n changes, as on a step of a drag, and the sum follows with the same function
+  at = findfirst("n = 3", e3.buf.lines[1])
+  K.edit!(e3.buf, (1, at.stop - 1), (1, at.stop), "4", typing=true)
+  foreach(_ -> frame(w3), 1:2)
+  @test K.made(e3, "total = sum(k for k in 1:n)", 1)[1] == "10" && K.sum_function(m, "total = sum(k for k in 1:n)") === f
+  # The sum that gives w a value runs as code, so w is a name of the page too
+  @test K.made(e3, "z = begin w = 5; w * 2 end", 1)[1] == "10" && K.sum_function(m, "z = begin w = 5; w * 2 end") === nothing
+  @test Base.invokelatest(getglobal, m, :w) == 5
+  close(w3)
+end
