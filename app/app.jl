@@ -285,15 +285,25 @@ warm_up() = begin
   right_click(60, 88); click(80, 104)
   press(Keys.a); press(Keys.escape); press(Keys.escape)
   # The menu of the page: open it and click away, then add a block of each kind from its Insert menu.
-  # Ladder draws the menu, 28px for each item, with Insert as its fifth item. A menu that would run
-  # off the bottom of the window moves up, so `pick` clicks item `k` where the menu is. A recording is
-  # left out, since it would record from the microphone while the app is built.
-  pick(k) = (menu = only(p for p in popups(w) if p.key == :menu).scene; click(540, round(Int, menu.top.value) + 1 + 28(k - 1) + 14))
+  # Ladder draws the menu, 28px for each item. `pick` clicks the item with the name it's given, where
+  # the menu is: a menu that would run off the bottom of the window moves up, an item that's grey isn't
+  # in it, and the items above Insert change. A recording is left out, since it would record from the
+  # microphone while the app is built.
+  items() = only(p for p in popups(w) if p.key == :menu).content.items
+  pick(name) = begin
+    menu = only(p for p in popups(w) if p.key == :menu)
+    k = findfirst(in((name, name * "  ›")), menu.content.items)
+    k === nothing && error("The menu has no item called $name. Its items are ", join(menu.content.items, ", "))
+    click(540, round(Int, menu.scene.top.value) + 1 + 28(k - 1) + 14)
+  end
   right_click(500, 300); click(900, 600)
   blocks = [x[1] for x in INSERTS if x isa Tuple]
-  for n in eachindex(blocks)
-    blocks[n] == "Recording" && continue
-    right_click(500, 300); pick(5); pick(n)
+  for block in blocks
+    block == "Recording" && continue
+    right_click(500, 300); pick("Insert")
+    # Front Matter is grey in a page that has it
+    block in items() || (click(900, 600); continue)
+    pick(block)
     # Type in the new block, press Return and type again, then undo it all
     press(Keys.a); press(Keys.enter); press(Keys.b)
     press(Keys.z, Keys.cmd); press(Keys.z, Keys.cmd); press(Keys.z, Keys.cmd); press(Keys.z, Keys.cmd)
@@ -304,14 +314,14 @@ warm_up() = begin
   press(Keys.enter)
   press(Keys.z, Keys.cmd); press(Keys.z, Keys.cmd)
   # A to-do item, then a click on its box to tick it
-  right_click(500, 300); pick(5); pick(findfirst(==("To-do"), blocks))
+  right_click(500, 300); pick("Insert"); pick("To-do")
   press(Keys.a); press(Keys.up, Keys.cmd)
   x = e.origin[1] + 6px
   y = findfirst(y -> todo_at(e, (x, px(y))) !== nothing, 80:4:780)
   y === nothing || click(x.value, (80:4:780)[y])
   press(Keys.z, Keys.cmd); press(Keys.z, Keys.cmd); press(Keys.z, Keys.cmd)
   # Select All from the menu. Nothing here cuts, copies or pastes, so the clipboard stays as it was.
-  right_click(500, 300); pick(2); press(Keys.escape)
+  right_click(500, 300); pick("Select All"); press(Keys.escape)
   press(Keys.backslash, Keys.cmd)
   frame(w)
   press(Keys.o, Keys.cmd); press(Keys.n); press(Keys.escape)
