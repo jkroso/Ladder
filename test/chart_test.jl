@@ -78,10 +78,14 @@ end
 end
 
 @testset "a pie" begin
-  rows = vcat([["Room", "Area"]], [[string("Room ", k), string(k, " m²")] for k in 1:8], [["Hall", "0 m²"], ["Shed", "-"]])
+  rows = vcat([["Room", "Area"]], [[string("Room ", k), string(k, " m²")] for k in 1:10], [["Hall", "0 m²"], ["Shed", "-"]])
   d = C.data(C.chart(["pie"]), rows)
-  @test length(d.labels) == C.SLICES && d.labels[1] == "Room 8" && d.labels[end] == "Other"
-  @test d.series[1].values[end] == 1 + 2 + 3 && sum(d.series[1].values) == 36 && d.after == " m²"
+  @test C.SLICES == C.MOST == 8
+  @test length(d.labels) == C.SLICES && d.labels[1] == "Room 10" && d.labels[end] == "Other"
+  @test d.series[1].values[end] == 1 + 2 + 3 && sum(d.series[1].values) == 55 && d.after == " m²"
+  # A pie of 8 parts shows each of them, with no Other
+  eight = C.data(C.chart(["pie"]), rows[1:9])
+  @test length(eight.labels) == 8 && !("Other" in eight.labels)
   @test !isempty(C.data(C.chart(["pie"]), [["a", "0"], ["b", "-2"]]).problem)
 end
 

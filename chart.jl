@@ -244,8 +244,8 @@ const MOST = 8
 
 same(a::AbstractString, b::AbstractString) = lowercase(strip(a)) == lowercase(strip(b))
 
-"The most slices that a pie has. The smallest of any more are one slice, called Other."
-const SLICES = 6
+"The most slices that a pie has: one for each colour. The smallest of any more are one slice, called Other."
+const SLICES = MOST
 
 """
 What the chart `c` shows of a table. `rows` holds the text of each cell of
