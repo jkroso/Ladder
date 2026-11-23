@@ -584,14 +584,21 @@ Face(f::Face; style=f.style, size=f.size, color=f.color, family=f.family, chip=f
 
 const measured = Dict{Tuple{String,String,Float32,String},px}()
 
-"How wide `s` is in `face`. It's kept, because the same words are measured every frame."
+"""
+How wide `s` is in `face`. It's kept, because the same words are measured every
+frame. A character that the font lacks is as wide as it is in the font that
+draws it (see `runs`), not as wide as the empty box that would stand for it.
+"""
 measure(face::Face, s::AbstractString) = begin
   isempty(s) && return 0px
   length(measured) > 200_000 && empty!(measured)
   get!(measured, (face.family, face.style, Float32(num(face.size)), String(s))) do
-    px(measure_text(skia_font(face.family, face.size, face.style), s)[1])
+    hasall(face, s) ? width_in(face, s) : sum(((t, f),) -> width_in(f, t), runs(s, face))
   end
 end
+
+"How wide `s` is in the font of `face`, with no other font for the characters that it lacks"
+width_in(face::Face, s::AbstractString) = px(measure_text(skia_font(face.family, face.size, face.style), s)[1])
 
 # --- a line laid out ---------------------------------------------------------------
 #
@@ -3374,16 +3381,17 @@ has(face::Face, c::Char) =
     Skia.sk_font_unichar_to_glyph(skia_font(face.family, face.size, face.style).raw, Int32(c)) != 0
   end
 
-const stand_ins = Dict{Char,String}()
+const stand_ins = Dict{Tuple{String,Char},String}()
 
 """
 The name of a font on this Mac that has the character `c`, or "" when none
-has. macOS picks it, as it does for the text of an app: Menlo when Menlo has
-the character, and if not a font of symbols, of another script or of emoji.
+has. macOS picks it, as it does for the text of an app in the font `family`:
+`family` when it has the character, and if not a font of symbols, of another
+script or of emoji. Code asks with Menlo, which has most signs.
 """
-font_with(c::Char) = get!(stand_ins, c) do
+font_with(c::Char, family::AbstractString=MONO) = get!(stand_ins, (String(family), c)) do
   style = Skia.sk_fontstyle_new(Int32(400), Int32(Skia.SK_FONT_STYLE_WIDTH_NORMAL), Skia.SK_FONT_STYLE_SLANT_UPRIGHT)
-  found = Skia.sk_fontmgr_match_family_style_character(Skia.sk_fontmgr_ref_default(), MONO, style, C_NULL, Int32(0), Int32(c))
+  found = Skia.sk_fontmgr_match_family_style_character(Skia.sk_fontmgr_ref_default(), family, style, C_NULL, Int32(0), Int32(c))
   Skia.sk_fontstyle_delete(style)
   found == C_NULL && return ""
   name = Skia.sk_typeface_get_family_name(found)
@@ -3393,15 +3401,32 @@ font_with(c::Char) = get!(stand_ins, c) do
   has(Face(family, "", 12px, colours.ink, false), c) ? family : ""
 end
 
+const one_wide = Dict{Tuple{String,String},Bool}()
+
+"True when each letter of the font of `face` is as wide as the others, as in a font of code"
+one_width(face::Face) = get!(one_wide, (face.family, face.style)) do
+  f = skia_font(face.family, 12px, face.style)
+  measure_text(f, "i")[1] == measure_text(f, "M")[1]
+end
+
+"""
+The font that macOS starts from to find a font for a character that `face`
+lacks. Code and the symbols of keys start from Menlo, which has most signs.
+Text starts from its own font, as in TextEdit.
+"""
+stand_in_from(face::Face) = one_width(face) || face.family == SYMBOL_FONT ? MONO : face.family
+
 """
 `text` in runs, each with the face to draw it in. A character that the font of
-`face` doesn't have is in a font that has it: Menlo for the raised minus of
-m⁻¹, a font of symbols for the ⋮ in a big matrix, and so on.
+`face` doesn't have is in a font that has it (see `stand_in_from`). In code,
+that's Menlo for the raised minus of m⁻¹, and a font of symbols for the ⋮ in a
+big matrix. Charter has no raised minus, so the minus of yr⁻¹ in a page's text
+is Lucida Grande's.
 """
 runs(text::AbstractString, face::Face) = begin
   out = Tuple{String,Face}[]
   for c in text
-    family = isascii(c) || has(face, c) ? face.family : font_with(c)
+    family = isascii(c) || has(face, c) ? face.family : font_with(c, stand_in_from(face))
     f = family == face.family || isempty(family) ? face : Face(face, family=family, style="")
     if !isempty(out) && last(out)[2] === f
       out[end] = (last(out)[1] * c, f)
@@ -25114,18 +25139,16 @@ describe(seg::Seg) = begin
   seg.node === nothing || return Box(fixed(seg.w), Alignment.Start, geometry(seg.node.node))
   isbox(seg) && return todo_box(seg)
   f = seg.face
-  t = Text(seg.text, size=f.size, family=f.family, subfamily=f.style, color=f.color, wrap=WrapMode.none)
+  # A character that the font lacks, like the raised minus of yr⁻¹ in Charter, is in a font that has it
+  t = hasall(f, seg.text) ? Text(seg.text, size=f.size, family=f.family, subfamily=f.style, color=f.color, wrap=WrapMode.none) :
+                            Row(Alignment.Start, spared(seg.text, f)...)
   # The number of a footnote is at the top of a box as tall as the text beside it, so it sits high in the line
   seg.atomic && startswith(seg.link, '^') && !endswith(seg.text, ' ') && return Box(fixed(seg.w), height(f.size * 1.9), Alignment.Start, t)
   # ==Words== have a highlighter's colour behind them
   f.highlit && !f.chip && return Box(fixed(seg.w), Alignment.Start, radius(2px), background(highlighter()), t)
   # A Text on its own would take a share of the spare room in its row
   f.chip || return Box(fixed(seg.w), Alignment.Start, t)
-  if !isempty(f.lang)
-    t = Row(Alignment.Start, [part for tok in tokens(seg.text, f.lang) for part in coloured(tok, f)]...)
-  elseif !hasall(f, seg.text)
-    t = Row(Alignment.Start, spared(seg.text, f)...)
-  end
+  isempty(f.lang) || (t = Row(Alignment.Start, [part for tok in tokens(seg.text, f.lang) for part in coloured(tok, f)]...))
   Box(fixed(seg.w), height(f.size * 1.5), padding(CHIP_X, 0px), radius(4px), background(colours.chip), border(1px, :solid, colours.chip_line), t)
 end
 

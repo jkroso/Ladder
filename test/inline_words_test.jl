@@ -83,3 +83,25 @@ end
   vl = only(f.lines)
   @test K.marks(f, 0, 0, K.selected(e.buf, one), margin=false) |> only |> (r -> r[3]) == K.num(last(vl.segs).x + last(vl.segs).w)
 end
+
+@testset "a character that the page's font lacks is drawn in a font that has it" begin
+  minus = joinpath(dir, "minus.md")
+  write(minus, "# Minus\n\nThey lose !`fade = 1.0Percent/yr` of it each year.\n")
+  e = K.build_editor(minus)
+  e.font = "Charter"
+  K.restyle!(e)
+  w = Window(e, size=(600px, 400px))
+  foreach(_ -> frame(w), 1:3)
+  i = findfirst(l -> startswith(l, "They lose"), e.buf.lines)
+  value = only(seg for vl in K.item(e, i).content.lines for seg in vl.segs if seg.text == "0.01yr⁻¹")
+  # Charter has no raised minus, so it's in the font that macOS gives Charter for it
+  @test !K.has(value.face, '⁻')
+  @test [f.family for (_, f) in K.runs(value.text, value.face)] == ["Charter", "Lucida Grande", "Charter"]
+  # It's as wide as those fonts draw it, not as wide as the empty box that Charter would draw
+  @test value.w == sum(K.width_in(f, t) for (t, f) in K.runs(value.text, value.face))
+  texts(node, out=K.Text[]) = (node isa K.Text ? push!(out, node) : node isa K.GeometricUI && foreach(n -> texts(n, out), node.children); out)
+  @test [(t.content, t.family) for t in texts(K.describe(value))] == [("0.01yr", "Charter"), ("⁻", "Lucida Grande"), ("¹", "Charter")]
+  # Code still takes its signs from Menlo, and the symbols of keys do too
+  @test K.stand_in_from(K.Face(K.CODE_FONT, K.CODE_STYLE, 13px, K.colours.ink, false)) == K.MONO
+  @test K.stand_in_from(K.Face(K.SYMBOL_FONT, "", 13px, K.colours.ink, false)) == K.MONO
+end
