@@ -353,6 +353,8 @@ The numbers have units from Units.jl: lengths like `m`, `km`, `ft` and `inch`, t
 
 A sum can give words too, and they wrap with the words round them, like this: !`farm_cost > 2e9USD ? "the farm costs more than two billion dollars, so it needs more than one company to pay for it" : "the farm costs two billion dollars or less, so one company can pay for it"`. Drag the size of the farm to see the words change.
 
+A sum can make a component too, like UI.jl's ProgressBar: !`ProgressBar(value = farm_size / 5GW)`. A component that uses the page's numbers is made again when they change, so the bar follows a drag on the size of the farm. One that uses none of them, like a switch, keeps its state.
+
 A sum that is one number has a line of dashes under what it shows, like the 16m and the 2.4m above. Drag it to the right or to the left to change the number. The sums that use its name follow while the mouse moves, so the area and the paint above change with the wall. The further the mouse goes, the faster the number changes. Hold ⇧ to make each step ten times as big. ⌘Z takes a drag back.
 
 A sum can use the rows of every sheet of the page, with a `_` for each space in a row's name: \!`wall_length` shows !`wall_length`, from the sheets above.

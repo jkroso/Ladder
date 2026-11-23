@@ -22987,9 +22987,11 @@ end
 Run again the sums in a line of text that come after a sum that changed, so
 that a sum which uses a name follows the sum that gives the name its value.
 What a sum made is forgotten, and the sum runs when its line is next laid
-out. A sum that made a node, like a switch, keeps its node. `also` is what
-else the sums read, as `inline_given!` gives it: when that changes, every sum
-runs again.
+out. A sum that made a node, like a switch, keeps its node, so the switch
+stays on. A node made from names that the page's sums and sheets give, like
+!`ProgressBar(value=done / jobs)`, is made again, so it follows the numbers.
+`also` is what else the sums read, as `inline_given!` gives it: when that
+changes, every sum runs again.
 """
 inline_tick!(e) = begin
   b = e.buf
@@ -23005,9 +23007,13 @@ inline_tick!(e) = begin
   (codes == seen[2] && also == seen[3]) && return e
   from = also == seen[3] ? something(findfirst(i -> i > length(seen[2]) || seen[2][i] != codes[i], eachindex(codes)), length(codes) + 1) : 1
   counts = Dict{String,Int}()
+  # The names that the page's sums and sheets give
+  names = Set{Symbol}(Iterators.flatten((filter(!isnothing, sum_name.(codes)), (Symbol(ident(name)) for (name, _) in page_given(e)))))
   for (i, code) in enumerate(codes)
     n = counts[code] = get(counts, code, 0) + 1
-    i >= from && get(e.nodes, (:inline, b.path, code, n), nothing) isa Tuple && delete!(e.nodes, (:inline, b.path, code, n))
+    i >= from || continue
+    was = get(e.nodes, (:inline, b.path, code, n), nothing)
+    (was isa Tuple || (was isa Shown && follows(code, names))) && delete!(e.nodes, (:inline, b.path, code, n))
   end
   # A sum that the page no longer has is forgotten too, so that it runs if it comes back
   for k in collect(keys(e.nodes))
@@ -23432,12 +23438,36 @@ sum_names(text::AbstractString) = begin
   occursin(INLINE, text) || return out
   for m in eachmatch(r"!`([^`]+)`", text)
     code = String(m[1])
-    ex = try Meta.parse(code, raise=false) catch; nothing end
-    (ex isa Expr && ex.head == :(=) && length(ex.args) == 2 && ex.args[1] isa Symbol) || continue
+    name = sum_name(code)
+    name === nothing && continue
     # The name has no =, so the first = is the one after it
-    push!(out, (replace(String(ex.args[1]), '_' => ' '), String(strip(code[nextind(code, findfirst('=', code)):end]))))
+    push!(out, (replace(String(name), '_' => ' '), String(strip(code[nextind(code, findfirst('=', code)):end]))))
   end
   out
+end
+
+"The name that the code of a sum gives, like `:farm` for `farm = 2GW`, or nothing"
+sum_name(code::AbstractString) = begin
+  ex = try Meta.parse(code, raise=false) catch; nothing end
+  ex isa Expr && ex.head == :(=) && length(ex.args) == 2 && ex.args[1] isa Symbol ? ex.args[1] : nothing
+end
+
+"""
+True when the code of a sum uses one of `names` for its value. The name that
+the sum gives doesn't count, nor does the name of a keyword: in
+`p = ProgressBar(value=x)` only `x` counts.
+"""
+follows(code::AbstractString, names) = begin
+  ex = try Meta.parse(code, raise=false) catch; return false end
+  sum_name(code) === nothing || (ex = ex.args[2])
+  found = false
+  look(x) = if x isa Symbol
+    x in names && (found = true)
+  elseif x isa Expr
+    foreach(look, x.head in (:kw, :(=)) && x.args[1] isa Symbol ? x.args[2:end] : x.args)
+  end
+  look(ex)
+  found
 end
 
 """

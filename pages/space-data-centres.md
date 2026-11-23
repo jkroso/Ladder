@@ -24,7 +24,7 @@ Above the air, sunlight brings 1361 watts to each square metre. A satellite that
 
 Two things wear the fleet down:
 
-- Radiation takes !`fade = 2.5`% of the power of the solar cells each year.
+- Radiation takes !`fade = 2.5`% of the power of the solar cells each year.[^1]
 - Chips break, and nobody can swap them. McCalip takes !`fail = 9`% a year, the rate that Meta saw for its GPUs, the chips that do the work of AI.
 
 Over the !`years = round(Int, life / 1yr)` years, the cells give !`cells = round(100 * sum((1 - fade / 100)^y for y in 0:years-1) / years, digits=1)`% of their first power on average, and !`works = round(100 * sum((1 - fail / 100)^y for y in 0:years-1) / years, digits=1)`% of the chips still work. So the fleet must start bigger than the job:
@@ -107,7 +107,7 @@ title: What each megawatt-hour costs
 show: Each megawatt-hour
 ```
 
-{==In orbit, each megawatt-hour costs !`round(per_orbit / per_ground, digits=1)` times as much as on the ground.==}{>>Idea 6: a bar that a sum can give, and that's drawn again when the numbers change. It could sit beside its number in a line of text, where a chart doesn't fit. Now a sum can only draw a bar as a line of dashes, because the page's font has no block characters, and a component that a sum makes never runs again.<<} !`per_orbit > per_ground ? "The ground wins." : "Orbit wins."`
+In orbit, each megawatt-hour costs !`round(per_orbit / per_ground, digits=1)` times as much as on the ground. !`per_orbit > per_ground ? "The ground wins." : "Orbit wins."`
 
 ## What would have to change
 
@@ -117,7 +117,12 @@ For orbit to match the ground, the whole fleet can cost no more than !`target = 
 - If launches stay at !`per_kg`, satellites would have to cost less than !`let x = (target - launch - design * 1e9USD) / panels / (1 + ops / 100 * years); x > 0USD/W ? round(convert(USD/W, x), digits=2) : "nothing" end`.
 - Even if launches were free, satellites would have to cost less than !`round(convert(USD/W, (target - design * 1e9USD) / panels / (1 + ops / 100 * years)), digits=2)`.
 
-Here the satellites cost !`build` and the launches !`launch`. !`build > launch ? "So cheaper satellites would help more than a cheaper rocket." : "So a cheaper rocket would help more than cheaper satellites."`
+Here the satellites cost !`build` and the launches !`launch`. Each bar shows its part of the two together:
+
+- !`ProgressBar(value = build / (build + launch))` the satellites
+- !`ProgressBar(value = launch / (build + launch))` the launches
+
+!`build > launch ? "So cheaper satellites would help more than a cheaper rocket." : "So a cheaper rocket would help more than cheaper satellites."`
 
 The sheet below tries every launch price from nothing to 2,000 USD a kilogram. It uses the numbers of the sums above, so a drag on one of them changes it too. The chart shows how many times the ground's cost orbit comes to at each price. Under 1, orbit wins. Point at the line to see the sheet at that price.
 
@@ -151,3 +156,5 @@ McCalip's own verdict: "It's not obviously stupid, and it's not a sure thing."
 
 > [!NOTE] Where these sums differ from McCalip's
 > His calculator pays each year to build again the hardware that breaks. This page makes the fleet bigger at the start instead, the way it does for cells that fade. The totals come out close to his. His sums are in [math.js](https://github.com/andrewmccalip/thoughts/blob/main/static/js/math.js).
+
+[^1]: 2.5% a year is McCalip's figure for silicon cells. His page gives no source for it. Silicon cells on eleven satellites in geostationary orbit lost 0.71% to 1.69% of their power each year: Lohmeyer, Aniceto, Cahoy and Carlton, "Solar array degradation on geostationary communications satellites", International Journal of Space Science and Engineering 5(1), 2018, [doi:10.1504/IJSPACESE.2018.090549](https://doi.org/10.1504/IJSPACESE.2018.090549). Those satellites were much higher than this fleet, so the rate here can be different.

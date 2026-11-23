@@ -1,8 +1,8 @@
 # Tests for names that one part of a page has from another, in main.jl and
 # sheet.jl: a row of a sheet that uses a measure of a takeoff, a task of a
 # time log or a row of another sheet, a sum in a line of text that uses a
-# row of a sheet, a sheet that uses a sum in a line of text, and a chart of
-# a table that has sums. Run them with `julia -O0 --project=. test/given_test.jl`.
+# row of a sheet, a sheet that uses a sum in a line of text, a chart of a
+# table that has sums, and a node that a sum makes from the page's numbers. Run them with `julia -O0 --project=. test/given_test.jl`.
 
 @use Test: @test, @testset
 @use "../main" => K
@@ -74,6 +74,8 @@ show: Bill
 
 ```chart
 ```
+
+The tiles cost this much of the budget: !`ProgressBar(value = price / 24)`. A switch: !`Toggle()`.
 """)
 
 const e = K.build_editor(page)
@@ -152,6 +154,22 @@ end
   @test chart().series[1].values == [1300.0, 650.0]
   K.undo!(e.buf); frames()
   @test chart().series[1].values == [1200.0, 600.0]
+end
+
+@testset "a node that a sum makes follows the numbers that it uses" begin
+  @test K.follows("p = ProgressBar(value=x / y)", Set([:x])) && !K.follows("p = ProgressBar(value=1)", Set([:value, :p]))
+  @test !K.follows("Toggle()", Set([:price])) && K.follows("let a = price; a end", Set([:price]))
+  node(code) = K.made(e, code, 1).value
+  bar = "ProgressBar(value = price / 24)"
+  @test node(bar).value == 0.5
+  node("Toggle()").on = true
+  # A sum over them changes. The bar is made again, and the switch stays on.
+  i = findfirst(l -> occursin("!`price = 12`", l), e.buf.lines)
+  at = findfirst("price = 12", e.buf.lines[i])
+  K.edit!(e.buf, (i, at.stop - 2), (i, at.stop), "18", typing=true); frames()
+  @test node(bar).value == 0.75 && node("Toggle()").on
+  K.undo!(e.buf); frames()
+  @test node(bar).value == 0.5 && node("Toggle()").on
 end
 
 @testset "a name of the page's code stays as it is" begin
