@@ -149,16 +149,18 @@ end
   click(Keys.cmd, Keys.opt)
   # The block didn't get the click. Its line stays after the keys went up, with a button for each thing to do with it.
   @test node().clicks == n && isempty(code_windows())
-  @test picker().chosen[1] === node() && buttons() == [:show_code, :ask_for_change, :ask_about]
+  @test picker().chosen[1] === node() && buttons() == [:show_code, :ask_agent]
   # The label and the buttons are in a row on the line's top edge, the label first
   r = rect(node())
   label = button(:label)
   @test label[2] == K.num(r.top) - 18 && all(b -> last(b)[2] == label[2], picker().buttons)
-  @test label[1] + label[3] < button(:show_code)[1] < button(:ask_for_change)[1] < button(:ask_about)[1]
+  @test label[1] + label[3] < button(:show_code)[1] < button(:ask_agent)[1]
+  # Ask Agent's button is as wide as it's tall, for the agent's logo
+  @test button(:ask_agent)[3] == button(:ask_agent)[4] == 18
   # The cursor is a hand over each button, and not over the label, which does nothing
   @test all(a -> cursor_at(button(a)) == :hand, buttons())
   @test cursor_at(label) != :hand
-  gone = button(:ask_about)
+  gone = button(:ask_agent)
   # A click on the label does nothing
   press_button(:label)
   @test picker().chosen !== nothing && isempty(code_windows()) && node().clicks == n
@@ -186,7 +188,7 @@ end
   @test length(code_windows()) == 1
 end
 
-@testset "Change and Explain on the line open the palette with the thing as A" for command in (:ask_for_change, :ask_about)
+@testset "the agent's logo on the line opens the palette with the thing as A" for command in (:ask_agent,)
   n = node().clicks
   click(Keys.cmd, Keys.opt)
   press_button(command)

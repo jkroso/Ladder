@@ -112,7 +112,7 @@ lines() = copy(e.buf.lines)
   r = rect(K.shown_now(t.chosen[1]))
   @test handle()[1] + handle()[3] <= K.num(r.left) && handle()[2] == K.num(r.top)
   # The buttons on the line are as they were
-  @test [a for (a, _) in t.buttons] == [:label, :show_code, :ask_for_change, :ask_about]
+  @test [a for (a, _) in t.buttons] == [:label, :show_code, :ask_agent]
   # The mouse shows a hand over it
   @test K.tool_cursor(t, w, convert.(px, grip())) == :hand
   shot("block-handle.png")

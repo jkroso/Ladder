@@ -130,7 +130,7 @@ end
   for (i, text, T) in ((3, "Words", K.Paragraph), (1, "Runs", K.Heading), (7, "The end", K.Paragraph))
     cmd_opt_click(spot(i, text)...)
     @test t.chosen !== nothing && t.chosen[1] isa T && t.chosen[1].first == i
-    @test [a for (a, _) in t.buttons] == [:label, :show_code, :ask_for_change, :ask_about]
+    @test [a for (a, _) in t.buttons] == [:label, :show_code, :ask_agent]
     # What it holds is the block that this frame drew, so the buttons act on the page as it is
     @test t.chosen !== nothing && rect(t.chosen[1]) !== nothing
     onkey(w, KeyPress{Keys.escape}(0, w)); frames(1)
@@ -150,7 +150,7 @@ end
   cmd_opt_click(spot(3, "struck")...)
   # The run keeps its line, with its buttons. A run is made again each time, and it's still the same run.
   t = K.code_picker(e)
-  @test t.chosen[1] isa K.TextRun && t.chosen[1].kind == "Struck" && [a for (a, _) in t.buttons] == [:label, :show_code, :ask_for_change, :ask_about]
+  @test t.chosen[1] isa K.TextRun && t.chosen[1].kind == "Struck" && [a for (a, _) in t.buttons] == [:label, :show_code, :ask_agent]
   @test K.same_thing(K.code_under(w)[1], t.chosen[1]) && !K.same_thing(picked(3, "bold")[1], t.chosen[1])
   shot("text-run-buttons.png")
   left, top, wide, tall = last(only(b for b in t.buttons if b[1] == :show_code))

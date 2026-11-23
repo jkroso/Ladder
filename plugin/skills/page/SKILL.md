@@ -5,7 +5,7 @@ description: Show the user a page in Ladder, a Markdown app on their Mac that dr
 
 # Show a page in Ladder
 
-Ladder is a Markdown app on the user's Mac. It draws a Markdown file as a page: a `mermaid` code block is a diagram, a table is a table, `- [ ]` is a box that the user can tick. The user can type anywhere on the page. A button in Ladder, a bell at the top right called "Nudge Claude", sends you the lines that the user changed.
+Ladder is a Markdown app on the user's Mac. It draws a Markdown file as a page: a `mermaid` code block is a diagram, a table is a table, `- [ ]` is a box that the user can tick. The user can type anywhere on the page. A button at the top right of Ladder, called "Nudge Claude", sends you the lines that the user changed. It shows your logo.
 
 So a page does two jobs. It shows the user more than the terminal can. And it is the form that the user answers on.
 
@@ -14,10 +14,10 @@ So a page does two jobs. It shows the user more than the terminal can. And it is
 1. Write the page as a Markdown file. Its name must end in `.md`. Put it where the user says. If the user names no place, put it in a `.ladder` folder in the project.
 2. Run `ladder show <file>`. Ladder opens the page in front of the other windows.
 3. Run `ladder wait <file>` in the background (in Claude Code: the Bash tool with `run_in_background: true`). Do not poll, and do not run it in the foreground, because the user can take any length of time.
-4. Tell the user, in one or two sentences, what is on the page and what you need from them. Tell them to click the bell at the top right of Ladder, or press ⌘Return, when they are done. Then end your turn.
+4. Tell the user, in one or two sentences, what is on the page and what you need from them. Tell them to click the Claude logo at the top right of Ladder, or press ⌘Return, when they are done. Then end your turn.
 5. When `ladder wait` stops, its output is what the user changed. Read it, and do what it asks.
 6. If you change the page, edit the file. Ladder shows your change in less than a second, so do not run `ladder show` again.
-7. If the work on the page goes on, run `ladder wait <file>` in the background again. If the work is done, do not. The Nudge button shows in Ladder only while a `ladder wait` runs.
+7. If the work on the page goes on, run `ladder wait <file>` in the background again. If the work is done, do not, unless the user asked for a change with Ask For Change (see below). The Nudge button shows in Ladder only while a `ladder wait` runs.
 
 If the user answers in the terminal and not on the page, do what they say. A `ladder wait` that still runs does no harm.
 
@@ -49,6 +49,31 @@ How to read it:
 - Any other changed text is the user's own wording. Keep it. Do not put your wording back.
 - "The user changed nothing in it" means that the user read the page and has nothing to add. If the page asked for approval, that is approval.
 - If the output ends with "The user selected this text", the user's note or their words in the terminal are about that text.
+
+### A change that the user asks for
+
+While you wait, the user can also ask you for a change in their own words, with the command Ask For Change in Ladder. Then `ladder wait` prints this:
+
+```
+The user asked you for a change from Ladder, on the page /Users/sam/shop/.ladder/plan.md.
+
+The user's words: make this shorter
+
+The user marked this thing in the window as A:
+
+A: A Paragraph of the page, on line 12:
+
+    The queue keeps each check until a worker takes it, ...
+
+Ladder draws it with the code in the file /Applications/Ladder.app/.../main.jl, lines 1200 to 1230.
+```
+
+- The words can name each thing by its letter, like "make A look like B".
+- A thing on the page has its lines. Change those lines of the page, unless the words ask for a change to how Ladder draws it.
+- A block of code has its file and its lines. Change that code.
+- What the user changed in the page comes after the things, as it does when they send the page.
+- Ladder knows that you have done the change when you run `ladder wait` again. So when you're done, run it again in the background, even if the work on the page is done.
+- If the first line says "or asked you a question", the user clicked your logo in Ladder, and the words can be a question, like "why is this number so big?". Answer a question in your reply, and change no file. Then run `ladder wait` again.
 
 Exit code 3 means that Ladder is not installed, or that it is too old to send a page. Tell the user, and carry on in the terminal.
 

@@ -78,6 +78,18 @@ Checkbox(label="Show a page when I hold ⌘ over its link", checked=page_peeks()
 
 With this on, hold ⌘ and rest the mouse on a link to a page. A card under the link shows the start of that page. A link to a heading shows the part under that heading. With this off, the card says only where the link goes.
 
+## Agent
+
+```ui
+names = agent_names()
+Box(width(240px), Dropdown(options=names, selected=something(findfirst(==(page_agent()), names), 1),
+                           onchange=dropdown -> page_agent!(names[dropdown.selected])))
+```
+
+This is the agent that Ladder starts when you ask for a change to a part of the window, or ask about it. Its logo is the button on the line round a part that you ⌘⌥-click. Its command must be on this Mac: `claude` for Claude, `codex` for Codex, `gemini` for Gemini and `grok` for Grok.
+
+When an agent shares the page with you, Ladder asks that agent instead, and the button shows its logo.
+
 ## Caret
 
 ```ui

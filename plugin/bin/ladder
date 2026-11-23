@@ -25,7 +25,8 @@ Usage:
   ladder wait <file.md> [--as <name>] [--timeout <seconds>]
       Wait until the user presses "Nudge" in Ladder. Then print the lines that
       the user changed in the file, and stop.
-      --as <name>          What Ladder calls you on its Nudge button.
+      --as <name>          What Ladder calls you on its Nudge button. The button
+                           shows the logo of Claude, Grok, Codex or Gemini.
       --timeout <seconds>  Stop waiting after this long. The exit code is then 2.
 
   <command> | ladder [--as <kind>] [--name <name>]

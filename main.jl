@@ -329,8 +329,8 @@
 @use "github.com/jkroso/UI.jl/Interface/image" image_aspect image_source has_image
 @use "github.com/jkroso/UI.jl/Interface/inspector" toggle_inspector!
 @use "github.com/jkroso/UI.jl/Interface/window" hide_titlebar! place_window_buttons! drag_window! set_dark! nswindow system_menu fills_screen fill_screen!
-@use "github.com/jkroso/UI.jl/Interface/Semantic/Icon" Icon icon_cache
-@use "github.com/jkroso/UI.jl/Interface/Semantic/SVG" SVGPath
+@use "github.com/jkroso/UI.jl/Interface/Semantic/Icon" Icon icon_cache load_icon
+@use "github.com/jkroso/UI.jl/Interface/Semantic/SVG" SVGPath render_svg
 @use "github.com/jkroso/UI.jl/Interface/Semantic/TextInput" TextInput
 @use "github.com/jkroso/UI.jl/Interface/Semantic/TextInput" => TextInputs
 @use "github.com/jkroso/UI.jl/Interface/Semantic/Link" Link
@@ -1209,6 +1209,7 @@ end
   updates::Bool = true                  # the app looks for a newer version of itself, and gets it, without being asked
   autosave::Bool = false                # a page is written to its file when its window stops being the front window
   peeks::Bool = true                    # the card of a link to a page, while ⌘ is held, shows the start of the page. See "the start of a page in a link's card".
+  ai::String = "Claude"                 # the agent that Ladder starts for a change or a question, by its name in AGENT_KINDS. See "the agents that Ladder can start".
   glide::Bool = true                    # the caret moves to a new place in a short time, and doesn't jump there
   wrap::Bool = true                     # a line of a file of code that's too long for the window goes on under itself
   numbers::Bool = true                  # a file of code shows the number of each line beside it
@@ -3925,6 +3926,10 @@ sandbox(e) = get!(e.nodes, :sandbox) do
   # ... and whether the card of a link to a page shows the start of the page, while ⌘ is held
   Core.eval(m, :(const page_peeks = $(() -> (reads!(e, :peeks); e.peeks))))
   Core.eval(m, :(const page_peeks! = $(on -> peeks!(e, Bool(on)))))
+  # ... and the agent that Ladder starts for a change or a question, by its name, and the names that it can be
+  Core.eval(m, :(const page_agent = $(() -> (reads!(e, :ai); e.ai))))
+  Core.eval(m, :(const page_agent! = $(name -> preferred_agent!(e, String(name)))))
+  Core.eval(m, :(const agent_names = $(() -> [k.name for k in AGENT_KINDS])))
   # ... and whether a line of a file of code that's too long for the window goes on under itself
   Core.eval(m, :(const code_wrap = $(() -> (reads!(e, :wrap); e.wrap))))
   Core.eval(m, :(const code_wrap! = $(on -> wrap!(e, Bool(on)))))
@@ -22871,6 +22876,16 @@ end
 "Turn on or off whether the card of a link to a page shows the start of the page, while ⌘ is held"
 peeks!(e, on::Bool) = (e.peeks = on; save_settings!(e); rerun!(e, :peeks); e)
 
+"Make the agent called `name` the one that Ladder starts for a change or a question: see \"the agents that Ladder can start\""
+preferred_agent!(e, name::String) = begin
+  any(k -> k.name == name, AGENT_KINDS) || error("Ladder can't start an agent called $name.")
+  e.ai = name
+  save_settings!(e)
+  rerun!(e, :ai)
+  redraw_windows!()   # the logo on the line round a thing shows the new agent
+  e
+end
+
 "Take hold of the number at `found`, which `scrub_at` gave, with the mouse at `pos`"
 scrub!(e, found, pos) = begin
   i, lo, hi = found
@@ -28793,7 +28808,12 @@ send!(e) = begin
   isempty(ws) && return
   save!(b)
   lo, hi = selection(b)
-  text = Agent.report(b.path, b.told, b.lines, lo[1], selecting(b) ? excerpt(b, lo, hi) : "")
+  hand_over!(e, ws, Agent.report(b.path, b.told, b.lines, lo[1], selecting(b) ? excerpt(b, lo, hi) : ""))
+end
+
+"Give the agents `ws`, which wait for the page of `e`, the text `text`, which tells them of the page as it is now"
+hand_over!(e, ws, text) = begin
+  b = e.buf
   foreach(w -> Agent.send(w, text), ws)
   # The agent knows the page as it is now, and none of the lines are its changes any more
   b.sent = b.told = copy(b.lines)
@@ -28869,15 +28889,63 @@ end
 "The name of the agent that works on the page, as the owner of something: \"Claude's\""
 whose(e) = get(e.nodes, :agent, "the agent")::String * "'s"
 
-# The button is a bell, the size of the other buttons in the top bar. It's in the
-# accent colour while an agent waits. After a click it's dim, and only an outline, and does nothing.
+# The logos of the agents that Ladder knows. Each is one shape in a square 24
+# wide, from Simple Icons (Claude, OpenAI, Gemini) and Lobe Icons (Grok).
+const CLAUDE_LOGO = "m4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307l-.7893-.0486-2.6956-.0729-2.3375-.0971-2.2646-.1214-.5707-.1215-.5343-.7042.0546-.3522.4797-.3218.686.0608 1.5179.1032 2.2767.1578 1.6514.0972 2.4468.255h.3886l.0546-.1579-.1336-.0971-.1032-.0972L6.973 9.8356l-2.55-1.6879-1.3356-.9714-.7225-.4918-.3643-.4614-.1578-1.0078.6557-.7225.8803.0607.2246.0607.8925.686 1.9064 1.4754 2.4893 1.8336.3643.3035.1457-.1032.0182-.0728-.164-.2733-1.3539-2.4467-1.445-2.4893-.6435-1.032-.17-.6194c-.0607-.255-.1032-.4674-.1032-.7285L6.287.1335 6.6997 0l.9957.1336.419.3642.6192 1.4147 1.0018 2.2282 1.5543 3.0296.4553.8985.2429.8318.091.255h.1579v-.1457l.1275-1.706.2368-2.0947.2307-2.6957.0789-.7589.3764-.9107.7468-.4918.5828.2793.4797.686-.0668.4433-.2853 1.8517-.5586 2.9021-.3643 1.9429h.2125l.2429-.2429.9835-1.3053 1.6514-2.0643.7286-.8196.85-.9046.5464-.4311h1.0321l.759 1.1293-.34 1.1657-1.0625 1.3478-.8804 1.1414-1.2628 1.7-.7893 1.36.0729.1093.1882-.0183 2.8535-.607 1.5421-.2794 1.8396-.3157.8318.3886.091.3946-.3278.8075-1.967.4857-2.3072.4614-3.4364.8136-.0425.0304.0486.0607 1.5482.1457.6618.0364h1.621l3.0175.2247.7892.522.4736.6376-.079.4857-1.2142.6193-1.6393-.3886-3.825-.9107-1.3113-.3279h-.1822v.1093l1.0929 1.0686 2.0035 1.8092 2.5075 2.3314.1275.5768-.3218.4554-.34-.0486-2.2039-1.6575-.85-.7468-1.9246-1.621h-.1275v.17l.4432.6496 2.3436 3.5214.1214 1.0807-.17.3521-.6071.2125-.6679-.1214-1.3721-1.9246L14.38 17.959l-1.1414-1.9428-.1397.079-.674 7.2552-.3156.3703-.7286.2793-.6071-.4614-.3218-.7468.3218-1.4753.3886-1.9246.3157-1.53.2853-1.9004.17-.6314-.0121-.0425-.1397.0182-1.4328 1.9672-2.1796 2.9446-1.7243 1.8456-.4128.164-.7164-.3704.0667-.6618.4008-.5889 2.386-3.0357 1.4389-1.882.929-1.0868-.0062-.1579h-.0546l-6.3385 4.1164-1.1293.1457-.4857-.4554.0608-.7467.2307-.2429 1.9064-1.3114Z"
+const GROK_LOGO = "M9.27 15.29l7.978-5.897c.391-.29.95-.177 1.137.272.98 2.369.542 5.215-1.41 7.169-1.951 1.954-4.667 2.382-7.149 1.406l-2.711 1.257c3.889 2.661 8.611 2.003 11.562-.953 2.341-2.344 3.066-5.539 2.388-8.42l.006.007c-.983-4.232.242-5.924 2.75-9.383.06-.082.12-.164.179-.248l-3.301 3.305v-.01L9.267 15.292M7.623 16.723c-2.792-2.67-2.31-6.801.071-9.184 1.761-1.763 4.647-2.483 7.166-1.425l2.705-1.25a7.808 7.808 0 00-1.829-1A8.975 8.975 0 005.984 5.83c-2.533 2.536-3.33 6.436-1.962 9.764 1.022 2.487-.653 4.246-2.34 6.022-.599.63-1.199 1.259-1.682 1.925l7.62-6.815"
+const OPENAI_LOGO = "M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z"
+const GEMINI_LOGO = "M11.04 19.32Q12 21.51 12 24q0-2.49.93-4.68.96-2.19 2.58-3.81t3.81-2.55Q21.51 12 24 12q-2.49 0-4.68-.93a12.3 12.3 0 0 1-3.81-2.58 12.3 12.3 0 0 1-2.58-3.81Q12 2.49 12 0q0 2.49-.96 4.68-.93 2.19-2.55 3.81a12.3 12.3 0 0 1-3.81 2.58Q2.49 12 0 12q2.49 0 4.68.96 2.19.93 3.81 2.55t2.55 3.81"
+
+"""
+The logo of each agent that Ladder knows, by the first word of the name that
+the agent calls itself, in small letters: the logo's shape, and its colour,
+or nothing for the colour of the page's text.
+"""
+const AGENT_LOGOS = Dict("claude" => (CLAUDE_LOGO, colorant"#D97757"),
+                         "grok" => (GROK_LOGO, nothing),
+                         "codex" => (OPENAI_LOGO, nothing), "chatgpt" => (OPENAI_LOGO, nothing), "openai" => (OPENAI_LOGO, nothing),
+                         "gemini" => (GEMINI_LOGO, colorant"#8E75B2"))
+
+"""
+The name of the icon of the logo of the agent called `name`, like \"Claude\",
+and the logo's colour: nothing for an agent that Ladder has no logo of. The
+logo goes among UI.jl's icons the first time that it's asked for, as the
+snake does: see `snake`.
+"""
+agent_logo(name::AbstractString) = begin
+  word = match(r"[A-Za-z]+", name)
+  word === nothing && return nothing
+  key = lowercase(word.match)
+  found = get(AGENT_LOGOS, key, nothing)
+  found === nothing && return nothing
+  shape, colour = found
+  icon = "agent-" * key
+  kept = get(icon_cache, icon, nothing)
+  (kept === nothing || first(kept.paths).d != shape) && (icon_cache[icon] = (paths=[SVGPath(d=shape, evenodd=key == "grok")], viewbox=(0f0, 0f0, 24f0, 24f0)))
+  (icon, something(colour, colours.ink))
+end
+
+"The name of the agent that the page of `e` is shared with: the one that waits for it, or the last that it was sent to. It's \"\" when there's neither."
+sharer(e) = begin
+  ws = agents(e)
+  isempty(ws) || return first(ws).name
+  sent = get(e.nodes, :sent, nothing)
+  sent !== nothing && sent[1] == e.buf.path ? sent[3]::String : ""
+end
+
+# The button is the logo of the agent, or a bell for an agent that Ladder has no
+# logo of, the size of the other buttons in the top bar. It's in the logo's
+# colour, or the bell in the accent colour, while an agent waits. After a click
+# it's dim, the bell only an outline, and it does nothing.
 describe(s::SendButton) = begin
   e = editor(s)
   ishovered(s) || (s.quiet = false)
   waits = !isempty(agents(e))
+  logo = agent_logo(sharer(e))
+  icon = logo === nothing ? Icon(waits ? "bell-fill" : "bell", size=15px, color=waits ? colours.accent : colours.dim) :
+                            Icon(logo[1], size=16px, color=waits ? logo[2] : colours.dim)
   Box(width(30px), height(28px), radius(6px), Alignment.Center, name="Nudge",
-      background(waits && ishovered(s) ? colours.hover : clear),
-    Icon(waits ? "bell-fill" : "bell", size=15px, color=waits ? colours.accent : colours.dim))
+      background(waits && ishovered(s) ? colours.hover : clear), icon)
 end
 
 cursor(s::SendButton) = isempty(agents(editor(s))) ? :arrow : :hand
@@ -34311,7 +34379,7 @@ True when the words that the command `name` asks for are what it's for, as the
 question of Ask About is. Their chip is wide before anything is typed in it.
 """
 wide_words(::Val) = false
-wide_words(::Union{Val{:ask_about},Val{:ask_for_change}}) = true
+wide_words(::Union{Val{:ask_about},Val{:ask_for_change},Val{:ask_agent}}) = true
 
 const OMNI_WORDS_LEAST, OMNI_WORDS_MOST = 240.0, 560.0   # how wide the chip of such words is, when the bar has room
 
@@ -40018,7 +40086,7 @@ end
 const pages_dir = Ref(joinpath(@__DIR__, "pages"))
 
 "The settings that every window has the same: each is a field of the editor"
-const SHARED = (:theme, :font, :weight, :zoom, :widest, :plain, :spelling, :updates, :autosave, :peeks, :glide, :wrap, :numbers, :shade, :beside, :indent, :code_scale, :code_font, :code_weight, :guide, :bundle, :rebound, :side, :hidden, :right, :own)
+const SHARED = (:theme, :font, :weight, :zoom, :widest, :plain, :spelling, :updates, :autosave, :peeks, :ai, :glide, :wrap, :numbers, :shade, :beside, :indent, :code_scale, :code_font, :code_weight, :guide, :bundle, :rebound, :side, :hidden, :right, :own)
 
 "The folder of the pages that have the settings"
 settings_dir() = joinpath(pages_dir[], "settings")
@@ -40131,7 +40199,7 @@ save_settings!(e) = begin
     mkpath(dirname(settings_file()))
     # After the bundle of key bindings comes a line for each command that has other keys than the bundle's, like key.save=ctrl+s
     changed = join(["key.$name=$(e.rebound[name])\n" for name in sort!(collect(keys(e.rebound)))])
-    write(settings_file(), "theme=$(e.theme)\nfont=$(e.font)\nweight=$(e.weight)\nzoom=$(e.zoom)\nwidth=$(e.widest.value)\nplain=$(e.plain)\nspelling=$(e.spelling)\nupdates=$(e.updates)\nautosave=$(e.autosave)\npeeks=$(e.peeks)\nglide=$(e.glide)\nwrap=$(e.wrap)\nnumbers=$(e.numbers)\nshade=$(e.shade)\nbeside=$(e.beside)\nindent=$(e.indent)\ncode=$(e.code_scale)\ncodefont=$(e.code_font)\ncodeweight=$(e.code_weight)\nguide=$(e.guide)\nsidebar=$(e.side.value)\nhidden=$(e.hidden)\nright=$(e.right)\nownmessage=$(e.own)\nkeys=$(e.bundle)\n$changed")
+    write(settings_file(), "theme=$(e.theme)\nfont=$(e.font)\nweight=$(e.weight)\nzoom=$(e.zoom)\nwidth=$(e.widest.value)\nplain=$(e.plain)\nspelling=$(e.spelling)\nupdates=$(e.updates)\nautosave=$(e.autosave)\npeeks=$(e.peeks)\nagent=$(e.ai)\nglide=$(e.glide)\nwrap=$(e.wrap)\nnumbers=$(e.numbers)\nshade=$(e.shade)\nbeside=$(e.beside)\nindent=$(e.indent)\ncode=$(e.code_scale)\ncodefont=$(e.code_font)\ncodeweight=$(e.code_weight)\nguide=$(e.guide)\nsidebar=$(e.side.value)\nhidden=$(e.hidden)\nright=$(e.right)\nownmessage=$(e.own)\nkeys=$(e.bundle)\n$changed")
   catch
     # A file that can't be written only means the settings last as long as the window
   end
@@ -40232,6 +40300,9 @@ load_settings!(e) = begin
       e.glide = value != "false"
     elseif name == "peeks"
       e.peeks = value != "false"
+    elseif name == "agent"
+      k = findfirst(k -> k.name == value, AGENT_KINDS)
+      k === nothing || (e.ai = AGENT_KINDS[k].name)
     elseif name == "wrap"
       e.wrap = value != "false"
     elseif name == "numbers"
@@ -41348,8 +41419,15 @@ tool_input(t::CodePicker, w, ::KeyPress{Keys.mouse_left}) = begin
   true
 end
 
-"The buttons on the top edge of the line round a thing that a click with ⌘ and ⌥ down chose: what each does, and its words"
-const CODE_BUTTONS = ((:show_code, "Show Code"), (:ask_for_change, "Change"), (:ask_about, "Explain"))
+"""
+The buttons on the top edge of the line round a thing that a click with ⌘ and
+⌥ down chose: what each does, and its words. Ask Agent's button has no words.
+It's the logo of the agent that it asks: see `asks_whom`.
+"""
+const CODE_BUTTONS = ((:show_code, "Show Code"), (:ask_agent, ""))
+
+"The name of the agent that Ask Agent asks from the window of `e`: the one that shares the page, or else the one that Settings chose"
+asks_whom(e) = (name = sharer(e); isempty(name) ? e.ai : name)
 
 "Take the line and the buttons of the thing that a click with ⌘ and ⌥ down chose away"
 unchoose!(t::CodePicker) = (t.chosen = nothing; empty!(t.buttons); redraw_in!(t.editor, 0); nothing)
@@ -41357,8 +41435,8 @@ unchoose!(t::CodePicker) = (t.chosen = nothing; empty!(t.buttons); redraw_in!(t.
 """
 Do what the button `action` on the line round the part `node` of the window
 of `e` says. The method `m` draws the part. Show Code shows the method in a
-window beside this one. Ask For Change and Ask About open the palette with
-that command, with the part as its A and the keyboard in the words.
+window beside this one. Ask Agent opens the palette with that command, with
+the part as its A and the keyboard in the words.
 """
 code_act!(e, action::Symbol, node, m) = action == :show_code ? show_code!(e, m) : ask_with!(e, action, node)
 
@@ -41457,7 +41535,7 @@ draw_tool(ctx, w, t::CodePicker, scene) = begin
       r = asked_rect(t.editor, c)
       r === nothing || pick_mark(ctx, w, r, string('A' + n - 1); colour=CHIP_MARKS[mod1(n, length(CHIP_MARKS))])
     end
-    words = a.ended == 0 ? asking_words(a.words, a.step) * "  ·  Esc stops it" : a.changed ? "$(a.said)  ·  Show Change" : a.said
+    words = asked_label(a)
     words = length(words) > 140 ? first(words, 139) * "…" : words
     a.label = pick_mark(ctx, w, asked_rect(t.editor, isempty(a.places) ? nothing : first(a.places)), words; colour=a.failed ? PICK_FAILED : PICK_LINE)
   end
@@ -41494,7 +41572,9 @@ draw_chosen(ctx, w, t::CodePicker) = begin
   r === nothing && (t.chosen = nothing; return nothing)
   t.chosen = (node, m)
   face = Face(SANS, "Medium", 11px, PICK_LINE, false)
-  wides = [num(measure(face, words)) + 12 for (_, words) in CODE_BUTTONS]
+  # A button with no words is as wide as it's tall, with the agent's logo in it
+  wides = [isempty(words) ? 18.0 : num(measure(face, words)) + 12 for (_, words) in CODE_BUTTONS]
+  logo = something(agent_logo(asks_whom(t.editor)), ("bell-fill", PICK_LINE))
   left, top, across, tall = pick_mark(ctx, w, r, "$(pick_name(node))  ·  $(code_label(m))"; room=sum(wides) + 4 * length(wides))
   push!(t.buttons, (:label, (left, top, across, tall)))
   x, y = num(w.mouse[1]), num(w.mouse[2])
@@ -41502,7 +41582,12 @@ draw_chosen(ctx, w, t::CodePicker) = begin
   for ((action, words), wide) in zip(CODE_BUTTONS, wides)
     over = left <= x <= left + wide && top <= y <= top + tall
     round_box(ctx, left + 0.5, top + 0.5, wide - 1, tall - 1, 3; fill=over ? RGBA(0.86, 0.92, 1.0, 1.0) : CODE_BUTTON_FILL, line=PICK_LINE, wide=1.0)
-    write_ink(ctx, words, left + 6, top + 13, face)
+    if isempty(words)
+      shape = load_icon(logo[1])
+      render_svg(ctx, px(left + 3), px(top + 3), px(12), px(12), shape.paths, shape.viewbox, logo[2])
+    else
+      write_ink(ctx, words, left + 6, top + 13, face)
+    end
     push!(t.buttons, (action, (left, top, wide, tall)))
     left += wide + 4
   end
@@ -42194,41 +42279,101 @@ claude_path() = begin
   found
 end
 
-"The command that changes code when it's asked to in words. Nothing means the command `claude` of Claude Code. A test puts a command of its own here."
+"The command that changes code when it's asked to in words. Nothing means the command of the agent that Settings chose. A test puts a command of its own here."
 const AGENT_COMMAND = Ref{Any}(nothing)
 
+# --- the agents that Ladder can start ---
+#
+# Settings has the agent that Ladder starts for a change or a question, when
+# no agent shares the page: Claude Code, Codex, Gemini CLI or Grok. Each is a
+# command on this Mac that does one request and ends. Your words go last, after
+# the options. Claude Code prints each step as a line of JSON, so the label on
+# the thing says what it's doing: see `agent_step`. The others print only what
+# they say at the end.
+
 """
-The command that an agent is started with. The words that ask for the change
-go after it. With `changes` false, the agent can read files and can't change
-them, for a question.
+An agent that Ladder can start: the name that Settings shows, its command,
+the folders where the command can be besides those of the PATH, and the
+options that go before your words, for a change and for a question. For a
+question, the agent reads files and changes none.
 """
-agent_command(; changes=true) = begin
+struct AgentKind
+  name::String
+  command::String
+  places::Vector{String}
+  change::Vector{String}
+  look::Vector{String}
+end
+
+# Claude's words go straight after -p. An option that takes a list, like --allowedTools, would take them as part of its list.
+const AGENT_KINDS = [
+  AgentKind("Claude", "claude", ["~/.local/bin", "/opt/homebrew/bin", "/usr/local/bin", "~/.claude/local"],
+            ["--output-format", "stream-json", "--verbose", "--permission-mode", "acceptEdits", "--allowedTools", "Read,Edit,Grep,Glob", "-p"],
+            ["--output-format", "stream-json", "--verbose", "--allowedTools", "Read,Grep,Glob", "-p"]),
+  AgentKind("Codex", "codex", ["/opt/homebrew/bin", "/usr/local/bin", "~/.local/bin"],
+            ["exec", "--sandbox", "workspace-write", "--skip-git-repo-check"],
+            ["exec", "--sandbox", "read-only", "--skip-git-repo-check"]),
+  AgentKind("Gemini", "gemini", ["/opt/homebrew/bin", "/usr/local/bin", "~/.local/bin"],
+            ["--approval-mode", "auto_edit", "-p"], ["--approval-mode", "plan", "-p"]),
+  AgentKind("Grok", "grok", ["~/.grok/bin", "/opt/homebrew/bin", "/usr/local/bin", "~/.local/bin"],
+            ["--permission-mode", "acceptEdits", "-p"], ["--permission-mode", "plan", "-p"])]
+
+"The agent called `name` that Ladder can start, or Claude Code when there's none of that name"
+agent_kind(name::AbstractString) = AGENT_KINDS[something(findfirst(k -> k.name == name, AGENT_KINDS), 1)]
+
+"""
+Where the command of the agent `k` is. An app that the Finder opened doesn't
+have the terminal's PATH, so the agent's usual folders are tried too.
+"""
+agent_path(k::AgentKind) = begin
+  found = Sys.which(k.command)
+  found === nothing || return found
+  for dir in k.places
+    file = joinpath(expanduser(dir), k.command)
+    isfile(file) && return file
+  end
+  error("Ladder can't find the command `$(k.command)` of $(k.name). Install it, or choose another agent in Settings.")
+end
+
+"""
+The command that the agent that Settings chose for `e` is started with. The
+words go after it. With `changes` false, the agent can read files and can't
+change them, for a question. The command's own folder and Homebrew's are on
+its PATH, as a command of Node, like Gemini's, needs `node`.
+"""
+agent_command(e; changes=true) = begin
   AGENT_COMMAND[] === nothing || return AGENT_COMMAND[]
-  found = claude_path()
-  # The words go straight after -p. An option that takes a list, like --allowedTools, would take them as part of its list.
-  # The agent prints each step as a line of JSON, so the window can say what it's doing: see `agent_step`.
-  steps = `--output-format stream-json --verbose`
-  changes ? `$found $steps --permission-mode acceptEdits --allowedTools Read,Edit,Grep,Glob -p` : `$found $steps --allowedTools Read,Grep,Glob -p`
+  k = agent_kind(e.ai)
+  found = agent_path(k)
+  path = join(unique([dirname(found), "/opt/homebrew/bin", "/usr/local/bin", split(get(ENV, "PATH", "/usr/bin:/bin"), ':')...]), ':')
+  addenv(Cmd([found; changes ? k.change : k.look]), "PATH" => path)
 end
 
 """
 Start an agent with the command `command` and the words `prompt`, in the
 folder `dir`. It gives the agent's process, and a task that reads what the
 agent prints. Each step that the agent prints goes into the field `step` of
-`into`, as words like "Reading main.jl", for the window to show.
+`into`, as words like "Reading main.jl", for the window to show. What the agent
+writes to its errors is kept only for when it fails: Codex writes each of its
+steps there.
 """
 start_agent(command, prompt, dir, into) = begin
-  out = Pipe()
-  process = run(pipeline(Cmd(`$command $prompt`, dir=dir), stdin=devnull, stdout=out, stderr=out), wait=false)
-  close(out.in)   # only the agent writes to it now, so reading ends when the agent does
+  out, err = Pipe(), Pipe()
+  process = run(pipeline(Cmd(`$command $prompt`; env=command.env, dir=dir), stdin=devnull, stdout=out, stderr=err), wait=false)
+  close(out.in)   # only the agent writes to them now, so reading ends when the agent does
+  close(err.in)
   reading = @async begin
+    wrong = @async read(err, String)
     printed = IOBuffer()
     for line in eachline(out)
       println(printed, line)
       step = agent_step(line)
       step === nothing || (into.step = step)
     end
-    String(take!(printed))
+    said = String(take!(printed))
+    wrong = fetch(wrong)
+    wait(process)
+    success(process) || isempty(strip(wrong)) ? said : said * "\n" * wrong
   end
   (process, reading)
 end
@@ -42577,6 +42722,15 @@ say when it has ended, at the time `ended`. `label` is where the label with
 those words was drawn last, for a click on it. `undone` is true once Undo
 Change put its files back. `step` is what the agent is doing now, in a few
 words. `stopped` is true when you stopped the agent before it ended.
+
+A change that went to the agent that works on a page with you has the
+agent's name in `by`, and the page's path in `page`: see "ask the agent of the
+page". `sent` is true once the agent has it, and `talk` is what was asked
+about the things before, in words for the agent.
+
+`asks` is true when the words can ask a question as well as for a change, as
+Ask Agent's do: see "ask an agent". An answer that changes nothing then shows
+in a card, as Ask About's does.
 """
 @def mutable struct AskedChange
   words::String = ""
@@ -42594,6 +42748,11 @@ words. `stopped` is true when you stopped the agent before it ended.
   label::Any = nothing
   undone::Bool = false
   stopped::Bool = false
+  by::String = ""
+  page::String = ""
+  sent::Bool = false
+  talk::String = ""
+  asks::Bool = false
 end
 
 "Each change that an agent made since Ladder started, the last last, for Show Change and Undo Change"
@@ -42626,7 +42785,7 @@ Ask an agent to make the change to the things `places` that `words` say. The
 picker of the window of `e` shows how it goes. `prompt` is what the agent is
 told, when it's other than the words that ask for a change, as for Fix Check.
 """
-ask_change!(e, places::AbstractVector, words::AbstractString; prompt=change_prompt(places, words)) = begin
+ask_change!(e, places::AbstractVector, words::AbstractString; prompt=change_prompt(places, words), asks=false) = begin
   t = code_picker(e)
   files = unique(c.file for c in places)
   # The agent reads the files, so what a window shows of one and didn't write goes to its file first
@@ -42634,11 +42793,11 @@ ask_change!(e, places::AbstractVector, words::AbstractString; prompt=change_prom
     !isempty(o.buf.path) && page_key(o.buf.path) in files && dirty(o.buf) && writes(o.buf) && save!(o.buf)
   end
   before = Dict(f => read(f, String) for f in files)
-  a = AskedChange(words=words, places=collect(places), before=before)
+  a = AskedChange(words=words, places=collect(places), before=before, asks=asks)
   # What you asked about the things before, from the card of an answer, goes with your words
   prompt *= talk_words(follow_up!(e, places))
   try
-    a.process, a.out = start_agent(agent_command(), prompt, dirname(first(files)), a)
+    a.process, a.out = start_agent(agent_command(e), prompt, dirname(first(files)), a)
   catch err
     a.said, a.failed, a.ended = "The agent didn't start. " * trouble(err), true, time()
   end
@@ -42676,6 +42835,7 @@ ask_tick!(e) = begin
   t = get(e.nodes, :code_picker, nothing)
   (t isa CodePicker && t.asked !== nothing) || return nothing
   a = t.asked
+  a.ended == 0 && !isempty(a.by) && return sharer_tick!(e, t, a)
   if a.ended == 0
     yield()   # the agent's end is noticed by a task, which gets its turn here
     process_exited(a.process) && a.gone == 0 && (a.gone = time())
@@ -42693,6 +42853,12 @@ ask_tick!(e) = begin
                !a.changed ? "Nothing changed. " * agent_said(printed) : agent_said(printed)
       a.ended = time()
       a.changed && push!(AGENT_CHANGES, a)
+      # Words that asked a question get the agent's answer in a card beside the thing
+      if a.asks && !a.changed && !a.failed && !a.stopped
+        said = strip(replace(printed, "**" => ""))
+        t.about = AskedAbout(words=a.words, places=a.places, answer=isempty(said) ? "The agent said nothing." : String(said), ended=time())
+        t.asked = nothing
+      end
     end
     redraw_in!(e, 0.1)
   elseif time() - a.ended > (a.failed ? 15 : 8)
@@ -42713,8 +42879,59 @@ See "ask for a change to a thing".
 """
 ask_for_change!(e, node::Union{ToChange,Things}, request::String) = begin
   isempty(strip(request)) && error("Say what should change, in a few words.")
-  agent_free(e)
-  ask_change!(e, collect(each_thing(node)), String(strip(request)))
+  # The agent that works on the page with you gets it, when there's one: see "ask the agent of the page"
+  name = sharer(e)
+  agent_free(e, command=isempty(name))
+  places = collect(each_thing(node))
+  isempty(name) ? ask_change!(e, places, String(strip(request))) : ask_sharer!(e, name, places, String(strip(request)))
+end
+
+# --- ask an agent ---
+#
+# Ask Agent takes a thing as Ask For Change does, and words that ask for a
+# change or ask a question: "make this bar thinner", or "why is this bar
+# red?". The agent does what the words ask. A change shows as Ask For Change's
+# does, and an answer shows in a card beside the thing, as Ask About's does.
+# The line round a thing that a click with ⌘ and ⌥ down chose has a button
+# for it, which is the agent's logo: see `CODE_BUTTONS`. The agent is the one
+# that shares the page, if one does, or else the one that Settings chose.
+
+"What an agent is told when the user's words `words` about the things `cs` can ask for a change, or ask a question"
+either_prompt(cs::AbstractVector, words) = begin
+  parts = map(enumerate(cs)) do (n, c)
+    what, start = thing_words(c)
+    "$('A' + n - 1): $what, in the file $(c.file), lines $(c.first) to $(c.last). It starts:\n\n    $start\n"
+  end
+  marked = length(cs) == 1 ? "marked this thing in its window as A" : "marked these things in its window with letters, and the user's words can name them by their letters"
+  """
+  The user of the app Ladder $marked:
+
+  $(join(parts, "\n"))
+  The user's words: $words
+
+  The words ask for a change, or ask a question. For a change, change that code, or the code that it uses. Change only files in $(join(unique(dirname(c.file) for c in cs), " and ")). Keep the change small, and write code that looks like the code around it. Ladder runs the changed code as soon as you end, so leave the file in a state that runs. Then say what you changed, in one short sentence.
+
+  For a question, don't change any file. Read the code to find the answer. Answer in a few short sentences of plain words, with no Markdown, as the answer shows in a small card beside the thing.
+  """
+end
+
+"""
+Ask an agent for a change to `node`, or a question about it, in the words of
+`request`, like "make this bar thinner" or "why is this bar red?". The agent
+changes the code, or its answer shows in a card beside the thing. See "ask an
+agent".
+"""
+ask_agent!(e, node::Union{ToChange,Things}, request::String) = begin
+  words = String(strip(request))
+  isempty(words) && error("Say what you want, in a few words.")
+  name = sharer(e)
+  agent_free(e, command=isempty(name))
+  q = code_picker(e).about
+  q !== nothing && q.ended == 0 && error("The agent is still answering the last question.")
+  places = collect(each_thing(node))
+  # What you asked about the things before, from the card of an answer, goes with your words
+  isempty(name) ? ask_change!(e, places, words, prompt=either_prompt(places, words) * talk_words(follow_up!(e, places)), asks=true) :
+                  ask_sharer!(e, name, places, words, asks=true)
 end
 
 """
@@ -42735,13 +42952,134 @@ ask_with!(e, command::Symbol, x) = begin
   nothing
 end
 
-"It's an error while an agent is still making a change in the window of `e`, or when this Mac has no agent"
-agent_free(e) = begin
-  t = code_picker(e)
-  t.asked !== nothing && t.asked.ended == 0 && error("The agent is still making the last change. Esc stops it.")
-  agent_command()   # it says so now if this Mac has no agent
+"It's an error while an agent is still making a change in the window of `e`, or, with `command` true, when this Mac has no agent"
+agent_free(e; command=true) = begin
+  a = code_picker(e).asked
+  if a !== nothing && a.ended == 0
+    isempty(a.by) && error("The agent is still making the last change. Esc stops it.")
+    error("$(a.by) still has the last change that you asked for. Ask again when it waits for the page.")
+  end
+  command && agent_command(e)   # it says so now if this Mac has no agent
   nothing
 end
+
+# --- ask the agent of the page ---
+#
+# A page can be shared with an agent: an agent like Claude Code wrote it, and
+# waits for you to send it back (see "a page that an agent waits for"). Then
+# Ask For Change asks that agent, not a new one. It knows what the page is
+# for, and a new agent wouldn't. The agent gets your words and what you marked,
+# as `ladder wait` prints them, with the lines that you changed in the page, as
+# the Nudge button sends them. Ladder knows that the agent has done the change
+# when it waits for the page again. Then Ladder runs the code that changed, as
+# it does after a new agent's change.
+#
+# An agent that's still working on what you sent last gets the change when it
+# waits for the page again. Until then the label on the thing says so, and Esc
+# takes the change back. After that Esc, Ladder no longer counts the page as
+# shared, so the next change goes to a new agent.
+
+"Lines `from` to `to` of `lines`, each indented, for an agent to read: no more than 12 lines, and no more than 400 characters of each"
+quoted_lines(lines, from, to) = begin
+  shown = [length(l) > 400 ? first(l, 399) * "…" : l for l in lines[from:min(to, from + 11)]]
+  to > from + 11 && push!(shown, "…")
+  join(("    " * l for l in shown), "\n")
+end
+
+"""
+The first and the last line of the page of `e` that the part `x` of the window
+shows, or nothing. A part inside a block of the page, like a bar in a block
+of a kind that a file defines, gives the lines of that block.
+"""
+on_page_lines(e, x) = begin
+  b = e.buf
+  x = something(shown_now(x), x)
+  while x !== nothing
+    at = findfirst(it -> it.content isa Live && it.content.node === x, e.layout)
+    found = x isa TextRun ? (x.line, x.line) :
+            x isa Union{Block,FileBlock} ? (x.first, x.last) :
+            at === nothing ? nothing : (e.layout[at].first, e.layout[at].last)
+    found !== nothing && 1 <= found[1] <= found[2] <= length(b.lines) && return found
+    x = x isa SemanticUI ? x.parent : nothing
+  end
+  nothing
+end
+
+"The thing `c` of Ask For Change, in words for the agent of the page of `e`: what it is, the page's lines that show it, and the code that draws it"
+thing_told(e, c::ToChange) = begin
+  lines = c.node === nothing ? nothing : on_page_lines(e, c.node)
+  if lines === nothing
+    what, start = thing_words(c)
+    return "$what, in the file $(c.file), lines $(c.first) to $(c.last). It starts:\n\n    $start"
+  end
+  from, to = lines
+  where = from == to ? "line $from" : "lines $from to $to"
+  shows = "A $(pick_name(c.node)) of the page, on $where:\n\n$(quoted_lines(e.buf.lines, from, to))"
+  "$shows\n\nLadder draws it with the code in the file $(c.file), lines $(c.first) to $(c.last)."
+end
+
+"""
+Ask the agent called `name`, which works on the page of `e` with you, for the
+change that `words` say to the things `places`. It gets them now if it waits
+for the page, and when it waits again if it doesn't. See "ask the agent of the
+page".
+"""
+ask_sharer!(e, name, places::AbstractVector, words::AbstractString; asks=false) = begin
+  t = code_picker(e)
+  # What you asked about the things before, from the card of an answer, goes with your words
+  a = AskedChange(words=words, places=collect(places), by=name, page=e.buf.path, talk=talk_words(follow_up!(e, places)), asks=asks)
+  t.asked = a
+  hand_change!(e, a)
+  redraw_in!(e, 0)
+  nothing
+end
+
+"Give the change `a` to the agent that waits for its page, while the window of `e` shows that page. It gives true when the agent got it."
+hand_change!(e, a::AskedChange) = begin
+  b = e.buf
+  b.path == a.page || return false
+  delete!(e.nodes, :agents)
+  ws = agents(e)
+  isempty(ws) && return false
+  files = unique(c.file for c in a.places)
+  # The agent reads the files, so the page, and what a window shows of a file and didn't write, go to their files first
+  save!(b)
+  for o in editors
+    !isempty(o.buf.path) && page_key(o.buf.path) in files && dirty(o.buf) && writes(o.buf) && save!(o.buf)
+  end
+  a.before = Dict(f => read(f, String) for f in files if isfile(f))
+  hand_over!(e, ws, Agent.request(b.path, b.told, b.lines, a.words, [thing_told(e, c) for c in a.places], a.talk, question=a.asks))
+  a.by, a.sent = first(ws).name, true
+  true
+end
+
+"In each frame while the agent of the page has a change: give it the change when it waits, and when it waits again, run the code that it changed"
+sharer_tick!(e, t::CodePicker, a::AskedChange) = begin
+  if a.stopped
+    t.asked = nothing
+    # It never got the change, and may never wait again, so the next change goes to a new agent
+    a.sent || delete!(e.nodes, :sent)
+  elseif !a.sent
+    hand_change!(e, a)
+  elseif !isempty(agents(e, a.page))
+    ran, failed = reload_files!(a.places, a.before)
+    a.after = Dict(f => read(f, String) for f in keys(a.before) if isfile(f))
+    a.changed = a.after != a.before
+    a.failed = !isempty(failed)
+    a.said = a.failed ? "The new code doesn't run. " * failed : "$(a.by) has done it."
+    a.ended = time()
+    a.changed && push!(AGENT_CHANGES, a)
+  end
+  redraw_in!(e, 0.5)
+  nothing
+end
+
+"What the label on the thing of the change `a` says"
+asked_label(a::AskedChange) =
+  a.ended > 0 ? (a.changed ? "$(a.said)  ·  Show Change" : a.said) :
+  isempty(a.by) ? asking_words(a.words, a.step) * "  ·  Esc stops it" :
+  a.sent ? "Asked $(a.by): $(a.words) …  ·  Esc hides this" :
+  "For $(a.by) when it waits for the page again: $(a.words)  ·  Esc takes it back"
 
 # --- stop an agent ---
 #
@@ -42869,7 +43207,7 @@ ask_about!(e, node::Union{ToChange,Things}, question::String) = begin
   isempty(question) && error("Write the question.")
   t = code_picker(e)
   t.about !== nothing && t.about.ended == 0 && error("The agent is still answering the last question.")
-  command = agent_command(changes=false)   # it says so now if this Mac has no agent
+  command = agent_command(e, changes=false)   # it says so now if this Mac has no agent
   places = collect(each_thing(node))
   q = AskedAbout(words=question, places=places, talk=follow_up!(e, places))
   try
@@ -43168,6 +43506,7 @@ keep_change!(e) = begin
 end
 
 add_command!(ask_for_change!, title="Ask an agent to change a block of code, or a part of the window, in your own words")
+add_command!(ask_agent!, title="Ask an agent for a change to a block of code or a part of the window, or a question about it, in your own words")
 add_command!(ask_about!, title="Ask an agent a question about a block of code, or a part of the window, and see the answer beside it")
 add_command!(show_change!, title="Show each change that an agent made, the newest first, and reject any part of one")
 add_command!(undo_change!, title="Put back the files that an agent changed last, as they were before")

@@ -507,12 +507,12 @@ end
   @test !p.plan.more && run().y == place(2).y && run().x + run().w <= p.plan.bar.x + p.plan.bar.w
   @test K.input(e).scroll > 0
   # Words for a command that isn't for them, like Rename In Code's new name, are as wide as they are
-  @test !K.wide_words(Val(:rename_in_code)) && K.wide_words(Val(:ask_for_change))
+  @test !K.wide_words(Val(:rename_in_code)) && K.wide_words(Val(:ask_for_change)) && K.wide_words(Val(:ask_agent))
   press(w, Keys.escape); press(w, Keys.escape)
   # The agent that answers can read files, and can't change them. Each agent prints its steps as lines of JSON.
   K.AGENT_COMMAND[] = nothing
-  @test endswith(string(K.agent_command(changes=false)), "--allowedTools Read,Grep,Glob -p`")
-  @test occursin("--output-format stream-json --verbose", string(K.agent_command()))
+  @test K.agent_command(e, changes=false).exec[end-2:end] == ["--allowedTools", "Read,Grep,Glob", "-p"]
+  @test occursin("--output-format stream-json --verbose", join(K.agent_command(e).exec, " "))
 end
 
 @testset "the label says what the agent is doing, from the lines of JSON that it prints" begin
@@ -609,6 +609,156 @@ end
   @test c.words == "twice(x)" && c.mod === nothing
   a = ask(agent("triple.sh", "sed -i '' 's/2x/3x/' \"$notes\"", "It's three times now."), c, "make it three times"; win)
   @test !a.failed && a.said == "It's three times now." && "twice(x) = 3x" in shown.buf.lines
+end
+
+@testset "Ask For Change asks the agent that works on the page with you" begin
+  K.Agent.place[] = mktempdir()
+  # The agent waits for the page, as `ladder wait` does. Its process is this one, so it runs.
+  waits() = (write(joinpath(K.Agent.folder(), "$(getpid()).wait"), realpath(page) * "\nClaude\n"); sleep(0.6); frames(w, 3))
+  sent = joinpath(K.Agent.folder(), "$(getpid()).sent")
+  got() = (s = read(sent, String); rm(sent); s)
+  # A new agent would leave this file
+  oneshot = joinpath(dir, "oneshot.txt")
+  rm(oneshot, force=true)
+  K.AGENT_COMMAND[] = `sh -c "touch $oneshot"`
+  picker().asked = nothing
+  waits()
+  @test K.sharer(e) == "Claude"
+  # The button at the top right is Claude's logo, in Claude's colour. An agent that Ladder has no logo of has a bell.
+  @test K.agent_logo("Claude") == ("agent-claude", K.colorant"#D97757") && K.agent_logo("grok-cli")[1] == "agent-grok"
+  @test K.agent_logo("Codex")[1] == "agent-codex" && K.agent_logo("the agent") === nothing && K.agent_logo("") === nothing
+  @test haskey(K.icon_cache, "agent-claude") && K.icon_cache["agent-claude"].viewbox == (0f0, 0f0, 24f0, 24f0)
+  level = first(offered(e, (3, 0)))
+  K.ask_for_change!(e, level, "make the bar shorter")
+  a = picker().asked
+  told = got()
+  @test a.by == "Claude" && a.sent && a.ended == 0 && !isfile(oneshot)
+  @test startswith(told, "The user asked you for a change from Ladder, on the page $(e.buf.path).")
+  @test occursin("The user's words: make the bar shorter", told) && occursin("A: A Level of the page, on lines 3 to 5", told)
+  @test occursin("Ladder draws it with the code in the file $(level.file), lines $(level.first) to $(level.last).", told)
+  frames(w, 2)
+  @test startswith(K.asked_label(a), "Asked Claude: make the bar shorter")
+  # Another change waits until Claude has done this one
+  @test_throws ErrorException K.ask_for_change!(e, level, "and red")
+  # Claude changes the code, and waits for the page again. Ladder runs the new code.
+  write(source, replace(read(source, String), r"height\(\d+px\)" => "height(22px)"))
+  waits()
+  @test a.ended > 0 && a.changed && a.said == "Claude has done it." && last(K.AGENT_CHANGES) === a
+  frames(w, 2)
+  @test rect(node()).height == 22px
+  picker().asked = nothing
+  # The Nudge button gives Claude the page, so it waits no more. A change waits for it.
+  K.send!(e)
+  got()
+  frames(w, 2)
+  K.ask_for_change!(e, level, "make it green")
+  a = picker().asked
+  @test a.by == "Claude" && !a.sent && !isfile(sent) && startswith(K.asked_label(a), "For Claude when it waits for the page again")
+  waits()
+  @test a.sent && occursin("The user's words: make it green", got())
+  # Esc takes the label of a change that Claude has away
+  press(w, Keys.escape)
+  @test picker().asked === nothing
+  # Esc takes back a change that Claude hasn't got, and the page isn't shared any more
+  K.ask_for_change!(e, level, "make it blue")
+  @test !picker().asked.sent
+  press(w, Keys.escape)
+  @test picker().asked === nothing && K.sharer(e) == ""
+  # So the next change goes to a new agent
+  K.ask_for_change!(e, level, "make it blue")
+  finish()
+  @test isfile(oneshot) && isempty(picker().asked.by)
+  picker().asked = nothing
+  K.Agent.place[] = ""
+end
+
+@testset "Ask Agent takes a change or a question, and an answer shows in a card" begin
+  level = first(offered(e, (3, 0)))
+  picker().asked = picker().about = nothing
+  # Words that ask for a change: the agent changes the code, as for Ask For Change
+  any_height = agent("any_height.sh", "sed -i '' -E 's/height\\([0-9]+px\\)/height(12px)/' \"$source\"", "The bar is 12 pixels tall now.")
+  a = (K.AGENT_COMMAND[] = `sh $any_height`; K.ask_agent!(e, level, "make the bar thinner"); finish(); picker().asked)
+  @test a.asks && a.changed && a.said == "The bar is 12 pixels tall now." && picker().about === nothing
+  @test occursin("The user's words: make the bar thinner", asked()) && occursin("The words ask for a change, or ask a question.", asked())
+  @test occursin("marked this thing in its window as A", asked()) && occursin("For a question, don't change any file.", asked())
+  picker().asked = nothing
+  # Words that ask a question: the agent changes nothing, and its answer shows in a card
+  K.AGENT_COMMAND[] = `sh $quiet`
+  K.ask_agent!(e, level, "why is it blue?")
+  finish()
+  q = picker().about
+  @test picker().asked === nothing && q !== nothing && q.ended > 0 && q.words == "why is it blue?" && q.answer == "I looked, and it's as you say."
+  frames(w, 2)
+  @test q.card !== nothing
+  picker().about = nothing
+  # An agent that fails says why on the label, with no card
+  a = (K.AGENT_COMMAND[] = `sh $stopped`; K.ask_agent!(e, level, "why?"); finish(); picker().asked)
+  @test a.failed && a.said == "The agent stopped. No network." && picker().about === nothing
+  picker().asked = nothing
+  # What an agent writes to its errors counts only when it fails, as Codex writes each step there
+  K.AGENT_COMMAND[] = `sh -c "echo 'Reading main.jl' >&2; echo 'It is blue for the sky.'"`
+  K.ask_agent!(e, level, "why blue?")
+  finish()
+  @test picker().about.answer == "It is blue for the sky."
+  picker().about = nothing
+  a = (K.AGENT_COMMAND[] = `sh -c "echo 'Not logged in.' >&2; exit 1"`; K.ask_agent!(e, level, "why?"); finish(); picker().asked)
+  @test a.failed && occursin("Not logged in.", a.said)
+  picker().asked = nothing
+  @test_throws ErrorException K.ask_agent!(e, level, "  ")
+  # The agent that shares the page gets the words, and is told that they can ask a question
+  K.Agent.place[] = mktempdir()
+  write(joinpath(K.Agent.folder(), "$(getpid()).wait"), realpath(page) * "\nClaude\n")
+  sleep(0.6); frames(w, 2)
+  @test K.asks_whom(e) == "Claude"
+  K.ask_agent!(e, level, "why is it blue?")
+  sent = joinpath(K.Agent.folder(), "$(getpid()).sent")
+  told = read(sent, String)
+  @test picker().asked.asks && picker().asked.by == "Claude"
+  @test startswith(told, "The user asked you for a change, or asked you a question, from Ladder, on the page ")
+  @test endswith(told, "If the words ask a question, answer it in your reply, and change no file.\n")
+  press(w, Keys.escape)
+  delete!(e.nodes, :sent)
+  K.Agent.place[] = ""
+end
+
+@testset "Settings chooses the agent that Ladder starts" begin
+  @test [k.name for k in K.AGENT_KINDS] == ["Claude", "Codex", "Gemini", "Grok"] && e.ai == "Claude" && K.asks_whom(e) == "Claude"
+  @test K.agent_kind("Grok").look == ["--permission-mode", "plan", "-p"] && K.agent_kind("Nobody").name == "Claude"
+  K.preferred_agent!(e, "Grok")
+  @test e.ai == "Grok" && K.asks_whom(e) == "Grok" && K.agent_logo(K.asks_whom(e))[1] == "agent-grok"
+  @test_throws ErrorException K.preferred_agent!(e, "Nobody")
+  # The command of the agent, with its folder first on its PATH, and the options for a change or for a question
+  bin = mktempdir()
+  fake = joinpath(bin, "grok")
+  write(fake, "#!/bin/sh\n"); chmod(fake, 0o755)
+  was = (K.AGENT_COMMAND[], ENV["PATH"])
+  K.AGENT_COMMAND[] = nothing
+  ENV["PATH"] = bin * ":" * ENV["PATH"]
+  c = K.agent_command(e)
+  @test c.exec == [fake, "--permission-mode", "acceptEdits", "-p"] && startswith(only(filter(startswith("PATH="), c.env)), "PATH=$bin:/opt/homebrew/bin:")
+  @test K.agent_command(e, changes=false).exec == [fake, "--permission-mode", "plan", "-p"]
+  @test_throws ErrorException K.agent_path(K.AgentKind("Nobody", "no-such-agent-command", String[], String[], String[]))
+  K.AGENT_COMMAND[], ENV["PATH"] = was
+  # The setting is kept with the others
+  write(K.settings_file(), "agent=Gemini\n")
+  K.load_settings!(e)
+  @test e.ai == "Gemini"
+  write(K.settings_file(), "agent=Nobody\n")
+  K.load_settings!(e)
+  @test e.ai == "Gemini"
+  rm(K.settings_file())
+  K.preferred_agent!(e, "Claude")
+end
+
+@testset "the words that the agent of a page reads, of a block of code" begin
+  block = only(filter(c -> c.note == "julia block · line 10", offered(e, (3, 0))))
+  @test K.thing_told(e, block) == "a block of Julia code on a page of Markdown, in the file $(block.file), lines 10 to 10. It starts:\n\n    x = 1"
+  @test K.quoted_lines(["a", "b", "c"], 2, 3) == "    b\n    c"
+  @test endswith(K.quoted_lines(string.(1:20), 1, 20), "    12\n    …")
+  told = K.Agent.request("/p.md", ["one"], ["one", "two"], "fix A", ["first", "second"], "\nBefore this, a question.\n")
+  @test occursin("The user marked these things in the window with letters", told) && occursin("\nA: first\n\nB: second\n", told)
+  @test occursin("Before this, a question.", told) && occursin("+two", told)
+  @test !occursin("changed in the page", K.Agent.request("/p.md", ["one"], ["one"], "fix", String[]))
 end
 
 @testset "Keep This Change adds the function to the startup page" begin
