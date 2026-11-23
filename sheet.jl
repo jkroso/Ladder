@@ -264,11 +264,30 @@ end
 shown(::Nothing) = ""
 shown(f::Function) = "ƒ"
 shown(x) = begin
+  # The % of 1,700GW·%·yr goes into its number: 17GW·yr
+  y = folded(x)
+  y === x || return shown(y)
   s = sprint(show, x)
   # A number with a unit, like 28.799999999999997m², shows its number the same way
   m = match(r"^(-?[\d,]*\.?\d+(?:e[+-]?\d+)?)(\D.*)$", s)
   n = m === nothing ? nothing : tryparse(Float64, replace(m[1], "," => ""))
   n === nothing ? s : shown(n) * m[2]
+end
+
+"""
+`x` without the units of it that have no dimension, like the % of
+1,700GW·%·yr, which go into its number: 17GW·yr. A value with only such
+units, like 85%, stays as it is, and so does any other value.
+"""
+folded(x) = begin
+  x isa Units.AbstractCombination || return x
+  parts = collect(Units.subunits(typeof(x)))
+  plain(u) = Units.abstract_dimension(u) == Units.NullDimension
+  (any(plain, parts) && !all(plain, parts)) || return x
+  rest = filter(!plain, parts)
+  # One unit to the power 1, like the USD of USD·%, is that unit itself, so the value shows as money does
+  T = length(rest) == 1 && Units.power(rest[1]) == 1 ? Units.unwrap(rest[1]) : prod(u -> Units.unwrap(u)^Units.power(u), rest)
+  try convert(T, x) catch; x end
 end
 
 const LONGEST = 48   # characters of a value or an error that a row shows
@@ -378,15 +397,23 @@ ends(expr::AbstractString, names) = begin
   m === nothing || !all(code(collect(m.match))[m.offsets[1] + ncodeunits(m[1]):m.offsets[2] - 1]) ? nothing : (String(m[1]), String(m[2]))
 end
 
-"The place of the first row of `rows` that is over a range, or 0"
-ranged(rows) = begin
+"The place of the first row of `rows` that is over a range, or 0. With `own`, a row before that place doesn't count."
+ranged(rows, own::Int=1) = begin
   seen = String[]
   for (i, (name, expr)) in enumerate(rows)
-    ends(expr, seen) === nothing || return i
+    i >= own && ends(expr, seen) !== nothing && return i
     isempty(ident(name)) || push!(seen, String(strip(name)))
   end
   0
 end
+
+"""
+The place in `all` of the row over a range of a sheet whose rows come after
+the `given` names that it has from outside it. It's the sheet's own row, so a
+sheet over another sheet with a range has a range of its own. A sheet with no
+such row can be over the range of a name from outside it.
+"""
+range_row(all, given::Int) = (k = ranged(all, given + 1); k == 0 ? ranged(all) : k)
 
 "How many steps a range from 0 to `far` is cut into, so that each step is a round number: 20 of them or more"
 steps(far::Real) = begin
@@ -422,9 +449,14 @@ expression of each one. A row that goes wrong says so, and the rows after it
 carry on. It gives what each row comes to, and the value of each row that has
 a name, under the name that Julia knows it by. `at` says where a row over a
 range is: 0 at its first value, 1 at its last. The third thing that it gives
-is how far apart those two values are, as a number, or nothing.
+is how far apart those two values are, as a number, or nothing. The fourth is
+the names of the rows, as they're written.
+
+`prior` is what `begun` gave for the first rows: they aren't worked out again.
+After each row, `each` is given the row's place and the names and values that
+the sheet knows then.
 """
-work(rows; at::Real=0) = begin
+work(rows; at::Real=0, over::Int=ranged(rows), prior=nothing, each=nothing) = begin
   mod = Module(:Sheet)
   Core.eval(mod, Expr(:block, Expr(:const, Expr(:(=), :SheetUnits, units())), Expr(:using, Expr(:., :., :SheetUnits))))
   read(expr, names) = converting(Meta.parse(rewrite(expr, names)))
@@ -441,20 +473,21 @@ work(rows; at::Real=0) = begin
     isempty(ident(name)) || push!(seen, String(strip(name)))
   end
   answers = Set(values(pairs))
-  over = ranged(rows)
   far = nothing
-  names = String[]
-  named = Pair{String,Any}[]
+  names = prior === nothing ? String[] : copy(prior.names)
+  named = prior === nothing ? Pair{String,Any}[] : copy(prior.named)
+  assign!(mod, [Symbol(id) => value for (id, value) in named])
   keep!(name, value) = begin
     id = ident(name)
     isempty(id) && return
-    Core.eval(mod, Expr(:(=), Symbol(id), QuoteNode(value)))
+    assign!(mod, [Symbol(id) => value])
     filter!(n -> ident(n) != id, names)
     push!(names, String(strip(name)))
     filter!(p -> p.first != id, named)
     push!(named, id => value)
   end
-  results = map(enumerate(rows)) do (i, (name, expr))
+  result_of(i, name, expr) = begin
+    prior === nothing || i > prior.n || return prior.results[i]
     isempty(strip(expr)) && return NONE
     try
       start = unknown(expr)
@@ -470,11 +503,11 @@ work(rows; at::Real=0) = begin
         id = Symbol(ident(name))
         trial(s) = begin
           known = copy(names)
-          isempty(ident(name)) || (Core.eval(mod, Expr(:(=), id, QuoteNode(unit * s))); push!(known, String(strip(name))))
+          isempty(ident(name)) || (assign!(mod, [id => unit * s]); push!(known, String(strip(name))))
           for (row, x) in rows[i+1:wanted-1]
             (isempty(strip(x)) || unknown(x) !== nothing) && continue
             v = Core.eval(mod, read(x, known))
-            isempty(ident(row)) || (Core.eval(mod, Expr(:(=), Symbol(ident(row)), QuoteNode(v))); push!(known, String(strip(row))))
+            isempty(ident(row)) || (assign!(mod, [Symbol(ident(row)) => v]); push!(known, String(strip(row))))
           end
           left, right = goal(read(rows[wanted][2], known), ids(known))
           Base.invokelatest(apart, Core.eval(mod, left), Core.eval(mod, right))
@@ -504,7 +537,90 @@ work(rows; at::Real=0) = begin
       Result(problem(err), true)
     end
   end
-  results, named, far
+  results = map(enumerate(rows)) do (i, (name, expr))
+    result = result_of(i, name, expr)
+    each === nothing || each(i, named, names)
+    result
+  end
+  results, named, far, names
+end
+
+"""
+Give each name of `pairs` its value in the module `mod`, as `name = value`
+there does. This has no code to lower, so it's much faster: a sheet over a
+range gives the names of the sums that it reads at each place of the range.
+"""
+assign!(mod::Module, pairs) = begin
+  try
+    foreach(((name, _),) -> Core.declare_global(mod, name, true), pairs)
+    Base.invokelatest(setglobals!, mod, pairs)
+  catch
+    # A name that can't be given a value this way, like a constant, says why as `name = value` does
+    foreach(((name, value),) -> Core.eval(mod, Expr(:(=), name, QuoteNode(value))), pairs)
+  end
+  nothing
+end
+
+setglobals!(mod, pairs) = foreach(((name, value),) -> setglobal!(mod, name, value), pairs)
+
+"""
+What `work` makes of the rows of `all` over the row `over`, which is over a
+range: what each of them comes to, and the names and values that it knows
+after them. They come out the same at every place of the range, so the sheet
+works them out once and starts from them at each place. It's nothing when
+there are no such rows, or when one of them is worked out backwards, as that
+can need a row under it. `cache` is where it's kept, as `tally` says.
+"""
+begun(all, over::Int, cache) = begin
+  n = over - 1
+  (n >= 1 && !any(((_, expr),) -> unknown(expr) !== nothing, all[1:n])) || return nothing
+  rows = all[1:n]
+  kept(cache, (:begun, rows)) do
+    chains = get!(() -> Any[], cache, :sheet_chains)
+    # The rows that were worked out before, as far as they're the same as these
+    k, before = 0, nothing
+    for c in chains
+      j = 0
+      while j < min(n, length(c.rows)) && c.rows[j+1] == rows[j+1]; j += 1 end
+      j > k && ((k, before) = (j, c))
+    end
+    after = k == 0 ? Tuple{Vector{Pair{String,Any}},Vector{String}}[] : before.after[1:k]
+    prior = k == 0 ? nothing : (n=k, results=before.results[1:k], named=after[k][1], names=after[k][2])
+    note(i, named_now, names_now) = i > k && push!(after, (copy(named_now), copy(names_now)))
+    results, named, _, names = work(rows; over=0, prior, each=note)
+    filter!(c -> c.rows != rows, chains)
+    pushfirst!(chains, (; rows, results, after))
+    length(chains) > LINKED && pop!(chains)
+    (; n, results, named, names)
+  end
+end
+
+# A sheet under a page of sums is worked out again when a sum changes, as on
+# each step of a drag. Two things keep that fast:
+#
+# - What a sheet came to is kept, by its rows and the names from outside it
+#   that they read. So a sheet that doesn't read the sum that changed has
+#   nothing to work out.
+# - `begun` keeps the rows from outside a sheet that it worked out lately, in
+#   a chain: what the sheet knew after each row. When one sum changes, the sums
+#   over it are the same as before, so only that sum and the sums under it run
+#   again. A sum that takes long, like one that adds up thousands of numbers,
+#   then runs only when it or a sum that it reads changes.
+#
+# Both are kept in the `cache` that the page gives, which is the page's own,
+# so they're forgotten as the rest of what the page laid out is. A sheet with
+# no page keeps them here, and only some of them.
+
+const KEPT = Dict{Any,Any}()
+const KEEP = 300    # things that KEPT holds: past this many, they're all forgotten
+const LINKED = 8    # chains that `begun` keeps: about as many as a page has sheets
+
+"What `f` gives, kept in `cache` by `key`: it's worked out only the first time"
+kept(f, cache, key) = begin
+  haskey(cache, key) && return cache[key]
+  value = f()
+  cache === KEPT && length(KEPT) >= KEEP && empty!(KEPT)
+  cache[key] = value
 end
 
 """
@@ -535,21 +651,26 @@ What each row of a sheet comes to. `given` holds the names that the sheet has
 from outside it, like a measure of a takeoff: each with an expression for its
 value, as a row has. They're worked out first, as rows over the first row
 would be, so a row can use them, and a row with the same name takes the name.
+What the sheet comes to is kept in `cache`: a page gives the place where it
+keeps what it laid out, so that it's forgotten with the rest.
 """
-tally(rows; given=(), at=nothing) = begin
+tally(rows; given=(), at=nothing, cache=KEPT) = begin
   given = needed(collect(given), rows)
   all = Tuple{String,String}[given..., rows...]
-  mine(results) = results[length(given)+1:end]
-  # With a row over a range, each row shows what it comes to at the two ends, or at the one place `at`
-  over = ranged(all)
-  if at !== nothing || over == 0
-    results = work(all; at=something(at, 0))[1]
-    # The row over a range shows that it's at one place of the range
-    at !== nothing && over > 0 && !results[over].failed && (results[over] = Result(results[over].text, false, true))
-    return mine(results)
-  end
-  map(mine(work(all)[1]), mine(work(all; at=1)[1])) do lo, hi
-    lo.failed ? lo : hi.failed ? hi : lo.text == hi.text ? lo : Result(brief("$(lo.text) to $(hi.text)"), false)
+  kept(cache, (:tally, all, at)) do
+    mine(results) = results[length(given)+1:end]
+    # With a row over a range, each row shows what it comes to at the two ends, or at the one place `at`
+    over = range_row(all, length(given))
+    prior = begun(all, over, cache)
+    if at !== nothing || over == 0
+      results = work(all; at=something(at, 0), over, prior)[1]
+      # The row over a range shows that it's at one place of the range
+      at !== nothing && over > 0 && !results[over].failed && (results[over] = Result(results[over].text, false, true))
+      return mine(results)
+    end
+    map(mine(work(all; over, prior)[1]), mine(work(all; at=1, over, prior)[1])) do lo, hi
+      lo.failed ? lo : hi.failed ? hi : lo.text == hi.text ? lo : Result(brief("$(lo.text) to $(hi.text)"), false)
+    end
   end
 end
 
@@ -559,25 +680,28 @@ of that row, from its first to its last. The first column is that row, and
 the others are the rows under it that have a name and change with it. The
 first row of the table has the names. `places` says where each of the other
 rows is in the range, from 0 to 1. It's nothing for a sheet with no row over
-a range, or with no row that changes.
+a range, or with no row that changes. It's kept in `cache`, as `tally` says.
 """
-cases(rows; given=()) = begin
+cases(rows; given=(), cache=KEPT) = begin
   given = needed(collect(given), rows)
   all = Tuple{String,String}[given..., rows...]
-  over = ranged(all)
+  over = range_row(all, length(given))
   over == 0 && return nothing
-  first, _, far = work(all)
-  (far === nothing || first[over].failed) && return nothing
-  n = steps(far)
-  places = [k / n for k in 0:n]
-  runs = [k == 0 ? first : work(all; at=places[k+1])[1] for k in 0:n]
-  # A row is a column of the table when it has a name, works at every value, and changes
-  shown = [i for i in over+1:length(all) if !isempty(ident(all[i][1])) && !any(r -> r[i].failed || isempty(r[i].text), runs) && any(r -> r[i].text != runs[1][i].text, runs)]
-  isempty(shown) && return nothing
-  columns = [over; shown]
-  table = Vector{String}[String[strip(all[i][1]) for i in columns]]
-  append!(table, (String[r[i].text for i in columns] for r in runs))
-  (table=table, places=places)
+  kept(cache, (:cases, all)) do
+    prior = begun(all, over, cache)
+    first, _, far = work(all; over, prior)
+    (far === nothing || first[over].failed) && return nothing
+    n = steps(far)
+    places = [k / n for k in 0:n]
+    runs = [k == 0 ? first : work(all; at=places[k+1], over, prior)[1] for k in 0:n]
+    # A row is a column of the table when it has a name, works at every value, and changes
+    shown = [i for i in over+1:length(all) if !isempty(ident(all[i][1])) && !any(r -> r[i].failed || isempty(r[i].text), runs) && any(r -> r[i].text != runs[1][i].text, runs)]
+    isempty(shown) && return nothing
+    columns = [over; shown]
+    table = Vector{String}[String[strip(all[i][1]) for i in columns]]
+    append!(table, (String[r[i].text for i in columns] for r in runs))
+    (table=table, places=places)
+  end
 end
 
 "The value of each name of `rows`, under the name that Julia knows it by: wall_length for \"Wall length\""

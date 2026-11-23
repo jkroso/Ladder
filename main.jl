@@ -3428,7 +3428,7 @@ while the mouse is on no such value: the sheet then shows both ends.
 sheet_case(e, texts, given) = begin
   name = pointed(e)
   name === nothing && return nothing
-  over = get!(() -> cases(texts; given), e.flows, (:cases, texts, given))
+  over = get!(() -> cases(texts; given, cache=e.flows), e.flows, (:cases, texts, given))
   over === nothing && return nothing
   k = findfirst(row -> plain_name(row[1]) == name, view(over.table, 2:length(over.table)))
   k === nothing ? nothing : over.places[k]
@@ -3451,7 +3451,7 @@ sheetgrid(e, from::Int, to::Int) = begin
     cells = [sheetcells(b.lines[i]) for i in rows]
     texts = [parts(b.lines[i]) for i in rows]
     # The rows are only worked out again when the text of one changes
-    results = get!(() -> tally(texts; given, at), e.flows, (:sheetrun, texts, given, at))
+    results = get!(() -> tally(texts; given, at, cache=e.flows), e.flows, (:sheetrun, texts, given, at))
     # The cell with the caret shows the spaces typed after its text
     upto(i, c) = caret !== nothing && caret[1] == i && within(c, caret[2]) ? max(c.hi, caret[2]) : c.hi
     names = map(zip(rows, cells)) do (i, cs)
@@ -3465,7 +3465,7 @@ sheetgrid(e, from::Int, to::Int) = begin
     # While the sheet shows itself at one value, a result is narrower than the range that it shows the rest of the
     # time. The expressions wrap for the wider of the two, so the sheet keeps its height. If it got shorter, a chart
     # under it would move away from the mouse, the sheet would show the range again, and the two would shake.
-    ends = at === nothing ? results : get!(() -> tally(texts; given, at=nothing), e.flows, (:sheetrun, texts, given, nothing))
+    ends = at === nothing ? results : get!(() -> tally(texts; given, at=nothing, cache=e.flows), e.flows, (:sheetrun, texts, given, nothing))
     exprs = map(enumerate(rows)) do (r, i)
       c = cells[r][end]
       chip = max(chip_w(ink, results[r]), chip_w(ink, ends[r]))
@@ -11652,13 +11652,13 @@ page_tables(e) = begin
           texts = [parts(b.lines[r]) for r in i+1:t-1]
           given = page_given(e, i, sums=true)
           # A sheet with a row over a range is a table with a row for each value of that row
-          over = get!(() -> cases(texts; given), e.flows, (:cases, texts, given))
+          over = get!(() -> cases(texts; given, cache=e.flows), e.flows, (:cases, texts, given))
           if over !== nothing
             push!(out, (first=i, last=t, under=under, rows=over.table, headed=true, ranged=true))
             i = t + 1
             continue
           end
-          results = get!(() -> tally(texts; given), e.flows, (:sheetrun, texts, given, nothing))
+          results = get!(() -> tally(texts; given, cache=e.flows), e.flows, (:sheetrun, texts, given, nothing))
           rows = [String[strip(name), results[r].failed ? "" : results[r].text] for (r, (name, _)) in enumerate(texts)]
         end
         push!(out, (first=i, last=t, under=under, rows=rows, headed=false, ranged=false))

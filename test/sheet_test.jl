@@ -76,6 +76,14 @@ end
   @test texts([("Long", "2 to 4"), ("Wide", "?"), ("Area", "long * wide = 12")]) == ["2 to 4", "6 to 3", "12"]
 end
 
+@testset "a sheet under another sheet with a range has a range of its own" begin
+  above = [("Age", "0 to 40"), ("Power", "age * 2")]
+  @test [r.text for r in S.tally([("Age", "0 to 10"), ("Twice", "age * 2")]; given=above)] == ["0 to 10", "0 to 20"]
+  @test S.cases([("Age", "0 to 10"), ("Twice", "age * 2")]; given=above).table[end] == ["10", "20"]
+  # A sheet with no range of its own is over the range of the name that it has from outside it
+  @test [r.text for r in S.tally([("Twice", "age * 2")]; given=above)] == ["0 to 80"]
+end
+
 @testset "money, and power in gigawatts" begin
   @test texts([("Price", "22USD/W"), ("Power", "1GW"), ("Cost", "price * power")]) == ["22USD/W", "1GW", "22 billion USD"]
   @test texts([("Launch", "500USD/kg * 35200ton")]) == ["17.6 billion USD"]
@@ -102,4 +110,32 @@ end
   @test texts([("", "3 in [1, 2, 3]"), ("", "4 in (1, 2)"), ("", "[x for x in 1:3]")]) == ["true", "false", "[1, 2, 3]"]
   # A row that a sheet works out backwards, from an answer in another unit
   @test texts([("Side", "? 1m"), ("", "side * side in cm^2 = 40000cm^2")]) == ["2m", "40,000cm²"]
+end
+
+# How many times a sheet has worked out the sum that it reads in the next test set. It's in Main, as
+# test/hot runs this file in a module of its own, which a sheet's code can't name.
+const RUNS = Core.eval(Main, :(sheet_test_runs = Ref(0)))
+
+@testset "a sheet over a range works out what it reads from outside it once" begin
+  given = [("Price", "(Main.sheet_test_runs[] += 1; 22USD/W)"), ("Unread", "5")]
+  rows = [("Power", "1MW to 3MW"), ("Cost", "price * power")]
+  c = S.cases(rows; given)
+  @test c.table[2] == ["1MW", "22 million USD"] && c.table[end] == ["3MW", "66 million USD"] && length(c.table) == 22
+  # Once for the 21 places of the range, and not again for the same names
+  @test RUNS[] == 1
+  @test [r.text for r in S.tally(rows; given)] == ["1MW to 3MW", "22 million USD to 66 million USD"] && RUNS[] == 1
+  # A sum that the sheet doesn't read changes, as it does while it's dragged, and the sheet has nothing to work out
+  @test S.cases(rows; given=[given[1], ("Unread", "6")]) == c && RUNS[] == 1
+  # A sum that it reads changes
+  @test S.cases(rows; given=[("Price", "(Main.sheet_test_runs[] += 1; 20USD/W)")]).table[end] == ["3MW", "60 million USD"] && RUNS[] == 2
+  @test [r.text for r in S.tally(rows; given, at=0.5)] == ["2MW", "44 million USD"] && RUNS[] == 2
+  # A sum under the one that counts changes, as on each step of a drag, and the sums over it don't run again
+  wide = [("Power", "1MW to 3MW"), ("Cost", "price * power * scale")]
+  @test S.cases(wide; given=[given[1], ("Scale", "2")]).table[end] == ["3MW", "132 million USD"] && RUNS[] == 2
+  @test S.cases(wide; given=[given[1], ("Scale", "3")]).table[end] == ["3MW", "198 million USD"] && RUNS[] == 2
+  @test [r.text for r in S.tally(wide; given=[given[1], ("Scale", "4")])] == ["1MW to 3MW", "88 million USD to 264 million USD"] && RUNS[] == 2
+  # A page keeps them in a place of its own, so a page that opens works them out again
+  page = Dict{Any,Any}()
+  @test S.cases(rows; given, cache=page) == c && RUNS[] == 3 && !isempty(page)
+  @test S.cases(rows; given, cache=page) == c && RUNS[] == 3
 end
