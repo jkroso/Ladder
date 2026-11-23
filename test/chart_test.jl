@@ -144,3 +144,28 @@ end
   @test occursin("Nuts &amp; bolts", picture) && occursin("&lt;Glue&gt;", picture) && occursin("<polygon", picture)
   @test C.fit("A long name of a thing", 60, measure) == "A long na…" && C.fit("Short", 60, measure) == "Short"
 end
+
+@testset "a chart of several tables" begin
+  cells = [["Age", "Power"], ["0", "100%"], ["5", "90%"], ["10", "80%"]]
+  chips = [["Age", "Working"], ["0", "100%"], ["10", "60%"], ["20", "20%"]]
+  c = C.chart(["kind: lines", "from: Cells, Chips"])
+  parts = [C.data(c, cells, headed=true, by_first=true, part=true), C.data(c, chips, headed=true, by_first=true, part=true)]
+  d = C.joined(c, parts, ["Cells", "Chips"])
+  # The names of both go in the order of their numbers, and a name that a table hasn't got is a gap in its line
+  @test d.problem == "" && d.labels == ["0", "5", "10", "20"] && [s.name for s in d.series] == ["Power", "Working"]
+  @test d.series[1].values == [100.0, 90.0, 80.0, nothing] && d.series[2].values == [100.0, nothing, 60.0, 20.0] && d.after == "%"
+  # `show` names columns of any of the tables
+  c.show = ["Working"]
+  d = C.joined(c, [C.data(c, t, headed=true, by_first=true, part=true) for t in (cells, chips)], ["Cells", "Chips"])
+  @test [s.name for s in d.series] == ["Working"] && d.labels == ["0", "10", "20"]
+  c.show = ["Heat"]
+  @test C.joined(c, [C.data(c, t, headed=true, by_first=true, part=true) for t in (cells, chips)], ["Cells", "Chips"]).problem == "No table has a column called “Heat”."
+  # Two columns with one name get the names of their tables, and words stay in the order the tables have them
+  c = C.chart(String[])
+  d = C.joined(c, [C.data(c, TABLE, headed=true, part=true), C.data(c, [["Month", "Sales"], ["Apr", "\$700"], ["Jan", "\$5"]], headed=true, part=true)], ["2025", "2026"])
+  @test d.labels == ["Jan", "Feb", "Mar", "Apr"] && [s.name for s in d.series] == ["Sales (2025)", "Costs", "Sales (2026)"]
+  @test d.series[3].values == [5.0, nothing, nothing, 700.0] && d.before == "\$"
+  # A table's problem says which table it is
+  @test C.joined(c, [C.data(c, TABLE, headed=true, part=true), C.nothing_to_draw("This table has no rows yet.")], ["2025", "2026"]).problem ==
+        "The table “2026” has no rows yet."
+end

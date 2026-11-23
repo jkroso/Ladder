@@ -368,7 +368,7 @@ title: Sales and costs
 ```
 ````
 
-`kind` is `bars`, `lines` or `pie`. `show: Sales` draws only that column. `by: Month` names the column whose words name the bars. `from: Budget` draws the first table under the heading "Budget". A chart under a `filter` or a `load` block draws the rows that the block shows. To draw numbers that are in no table, put the rows in the block, under an empty line, with a `|` between the cells and the names of the columns in the first row. Do not draw two measures with different units in one chart.
+`kind` is `bars`, `lines` or `pie`. `show: Sales` draws only that column. `by: Month` names the column whose words name the bars. `from: Budget` draws the first table under the heading "Budget". `from: Budget, Costs` draws both tables in one chart, and rows with the same name, like the same month or the same year, go in the same place. Use it to put the lines of two sheets over the same range in one chart, rather than writing their sums again. A chart under a `filter` or a `load` block draws the rows that the block shows. To draw numbers that are in no table, put the rows in the block, under an empty line, with a `|` between the cells and the names of the columns in the first row. Do not draw two measures with different units in one chart.
 
 ### A table from a CSV file
 

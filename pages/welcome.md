@@ -609,6 +609,24 @@ The three buttons at its top make it bars, lines or a pie. Change a number in th
 
 A line in the block can say more. `show: Sales` draws only that column. `by: Month` names the column whose words go under the bars. `from: Spreadsheets` draws the first table under that heading. A chart can hold its own rows too, with a `|` between the cells. To see the block's lines, hold ⌥ and click the chart.
 
+A chart can draw several tables in one. Name them in its `from` line, with commas between them. Or click the chart's table button, hold ⌘, and click each table that you want. The numbers of rows with the same name go in the same place, so the two tables below draw two lines over the same months:
+
+### Last year
+
+| Month | Sales last year |
+|---|---|
+| July | $3,900 |
+| August | $4,400 |
+| September | $4,100 |
+| October | $5,000 |
+
+```chart
+kind: lines
+title: Sales, this year and last
+from: Charts, Last year
+show: Sales, Sales last year
+```
+
 ## Boards
 
 A code block in the language `board` shows this page's to-do items as cards in columns. Drag a card to another column. A card that you drop on the last column ticks its item, and a card that you drag out of that column takes the tick away. Click a card twice to go to its item.

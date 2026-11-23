@@ -58,6 +58,29 @@ Floor = 4 * 5
 
 ```chart
 ```
+
+## Cells
+
+```sheet
+Age = 0 to 10
+Power = 100 - 2 * age
+```
+
+## Chips
+
+```sheet
+Age = 0 to 10
+Working = 100 - 5 * age
+```
+
+```chart
+kind: lines
+from: Cells, Chips
+```
+
+```chart
+from: Cells, Nowhere
+```
 """)
 
 const e = K.build_editor(page)
@@ -133,4 +156,38 @@ end
   shot("lines.png")
   v = show_chart(5)
   @test K.shown!(v).labels == ["Walls", "Floor"] && K.shown!(v).series[1].values == [28.8, 20.0]
+end
+
+@testset "a chart of two sheets" begin
+  v = show_chart(6)
+  d = K.shown!(v)
+  @test d.problem == "" && [s.name for s in d.series] == ["Power", "Working"] && d.labels[[1, end]] == ["0", "10"]
+  @test d.series[1].values[end] == 80.0 && d.series[2].values[end] == 50.0
+  @test count(m -> m.kind == :line, v.marks) == 2 && K.source_words(v) == "2 tables"
+  shot("two sheets.png")
+  @test occursin("“Nowhere”", K.shown!(show_chart(7)).problem)
+end
+
+@testset "⌘-click in a chart's list of tables adds a table" begin
+  K.show_line!(e, 1); frames(3)   # from below, show_chart would leave the chart's top over the window
+  v = chart(1)
+  click(middle(rect(v.parts[:source])))
+  c = v.parts[:sources]
+  @test c.asking == :source
+  row(name) = c.parts[(:choice_row, findfirst(r -> r.name == name, c.rows))]
+  cmd_click(r) = (w.keys |= Keys.cmd; click(middle(rect(r))); w.keys ⊻= Keys.cmd)
+  cmd_click(row("Rooms"))
+  # The chart drew the table above it, so it names that table and the new one
+  @test "from: Budget, Rooms" in block(1) && c.asking == :source
+  d = K.shown!(chart(1))
+  @test d.labels == ["Jan", "Feb", "Mar", "Kitchen", "Lounge"] && [s.name for s in d.series] == ["Sales", "Costs", "Long", "Wide", "Area"]
+  @test K.chosen(c, row("Budget").of.rows[row("Budget").k]) && K.chosen(c, c.rows[row("Rooms").k])
+  @test K.source_words(chart(1)) == "2 tables"
+  # ⌘Return takes the picked table away again
+  c.pick = row("Rooms").k
+  w.keys |= Keys.cmd; onkey(w, KeyPress{Keys.enter}(0, w)); w.keys ⊻= Keys.cmd; frames()
+  @test "from: Budget" in block(1) && c.asking == :source
+  # A plain click picks one table and closes the list
+  click(middle(rect(row("The table above"))))
+  @test !any(l -> startswith(l, "from:"), block(1)) && c.asking === nothing
 end

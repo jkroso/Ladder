@@ -18,7 +18,10 @@
 # sheet. `from` names the heading that the table is under. Without it, the
 # chart draws the table that's nearest above it. A line that shows a CSV file
 # as a table counts as a table, and `from` can name a CSV file, like
-# `from: prices.csv`. The chart then draws the file's numbers.
+# `from: prices.csv`. The chart then draws the file's numbers. `from` can
+# name several tables, with commas between them, like
+# `from: The solar cells, The chips`. The chart then draws the columns of
+# each over the same names, so two sheets over the same range are two lines.
 #
 # A chart can hold its own rows too. They go under the settings, with a |
 # between the cells, and the first row has the names of the columns:
@@ -198,8 +201,11 @@ each row. With `headed`, the first row has the names of the columns. Without
 it, the first row is the names when none of its cells but the first is a number.
 With `by_first`, the first column names each row, even when it holds numbers,
 unless the chart names another: the rows of a sheet over a range are like that.
+With `part`, the table is one of several that the chart draws. A column that
+`show` names and this table doesn't have is in another table, so it isn't a
+problem, and a pie's slices are made when the tables are together.
 """
-data(c::Chart, rows::Vector{Vector{String}}; headed::Bool=false, by_first::Bool=false) = begin
+data(c::Chart, rows::Vector{Vector{String}}; headed::Bool=false, by_first::Bool=false, part::Bool=false) = begin
   rows = filter(row -> any(!isempty, row), rows)
   isempty(rows) && return nothing_to_draw("This table has no rows yet.")
   wide = maximum(length, rows)
@@ -216,10 +222,11 @@ data(c::Chart, rows::Vector{Vector{String}}; headed::Bool=false, by_first::Bool=
   shown = Int[]
   for name in c.show
     k = findfirst(k -> same(head[k], name), 1:wide)
-    k === nothing && return nothing_to_draw("The table has no column called “$(name)”.")
+    k === nothing && (part ? continue : return nothing_to_draw("The table has no column called “$(name)”."))
     numeric(k) || return nothing_to_draw("The column “$(name)” has no numbers.")
     push!(shown, k)
   end
+  part && !isempty(c.show) && isempty(shown) && return Data(String[], Series[], "", "", "")   # what it shows is in the other tables
   isempty(shown) && (shown = [k for k in 1:wide if k != by && numeric(k)])
   isempty(shown) && return nothing_to_draw("This table has no column of numbers.")
   labels = by === nothing ? string.(1:length(body)) : column(by)
@@ -229,6 +236,40 @@ data(c::Chart, rows::Vector{Vector{String}}; headed::Bool=false, by_first::Bool=
   series = [Series(isempty(head[k]) ? (length(shown) == 1 ? "" : "Column $k") : head[k],
                    Union{Nothing,Float64}[n === nothing ? nothing : n[1] for n in found[:, j]]) for (j, k) in enumerate(shown)]
   d = Data(labels, first(series, MOST), length(before) == 1 ? before[1] : "", length(after) == 1 ? after[1] : "", "", max(length(series) - MOST, 0))
+  c.kind == :pie && !part ? slices(d) : d
+end
+
+"""
+What the chart `c` shows of several tables at once: the `data` of each, with
+the name that the chart calls it by in `names`. Each table's columns are drawn
+over the same names, like the years of two sheets over the same range. A name
+that only some tables have is a gap in the lines of the others. When every
+name is a number, they go in the order of their numbers. Two columns with the
+same name get the names of their tables after them.
+"""
+joined(c::Chart, ds::Vector{Data}, names::Vector{String}) = begin
+  for (d, name) in zip(ds, names)
+    isempty(d.problem) && continue
+    return nothing_to_draw(replace(d.problem, r"^(The|This) table " => "The table “$(name)” ", "The column “" => "The column of “$(name)” called “"))
+  end
+  missed = [n for n in c.show if !any(d -> any(s -> same(s.name, n), d.series), ds)]
+  isempty(missed) || return nothing_to_draw("No table has a column called “$(missed[1])”.")
+  labels = unique(l for d in ds for l in d.labels)
+  all(isnumber, labels) && sort!(labels, by=l -> number(l)[1])
+  place = Dict(l => k for (k, l) in enumerate(labels))
+  series = Series[]
+  for (d, name) in zip(ds, names), s in d.series
+    values = Vector{Union{Nothing,Float64}}(nothing, length(labels))
+    for (k, l) in enumerate(d.labels)
+      k <= length(s.values) && (values[place[l]] = s.values[k])
+    end
+    twice = count(d -> any(t -> same(t.name, s.name), d.series), ds) > 1
+    push!(series, Series(twice ? "$(s.name) ($name)" : s.name, values))
+  end
+  isempty(series) && return nothing_to_draw("These tables have no column of numbers.")
+  agreed(f) = (marks = unique(f(d) for d in ds if !isempty(d.series)); length(marks) == 1 ? marks[1] : "")
+  d = Data(labels, first(series, MOST), agreed(d -> d.before), agreed(d -> d.after), "",
+           sum(d -> d.more, ds) + max(length(series) - MOST, 0))
   c.kind == :pie ? slices(d) : d
 end
 

@@ -11712,8 +11712,9 @@ end
 
 """
 The rows that a chart draws: its own, or those of a table of the page. With
-`from`, that's the first table under the heading that `from` names. Without
-it, it's the table that's nearest above the chart, or the first one under it.
+`from`, that's the first table under the heading that `from` names, or the
+tables that it names with commas between them. Without it, it's the table
+that's nearest above the chart, or the first one under it.
 """
 chart_data(e, v::ChartView) = begin
   c = v.spec
@@ -11723,10 +11724,26 @@ chart_data(e, v::ChartView) = begin
   tables = page_tables(e)
   k = isempty(c.from) ? something(findlast(t -> t.last < v.first, tables), findfirst(t -> t.first > v.last, tables), 0) :
                         something(named_table(e, tables, c.from), 0)
-  k == 0 && return Charts.nothing_to_draw(isempty(c.from) ?
+  k == 0 || return Charts.data(c, tables[k].rows, headed=tables[k].headed, by_first=tables[k].ranged)
+  names = chart_sources(c)
+  length(names) > 1 && return Charts.joined(c, [chart_part(e, c, tables, name) for name in names], names)
+  Charts.nothing_to_draw(isempty(c.from) ?
     "This page has no table yet. Put a table, a spreadsheet or a sheet over this chart, and the chart draws its numbers." :
     "This page has no table called “$(c.from)”. A table is called by the heading over it, with a number after it for the second table under that heading.")
-  Charts.data(c, tables[k].rows, headed=tables[k].headed, by_first=tables[k].ranged)
+end
+
+"The tables that the `from` of the chart `c` names, with commas between them. It's one name, or none, for a chart that draws one table."
+chart_sources(c::Charts.Chart) = Charts.listed(c.from)
+
+"What the chart `c` draws of `name`, one of the several tables that it draws: the table under a heading of the page, or a CSV file"
+chart_part(e, c::Charts.Chart, tables, name) = begin
+  if istable(name)
+    t = file_table(abspath(docdir(e), expanduser(name)))
+    return isempty(t.problem) ? Charts.data(c, t.rows, headed=true, part=true) : Charts.nothing_to_draw(t.problem)
+  end
+  k = named_table(e, tables, name)
+  k === nothing && return Charts.nothing_to_draw("This page has no table called “$(name)”. A table is called by the heading over it.")
+  Charts.data(c, tables[k].rows, headed=tables[k].headed, by_first=tables[k].ranged, part=true)
 end
 
 "What the chart shows. It's worked out again when the page has changed."
@@ -14476,10 +14493,19 @@ source_tables(v::ChartView) = (ts = page_tables(editor(v)); [k for k in eachinde
 source_files(::ChartView) = istable
 source_files(_) = isfilterable
 
+"The tables that the chart `c` of the page of `e` draws, when it draws more than one, or none"
+several_sources(e, c::Charts.Chart) = begin
+  names = chart_sources(c)
+  length(names) > 1 && chart_path(e, c) === nothing && named_table(e, page_tables(e), c.from) === nothing ? names : String[]
+end
+several_sources(v) = v isa ChartView ? several_sources(editor(v), v.spec) : String[]
+
 "What the button of `v` says: where its rows come from"
 source_words(v) = begin
   from = source_from(v)
   isempty(from) && return v isa FilterView && v.lang == LOAD ? "Choose rows" : "The table above"
+  n = length(several_sources(v))
+  n > 1 && return "$n tables"
   Saves.isurl(from) ? Saves.host(from) : source_files(v)(from) ? basename(from) : from
 end
 
@@ -14516,7 +14542,12 @@ source_rows(v) = begin
     name, kind = table_name(e, ts, k), table_kind(e, ts[k])
     push!(rows, (key=name, name=name, short=kind, words=[name, kind]))
   end
-  isempty(from) || any(r -> r.key == from, rows) || named_table(e, ts, from) !== nothing ||
+  several = several_sources(v)
+  for name in several   # a chart that draws several tables can draw files too
+    istable(name) && !any(r -> r.key isa String && Charts.same(r.key, name), rows) &&
+      push!(rows, (key=name, name=basename(name), short="file", words=[name]))
+  end
+  isempty(from) || !isempty(several) || any(r -> r.key == from, rows) || named_table(e, ts, from) !== nothing ||
     push!(rows, (key=from, name=source_words(v), short=Saves.isurl(from) ? "server" : "file", words=[from]))
   push!(rows, (key=:file, name="Choose a file…", short="", words=["choose a file", "file"]))
   rows
@@ -14525,14 +14556,40 @@ end
 "The list of where the rows of the block `v` can come from, kept with the block"
 source_chooser(v) = block_part!(() -> SourceChooser(of=v), v, :sources)
 
-"The field at the top of the list of where rows can come from, that searches it"
+"The field at the top of the list of where rows can come from, that searches it. A chart's says how to draw several tables."
 choice_input(c::SourceChooser) = block_part!(c, :filter) do
-  TextInput(placeholder="Filter…", font_family=SANS, font_size=13px,
+  TextInput(placeholder=c.of isa ChartView ? "Filter, or ⌘-click to add a table" : "Filter…", font_family=SANS, font_size=13px,
             look=(_, text) -> Row(width(grow=grow), height(grow=grow), clip=true, text))
 end
 
-"True when the row `r` of the list is where the block's rows come from now"
-chosen(c::SourceChooser, r) = r.key isa String && r.key == source_from(c.of)
+"True when the row `r` of the list is where the block's rows come from now, or one of the tables that a chart draws"
+chosen(c::SourceChooser, r) = r.key isa String && (r.key == source_from(c.of) || any(n -> Charts.same(n, r.key), several_sources(c.of)))
+
+"""
+Add the table of row `k` of the list to the tables that the chart of `c`
+draws, or take it away when the chart draws it already. A chart that drew
+the table above names that table, so it goes on drawing it too. The list
+stays open, for the next table. A row that isn't a table is taken as a click
+takes it.
+"""
+toggle_source!(c::SourceChooser, k::Int) = begin
+  v = c.of
+  (c.asking !== nothing && k in eachindex(c.rows)) || return stop_choosing!(c)
+  key = c.rows[k].key
+  (v isa ChartView && key isa String && !isempty(key)) || return choose!(c, k)
+  e = editor(v)
+  names = several_sources(v)
+  if isempty(names)
+    from = source_from(v)
+    ts = page_tables(e)
+    above = something(findlast(t -> t.last < v.first, ts), findfirst(t -> t.first > v.last, ts), 0)
+    names = !isempty(from) ? [from] : above == 0 ? String[] : [table_name(e, ts, above)]
+  end
+  at = findfirst(n -> Charts.same(n, key), names)
+  at === nothing ? push!(names, key) : deleteat!(names, at)
+  set_source!(v, join(names, ", "))
+  handled
+end
 
 "Show the list of where the rows of the block of `b` can come from, under `b`, with the keyboard in its field"
 open_sources!(b::SourceButton, window) = begin
@@ -17435,7 +17492,8 @@ describe(r::ChoiceRow) = begin
 end
 
 cursor(::ChoiceRow) = :hand
-onkey(r::ChoiceRow, ::KeyPress{Keys.mouse_left}) = choose!(r.of, r.k)
+# ⌘-click on a table in a chart's list adds it to the tables that the chart draws, or takes it away
+onkey(r::ChoiceRow, ev::KeyPress{Keys.mouse_left}) = r.of isa SourceChooser && only_held(ev, Keys.cmd) ? toggle_source!(r.of, r.k) : choose!(r.of, r.k)
 # The mouse picks the row that it's over, as the arrow keys do
 onmouse(r::ChoiceRow, ::MouseMove) = begin
   v = r.of
@@ -17464,7 +17522,8 @@ placed!(m::ChoiceMenu, side) = (m.side = side; nothing)
 draw(ctx, size, ui::ConcreteRect, m::ChoiceMenu) = caret(ctx, ui, m.side, rect(m.button))
 
 # The list sees a key before its field does. The arrows pick a row, Return takes it, and Esc closes the list.
-onkey(m::ChoiceMenu, ev::KeyPress{Keys.enter}) = unmodified(ev) ? choose!(m.of, m.of.pick) : nothing
+onkey(m::ChoiceMenu, ev::KeyPress{Keys.enter}) = unmodified(ev) ? choose!(m.of, m.of.pick) :
+  m.of isa SourceChooser && only_held(ev, Keys.cmd) ? toggle_source!(m.of, m.of.pick) : nothing   # ⌘Return adds the table, as ⌘-click does
 onkey(m::ChoiceMenu, ev::KeyPress{Keys.escape}) = unmodified(ev) ? stop_choosing!(m.of) : nothing
 onkey(m::ChoiceMenu, ev::KeyPress{Keys.down}) = unmodified(ev) ? (v = m.of; v.pick = min(v.pick + 1, max(1, length(v.rows))); handled) : nothing
 onkey(m::ChoiceMenu, ev::KeyPress{Keys.up}) = unmodified(ev) ? (v = m.of; v.pick = max(v.pick - 1, 1); handled) : nothing
@@ -35795,8 +35854,18 @@ table_rows(e, i) = begin
   isempty(t.problem) ? t.rows : nothing
 end
 
-"The CSV file that the `from` of a chart names, or nothing when it names a heading"
-chart_path(e, c::Charts.Chart) = istable(c.from) ? abspath(docdir(e), expanduser(c.from)) : nothing
+"The CSV file that the `from` of a chart names, or nothing when it names a heading or several tables"
+chart_path(e, c::Charts.Chart) = begin
+  istable(c.from) || return nothing
+  path = abspath(docdir(e), expanduser(c.from))
+  length(chart_sources(c)) > 1 && !isfile(path) ? nothing : path   # a file's name can have a comma in it
+end
+
+"Each CSV file that the chart `c` draws"
+chart_files(e, c::Charts.Chart) = begin
+  path = chart_path(e, c)
+  path !== nothing ? [path] : [abspath(docdir(e), expanduser(n)) for n in chart_sources(c) if istable(n)]
+end
 
 "What the chart `c` draws when its `from` names a CSV file: the file's numbers, or why it has none. It's nothing when `from` names a heading."
 chart_file(e, c::Charts.Chart) = begin
@@ -35807,7 +35876,7 @@ chart_file(e, c::Charts.Chart) = begin
 end
 
 # A chart whose `from` names a CSV file looks at the file in each frame, so it draws the new numbers when the file changes
-block_tick!(v::ChartView) = (path = chart_path(editor(v), v.spec); path === nothing || file_table(path); sources_tick!(v); from_pick_tick!(v); v)
+block_tick!(v::ChartView) = (foreach(file_table, chart_files(editor(v), v.spec)); sources_tick!(v); from_pick_tick!(v); v)
 
 "The line `text` as HTML when it holds only a CSV file: the file's table, or the words that say why it has none. It's nothing for any other line."
 table_html(e, text) = begin
