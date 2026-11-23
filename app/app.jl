@@ -346,8 +346,6 @@ warm_up() = begin
   foreach(x -> mouse(x, 22), (50, 550, 1000, 1075))
   press(Keys.up, Keys.cmd)
   click(400, 200); click(400, 200); click(500, 400)
-  # The layout inspector
-  press(Keys.i, Keys.cmd, Keys.opt); press(Keys.i, Keys.cmd, Keys.opt)
   # Something else changes the file while the page has a change that isn't saved, and the page keeps both
   press(Keys.down, Keys.cmd); press(Keys.enter)
   file = e.buf.path

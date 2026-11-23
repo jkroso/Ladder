@@ -248,7 +248,7 @@
 #     its page.
 #   - ⌘W closes the file, and the window stays open with no file. ⌘W in a
 #     window with no file closes it. Ladder quits when its last window closes.
-#   - ⌘⌥I opens the layout inspector.
+#   - ⌘⌥I opens the layout inspector. The app that's built leaves it out.
 #   - Press ⌘⇧P and choose Show Folder As to show the folder of the file as
 #     a kind of folder: a desktop, notes, a grid of pictures, or a kind that
 #     a repository on GitHub has, like github.com/jkroso/Media.lad. Ladder
@@ -327,7 +327,16 @@
 @use "github.com/jkroso/UI.jl/Interface/objc" libobjc cls sel msg nsstring jstring with_pool send
 @use "github.com/jkroso/UI.jl/Interface/fonts" skia_font register_font weight_of weight_name isitalic installed_faces
 @use "github.com/jkroso/UI.jl/Interface/image" image_aspect image_source has_image
-@use "github.com/jkroso/UI.jl/Interface/inspector" toggle_inspector!
+"""
+True while Ladder is built into an app (see app/bundle.jl). Kip then loads
+each file as it's built, and never compiles a copy of it to keep.
+"""
+const BUILDING_APP = haskey(ENV, "KIP_FROZEN") && ccall(:jl_generating_output, Cint, ()) == 1
+# The layout inspector is a tool for working on Ladder's layout, so the app
+# that's built leaves it out. Its @use line stays on a line of its own, where Kip finds it.
+if !BUILDING_APP
+  @use "github.com/jkroso/UI.jl/Interface/inspector" toggle_inspector!
+end
 @use "github.com/jkroso/UI.jl/Interface/window" hide_titlebar! place_window_buttons! drag_window! set_dark! nswindow system_menu fills_screen fill_screen!
 @use "github.com/jkroso/UI.jl/Interface/Semantic/Icon" Icon icon_cache load_icon
 @use "github.com/jkroso/UI.jl/Interface/Semantic/SVG" SVGPath render_svg
@@ -28418,7 +28427,8 @@ const COMMAND_GROUPS = with_added([
     Command(:bigger, "Make the text bigger", :window, "cmd+equal", (e, w, _) -> zoom!(e, zoom_for(text_size(e) + 1))),
     Command(:smaller, "Make the text smaller", :window, "cmd+minus", (e, w, _) -> zoom!(e, zoom_for(text_size(e) - 1))),
     Command(:usual_size, "Put the text back to its usual size", :window, "cmd+0", (e, w, _) -> zoom!(e, 1.0)),
-    Command(:inspector, "Show or hide the layout inspector", :window, "cmd+opt+i", (e, w, _) -> toggle_inspector!(w))],
+    # The app that's built has no layout inspector
+    (BUILDING_APP ? () : (Command(:inspector, "Show or hide the layout inspector", :window, "cmd+opt+i", (e, w, _) -> toggle_inspector!(w)),))...],
   "The text" => [
     Command(:undo, "Undo", :edit, "cmd+z", (e, w, _) -> (undo!(e.buf); touch!(e))),
     Command(:redo, "Redo", :edit, "cmd+shift+z", (e, w, _) -> (redo!(e.buf); touch!(e))),
