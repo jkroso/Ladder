@@ -28252,10 +28252,37 @@ step_value!(e, steps::Int) = begin
 end
 
 """
+Each command that `add_commands!` added, with the name of its group, in the
+order that they came. A hot reload makes `COMMAND_GROUPS` again when a name
+in it changes, and doesn't call `add_command!` again further down the file.
+So the list takes these back in: see `with_added`.
+"""
+const ADDED_COMMANDS = Pair{String,Command}[]
+
+"""
+Put each of `commands` in the group of `groups` called `group`, at the end,
+or in the place of the one that has its name. A group that isn't there yet
+comes last.
+"""
+put_commands!(groups, group::AbstractString, commands) = begin
+  i = findfirst(g -> first(g) == group, groups)
+  i === nothing && (push!(groups, String(group) => Command[]); i = length(groups))
+  list = last(groups[i])
+  for c in commands
+    k = findfirst(o -> o.name == c.name, list)
+    k === nothing ? push!(list, c) : (list[k] = c)
+  end
+  groups
+end
+
+"`groups` with each command that `add_commands!` added put back in its group"
+with_added(groups) = (foreach(((group, c),) -> put_commands!(groups, group, (c,)), ADDED_COMMANDS); groups)
+
+"""
 The commands, in the groups and the order that the key bindings page shows
 them. Each has its shortcuts in the bundle called Ladder.
 """
-const COMMAND_GROUPS = [
+const COMMAND_GROUPS = with_added([
   "Files and windows" => [
     Command(:save, "Save the file", :window, "cmd+s", (e, w, _) -> save_page!(e)),
     Command(:new_window, "Open a new window on the folder that you're in", :window, "cmd+n", (e, w, _) -> new_window!(e)),
@@ -28327,7 +28354,7 @@ const COMMAND_GROUPS = [
     Command(:erase_word_back, "Delete to the start of the word", :type, "opt+backspace", (e, w, _) -> erase!(e, word_step(e.buf, e.buf.caret, -1))),
     Command(:erase_word, "Delete to the end of the word", :type, "opt+delete", (e, w, _) -> erase!(e, word_step(e.buf, e.buf.caret, 1))),
     Command(:erase_line_start, "Delete to the start of the line", :type, "cmd+backspace", (e, w, _) -> erase!(e, (e.buf.caret[1], 0))),
-    Command(:erase_line_end, "Delete to the end of the line", :type, "ctrl+k", (e, w, _) -> erase_line_end!(e))]]
+    Command(:erase_line_end, "Delete to the end of the line", :type, "ctrl+k", (e, w, _) -> erase_line_end!(e))]])
 
 "Each command, by its name"
 const COMMANDS = Dict{Symbol,Command}(c.name => c for (_, cs) in COMMAND_GROUPS for c in cs)
@@ -41016,16 +41043,14 @@ bar_parts(e) = Tuple(Iterators.flatten(f(e) for f in values(BAR_PARTS)))
 Add `commands` to Ladder's commands, in the group called `group` on the key
 bindings page. Each is a `Command`: its name, what the page calls it, its
 kind, its keys, and what it does. A command that has the name of one that's
-there takes its place.
+there takes its place. `ADDED_COMMANDS` keeps them too, for a hot reload.
 """
 add_commands!(group::AbstractString, commands) = begin
-  i = findfirst(g -> first(g) == group, COMMAND_GROUPS)
-  i === nothing && (push!(COMMAND_GROUPS, String(group) => Command[]); i = length(COMMAND_GROUPS))
-  list = last(COMMAND_GROUPS[i])
+  put_commands!(COMMAND_GROUPS, group, commands)
   for c in commands
-    k = findfirst(o -> o.name == c.name, list)
-    k === nothing ? push!(list, c) : (list[k] = c)
     COMMANDS[c.name] = c
+    k = findfirst(((_, o),) -> o.name == c.name, ADDED_COMMANDS)
+    k === nothing ? push!(ADDED_COMMANDS, String(group) => c) : (ADDED_COMMANDS[k] = String(group) => c)
   end
   nothing
 end
