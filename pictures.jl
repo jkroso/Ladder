@@ -174,6 +174,11 @@ end
 # Each has when its file last changed and macOS's document.
 const open_pdfs = Dict{String,Tuple{Float64,Object}}()
 
+# The build draws the welcome page, which has a takeoff of plan.pdf, so the app's image holds a document of the
+# process that built it. In the app that pointer points at nothing, and the first takeoff of that file crashed.
+# They aren't released: they were never this process's.
+__init__() = (empty!(open_pdfs); nothing)
+
 "macOS's document for the PDF file at `path`, or C_NULL if it isn't a PDF file that macOS can read. It's kept, so don't release it."
 pdf(path::AbstractString) = begin
   path = abspath(path)

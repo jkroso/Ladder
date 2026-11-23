@@ -82,6 +82,17 @@ block() = (s = K.takeoff_lines(e.buf, 1); e.buf.lines[s[1]+1:s[2]-1])
   @test K.known(v, "acme 77")["price"] == 12.5
 end
 
+@testset "the app doesn't use a PDF document that the build kept" begin
+  pics = parentmodule(K.pdf_size)
+  plan = joinpath(dir, "plan.pdf")
+  # The app's image held this: the build's document of the plan, which points at nothing in the app.
+  # Asked for its page, macOS crashed the app (2026-11-23).
+  pics.open_pdfs[plan] = (mtime(plan), Ptr{Cvoid}(0x76977a4280))
+  pics.__init__()
+  @test isempty(pics.open_pdfs)
+  @test K.plan_size(v) == (1190.55, 841.89)
+end
+
 @testset "counting and measuring" begin
   button((:tool, :count))
   @test v.tool == :count && v.current == 1
