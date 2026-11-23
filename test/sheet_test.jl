@@ -76,6 +76,13 @@ end
   @test texts([("Long", "2 to 4"), ("Wide", "?"), ("Area", "long * wide = 12")]) == ["2 to 4", "6 to 3", "12"]
 end
 
+@testset "percentages" begin
+  @test texts([("Sun", "100Percent"), ("Uptime", "85Percent"), ("Down", "100Percent - uptime")]) == ["100%", "85%", "15%"]
+  @test texts([("Fade", "1Percent"), ("Left", "round(exp(-fade * 3), digits=4)"), ("Rate", "round(log(1 + 50Percent), digits=4)")])[2:3] == ["0.9704", "0.4055"]
+  # A % with other units goes into the number
+  @test texts([("Panels", "1GW / 100Percent"), ("Work", "1GW * 85Percent * 20yr"), ("Upkeep", "22e9USD * 1Percent * 11")]) == ["1GW", "17GW·yr", "2.42 billion USD"]
+end
+
 @testset "a sheet under another sheet with a range has a range of its own" begin
   above = [("Age", "0 to 40"), ("Power", "age * 2")]
   @test [r.text for r in S.tally([("Age", "0 to 10"), ("Twice", "age * 2")]; given=above)] == ["0 to 10", "0 to 20"]
