@@ -757,15 +757,34 @@ inset(seg::Seg, k::Int) = begin
   pad + measure(seg.face, first(seg.text, k))
 end
 
+"""
+True when `seg` is one of the words after the first of the text that inline
+code made. Those take none of the line's columns: the first word stands for
+all of the code. See `wrap`.
+"""
+later_word(seg::Seg) = seg.atomic && seg.n == 0
+
+"Where segment `i` of `vl` ends, with the words of the same inline code that come after it"
+words_end(vl::VLine, i::Int) = begin
+  at = vl.segs[i].col + vl.segs[i].n
+  while i < length(vl.segs) && later_word(vl.segs[i+1]) && vl.segs[i+1].col == at
+    i += 1
+  end
+  vl.segs[i].x + vl.segs[i].w
+end
+
 "Where column `col` is on the screen line `vl`"
 xcol(vl::VLine, col::Int) = begin
   for (i, seg) in enumerate(vl.segs)
     col < seg.col && return seg.x
+    # The end of inline code is after the last word of its text. A line can start with the last of them.
+    later_word(seg) && col == seg.col && return words_end(vl, i)
     col == seg.col && return seg.x + inset(seg, 0)
     if col <= seg.col + seg.n
       # The gap before a `code` chip is the start of its code, so the caret shows inside the chip
       i < length(vl.segs) && col == seg.col + seg.n && (next = vl.segs[i+1]).face.chip && next.col == col &&
         return next.x + inset(next, 0)
+      seg.atomic && col == seg.col + seg.n && return words_end(vl, i)
       return seg.x + inset(seg, col - seg.col)
     end
   end
@@ -25225,7 +25244,9 @@ marks(f::Flow, x, y, (from, to, more); margin=true, edge=0px) = begin
   for (k, vl) in enumerate(f.lines)
     (from <= vl.to && to >= vl.from) || continue
     # `edge` is the left edge of the line's column of the page, where the space to the left of its text starts
-    x1 = from > vl.from ? xcol(vl, from) : margin ? edge : vl.x
+    # A selection from the end of inline code starts after its last words, which can start the line
+    starts = from > vl.from || (from == vl.from && !isempty(vl.segs) && later_word(first(vl.segs)))
+    x1 = starts ? xcol(vl, from) : margin ? edge : vl.x
     x2 = xcol(vl, min(to, vl.to))
     # A little extra shows that the end of the line is selected too
     (to > vl.to || (more && k == n)) && (x2 += 7px)
