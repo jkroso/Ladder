@@ -260,5 +260,38 @@ end
   e.own = false
 end
 
+@testset "the agent that Settings chose writes the message, and the button names it" begin
+  # An agent that reads only its words, as Grok does, gets the diff after them
+  bin = mkpath(joinpath(dir, "bin"))
+  fake = joinpath(bin, "fake-agent")
+  write(fake, """#!/bin/sh
+  for a; do last="\$a"; done
+  printf '%s' "\$last" > "$(joinpath(dir, "words.txt"))"
+  printf '%s' "\$1" > "$(joinpath(dir, "first.txt"))"
+  cat > "$(joinpath(dir, "piped.txt"))"
+  echo 'Say who it is for'
+  """)
+  chmod(fake, 0o755)
+  push!(K.AGENT_KINDS, K.AgentKind("Fake", "fake-agent", [bin], String[], String[], ["--quick", "-p"], false))
+  K.MESSAGE_COMMAND[] = nothing
+  e.ai = "Fake"
+  K.refresh!(e.buf)
+  again()
+  @test !isempty(K.commit_part(e)) && K.tip(commit_button()) == "Commit Readme.md, with a message that Fake writes"
+  click(rect(commit_button()))
+  @test e.nodes[:writing].who == "Fake"
+  committed()
+  @test subjects()[1] == "Say who it is for" && said() == "Committed Readme.md: Say who it is for"
+  words = read(joinpath(dir, "words.txt"), String)
+  @test read(joinpath(dir, "first.txt"), String) == "--quick" && isempty(read(joinpath(dir, "piped.txt"), String))
+  @test occursin("comes at the end of these words", words) && occursin("The diff:", words) && occursin("+The end today.", words)
+  # Claude Code reads the diff on its stdin, and Haiku writes it
+  e.ai = "Claude"
+  k = K.agent_kind("Claude")
+  @test k.piped && "haiku" in k.message && last(k.message) == "-p"
+  pop!(K.AGENT_KINDS)
+  K.MESSAGE_COMMAND[] = WRITES
+end
+
 K.MESSAGE_COMMAND[] = nothing
 close(w)

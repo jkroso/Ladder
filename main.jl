@@ -1223,7 +1223,7 @@ end
   side::px = PANEL_W                    # how wide the sidebar is. Drag its right edge to change it.
   hidden::Bool = false                  # the sidebar lists the hidden files and folders too: the ones whose names start with a dot
   right::Bool = true                    # a page that has a panel at the right shows it, as a repository's page has git's panel. See `page_side`.
-  own::Bool = false                     # you write the message of each commit, and Claude doesn't. See "Claude writes the commit's message".
+  own::Bool = false                     # you write the message of each commit, and the agent doesn't. See "an agent writes the commit's message".
   pinned::Bool = false                  # a click on the file's name pinned the path in the top bar open. See "the path in the top bar".
   theme::Symbol = :sepia
   look::Symbol = :own                   # :site on a page of a blog, which looks as the blog's site does. See `page_look`.
@@ -29051,7 +29051,7 @@ describe(b::ToolButton) = begin
   ishovered(b) || (b.quiet = false)
   on = (b.action == :panel && e.panel) || (b.action == :marks && marking(e)) || (b.action == :hidden && e.hidden) ||
        (haskey(BUTTONS, b.action) && get(BUTTONS[b.action], :on, _ -> false)(e))
-  # A button whose work takes a while, like a commit while Claude writes its message, spins until it's done
+  # A button whose work takes a while, like a commit while the agent writes its message, spins until it's done
   busy = haskey(BUTTONS, b.action) && get(BUTTONS[b.action], :busy, _ -> false)(e)
   # A half button, like each chevron beside the diff button, is half as tall as the others, with one over the other, and narrow
   half = haskey(BUTTONS, b.action) && get(BUTTONS[b.action], :half, false) !== false
@@ -43078,14 +43078,6 @@ end
 # startup page, in a block of code that runs each time Ladder starts. See
 # "the startup page".
 
-"Where the command `claude` of Claude Code is. An app that the Finder opened doesn't have the terminal's PATH, so the usual places are tried too."
-claude_path() = begin
-  places = (joinpath(homedir(), ".local", "bin", "claude"), "/opt/homebrew/bin/claude", "/usr/local/bin/claude", joinpath(homedir(), ".claude", "local", "claude"))
-  found = something(Sys.which("claude"), Some(get(filter(isfile, collect(places)), 1, nothing)))
-  found === nothing && error("Ladder can't find the command `claude`. Install Claude Code, and ask again.")
-  found
-end
-
 "The command that changes code when it's asked to in words. Nothing means the command of the agent that Settings chose. A test puts a command of its own here."
 const AGENT_COMMAND = Ref{Any}(nothing)
 
@@ -43102,7 +43094,10 @@ const AGENT_COMMAND = Ref{Any}(nothing)
 An agent that Ladder can start: the name that Settings shows, its command,
 the folders where the command can be besides those of the PATH, and the
 options that go before your words, for a change and for a question. For a
-question, the agent reads files and changes none.
+question, the agent reads files and changes none. `message` are the options
+for a few words that it writes from what it's given, like a commit's
+message, quickly and with no files. `piped` is true when it reads text that's
+piped to it as part of your words. Without it, that text goes in the words.
 """
 struct AgentKind
   name::String
@@ -43110,20 +43105,28 @@ struct AgentKind
   places::Vector{String}
   change::Vector{String}
   look::Vector{String}
+  message::Vector{String}
+  piped::Bool
 end
+
+AgentKind(name, command, places, change, look) = AgentKind(name, command, places, change, look, look, false)
 
 # Claude's words go straight after -p. An option that takes a list, like --allowedTools, would take them as part of its list.
 const AGENT_KINDS = [
   AgentKind("Claude", "claude", ["~/.local/bin", "/opt/homebrew/bin", "/usr/local/bin", "~/.claude/local"],
             ["--output-format", "stream-json", "--verbose", "--permission-mode", "acceptEdits", "--allowedTools", "Read,Edit,Grep,Glob", "-p"],
-            ["--output-format", "stream-json", "--verbose", "--allowedTools", "Read,Grep,Glob", "-p"]),
+            ["--output-format", "stream-json", "--verbose", "--allowedTools", "Read,Grep,Glob", "-p"],
+            # Haiku writes a message in a few seconds. Safe mode starts with no plugins, MCP servers or hooks, so it starts quickly.
+            ["--model", "haiku", "--output-format", "text", "--safe-mode", "--no-session-persistence", "-p"], true),
   AgentKind("Codex", "codex", ["/opt/homebrew/bin", "/usr/local/bin", "~/.local/bin"],
             ["exec", "--sandbox", "workspace-write", "--skip-git-repo-check"],
             ["exec", "--sandbox", "read-only", "--skip-git-repo-check"]),
   AgentKind("Gemini", "gemini", ["/opt/homebrew/bin", "/usr/local/bin", "~/.local/bin"],
             ["--approval-mode", "auto_edit", "-p"], ["--approval-mode", "plan", "-p"]),
+  # Grok takes text that's piped to it as something to read with a tool, so it gets it in the words
   AgentKind("Grok", "grok", ["~/.grok/bin", "/opt/homebrew/bin", "/usr/local/bin", "~/.local/bin"],
-            ["--permission-mode", "acceptEdits", "-p"], ["--permission-mode", "plan", "-p"])]
+            ["--permission-mode", "acceptEdits", "-p"], ["--permission-mode", "plan", "-p"],
+            ["--permission-mode", "plan", "--no-memory", "--disable-web-search", "-p"], false)]
 
 "The agent called `name` that Ladder can start, or Claude Code when there's none of that name"
 agent_kind(name::AbstractString) = AGENT_KINDS[something(findfirst(k -> k.name == name, AGENT_KINDS), 1)]
@@ -43151,9 +43154,14 @@ its PATH, as a command of Node, like Gemini's, needs `node`.
 agent_command(e; changes=true) = begin
   AGENT_COMMAND[] === nothing || return AGENT_COMMAND[]
   k = agent_kind(e.ai)
+  kind_command(k, changes ? k.change : k.look)
+end
+
+"The command of the agent `k` with the options `options`, which the words go after, with its own folder and Homebrew's on its PATH"
+kind_command(k::AgentKind, options) = begin
   found = agent_path(k)
   path = join(unique([dirname(found), "/opt/homebrew/bin", "/usr/local/bin", split(get(ENV, "PATH", "/usr/bin:/bin"), ':')...]), ':')
-  addenv(Cmd([found; changes ? k.change : k.look]), "PATH" => path)
+  addenv(Cmd([found; options]), "PATH" => path)
 end
 
 """
@@ -46638,8 +46646,9 @@ end
 #
 # The Commit button at the right of the heading of the changes commits the
 # ticked files: it says "Commit 2" for two of them. With no file ticked, it says
-# "Commit all", and commits every changed file. Claude writes the message, or
-# you do when the setting says so, as with the Commit button of the top bar.
+# "Commit all", and commits every changed file. The agent that Settings chose
+# writes the message, or you do when the setting says so, as with the Commit
+# button of the top bar.
 # A file that a merge left in two forms has no tick box: a tick would tell git
 # that you've chosen its lines.
 
@@ -47116,8 +47125,8 @@ cursor(::CommitView) = :arrow
 #
 # While the window shows a file that git keeps, and the file has changes since
 # the last commit, the top bar has a button with git's mark. A click commits
-# the file with a message that Claude writes: see "Claude writes the commit's
-# message". The palette's Commit takes words that you write. Run commits that
+# the file with a message that the agent that Settings chose writes: see "an
+# agent writes the commit's message". The palette's Commit takes words that you write. Run commits that
 # file alone, as the window has it. The other files with changes stay as they
 # are, and so does what git was given for the next commit of them.
 
@@ -47194,23 +47203,25 @@ commit_part(e) = begin
        button(e, :commit, "git"), node!(CommitMore, e, :commit_more)),)
 end
 
-# A click commits the file with a message that Claude writes, or that you write when the setting says so. While
-# ticked changes are chosen, it commits only those.
+# A click commits the file with a message that the agent that Settings chose writes, or that you write when the
+# setting says so. While ticked changes are chosen, it commits only those.
 BUTTONS[:commit] = (run=e -> commit_scope!(e, choosing(e) ? :part : :file), off=e -> choosing(e) && isempty(ticked(e)), strong=false,
                     busy=e -> haskey(e.nodes, :writing),
-                    tip=e -> haskey(e.nodes, :writing) ? "Claude is writing the commit message…" :
+                    tip=e -> haskey(e.nodes, :writing) ? "$(e.nodes[:writing].who) is writing the commit message…" :
                              (!choosing(e) ? "Commit $(basename(e.buf.path))" :
                               (n = length(ticked(e)); n == 0 ? "Tick the changes to commit" : n == 1 ? "Commit the ticked change" : "Commit the $n ticked changes")) *
-                             (choosing(e) && isempty(ticked(e)) ? "" : e.own ? ", with a message that you write" : ", with a message that Claude writes"))
+                             (choosing(e) && isempty(ticked(e)) ? "" : e.own ? ", with a message that you write" : ", with a message that $(e.ai) writes"))
 
-# --- Claude writes the commit's message --------------------------------------------------------
+# --- an agent writes the commit's message --------------------------------------------------------
 #
 # A click on the Commit button saves the window's changes to the file, and
-# gives the file's diff since the last commit to Claude, which writes the
-# message as the repository's last messages are written. Then Ladder commits
-# the file, and says so under the top bar. The button spins while Claude
-# writes. When Claude can't write it, the words under the top bar say why, and
-# the palette opens with Commit, for a message that you write.
+# gives the file's diff since the last commit to the agent that Settings
+# chose, Claude Code unless you changed it, which writes the message as the
+# repository's last messages are written. Then Ladder commits the file, and
+# says so under the top bar. The button spins while the agent writes. When it
+# can't write it, the words under the top bar say why, and the palette opens
+# with Commit, for a message that you write. The words of the button and of
+# the list name the agent.
 #
 # The chevron beside the button opens a list of the three ways to commit:
 #
@@ -47221,21 +47232,28 @@ BUTTONS[:commit] = (run=e -> commit_scope!(e, choosing(e) ? :part : :file), off=
 #     still changes after the commit.
 #   - Commit all changed files commits every file that git's panel lists.
 #
-# Under them, a switch says who writes the message of each way: Claude, or
+# Under them, a switch says who writes the message of each way: the agent, or
 # you. With it on, a commit opens the palette for your words. It's a setting,
 # so it stays as you leave it.
 
-"The command that writes a commit's message from the diff that it reads on its stdin. Nothing means `claude` of Claude Code. A test puts a command of its own here."
+"The command that writes a commit's message from the diff that it reads on its stdin. Nothing means the command of the agent that Settings chose. A test puts a command of its own here."
 const MESSAGE_COMMAND = Ref{Any}(nothing)
 
-"The most of a diff that Claude reads for a message. A longer diff is cut short, and says so."
+"The most of a diff that the agent reads for a message. A longer diff is cut short, and says so."
 const MOST_DIFF = 60_000
 
-"The command that writes a commit's message, with the words that ask for it"
-message_command(prompt) =
-  MESSAGE_COMMAND[] !== nothing ? `$(MESSAGE_COMMAND[]) $prompt` :
-  # Haiku writes it in a few seconds. Safe mode starts with no plugins, MCP servers or hooks, so it starts quickly.
-  `$(claude_path()) --model haiku --output-format text --safe-mode --no-session-persistence -p $prompt`
+"""
+The command that writes the message of a commit of the repository at `root`
+for the window of `e`, and what the command reads on its stdin: the agent
+that Settings chose, asked for a message of `diff`. Claude Code reads the
+diff on its stdin. An agent that doesn't, like Grok, gets it in its words.
+"""
+message_command(e, root, diff) = begin
+  MESSAGE_COMMAND[] === nothing || return (`$(MESSAGE_COMMAND[]) $(message_prompt(root))`, diff)
+  k = agent_kind(e.ai)
+  k.piped ? (`$(kind_command(k, k.message)) $(message_prompt(root))`, diff) :
+            (`$(kind_command(k, k.message)) $(message_prompt(root, piped=false) * "\n\nThe diff:\n\n" * diff)`, "")
+end
 
 "The last commit messages of the repository at `root`, the newest first, with no lines that say who helped"
 recent_messages(root, n=5) = begin
@@ -47249,29 +47267,33 @@ recent_messages(root, n=5) = begin
   messages
 end
 
-"What Claude is asked, for the message of a commit of the repository at `root`"
-message_prompt(root) = begin
+"What the agent is asked, for the message of a commit of the repository at `root`. With `piped` false, the diff comes after these words."
+message_prompt(root; piped=true) = begin
   examples = recent_messages(root)
-  "Write the git commit message for the change in the diff that you read on stdin. " *
+  "Write the git commit message for the change in the diff that $(piped ? "you read on stdin" : "comes at the end of these words"). " *
   "Write it as the recent messages of this repository are written: a first line of less than 72 characters " *
   "that says what the change does, and then a blank line and a short body only when the change needs one. " *
   "Reply with the message alone, with no quotes and no code fence." *
   (isempty(examples) ? "" : "\n\nThe recent messages, newest first:\n\n" * join(examples, "\n\n---\n\n"))
 end
 
-"The message that the command `cmd` wrote from `diff`, with no code fence and no blank lines round it. It fails with what the command said when it fails."
-read_message(cmd, diff) = begin
+"""
+The message that the command `cmd` wrote from `input`, which it reads on its
+stdin, with no code fence and no blank lines round it. It fails with what the
+command said when it fails. `who` is the agent, by its name.
+"""
+read_message(cmd, input; who="Claude") = begin
   said = IOBuffer()
   out = try
-    read(pipeline(cmd, stdin=IOBuffer(diff), stderr=said), String)
+    read(pipeline(cmd, stdin=IOBuffer(input), stderr=said), String)
   catch
     why = strip(String(take!(said)))
-    error(isempty(why) ? "Claude didn't write a message." : "Claude didn't write a message: " * first(split(why, '\n')))
+    error(isempty(why) ? "$who didn't write a message." : "$who didn't write a message: " * first(split(why, '\n')))
   end
   text = strip(replace(strip(out), r"^```[a-z]*\n" => "", r"\n```$" => ""))
   # Claude adds a line that says it wrote the commit with you. It wrote the message, not the change, so the line goes.
   text = strip(join(filter(l -> !occursin(r"^(Co-Authored-By|Claude-Session):"i, l), split(text, '\n')), "\n"))
-  isempty(text) && error("Claude wrote an empty message.")
+  isempty(text) && error("$who wrote an empty message.")
   String(text)
 end
 
@@ -47292,11 +47314,11 @@ with_changes(old, new, chosen) = begin
 end
 
 """
-Start a commit of the window's file with a message that Claude writes: of the
+Start a commit of the window's file with a message that the agent writes: of the
 whole file with `:file`, of every changed file of its repository with
 `:all`, of the ticked changes of the file with `:part`, or of the files that
 are ticked in git's panel with `:staged`. Changes that aren't saved are saved
-first. Claude writes while the window goes on, and `commit_tick!` commits
+first. The agent writes while the window goes on, and `commit_tick!` commits
 when the message comes.
 """
 commit_now!(e, what::Symbol) = begin
@@ -47324,9 +47346,10 @@ commit_now!(e, what::Symbol) = begin
     what == :staged && isempty(strip(diff)) && error("Tick the files to commit.")
     isempty(strip(diff)) && error("$(what == :all ? basename(root) : basename(path)) has no change to commit.")
     length(diff) > MOST_DIFF && (diff = first(diff, MOST_DIFF) * "\n… (the diff goes on)")
-    cmd = message_command(message_prompt(root))
-    task = Threads.@spawn read_message(cmd, diff)
-    e.nodes[:writing] = (task=task, what=what, root=root, path=path, rel=rel, part=part)
+    cmd, input = message_command(e, root, diff)
+    who = e.ai
+    task = Threads.@spawn read_message(cmd, input; who=who)
+    e.nodes[:writing] = (task=task, what=what, root=root, path=path, rel=rel, part=part, who=who)
     redraw_in!(e, 0.05)
   catch err
     say_result!(e, trouble(err))
@@ -47361,7 +47384,7 @@ end
 """
 Commit the window's file with `:file`, its ticked changes with `:part`, every
 changed file of its repository with `:all`, or the files that are ticked in
-git's panel with `:staged`. Claude writes the message, unless the setting says
+git's panel with `:staged`. The agent writes the message, unless the setting says
 that you write it. Then the palette asks for it.
 """
 commit_scope!(e, what::Symbol) = begin
@@ -47424,11 +47447,11 @@ add_command!(commit_ticked!, name=:commit_ticked, title="Commit the ticked chang
 "Say `words` under the top bar for a while"
 say_result!(e, words) = (e.nodes[:result] = (String(words), time()); redraw_in!(e, 0); e)
 
-"Commit what `commit_now!` started, once Claude has written its message. Each window does this in each frame."
+"Commit what `commit_now!` started, once the agent has written its message. Each window does this in each frame."
 commit_tick!(e) = begin
   w = get(e.nodes, :writing, nothing)
   w === nothing && return
-  istaskdone(w.task) || return (yield(); redraw_in!(e, 0.05))   # the button spins, and the task that reads Claude gets its turn
+  istaskdone(w.task) || return (yield(); redraw_in!(e, 0.05))   # the button spins, and the task that reads the agent gets its turn
   delete!(e.nodes, :writing)
   message = try
     fetch(w.task)
@@ -47573,7 +47596,7 @@ end
   way::Symbol = :file
 end
 
-"The row of the list with the switch. On, you write the message of each commit. Off, Claude does."
+"The row of the list with the switch. On, you write the message of each commit. Off, the agent that Settings chose does."
 @def mutable struct OwnMessage <: SemanticUI end
 
 "True while the list of the ways to commit shows under the chevron"
@@ -47692,7 +47715,7 @@ cursor(::CommitWay) = :hand
 onkey(r::CommitWay, ev::KeyPress{Keys.mouse_left}) = begin
   e = editor(r)
   close_popup!(ev.window, COMMIT_LIST)
-  haskey(e.nodes, :writing) && return handled   # Claude is writing a message
+  haskey(e.nodes, :writing) && return handled   # the agent is writing a message
   r.way == :part ? choose_changes!(e) : commit_scope!(e, r.way)
   handled
 end
