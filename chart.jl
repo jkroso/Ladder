@@ -133,10 +133,11 @@ The number that a cell holds, with what's written before it and after it, or
 nothing when the cell isn't a number. `\$1,200` is 1200 with a \$ before it,
 `45%` is 45 with a % after it, and `2.4 m` is 2.4 with ` m` after it.
 `22.4 billion USD` is 22.4 billion, and `100 million USD` is 100 million.
+`2.6e-8%` is 2.6 × 10⁻⁸ with a % after it, as Julia writes a very small number.
 """
 number(text::AbstractString) = begin
   s = replace(strip(text), r"^\*\*(.*)\*\*$" => s"\1", r"^`(.*)`$" => s"\1")
-  m = match(r"^([-−–+]?)\s*([$€£¥]?)\s*(\d[\d,]*(?:\.\d+)?|\.\d+)\s*(%|[^\d\s,.][^\d]{0,11})?$", s)
+  m = match(r"^([-−–+]?)\s*([$€£¥]?)\s*((?:\d[\d,]*(?:\.\d+)?|\.\d+)(?:[eE][-+]?\d+)?)\s*(%|[^\d\s,.][^\d]{0,11})?$", s)
   m === nothing && return nothing
   x = parse(Float64, replace(m[3], "," => ""))
   after = m[4] === nothing ? "" : m[4] == "%" ? "%" : " " * m[4]

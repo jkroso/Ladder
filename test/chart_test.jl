@@ -14,6 +14,9 @@ const TABLE = [["Month", "Sales", "Costs", "Note"],
   @test C.number("\$1,200") == (1200.0, "\$", "") && C.number("45%") == (45.0, "", "%") && C.number("2.4 m") == (2.4, "", " m")
   @test C.number("-3") == (-3.0, "", "") && C.number("−\$3") == (-3.0, "\$", "") && C.number("**7**") == (7.0, "", "")
   @test C.number("3 days") == (3.0, "", " days") && C.number(".5") == (0.5, "", "")
+  # Julia writes a very small or big number with an e, as a sheet shows it
+  @test C.number("2.57816e-8%") == (2.57816e-8, "", "%") && C.number("1e6") == (1e6, "", "") && C.number("3E+2 m") == (300.0, "", " m")
+  @test C.number("-1.5e-3") == (-1.5e-3, "", "") && C.number("2 eggs") == (2.0, "", " eggs") && C.number("2e") == (2.0, "", " e")
   @test C.number("Jan") === nothing && C.number("") === nothing && C.number("2026-11-16") === nothing && C.number("12 of 14") === nothing
   @test C.words(54.0) == "54" && C.words(14285.714) == "14,285.7" && C.words(0.256) == "0.26" && C.words(-1200) == "−1,200"
   @test C.words(1234567.5) == "1,234,567.5" && C.words(-0.001) == "0"
