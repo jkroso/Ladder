@@ -177,7 +177,7 @@ Five amounts, added once. The prices are in US dollars.
 
 - **The satellites.** McCalip prices a Starlink satellite at !`per_watt = 22USD/W` for each watt its panels make. These panels make !`panels`. The satellites cost !`build = per_watt * panels`.
 - **The launches.** A Falcon 9 costs a customer roughly $3,000 a kilogram. Say a Starship costs !`per_kg = 100USD/kg`. The fleet weighs !`fleet` tonnes. The launches cost !`launch = per_kg * fleet * ton`.
-- **Keeping it running.** Ground stations and staff cost !`ops = 1Percent` of the satellites' price for each year of work at full size. The fleet does !`years` years of that work before it is gone. This costs !`upkeep = build * ops * years`.
+- **Keeping it running.** Ground stations and staff cost !`ops = 1Percent` of the satellites' price for each year the fleet is up. They are paid for !`life` years, until 1% of the chips are left. That is not the !`years` years of work at full size. This costs !`upkeep = build * ops * life`.
 - **The design.** Engineering the first satellite of a new kind costs !`design = 100000000USD`. That is paid once.
 - **Deorbit.** The fuel for the burn costs !`deorbit_cost = per_kg * propellant * ton`.
 
@@ -228,8 +228,8 @@ In orbit, each megawatt-hour costs !`round(per_orbit / per_ground, digits=1)` ti
 At the ground's price for each megawatt-hour, the fleet's work is worth !`target = ground / energy_ground * energy`. For orbit to match the ground, the whole fleet can cost no more than that.
 
 - If nothing else changes, launches would have to cost less than !`let x = (target - build - upkeep - design) / ((fleet + propellant) * ton); x > 0USD/kg ? x : "nothing. The other costs already pass the ground" end`.
-- If launches stay at !`per_kg`, satellites would have to cost less than !`let x = (target - launch - deorbit_cost - design) / panels / (1 + ops * years); x > 0USD/W ? round(convert(USD/W, x), digits=2) : "nothing. The other costs already pass the ground" end`.
-- Even if launches were free, satellites would have to cost less than !`let x = (target - design) / panels / (1 + ops * years); x > 0USD/W ? round(convert(USD/W, x), digits=2) : "nothing. The other costs already pass the ground" end`.
+- If launches stay at !`per_kg`, satellites would have to cost less than !`let x = (target - launch - deorbit_cost - design) / panels / (1 + ops * life); x > 0USD/W ? round(convert(USD/W, x), digits=2) : "nothing. The other costs already pass the ground" end`.
+- Even if launches were free, satellites would have to cost less than !`let x = (target - design) / panels / (1 + ops * life); x > 0USD/W ? round(convert(USD/W, x), digits=2) : "nothing. The other costs already pass the ground" end`.
 
 Here the satellites cost !`build` and the launches !`launch`. Each bar shows its part of the two together:
 
