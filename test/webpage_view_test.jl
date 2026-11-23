@@ -24,9 +24,10 @@ K.MEDIA_CACHE[] = mktempdir()                          # the pictures are kept h
 K.Eml.CACHE[] = mktempdir()                            # and the files that came with an email here
 
 const dir = mktempdir()
+@eval K settings_file() = $(joinpath(dir, "settings"))   # the senders whose pictures you asked for are listed beside it
 "Write an email file whose body is `body`, of the kind `type`, and give its path. With `file`, a PDF comes with it."
-email(name, body; type="text/html", file=false) = begin
-  head = "From: Sam Lee <sam@example.com>\r\nTo: you@example.com\r\nSubject: $name\r\nDate: Sat, 14 Nov 2026 09:32:00 +1100\r\nMIME-Version: 1.0\r\n"
+email(name, body; type="text/html", file=false, from="Sam Lee <sam@example.com>") = begin
+  head = "From: $from\r\nTo: you@example.com\r\nSubject: $name\r\nDate: Sat, 14 Nov 2026 09:32:00 +1100\r\nMIME-Version: 1.0\r\n"
   text = "Content-Type: $type; charset=utf-8\r\n\r\n$body\r\n"
   pdf = "Content-Type: application/pdf; name=\"Roof quote.pdf\"\r\nContent-Disposition: attachment; filename=\"Roof quote.pdf\"\r\n" *
         "Content-Transfer-Encoding: base64\r\n\r\nJVBERi0xLjcK\r\n"
@@ -312,6 +313,33 @@ end
   foreach(_ -> frame(second), 1:3)
   v = other.nodes[:sent_email]
   @test v.pictures && v.shown !== nothing && v.shown.want[3] && v.shown.shot.tall == tall + 30
+end
+
+@testset "each email from a sender whose pictures you asked for gets its pictures" begin
+  # The click on Load pictures in the test before this one noted the sender, once
+  @test readlines(K.picture_senders_file()) == ["sam@example.com"]
+  url = "https://example.com/footer.png"
+  file = joinpath(dir, "footer.png")
+  write(file, png((x, y) -> (220, 120, 40), 40, 20))
+  K.fetches[url] = file
+  path = email("More news", """<p>More news</p><img src="$url" style="display:block">""", from="\"Lee, Sam\" <Sam@Example.com>")
+  show(path)
+  @test shows() && sent().sender == "sam@example.com" && sent().pictures && sent().shown.want[3]
+  @test !isfile(K.sent_mark(path))
+  # It has no button, so the email is at the top of where the button would be
+  @test until(() -> colour(spot(8 + 20, laid().tall - 8 - 10)) == (220, 120, 40))
+  # An email from someone else still asks first
+  other = email("Hello", """<p>Hello</p><img src="$url" style="display:block">""", from="Kim Ng <kim@example.org>")
+  show(other)
+  @test shows() && sent().sender == "kim@example.org" && !sent().pictures && !sent().shown.want[3]
+  button = sent().parts[(:button, :pictures)]
+  @test occursin("kim@example.org", button.tip)
+  click(middle(rect(button)))
+  frames()
+  @test sent().pictures && readlines(K.picture_senders_file()) == ["sam@example.com", "kim@example.org"]
+  # An address is listed once
+  K.picture_sender!("sam@example.com")
+  @test readlines(K.picture_senders_file()) == ["sam@example.com", "kim@example.org"]
 end
 
 @testset "a window that isn't on the screen asks the web for nothing" begin

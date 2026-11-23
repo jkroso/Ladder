@@ -222,7 +222,8 @@
 #     page that's read and not changed. eml.jl says how. The email shows as
 #     it was sent, with its sender's colours, layout and buttons. ⌘E goes
 #     down a level, to its words as a page, and up again. It asks the web
-#     for nothing until you click Load pictures. Ladder gets no email and
+#     for nothing until you click Load pictures. Each email from the same
+#     sender then loads its pictures too. Ladder gets no email and
 #     sends none: that's the work of code that the startup page loads.
 #     Click the top of the email, with its subject and sender, and a line
 #     goes round it. ⌘E or the ladder then shows every field of its header,
@@ -40091,7 +40092,10 @@ end
 # Ladder asks the web for nothing to draw an email, so its sender can't tell
 # when you open it. A picture that the email has from a web site is an empty
 # box then, and a button over the email fetches those pictures. An email that
-# you asked that of once shows its pictures from then on.
+# you asked that of once shows its pictures from then on, and so does each
+# email from the same address. The file "picture senders" in Ladder's own
+# folder lists those addresses, one on each line. Take an address out of it,
+# and the emails from it that you didn't click the button on ask again.
 #
 # A picture of the email that moves, like a GIF, moves here too. The email is
 # laid out once, and the window is drawn again each time such a picture shows
@@ -40111,7 +40115,8 @@ const SENT_PAGE = Ref{Any}(Web.page)
   read::Float64 = -1.0                       # when the file had last changed, as its HTML was read
   html::String = ""                          # the email's HTML, or "" for an email with none
   remote::Bool = false                       # the HTML has pictures from a web site
-  pictures::Bool = false                     # and you asked for them
+  pictures::Bool = false                     # and you asked for them, for this email or for each email from its sender
+  sender::String = ""                        # the address that the email is from, in lower case, or ""
   store::Any = nothing                       # the pictures of the HTML that are read already, which each layout uses again
   waiting::Set{String} = Set{String}()       # the addresses of the pictures that are on their way from the web
   landed::Int = 0                            # how many of them have come, or couldn't be fetched
@@ -40146,6 +40151,28 @@ sent_dir(path) = joinpath(media_dir(), "emails", string(hash(abspath(path)), bas
 "The file in an email's folder that says you asked for its pictures from the web"
 sent_mark(path) = joinpath(sent_dir(path), ".pictures")
 
+"The file in Ladder's own folder that lists the addresses whose emails get their pictures from the web, one on each line"
+picture_senders_file() = joinpath(dirname(settings_file()), "picture senders")
+
+"The addresses whose emails get their pictures from the web, in lower case"
+picture_senders() = begin
+  file = picture_senders_file()
+  lines = isfile(file) ? (try readlines(file) catch; String[] end) : String[]
+  Set(lowercase(strip(l)) for l in lines if !isempty(strip(l)))
+end
+
+"Note that each email from `address` gets its pictures from the web from now on"
+picture_sender!(address) = begin
+  (isempty(address) || address in picture_senders()) && return
+  try
+    mkpath(dirname(picture_senders_file()))
+    open(io -> println(io, address), picture_senders_file(), "a")
+  catch err
+    @warn "Ladder couldn't note that this sender's emails get their pictures" address exception=err
+  end
+  nothing
+end
+
 "The page's email as it was sent, when the page is an email with HTML, or nothing. Its HTML is read here, once."
 sent_html(e) = begin
   b = e.buf
@@ -40155,7 +40182,8 @@ sent_html(e) = begin
   if v.path != b.path || v.read != at
     v.path, v.read, v.html = b.path, at, Eml.webpage(b.path)
     v.remote = Webpages.remote(v.html)
-    v.pictures = v.remote && isfile(sent_mark(b.path))
+    v.sender = Eml.sender(b.lines)
+    v.pictures = v.remote && (isfile(sent_mark(b.path)) || (!isempty(v.sender) && v.sender in picture_senders()))
     v.asked = v.shown = v.failed = v.store = nothing
     v.since = time()
     empty!(v.waiting)
@@ -40283,7 +40311,8 @@ end
 describe(v::SentEmail) = begin
   e = editor(v)
   with_theme(component_theme(e.zoom)) do
-    words = "Get this email's pictures from the web. Its sender can then tell that you opened it."
+    words = isempty(v.sender) ? "Get this email's pictures from the web. Its sender can then tell that you opened it." :
+      "Get this email's pictures from the web, and the pictures of each email from $(v.sender) from now on. The sender can then tell when you open them."
     bar = v.remote && !v.pictures && v.shown !== nothing ?
       (Row(width(grow=grow), Alignment.Center, justify=Alignment.End, block_button!(v, :pictures, :pictures, words="Load pictures", icon="image", tip=words)),) : ()
     # The links to the email's files are under it, with some room between
@@ -40481,7 +40510,7 @@ onkey(a::SentPage, ev::KeyPress{K}) where K = begin
   K == Keys.escape ? handled : nothing
 end
 
-"Do what a button of the email does: get the email's pictures from the web, now and each time it shows"
+"Do what a button of the email does: get the email's pictures from the web, now and each time it shows, and the pictures of each email from the same sender"
 act!(v::SentEmail, action, w) = begin
   action == :pictures || return handled
   v.pictures = true
@@ -40491,6 +40520,7 @@ act!(v::SentEmail, action, w) = begin
     touch(sent_mark(v.path))
   catch
   end
+  picture_sender!(v.sender)
   redraw_in!(v, 0.0)
   handled
 end

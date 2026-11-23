@@ -11,6 +11,7 @@
 #     header_fields(path)      # every field of the email's header, as name => value
 #     attached(path, lines)    # the first of the lines of that page that link to the email's files
 #     fields(lines)            # what the front matter of a page says, by its keys
+#     sender(lines)            # the address of who sent the email of that page
 #     isdraft(lines)           # true for a page that's an email to send
 #
 # Ladder only reads email. Getting it from a server, and sending it, is the
@@ -125,6 +126,17 @@ fields(lines) = begin
     end
   end
   (out, stop + 1)
+end
+
+"""
+The address of who sent the email whose page is `lines`, as `render` makes
+it, in lower case and without the sender's name. It's "" when the front
+matter names nobody it's from.
+"""
+sender(lines) = begin
+  said, _ = fields(lines)
+  people = addresses(get(said, "from", ""))
+  isempty(people) ? "" : lowercase(strip(last(first(people))))
 end
 
 "True when the page `lines` is an email that isn't sent yet: its front matter names who it's to, and has no date"
