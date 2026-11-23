@@ -614,6 +614,7 @@ struct Piece
   atomic::Bool   # true when `text` isn't the line's own text, like a • for a -
   link::String
   node::Union{Nothing,Inline}   # what's drawn in place of the text, for inline code that made a node
+  words::Bool    # true for the text that inline code made, whose words can go onto different lines
 end
 
 "A run of text placed on one line of the screen"
@@ -691,10 +692,16 @@ wrap(pieces, limit::px; lh, size, left=0px, hang=left, above=0px, below=0px, kin
       x[] += w
     end
   end
-  # Cut the pieces into words, each with the spaces after it. What inline code made is one word.
+  # Cut the pieces into words, each with the spaces after it. A node that inline code made is one word. The text that
+  # it made is cut into words too, and its first word stands for all of the code, so that a click on it finds the code.
   words = Tuple{Piece,String,Int,Int}[]
   for p in pieces
-    if p.atomic
+    if p.words
+      for (k, m) in enumerate(eachmatch(r"\S+\s*|\s+", p.text))
+        push!(words, (p, String(m.match), k == 1 ? p.col : p.col + p.n, k == 1 ? p.n : 0))
+      end
+      continue
+    elseif p.atomic
       push!(words, (p, p.text, p.col, p.n))
       continue
     end
@@ -709,6 +716,7 @@ wrap(pieces, limit::px; lh, size, left=0px, hang=left, above=0px, below=0px, kin
   # Spaces at the end of a line may hang past the edge, but the spaces in a chip are inside it.
   reach((p, text, col, n), last) =
     p.node !== nothing ? p.node.w :
+    p.words ? measure(p.face, last ? rstrip(text) : text) :
     p.atomic ? measure(p.face, text) :
     p.face.chip ? measure(p.face, text) + (col == p.col ? 2(CHIP_X + 1px) : 0px) :
     measure(p.face, last ? rstrip(text) : text)
@@ -2033,7 +2041,7 @@ end
 "`w` if text can be that heavy"
 text_weight(w::Integer) = 0 < w <= HEAVIEST ? Int(w) : error("A weight of text goes from 1, the lightest, to $HEAVIEST, which is Semibold. $w isn't one of them.")
 
-piece(text, col, face; atomic=false, n=length(text), link="", node=nothing) = Piece(text, col, n, face, atomic, link, node)
+piece(text, col, face; atomic=false, n=length(text), link="", node=nothing, words=false) = Piece(text, col, n, face, atomic, link, node, words)
 
 # --- the font of code ------------------------------------------------------------------
 #
@@ -2288,12 +2296,41 @@ Which one of the document's pieces of inline code with this code the span `s`
 of line `i` is: 1 for the first. Two pieces with the same code each make a
 node of their own.
 """
-ordinal(e, i::Int, s::Span) = begin
+ordinal(e, i::Int, s::Span) = ordinal(e, i, s.col, s.text)
+
+"Which one of the document's pieces of inline code `code` the one whose code starts at column `col` of line `i` is"
+ordinal(e, i::Int, col::Int, code::AbstractString) = begin
   b = e.buf
-  marked = INLINE * s.text * "`"
+  marked = INLINE * code * "`"
   1 <= i <= length(b.lines) || return 1
   before = sum(j -> count(marked, b.lines[j]), Iterators.filter(<(i), inline_lines(e, b)), init=0)
-  before + count(marked, head(b.lines[i], max(0, s.col - length(INLINE)))) + 1
+  before + count(marked, head(b.lines[i], max(0, col - length(INLINE)))) + 1
+end
+
+# How many times a sum in a line of text has run. What's worked out from what the sums show, like the
+# numbers that a chart draws from a table, is worked out again when this changes.
+const sums_run = Ref(0)
+
+"""
+The text of a cell of a table, with what each sum in it shows in place of its
+code: "\$!`price`" is "\$12". `i` is the cell's line, and `col` the column
+where `text` starts in it. A sum that hasn't run yet, that went wrong or that
+made a node shows nothing. This runs no sum, as the sums run in the order of
+the page, and `sums_run` says when they've run again.
+"""
+sums_shown(e, i::Int, col::Int, text::AbstractString) = begin
+  occursin(INLINE, text) || return text
+  out = IOBuffer()
+  at = 1
+  for m in eachmatch(r"!`([^`]+)`", text)
+    print(out, text[at:prevind(text, m.offset)])
+    code = String(m[1])
+    made = get(e.nodes, (:inline, e.buf.path, code, ordinal(e, i, col + length(text, 1, m.offset) + 1, code)), nothing)
+    made isa Tuple && !made[2] && print(out, made[1])
+    at = m.offset + ncodeunits(m.match)
+  end
+  print(out, text[at:end])
+  String(take!(out))
 end
 
 """
@@ -2304,6 +2341,7 @@ true if that text says what went wrong.
 made(e, code::String, n::Int) = begin
   key = (:inline, e.buf.path, code, n)
   get!(e.nodes, key) do
+    sums_run[] += 1
     out = evaluate(e, code, key=key, inline=true)
     out isa Tuple && return out
     shown = Shown(value=out, inline=true)
@@ -2331,7 +2369,8 @@ inline(e, i::Int, s::Span, base::Face) = begin
   n = length(s.text)
   out isa Tuple || return piece(s.text, s.col, base, atomic=true, n=n, node=fit(e, out))
   text, failed = out
-  piece(text, s.col, failed ? Face(base, color=colours.accent) : base, atomic=true, n=n)
+  # A value between == and ==, or in the words that a comment is about, has the highlighter's colour behind it too
+  piece(text, s.col, Face(base, color=failed ? colours.accent : base.color, highlit=s.highlit), atomic=true, n=n, words=true)
 end
 
 const LONGEST_VALUE = 200   # characters of a value that inline code shows as text
@@ -3059,7 +3098,7 @@ cellnames(rows::Int, cols::Int) = [letters(c) * string(r) for r in 1:rows for c 
 
 "How wide the longest part of `p` is that can't go onto two lines: a word, a number or what a formula comes to"
 unbroken(p::Piece) =
-  p.node !== nothing ? p.node.w : p.atomic ? measure(p.face, p.text) :
+  p.node !== nothing ? p.node.w : p.atomic && !p.words ? measure(p.face, p.text) :
   maximum(word -> measure(p.face, word), split(p.text), init=0px) + (p.face.chip ? 2(CHIP_X + 1px) : 0px)
 
 "Lay out the spreadsheet whose code block opens on line `from` and closes on line `to`"
@@ -3368,7 +3407,7 @@ spare(ps::Vector{Piece}) = begin
     whole(p) && (push!(out, p); continue)
     col = p.col
     for (part, f) in runs(p.text, p.face)
-      push!(out, Piece(part, col, length(part), f, false, p.link, nothing))
+      push!(out, Piece(part, col, length(part), f, false, p.link, nothing, false))
       col += length(part)
     end
   end
@@ -3400,8 +3439,8 @@ sheetgrid(e, from::Int, to::Int) = begin
   b = e.buf
   caret = from < b.caret[1] < to && b.caret[1] == b.anchor[1] ? b.caret : nothing
   # The layout holds the number of each row's line, so it's kept for these lines only
-  # The names that the sheet has from the parts of the page over it, like the measures of a takeoff
-  given = page_given(e, from)
+  # The names that the sheet has from the parts of the page over it, like the measures of a takeoff and the sums in its lines of text
+  given = page_given(e, from, sums=true)
   # While the mouse is on one value of a chart of a sheet with a row over a range, the sheet shows itself at that value
   at = sheet_case(e, [parts(b.lines[i]) for i in from+1:to-1], given)
   get!(e.flows, (:sheet, from, b.lines[from+1:to-1], caret, given, at)) do
@@ -3749,7 +3788,7 @@ offered(e) = begin
   (c.lo <= col <= c.limit && nearest(cs, col) == length(cs)) || return nothing
   s, _ = sheet(b, i)
   rows = [parts(b.lines[j]) for j in s+1:i-1]
-  names = known(rows, length(rows) + 1, page_given(e, s))
+  names = known(rows, length(rows) + 1, page_given(e, s, sums=true))
   isempty(names) && return nothing
   chars = collect(b.lines[i])
   # In the middle of a word, nothing is offered
@@ -11563,11 +11602,11 @@ plain_cell(text) = String(strip(replace(text, r"\*\*|__|`" => "")))
 Every table of the page that shows: each table, each spreadsheet and each
 sheet. Each one has its first and last line, the heading that it's under, and
 the text of each cell of each row. A formula's cell holds what the formula
-comes to. `headed` is true when the first row has the names of the columns.
+comes to, and a cell with a sum in it holds what the sum shows. `headed` is true when the first row has the names of the columns.
 """
 page_tables(e) = begin
   b = e.buf
-  key = (:tables, b.path, b.version, table_reads[], page_day(e))
+  key = (:tables, b.path, b.version, table_reads[], sums_run[], page_day(e))
   haskey(e.flows, key) && return e.flows[key]
   ks = kinds(b)
   out = @NamedTuple{first::Int, last::Int, under::String, rows::Vector{Vector{String}}, headed::Bool, ranged::Bool}[]
@@ -11581,7 +11620,8 @@ page_tables(e) = begin
     elseif k.kind == Kind.table
       run = table(b, i)
       if run !== nothing && run[1] == i
-        rows = [String[plain_cell(rest(head(b.lines[r], c.hi), c.lo)) for c in tablecells(b.lines[r])] for r in tablerows(run)]
+        # A chart draws what a sum in a cell shows, and not its code
+        rows = [String[plain_cell(sums_shown(e, r, c.lo, rest(head(b.lines[r], c.hi), c.lo))) for c in tablecells(b.lines[r])] for r in tablerows(run)]
         push!(out, (first=i, last=run[2], under=under, rows=rows, headed=true, ranged=false))
         stop = run[2]
       end
@@ -11595,7 +11635,7 @@ page_tables(e) = begin
                   for (r, row) in enumerate(texts)]
         else
           texts = [parts(b.lines[r]) for r in i+1:t-1]
-          given = page_given(e, i)
+          given = page_given(e, i, sums=true)
           # A sheet with a row over a range is a table with a row for each value of that row
           over = get!(() -> cases(texts; given), e.flows, (:cases, texts, given))
           if over !== nothing
@@ -11657,7 +11697,7 @@ end
 "What the chart shows. It's worked out again when the page has changed."
 shown!(v::ChartView) = begin
   e = editor(v)
-  key = (e.buf.version, v.first, v.lines, table_reads[], page_day(e))
+  key = (e.buf.version, v.first, v.lines, table_reads[], sums_run[], page_day(e))
   (v.shown !== nothing && v.shown[1] == key) || (v.shown = (key, chart_data(e, v)))
   v.shown[2]
 end
@@ -12121,7 +12161,7 @@ worked out again when the block, the page or the file changes.
 """
 filter_shown!(v::FilterView) = begin
   e = editor(v)
-  key = (v.lines, e.buf.version, v.first, table_reads[], page_day(e))
+  key = (v.lines, e.buf.version, v.first, table_reads[], sums_run[], page_day(e))
   v.shown !== nothing && v.shown[1] == key && return v.shown[2]
   found = filter_subset(e, v.lines, page_tables(e), v.first; load=v.lang == LOAD)
   # What's kept of the rows is kept while they're the same
@@ -20359,7 +20399,7 @@ block_tick!(v::TimelogView) = begin
   if Timelogs.running(v.data) !== nothing && (minute = Dates.minute(Timelogs.now())) != v.minute
     v.minute = minute
     e = editor(v)
-    delete!(e.flows, (:tables, e.buf.path, e.buf.version, table_reads[], page_day(e)))
+    delete!(e.flows, (:tables, e.buf.path, e.buf.version, table_reads[], sums_run[], page_day(e)))
     foreach(node -> node isa ChartView && (node.shown = nothing), values(e.nodes))
   end
   v
@@ -22511,7 +22551,16 @@ end
 # sum of the page changes, `inline_tick!` forgets what the sums after it made,
 # and they run again from the top down.
 
-const SCRUB_STEP = 5.0   # px that the mouse moves for one step of a number
+const SCRUB_STEP = 5.0         # px that the mouse moves for one step of a number, near where the drag started
+const SCRUB_SPEEDUP = 200.0    # px: each this much further from there, the steps come e times as fast
+
+"""
+How many steps of a number a drag of `dx` px from where it started makes. Near
+the start it's one step for each `SCRUB_STEP` px, so a small change is easy to
+make. Further away, the steps come faster and faster: 100px makes 26 steps, and
+1000px makes 5,897, which is more than 200 times as many.
+"""
+scrub_steps(dx) = (k = SCRUB_SPEEDUP / SCRUB_STEP; round(Int, sign(dx) * k * expm1(abs(dx) / SCRUB_SPEEDUP)))
 
 """
 The number at the place `pos` of the window that a drag can change: its line,
@@ -22902,7 +22951,7 @@ end
 scrub_to!(e, pos) = begin
   s = e.nodes[:scrub]
   b = e.buf
-  steps = round(Int, (num(pos[1]) - s.x) / SCRUB_STEP) * (only_held(e, Keys.shft) ? 10 : 1)
+  steps = scrub_steps(num(pos[1]) - s.x) * (only_held(e, Keys.shft) ? 10 : 1)
   (steps == s.steps || !(1 <= s.line <= length(b.lines))) && return e
   new = nudged(s.text, steps)
   caret, anchor = b.caret, b.anchor
@@ -23372,13 +23421,34 @@ block_names(lang, lines) = begin
 end
 
 """
+The names that the sums in a line of text give, each with the code of its
+value: !`farm = 2GW` gives ("farm", "2GW"). A sum that gives no name, like
+!`farm * 2`, gives nothing. A `_` of a name is a space, so a row of a sheet
+can use !`farm_cost = …` as "farm cost", the way a sum uses the row "Farm
+cost" as `farm_cost`.
+"""
+sum_names(text::AbstractString) = begin
+  out = Tuple{String,String}[]
+  occursin(INLINE, text) || return out
+  for m in eachmatch(r"!`([^`]+)`", text)
+    code = String(m[1])
+    ex = try Meta.parse(code, raise=false) catch; nothing end
+    (ex isa Expr && ex.head == :(=) && length(ex.args) == 2 && ex.args[1] isa Symbol) || continue
+    # The name has no =, so the first = is the one after it
+    push!(out, (replace(String(ex.args[1]), '_' => ' '), String(strip(code[nextind(code, findfirst('=', code)):end]))))
+  end
+  out
+end
+
+"""
 The names that the parts of the page over line `upto` give, each with an
 expression for its value. With no line, it's the names of the whole page.
-They're found again when the page has changed.
+With `sums`, the sums in the lines of text give their names too, so a sheet
+can use !`farm = 2GW` as `farm`. They're found again when the page has changed.
 """
-page_given(e, upto::Int=typemax(Int)) = begin
+page_given(e, upto::Int=typemax(Int); sums::Bool=false) = begin
   b = e.buf
-  get!(e.flows, (:given, b.path, b.version, upto)) do
+  get!(e.flows, (:given, b.path, b.version, upto, sums)) do
     out = Tuple{String,String}[]
     ks = kinds(b)
     i = 1
@@ -23391,6 +23461,8 @@ page_given(e, upto::Int=typemax(Int)) = begin
             append!(out, get!(() -> block_names(k.lang, b.lines[i+1:t-1]), e.flows, (:block_names, k.lang, b.lines[i+1:t-1])))
           i = t
         end
+      elseif sums && !(k.kind in (Kind.fence, Kind.code))
+        append!(out, get!(() -> sum_names(b.lines[i]), e.flows, (:sum_names, b.lines[i])))
       end
       i += 1
     end
@@ -24402,9 +24474,9 @@ text_width(e) = begin
   room = w - ((e.panel || sliding(e)) && !alone ? panel_w(e) : 0px) - 2PAGE_X - gutter(e)
   # A file of code or of text takes all the room that the window has, and so do a CSV file's table and
   # the lines of a block that fill the window. A page is no wider than the settings say. A page of a blog is
-  # as wide as its site's text, for as many words to a line.
+  # as wide as its site's text, for as many words to a line. A page with comments leaves room for them at its right.
   numbered(e.buf) || alone || json_page(e.buf) || bytes_page(e.buf) || sheet_page(e.buf) || own_page(e) ? max(room, 240px) :
-    clamp(room, 240px, e.look == :site ? SITE_MEASURE * TEXT_SIZE * e.zoom : e.widest * e.zoom)
+    clamp(room - comment_room(e), 240px, e.look == :site ? SITE_MEASURE * TEXT_SIZE * e.zoom : e.widest * e.zoom)
 end
 
 """
@@ -24417,7 +24489,20 @@ text_left(e) = begin
   w, _ = window_size(e)
   side = lowered(e) === nothing ? panel_w(e) * opened(e) : 0px
   # The lines of a file's bytes start at the left too, and scroll to the right as numbered lines do
-  numbered(e.buf) || bytes_page(e.buf) ? side + PAGE_X + gutter(e) - sideways(e) : side + max(PAGE_X, (w - side - e.width) / 2)
+  numbered(e.buf) || bytes_page(e.buf) ? side + PAGE_X + gutter(e) - sideways(e) : side + text_inset(e, w - side)
+end
+
+"""
+How far the left edge of a page's text is from the left edge of `space`, the
+room beside the file panel. The text is in the middle of it. When the page's
+comments at its right don't fit in the margin there, the text and the comments
+are in the middle together, so the text is to the left of the middle.
+"""
+text_inset(e, space) = begin
+  extra = comment_room(e)
+  extra == 0px && return max(PAGE_X, (space - e.width) / 2)
+  before = comment_balance(e, space)
+  max(PAGE_X, (space - e.width - extra - before) / 2) + before
 end
 
 # A page of Markdown is laid out again in each frame, since what a block shows
@@ -24907,7 +24992,7 @@ describe(p::Page) = begin
   page = wraps(e) ?
     Row(width(grow=grow), Alignment.Start, justify=numbered(e.buf) ? Alignment.Start : Alignment.Center,
         padding(page_top(e), PAGE_X, page_bottom(e), PAGE_X + gutter(e)),
-      foot === nothing ? node!(Document, e, :document) : Column(Alignment.Start, node!(Document, e, :document), foot)) :
+      with_comments(e, foot === nothing ? node!(Document, e, :document) : Column(Alignment.Start, node!(Document, e, :document), foot))) :
     Row(width(grow=grow), Alignment.Start, padding(page_top(e), 0px, page_bottom(e), PAGE_X + gutter(e)), clip_x=true,
       Box(Alignment.Start, offset_x=-sideways(e), node!(Document, e, :document)))
   reuse!(e.scroll, guide_under(e, page))
@@ -25119,6 +25204,7 @@ draw(ctx, size, ui::ConcreteRect, d::Document) = begin
   mark_steps(ctx, e, ui)
   ring_part(ctx, e, ui)
   annotate(ctx, e, ui)
+  mark_commented(ctx, e, ui)
   glow_bracket_pair(ctx, e, ui)
   # A file that's only shown has a selection and no caret. So has a page that's never changed.
   if !(caretless(b) || readonly(b))
@@ -36176,6 +36262,195 @@ annotate(ctx, e, ui) = begin
   end
 end
 
+# --- comments in the margin --------------------------------------------------------------
+#
+# A comment is written as CriticMarkup writes it: {>>a comment<<}. The words
+# that it's about go before it, between {== and ==}, and have a highlighter's
+# colour behind them: {==these words==}{>>a comment<<}. A comment with no words
+# before it is about the place where it is. Rich text hides the comment's
+# markup and its words, and shows each comment as a card in the margin at the
+# right of the text, level with the words that it's about. A comment that would
+# go over the card above it goes under that card. When the window is too narrow
+# for the cards beside the text, the text gets narrower.
+#
+# The mouse over a card marks the words that it's about. A click on a card
+# puts the caret in its comment and takes that part of the page down a level,
+# so the comment shows as it's written, to change. ⌘E takes it up again. Add
+# Comment (⌘⌥M) puts a comment on the words that are selected.
+
+const COMMENT_W = 230px      # how wide a comment's card is, before zooming
+const COMMENT_GAP = 36px     # the room between the text and the cards
+const COMMENT_PAD = 10px     # the room round a card's words
+const COMMENT_SPACE = 8px    # the least room between two cards
+const COMMENT_LEADING = 1.4  # how tall a line of a card is, for the size of its words
+
+"A comment of the page: its line, the column where its words start, its words, the columns of the words that it's about, and how far down the page they are"
+struct PageComment
+  line::Int
+  col::Int
+  text::String
+  lo::Int
+  hi::Int
+  at::px
+end
+
+"True when the page shows comments in the margin: a page of Markdown, as rich text, with a comment in it"
+has_comments(e) = begin
+  b = e.buf
+  (b.view == :markdown && !numbered(b) && wraps(e) && slideshow(e) === nothing && lowered(e) === nothing && hosted(e) === nothing) || return false
+  seen = get(e.nodes, :has_comments, nothing)
+  seen !== nothing && seen[1] == b.path && seen[2] == b.version && return seen[3]::Bool
+  ks = kinds(b)
+  # {>> in code, or in a table, is no comment that the margin shows
+  yes = any(i -> occursin("{>>", b.lines[i]) && !(ks[i].kind in (Kind.code, Kind.fence, Kind.table)) &&
+                 !isempty(comments_in(spans(rest(b.lines[i], ks[i].prefix), ks[i].prefix))), eachindex(b.lines))
+  e.nodes[:has_comments] = (b.path, b.version, yes)
+  yes
+end
+
+"Where the words of each {>>comment<<} are in `ss`, the spans of a line"
+comments_in(ss) = [k for (k, s) in enumerate(ss) if s.comment && k > 1 && ss[k-1].markup && ss[k-1].text == "{>>"]
+
+comment_w(e) = COMMENT_W * e.zoom
+
+"How much room the page's comments take at the right of its text: none when it has none"
+comment_room(e) = has_comments(e) ? comment_w(e) + COMMENT_GAP * e.zoom : 0px
+
+"""
+The room before a page's text that balances the comments at its right, so
+that the text stays in the middle of `space` while the window is wide enough.
+"""
+comment_balance(e, space) = (extra = comment_room(e); clamp(space - 2PAGE_X - e.width - extra, 0px, extra))
+
+"The page's text, with its comments in a column at its right"
+with_comments(e, page) = begin
+  comment_room(e) == 0px && return page
+  w, _ = window_size(e)
+  before = comment_balance(e, w - panel_w(e) * opened(e))
+  Row(Alignment.Start, Box(fixed(before)), page, Box(fixed(COMMENT_GAP * e.zoom)), node!(Comments, e, :comments))
+end
+
+"The comments of the page that rich text shows, from the top, with where each goes in the margin"
+page_comments(e) = begin
+  b = e.buf
+  out = PageComment[]
+  has_comments(e) || return out
+  ks = kinds(b)
+  for it in e.layout
+    f = it.content
+    (f isa Flow && !f.raw && it.first == it.last) || continue
+    text = b.lines[it.first]
+    (occursin("{>>", text) && !(ks[it.first].kind in (Kind.code, Kind.fence, Kind.table))) || continue
+    start = ks[it.first].prefix
+    ss = spans(rest(text, start), start)
+    for k in comments_in(ss)
+      s = ss[k]
+      # The words that it's about are between the {== and ==} just before it
+      lo = hi = ss[k-1].col
+      if k > 2 && ss[k-2].markup && ss[k-2].text == "==}"
+        open = findlast(t -> t.markup && t.text == "{==", view(ss, 1:k-3))
+        open === nothing || ((lo, hi) = (ss[open].col + 3, ss[k-2].col))
+      end
+      row, _ = spot(f, lo)
+      push!(out, PageComment(it.first, s.col, strip(s.text), lo, hi, it.top + line_top(f, row)))
+    end
+  end
+  out
+end
+
+comment_face(e) = Face(SANS, "", body(e).size * 0.78, colours.ink, false)
+
+"The column of the page's comments, each card level with the words that it's about"
+@def mutable struct Comments <: SemanticUI end
+
+"One comment of the page, as a card in the margin"
+@def mutable struct CommentCard <: SemanticUI
+  line::Int = 0
+  col::Int = 0                   # the column where the comment's words start
+  lo::Int = 0                    # the columns of the words that it's about
+  hi::Int = 0
+  lines::Vector{String} = String[]
+end
+
+describe(n::Comments) = begin
+  e = editor(n)
+  face = comment_face(e)
+  high = face.size * COMMENT_LEADING
+  parts = Any[]
+  bottom = 0px   # where the last card ends
+  for (k, note) in enumerate(page_comments(e))
+    lines = filter(!isempty, wrapped(face, note.text, num(comment_w(e) - 2COMMENT_PAD)))
+    # The card's first line is level with the words, and a card never goes over the one above it
+    at = max(note.at - COMMENT_PAD + (body(e).size * 1.35 - high) / 2, k == 1 ? 0px : bottom + COMMENT_SPACE * e.zoom)
+    push!(parts, spacer(at - bottom))
+    card = node!(CommentCard, e, (:comment_card, k))
+    card.line, card.col, card.lo, card.hi, card.lines = note.line, note.col, note.lo, note.hi, lines
+    push!(parts, card)
+    bottom = at + 2COMMENT_PAD + high * max(1, length(lines))
+  end
+  Column(fixed(comment_w(e)), Alignment.Start, parts...)
+end
+
+describe(c::CommentCard) = begin
+  e = editor(c)
+  face = comment_face(e)
+  high = face.size * COMMENT_LEADING
+  words = isempty(c.lines) ? [Row(height(high), Alignment.Center, spared("An empty comment", Face(face, color=colours.faint))...)] :
+                             [Row(height(high), Alignment.Center, spared(line, face)...) for line in c.lines]
+  Column(fixed(comment_w(e)), Alignment.Start, padding(COMMENT_PAD), radius(6px), name="Comment",
+         background(ishovered(c) ? colours.active : colours.block), words...)
+end
+
+cursor(::CommentCard) = :hand
+
+"A click on a card puts the caret at the start of its comment, and shows the comment as it's written"
+onkey(c::CommentCard, ::KeyPress{Keys.mouse_left}) = begin
+  e = editor(c)
+  b = e.buf
+  1 <= c.line <= length(b.lines) || return handled
+  b.caret = b.anchor = (c.line, c.col)
+  e.plain || level!(e)
+  focus(e)
+  touch!(e)
+  handled
+end
+
+"While the mouse is over a comment's card, mark the words that it's about"
+mark_commented(ctx, e, ui) = begin
+  has_comments(e) || return
+  for k in eachindex(page_comments(e))
+    card = get(e.nodes, (:comment_card, k), nothing)
+    (card isa CommentCard && ishovered(card)) || continue
+    it = item(e, card.line)
+    (it.first == card.line && it.content isa Flow) || continue
+    f = it.content
+    for (x1, x2, y, high) in stretches(f, card.lo, max(card.hi, card.lo + 1))
+      tall = f.size * 1.35
+      rounded_rectangle(ctx, ui.left + x1 - 2px, ui.top + it.top + y + (high - tall) / 2, x2 - x1 + 4px, tall, 3px, background=highlighter())
+    end
+  end
+end
+
+"""
+Put a comment on the words that are selected, in the line where the selection
+starts, and put the caret in it to type. With nothing selected, the comment is
+about the place where the caret is. The caret's part of the page goes down a
+level, so the comment shows as it's written.
+"""
+add_comment!(e) = begin
+  b = e.buf
+  (b.view == :markdown && !readonly(b)) || return e
+  lo, hi = selection(b)
+  hi[1] == lo[1] || (hi = (lo[1], length(b.lines[lo[1]])))
+  words = excerpt(b, lo, hi)
+  new = isempty(words) ? "{>><<}" : "{==" * words * "==}{>><<}"
+  edit!(b, lo, hi, new)
+  b.caret = b.anchor = (lo[1], lo[2] + length(new) - 3)
+  e.plain || level!(e)
+  touch!(e)
+  e
+end
+
 """
 The word that's selected, or nothing. It's the text of a selection that has
 only the characters of a word, all in one line.
@@ -40454,6 +40729,9 @@ add_commands!("The text", [Command(:reset_module, "Run the page's Julia code in 
 # ⌘⇧V pastes a block that was copied from another page as its lines: see "a block that's copied pastes as a part of its page"
 add_commands!("The text", [Command(:paste_copy, "Paste a block from another page as a copy of its lines, not as a part of that page", :edit, "cmd+shift+v",
                                    (e, w, _) -> paste_copy!(e))])
+
+# ⌘⌥M puts a comment on the words that are selected: see "comments in the margin"
+add_commands!("The text", [Command(:add_comment, "Put a comment on the words that are selected", :edit, "cmd+opt+m", (e, w, _) -> add_comment!(e))])
 
 # --- commands that are functions ----------------------------------------------------------
 #

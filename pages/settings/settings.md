@@ -15,6 +15,7 @@ These pages show what a page can do:
 - [Julia](../julia.md) runs code where it is.
 - [Schedule](../schedule.md) plans a job, with the days of each task.
 - [Counter](../counter.md) makes a new kind of block.
+- [Data centres in space](../space-data-centres.md) is an explanation that you explore by dragging its numbers.
 
 ## Colours
 

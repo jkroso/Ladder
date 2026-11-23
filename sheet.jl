@@ -11,11 +11,13 @@
 #
 # This file reads a row, finds the names in an expression and works out the
 # value of every row. Numbers can have units, from Units.jl: 12m, 25mm, 2hr.
-# A row like `1m in cm` gives a value in another unit: 100cm.
+# A row like `1m in cm` gives a value in another unit: 100cm. Money has
+# units too: 22USD/W * 1GW is 22 billion USD.
 # Columns count characters from 0, as they do in markdown.jl.
 
 @use "github.com/jkroso/Units.jl" => Units
 @use "github.com/jkroso/Units.jl/Imperial" => Imperial
+@use "github.com/jkroso/Units.jl/Money" => Cash
 @use "./markdown" Cell
 
 "The language of a code block that is a sheet"
@@ -208,11 +210,15 @@ end
 
 const prelude = Ref{Any}(nothing)
 
+"The currencies that a sheet has, like USD and €, from Units.jl's Money"
+const CURRENCIES = (:USD, :AUD, :NZD, :EUR, :GBP, :JPY, :€, :£, :¥)
+
 "A module that holds the units, for every sheet to use"
 units() = begin
   prelude[] === nothing || return prelude[]
   mod = Module(:SheetUnits)
-  all = merge(bindings(Units), bindings(Imperial))
+  money = Dict{Symbol,Any}(n => getfield(Cash, n) for n in CURRENCIES if isdefined(Cash, n))
+  all = merge(bindings(Units), bindings(Imperial), money)
   Core.eval(mod, Expr(:block, [Expr(:const, Expr(:(=), n, QuoteNode(v))) for (n, v) in all]...))
   Core.eval(mod, Expr(:export, keys(all)...))
   prelude[] = mod
@@ -234,7 +240,27 @@ shown(x::AbstractFloat) = begin
   whole, part = occursin('.', s) ? split(s, '.') : (s, "")
   isempty(part) ? commas(whole) : commas(whole) * "." * part
 end
+# Any other kind of number, like the 3.05 that 48.3 billion USD over 15.8 billion USD comes to, shows as a float does
+shown(x::Real) = shown(float(x))
 shown(x::AbstractString) = repr(x)
+"""
+An amount of money the way a person says it: 28.3 billion USD, and not
+28,300,000,000.00 USD. An amount under a million shows its cents, unless it
+has none: 22 USD, 22.50 USD and 1,500 USD.
+"""
+shown(x::Cash.Money{code}) where code = begin
+  v = Float64(x.value)
+  scale = abs(v) >= 1e12 ? (1e12, " trillion") : abs(v) >= 1e9 ? (1e9, " billion") : abs(v) >= 1e6 ? (1e6, " million") : nothing
+  n = scale === nothing ? cents(v) : shown(round(v / scale[1], sigdigits=3)) * scale[2]
+  mark = Cash.symbols[code]
+  mark == :$ ? "$n $code" : "$mark$n"
+end
+
+"An amount with its cents, like 1,500.50, or with none when it has none, like 1,500"
+cents(v::Real) = begin
+  whole, part = divrem(round(Int, abs(v) * 100), 100)
+  (v < 0 && whole + part > 0 ? "-" : "") * commas(string(whole)) * (part == 0 ? "" : "." * lpad(part, 2, '0'))
+end
 shown(::Nothing) = ""
 shown(f::Function) = "ƒ"
 shown(x) = begin
@@ -482,12 +508,36 @@ work(rows; at::Real=0) = begin
 end
 
 """
+The names of `given` that `rows` need: each one that a row uses, each one
+that the expression of a needed name uses, and so on up. A sheet under a page
+of sums then works out only the sums that it reads.
+"""
+needed(given, rows) = begin
+  isempty(given) && return given
+  # The rows' own names count too, so "tile price" isn't read as "tile" and "price"
+  names = unique!(String[s for (name, _) in Iterators.flatten((given, rows)) for s in (String(strip(name)), ident(name)) if !isempty(s)])
+  want = Set{String}()
+  look(text) = foreach(((_, _, name),) -> push!(want, ident(name)), uses(text, names))
+  foreach(((_, expr),) -> look(expr), rows)
+  keep = falses(length(given))
+  for i in reverse(eachindex(given))
+    name, expr = given[i]
+    id = ident(name)
+    (!isempty(id) && id in want) || continue
+    keep[i] = true
+    look(expr)
+  end
+  given[keep]
+end
+
+"""
 What each row of a sheet comes to. `given` holds the names that the sheet has
 from outside it, like a measure of a takeoff: each with an expression for its
 value, as a row has. They're worked out first, as rows over the first row
 would be, so a row can use them, and a row with the same name takes the name.
 """
 tally(rows; given=(), at=nothing) = begin
+  given = needed(collect(given), rows)
   all = Tuple{String,String}[given..., rows...]
   mine(results) = results[length(given)+1:end]
   # With a row over a range, each row shows what it comes to at the two ends, or at the one place `at`
@@ -512,6 +562,7 @@ rows is in the range, from 0 to 1. It's nothing for a sheet with no row over
 a range, or with no row that changes.
 """
 cases(rows; given=()) = begin
+  given = needed(collect(given), rows)
   all = Tuple{String,String}[given..., rows...]
   over = ranged(all)
   over == 0 && return nothing

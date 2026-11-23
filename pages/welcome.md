@@ -15,6 +15,7 @@ These pages have more examples. Hold ⌘ and click a link to go there. To come b
 - [julia.md](julia.md) runs Julia code where it is.
 - [schedule.md](schedule.md) plans a job, with the days of each task.
 - [counter.md](counter.md) defines a new kind of block, and says in words what each part of its code does.
+- [space-data-centres.md](space-data-centres.md) works out whether a data centre in orbit costs less than one on the ground. Its numbers are sums in a line of text, so a drag on one changes every sum after it.
 - [settings.md](settings/settings.md) has the colours, the font and the size of the text. ⌘, opens it too.
 
 ## Text
@@ -43,6 +44,8 @@ This comment has lines of its own. Nothing in it is part of the page.
 %%
 
 A comment stays out of the page's HTML, its word count and the spelling check.
+
+A comment can show beside the text too, as one does in Word or Google Docs. Write it as CriticMarkup does: the words that it's about between `{==` and `==}`, and the comment after them between `{>>` and `<<}`, like `{==these words==}{>>Is this right?<<}`. The words get a highlighter's colour, and the comment shows as a card at the right of the text, level with them. When the window is narrow, the text gets narrower to make room for the cards. Move the mouse over a card to mark its words. Click a card to change its comment, and press ⌘E when you're done. To add a comment, select some words and press ⌘⌥M. The page [space-data-centres.md](space-data-centres.md) has eight comments, each an idea for Ladder.
 
 A word that the Mac's dictionary doesn't have, like teh, gets a line of red dots under it. Right-click the word to choose the word you meant. Press ⌘F to find text in the page.
 
@@ -307,7 +310,7 @@ Tins = ceil(litres / 4litre)
 
 Click a cell and type. Tab goes to the next cell and Return starts a row. To see the sheet as lines of code, hold ⌥ and click it.
 
-A row that is one number, like the wall's length, changes with a drag. Put the mouse on the `12m` at the right end of its row, and drag to the right or to the left. The rows under it follow while the mouse moves. Hold ⇧ to make each step ten times as big.
+A row that is one number, like the wall's length, changes with a drag. Put the mouse on the `12m` at the right end of its row, and drag to the right or to the left. The rows under it follow while the mouse moves. Near where the drag starts, each step of the number is small. The further the mouse goes, the faster the steps come, so a long drag makes a big change. Hold ⇧ to make each step ten times as big.
 
 The keyboard can do the same to any number in the page. Put the caret in the number, or at either end of it, and press ⌃↑ to make it a step bigger or ⌃↓ to make it a step smaller. A step is one of its last digit, so 12 goes to 13 and 2.40 to 2.41. The unit stays as it is, so the caret can be after the m of 12m. The same keys change true to false, and false to true. Any other word gets capitals: ⌃↑ makes word into Word, then WORD, and ⌃↓ takes it back down. One ⌘Z takes back all the presses that came one after another.
 
@@ -346,11 +349,33 @@ A sum can go in a line of text too. Write a `!` and then the sum between backtic
 
 A wall that is !`l = 16m` long and !`h = 2.4m` high has an area of !`wall_area = l * h`. Two coats of paint that covers !`per_litre = 16m²` a litre take !`wall_area * 2 / (per_litre / litre)`. A car that goes 150km in 2 hours travels at !`150km / 2hr`, which is !`convert(m/s, 150km / 2hr)`. A person who is 5 feet 10 inches tall is !`convert(cm, 5ft + 10inch)` tall.
 
-The numbers have units from Units.jl: lengths like `m`, `km`, `ft` and `inch`, times like `s`, `minute` and `hr`, masses like `kg`, and volumes like `litre`. A sheet has the same units.
+The numbers have units from Units.jl: lengths like `m`, `km`, `ft` and `inch`, times like `s`, `minute` and `hr`, masses like `kg`, volumes like `litre`, power like `kW` and `GW`, and energy like `kWh` and `TWh`. Money has units too, like `USD`, `AUD` and `EUR`. A solar farm of !`farm_size = 2GW` at !`watt_price = 1.2USD/W` costs !`farm_cost = farm_size * watt_price`. An amount of a million or more shows in words. A sheet has the same units.
 
-A sum that is one number has a line of dashes under what it shows, like the 16m and the 2.4m above. Drag it to the right or to the left to change the number. The sums that use its name follow while the mouse moves, so the area and the paint above change with the wall. Hold ⇧ to make each step ten times as big. ⌘Z takes a drag back.
+A sum can give words too, and they wrap with the words round them, like this: !`farm_cost > 2e9USD ? "the farm costs more than two billion dollars, so it needs more than one company to pay for it" : "the farm costs two billion dollars or less, so one company can pay for it"`. Drag the size of the farm to see the words change.
+
+A sum that is one number has a line of dashes under what it shows, like the 16m and the 2.4m above. Drag it to the right or to the left to change the number. The sums that use its name follow while the mouse moves, so the area and the paint above change with the wall. The further the mouse goes, the faster the number changes. Hold ⇧ to make each step ten times as big. ⌘Z takes a drag back.
 
 A sum can use the rows of every sheet of the page, with a `_` for each space in a row's name: \!`wall_length` shows !`wall_length`, from the sheets above.
+
+It works the other way too. A sheet under a sum can use the name that the sum gives, with a space for each `_`. Drag the size of the farm above, and the sheet follows.
+
+```sheet
+Farms = 3
+Cost of them all = farms * farm cost
+```
+
+A chart of a table draws what the sums in its cells show:
+
+| Farm | Cost |
+|---|---|
+| This farm | !`farm_cost` |
+| A farm twice as big | !`farm_cost * 2` |
+
+```chart
+title: What the farms cost
+```
+
+The page [space-data-centres.md](space-data-centres.md) is an explanation that you explore this way. Its sums work out what a data centre in orbit costs, and its words change with the numbers.
 
 ## Spreadsheets
 

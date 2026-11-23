@@ -297,7 +297,9 @@ end
 """
 Where the formula that opens with `n` dollar signs at `i` closes, or 0 if it
 doesn't. The TeX can't start or end with a space, and a digit can't follow it,
-so the dollar signs of "from \$5 to \$10" are dollar signs.
+so the dollar signs of "from \$5 to \$10" are dollar signs. Code comes before
+a formula: one that would hold code doesn't open, so the dollar sign of
+"costs \$!`price`" is a dollar sign, whatever the code holds.
 """
 math_end(chars, i, n, to) = begin
   start = i + n
@@ -308,6 +310,8 @@ math_end(chars, i, n, to) = begin
       j += 2   # \$ in TeX is a dollar sign
       continue
     end
+    # A ` that some code starts with, and not one that TeX has by itself
+    chars[j] == '`' && find(chars, "`", j + 1, to) > j + 1 && return 0
     if chars[j] == '$' && j > start && !isspace(chars[j-1]) && (n == 1 || (j < to && chars[j+1] == '$'))
       (j + n > to || !isdigit(chars[j+n])) && return j
     end
@@ -353,6 +357,26 @@ function scan!(out, chars, from, to, style::Style, offset)
       if j != 0
         emit(plain, i - 1); emit(i, i + n - 1, markup=true); emit(i + n, j - 1, math=true); emit(j, j + n - 1, markup=true)
         plain = i = j + n
+        continue
+      end
+    elseif c == '{' && next == '=' && i + 2 <= to && chars[i+2] == '='
+      # {==words==} are the words that a comment after them is about, as CriticMarkup writes them. They have a
+      # highlighter's colour behind them, and their own markup is read.
+      j = find(chars, "==}", i + 3, to)
+      if j > i + 3
+        emit(plain, i - 1); emit(i, i + 2, markup=true)
+        scan!(out, chars, i + 3, j - 1, Style(style.bold, style.italic, style.strike, style.link, true), offset)
+        emit(j, j + 2, markup=true)
+        plain = i = j + 3
+        continue
+      end
+    elseif c == '{' && next == '>' && i + 2 <= to && chars[i+2] == '>'
+      # {>>note<<} is a comment, as CriticMarkup writes it. Rich text shows it in the margin, beside its line.
+      # Its words are one span, with no markup read inside them.
+      j = find(chars, "<<}", i + 3, to)
+      if j != 0
+        emit(plain, i - 1); emit(i, i + 2, markup=true); emit(i + 3, j - 1, comment=true); emit(j, j + 2, markup=true)
+        plain = i = j + 3
         continue
       end
     elseif c == '%' && next == '%'

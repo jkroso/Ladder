@@ -76,6 +76,19 @@ end
   @test texts([("Long", "2 to 4"), ("Wide", "?"), ("Area", "long * wide = 12")]) == ["2 to 4", "6 to 3", "12"]
 end
 
+@testset "money, and power in gigawatts" begin
+  @test texts([("Price", "22USD/W"), ("Power", "1GW"), ("Cost", "price * power")]) == ["22USD/W", "1GW", "22 billion USD"]
+  @test texts([("Launch", "500USD/kg * 35200ton")]) == ["17.6 billion USD"]
+  # An amount under a million shows its cents, unless it has none
+  @test texts([("A", "22USD"), ("B", "1500.5USD"), ("C", "0.5AUD"), ("D", "-3e9USD"), ("E", "2.5e6EUR")]) ==
+        ["22 USD", "1,500.50 USD", "0.50 AUD", "-3 billion USD", "€2.5 million"]
+  @test texts([("Energy", "convert(TWh, 1GW * 5yr)"), ("Each", "1GW / 1MW")]) == ["43.8TWh", "1,000"]
+  @test texts([("Per watt", "22/W")]) == ["22W⁻¹"]
+  # Money over money is a number
+  @test texts([("Orbit", "10USD"), ("Ground", "3USD"), ("Times", "orbit / ground")])[3] == "3.3333"
+  @test texts([("Each", "convert(USD/MWh, 48.3e9USD / 43.8TWh)")]) == ["1,102.74USD/MW·hr"]
+end
+
 @testset "a value in another unit" begin
   @test texts([("", "1m in cm"), ("", "2.5km in m"), ("", "1m in ft"), ("", "25°C in °F")]) == ["100cm", "2,500m", "3.2808'", "77°F"]
   # A unit made of others, and a sum on the left

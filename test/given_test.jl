@@ -1,11 +1,12 @@
 # Tests for names that one part of a page has from another, in main.jl and
 # sheet.jl: a row of a sheet that uses a measure of a takeoff, a task of a
-# time log or a row of another sheet, and a sum in a line of text that uses a
-# row of a sheet. Run them with `julia -O0 --project=. test/given_test.jl`.
+# time log or a row of another sheet, a sum in a line of text that uses a
+# row of a sheet, a sheet that uses a sum in a line of text, and a chart of
+# a table that has sums. Run them with `julia -O0 --project=. test/given_test.jl`.
 
 @use Test: @test, @testset
 @use "../main" => K
-@use "../sheet" tally known name_values
+@use "../sheet" tally known name_values needed
 @use "github.com/jkroso/MiniFB.jl" Window
 @use "github.com/jkroso/UI.jl/Interface/draw" frame
 const px = K.px
@@ -52,6 +53,27 @@ Rate = 80
 Labour = tiling / hr * rate
 Both = labour + tiles * 12
 ```
+
+The grout costs !`grout = tiles / 10 * 4`. This sum goes wrong: !`waste = nope(1)`.
+
+```sheet
+Tile price = 10 to 20
+Floor = tiles * tile price + grout
+Bill = floor + price
+```
+
+```chart
+kind: lines
+show: Bill
+```
+
+| Room | Cost |
+|---|---|
+| Kitchen | \$!`kitchen = tiles * price` |
+| Laundry | \$!`kitchen / 2` |
+
+```chart
+```
 """)
 
 const e = K.build_editor(page)
@@ -94,6 +116,42 @@ end
   @test results(1)[3] == "4"
   K.undo!(e.buf); K.undo!(e.buf); frames()
   @test results(1) == ["0.5m²", "100", "3"] && said("tiles") == "100"
+end
+
+@testset "a sheet uses a sum in a line of text over it" begin
+  @test K.sum_names("a !`x = 2GW` b !`x * 2` c !`f(y) = 1` !`y=3` !`x == 2` !`farm_cost = 1`") == [("x", "2GW"), ("y", "3"), ("farm cost", "1")]
+  @test [r.text for r in tally([("Twice", "farm cost * 2"), ("Again", "farm_cost * 2")]; given=K.sum_names("!`farm_cost = 3`"))] == ["6", "6"]
+  third = findall(==("```sheet"), e.buf.lines)[3]
+  @test [name for (name, _) in K.page_given(e, third, sums=true)] ==
+    ["Power point", "Kitchen floor", "Tiling", "Tile", "Tiles", "Points", "price", "Rate", "Labour", "Both", "grout", "waste"]
+  @test !any(n -> n in ("price", "grout"), first.(K.page_given(e, third)))   # the page's code has them already
+  # The sheet works out only the names that it reads, so the sum that goes wrong does no harm
+  @test first.(needed(K.page_given(e, third, sums=true), [("Tile price", "10"), ("Floor", "tiles * tile price + grout")])) == ["Kitchen floor", "Tile", "Tiles", "grout"]
+  @test results(3) == ["10 to 20", "1,040 to 2,040", "1,052 to 2,052"]
+  # The chart draws the sheet at each tile price
+  d = K.shown!(e.nodes[(:block, K.CHART, page, 1)])
+  @test isempty(d.problem) && d.labels[1] == "10" && d.labels[end] == "20" && d.series[1].values[[1, end]] == [1052.0, 2052.0]
+  # A drag on a sum changes its number, and the sheet follows
+  i = findfirst(l -> occursin("!`price = 12`", l), e.buf.lines)
+  at = findfirst("price = 12", e.buf.lines[i])
+  K.edit!(e.buf, (i, at.stop - 2), (i, at.stop), "13", typing=true); frames()
+  @test said("tiles * price") == "1,300" && results(3) == ["10 to 20", "1,040 to 2,040", "1,053 to 2,053"]
+  K.undo!(e.buf); frames()
+  @test results(3)[3] == "1,052 to 2,052"
+end
+
+@testset "a chart draws what the sums of a table show" begin
+  t = only(t for t in K.page_tables(e) if t.rows[1] == ["Room", "Cost"])
+  @test t.rows[2:3] == [["Kitchen", "\$1,200"], ["Laundry", "\$600"]]
+  chart() = K.shown!(e.nodes[(:block, K.CHART, page, 2)])
+  @test chart().labels == ["Kitchen", "Laundry"] && chart().series[1].values == [1200.0, 600.0] && chart().before == "\$"
+  # A sum over the table changes, and the chart follows
+  i = findfirst(l -> occursin("!`price = 12`", l), e.buf.lines)
+  at = findfirst("price = 12", e.buf.lines[i])
+  K.edit!(e.buf, (i, at.stop - 2), (i, at.stop), "13", typing=true); frames()
+  @test chart().series[1].values == [1300.0, 650.0]
+  K.undo!(e.buf); frames()
+  @test chart().series[1].values == [1200.0, 600.0]
 end
 
 @testset "a name of the page's code stays as it is" begin

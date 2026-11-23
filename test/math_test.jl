@@ -28,6 +28,11 @@ mark(f, c) = first(m for m in f.box.marks if m.glyph == M.glyph(M.font(), c))
   @test any(s -> s.math && s.text == "5 + \\\$x", spans("\$5 + \\\$x\$"))
   # Code keeps its dollar signs, and bold text can hold a formula
   @test !any(s -> s.math, spans("`\$x\$`"))
+  # A formula can't hold code, so the dollar sign before a sum is a dollar sign, whatever the sum's code holds
+  sums = "costs \$!`string(\"\$\", x)` or \$!`y`"
+  @test !any(s -> s.math, spans(sums)) && [s.text for s in spans(sums) if s.live] == ["string(\"\$\", x)", "y"]
+  @test [s.text for s in spans("\$x\$ costs \$!`a`") if s.math] == ["x"]
+  @test any(s -> s.math && s.text == "`a", spans("\$`a\$"))   # a ` by itself is TeX's
   @test any(s -> s.math && s.bold, spans("**so \$x\$**"))
   # The old way to make a span has no formula in it
   @test !spans("a")[1].math

@@ -129,4 +129,16 @@ end
   @test e.buf.lines[end-1] == "The end."
 end
 
+@testset "a long drag speeds up" begin
+  # Near where the drag starts, a step is 5px. Further away, the steps come faster and faster.
+  @test K.scrub_steps(5) == 1 && K.scrub_steps(20) == 4 && K.scrub_steps(-20) == -4 && K.scrub_steps(0) == 0
+  @test K.scrub_steps(1000) > 10 * K.scrub_steps(100) > 0
+  @test K.scrub_steps(-1000) == -K.scrub_steps(1000)
+  first_sum = sum_at(1)
+  press(first_sum); at(first_sum .+ (400, 0))
+  @test occursin("!`l = $(16 + K.scrub_steps(400))m`", text()) && K.scrub_steps(400) > 200
+  release(); K.undo!(e.buf); frames()
+  @test occursin("!`l = 16m`", text())
+end
+
 close(w)
