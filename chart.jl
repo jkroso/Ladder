@@ -36,6 +36,14 @@
 #
 # This file reads and writes those lines, and turns the rows of a table into
 # what a chart shows. It draws nothing.
+#
+# A row named In all, Total or Sum adds the others up. The chart keeps that
+# row apart from the bars and the slices, and writes it on its own. A cell
+# whose value has a unit, like USD, is read in that unit. The words million
+# and billion are only for a cell that is text.
+
+@use "github.com/jkroso/Units.jl" => Units
+@use "github.com/jkroso/Units.jl/Money" => Cash
 
 "The language of a code block that is a chart"
 const CHART = "chart"
@@ -117,10 +125,14 @@ end
 
 # --- numbers -----------------------------------------------------------------------
 
+"Words that say how many thousands a number is, from the largest"
+const SCALES = (("trillion", 1e12), ("billion", 1e9), ("million", 1e6), ("thousand", 1e3))
+
 """
 The number that a cell holds, with what's written before it and after it, or
 nothing when the cell isn't a number. `\$1,200` is 1200 with a \$ before it,
 `45%` is 45 with a % after it, and `2.4 m` is 2.4 with ` m` after it.
+`22.4 billion USD` is 22.4 billion, and `100 million USD` is 100 million.
 """
 number(text::AbstractString) = begin
   s = replace(strip(text), r"^\*\*(.*)\*\*$" => s"\1", r"^`(.*)`$" => s"\1")
@@ -128,7 +140,36 @@ number(text::AbstractString) = begin
   m === nothing && return nothing
   x = parse(Float64, replace(m[3], "," => ""))
   after = m[4] === nothing ? "" : m[4] == "%" ? "%" : " " * m[4]
-  (m[1] in ("-", "−", "–") ? -x : x, String(m[2]), String(after))
+  x, after = scaled(x, after)
+  (m[1] in ("-", "−", "–") ? -x : x, String(m[2]), after)
+end
+
+"The number `x` is, in its own unit, with what is written before it and after it. A value with no unit is nothing, so the chart reads the cell's text."
+reading(x) = nothing
+reading(x::Real) = isfinite(Float64(x)) ? (Float64(x), "", "") : nothing
+reading(x::Cash.Money{code}) where code = begin
+  v = Float64(x.value)
+  isfinite(v) || return nothing
+  mark = Cash.symbols[code]
+  mark == :$ ? (v, "", " $code") : (v, string(mark), "")
+end
+reading(x::Units.Unit) = begin
+  v = try Float64(x.value) catch; return nothing end
+  isfinite(v) || return nothing
+  unit = Units.abbr(typeof(x))
+  isempty(unit) ? (v, "", "") : unit == "%" ? (v, "", "%") : (v, "", " " * unit)
+end
+
+"`x` times the thousand, million, billion or trillion at the front of `after`. That word comes off `after`."
+scaled(x, after) = begin
+  rest, low = lstrip(after), lowercase(lstrip(after))
+  for (word, scale) in SCALES
+    n = ncodeunits(word)
+    (startswith(low, word) && (n == ncodeunits(low) || !isletter(low[n + 1]))) || continue
+    tail = strip(rest[nextind(rest, n):end])
+    return x * scale, isempty(tail) ? "" : startswith(tail, "%") ? tail : " " * tail
+  end
+  x, String(after)
 end
 
 isnumber(text::AbstractString) = number(text) !== nothing
@@ -145,8 +186,17 @@ words(x::Real) = begin
   (x < 0 && (whole > 0 || !isempty(part)) ? "−" : "") * commas(string(whole)) * (isempty(part) ? "" : "." * part)
 end
 
-"A number on a chart's side, short where the numbers get big: 12K, 3.5M"
-short(x::Real, most::Real) = most >= 1e6 ? words(x / 1e6) * "M" : most >= 1e4 ? words(x / 1e3) * "K" : words(x)
+"A big number the way a person says it: 22.4 billion, 100 million. A smaller one stays as `words` writes it."
+spoken(x::Real) = begin
+  scale = x >= 1e12 ? (1e12, " trillion") : x >= 1e9 ? (1e9, " billion") : x >= 1e6 ? (1e6, " million") : nothing
+  scale === nothing ? words(x) : words(x / scale[1]) * scale[2]
+end
+
+"A number on a chart's side, short where the numbers get big: 12K, 3.5M, 22.4B"
+short(x::Real, most::Real) = begin
+  div, mark = most >= 1e12 ? (1e12, "T") : most >= 1e9 ? (1e9, "B") : most >= 1e6 ? (1e6, "M") : most >= 1e4 ? (1e3, "K") : (1.0, "")
+  words(x / div) * mark
+end
 
 """
 The numbers to write beside a chart whose values go from `lo` to `hi`: about
@@ -182,9 +232,10 @@ struct Data
   after::String     # and after each number, like % or m
   problem::String   # why there's nothing to draw, or ""
   more::Int         # how many columns of numbers it leaves out, because a chart has `MOST` colours
+  apart::Union{Nothing,Tuple{String,Float64}}   # a total row, kept out of the bars and the slices: its name, then its number
 end
 
-Data(labels, series, before, after, problem) = Data(labels, series, before, after, problem, 0)
+Data(labels, series, before, after, problem, more=0) = Data(labels, series, before, after, problem, more, nothing)
 nothing_to_draw(problem) = Data(String[], Series[], "", "", problem)
 
 "The most columns that a chart draws. Each has a colour of its own, and a chart has this many colours."
@@ -204,9 +255,17 @@ unless the chart names another: the rows of a sheet over a range are like that.
 With `part`, the table is one of several that the chart draws. A column that
 `show` names and this table doesn't have is in another table, so it isn't a
 problem, and a pie's slices are made when the tables are together.
+`values` holds the amount of each cell, in the same place as `rows`. A cell
+whose amount has a unit is read from that unit. The text is used when it has none.
 """
-data(c::Chart, rows::Vector{Vector{String}}; headed::Bool=false, by_first::Bool=false, part::Bool=false) = begin
-  rows = filter(row -> any(!isempty, row), rows)
+data(c::Chart, rows::Vector{Vector{String}}; headed::Bool=false, by_first::Bool=false, part::Bool=false, values=nothing) = begin
+  if values !== nothing && length(values) == length(rows)
+    kept = [i for (i, row) in enumerate(rows) if any(!isempty, row)]
+    rows, values = rows[kept], values[kept]
+  else
+    rows = filter(row -> any(!isempty, row), rows)
+    values = nothing
+  end
   isempty(rows) && return nothing_to_draw("This table has no rows yet.")
   wide = maximum(length, rows)
   cell(row, k) = k <= length(row) ? row[k] : ""
@@ -214,9 +273,19 @@ data(c::Chart, rows::Vector{Vector{String}}; headed::Bool=false, by_first::Bool=
   head = headed ? [cell(rows[1], k) for k in 1:wide] : fill("", wide)
   body = headed ? rows[2:end] : rows
   isempty(body) && return nothing_to_draw("This table has no rows under its headings yet.")
+  origin = length(rows) - length(body) + 1
+  # The amount of the cell in row `r` of the whole table, or nothing
+  amount_at(r, k) = values === nothing || !(1 <= r <= length(values)) || k > length(values[r]) ? nothing : values[r][k]
+  readat(i, k) = begin
+    got = reading(amount_at(origin + i - 1, k))
+    got === nothing ? number(cell(body[i], k)) : got
+  end
   column(k) = [cell(row, k) for row in body]
   # A column of numbers has a number in most of its cells that hold something
-  numeric(k) = (full = filter(!isempty, column(k)); !isempty(full) && 2count(isnumber, full) > length(full))
+  numeric(k) = begin
+    idx = [i for i in eachindex(body) if !isempty(cell(body[i], k)) || reading(amount_at(origin + i - 1, k)) !== nothing]
+    !isempty(idx) && 2count(i -> readat(i, k) !== nothing, idx) > length(idx)
+  end
   by = !isempty(c.by) ? findfirst(k -> same(head[k], c.by), 1:wide) : by_first ? 1 : findfirst(k -> !numeric(k), 1:wide)
   !isempty(c.by) && by === nothing && return nothing_to_draw("The table has no column called “$(c.by)”.")
   shown = Int[]
@@ -230,13 +299,34 @@ data(c::Chart, rows::Vector{Vector{String}}; headed::Bool=false, by_first::Bool=
   isempty(shown) && (shown = [k for k in 1:wide if k != by && numeric(k)])
   isempty(shown) && return nothing_to_draw("This table has no column of numbers.")
   labels = by === nothing ? string.(1:length(body)) : column(by)
-  found = [number(cell(row, k)) for row in body, k in shown]
+  found = [readat(i, k) for i in eachindex(body), k in shown]
   marks(place) = unique(n[place] for n in found if n !== nothing)
   before, after = marks(2), marks(3)
   series = [Series(isempty(head[k]) ? (length(shown) == 1 ? "" : "Column $k") : head[k],
                    Union{Nothing,Float64}[n === nothing ? nothing : n[1] for n in found[:, j]]) for (j, k) in enumerate(shown)]
   d = Data(labels, first(series, MOST), length(before) == 1 ? before[1] : "", length(after) == 1 ? after[1] : "", "", max(length(series) - MOST, 0))
+  d = part ? d : without_total(d)
   c.kind == :pie && !part ? slices(d) : d
+end
+
+"Names of a row that adds the others up"
+const TOTALS = ("in all", "total", "totals", "sum", "overall")
+
+total_row(name) = lowercase(strip(name)) in TOTALS
+
+"""
+The rows of `d` with a total taken out. The total is the last row named In all,
+Total or Sum, and it has a number. With one column of numbers, that row is
+`apart`, so the chart can write it on its own.
+"""
+without_total(d::Data) = begin
+  i = findlast(total_row, d.labels)
+  i === nothing && return d
+  any(s -> s.values[i] !== nothing, d.series) || return d
+  keep = [k for k in eachindex(d.labels) if k != i]
+  isempty(keep) && return d
+  apart = length(d.series) == 1 ? (d.labels[i], d.series[1].values[i]) : nothing
+  Data(d.labels[keep], [Series(s.name, s.values[keep]) for s in d.series], d.before, d.after, d.problem, d.more, apart)
 end
 
 """
@@ -287,11 +377,11 @@ slices(d::Data) = begin
     rest = sum(last, parts[SLICES:end])
     parts = [parts[1:SLICES-1]; ("Other", rest)]
   end
-  Data(first.(parts), [Series(s.name, Union{Nothing,Float64}[last(p) for p in parts])], d.before, d.after, "")
+  Data(first.(parts), [Series(s.name, Union{Nothing,Float64}[last(p) for p in parts])], d.before, d.after, "", 0, d.apart)
 end
 
 "A number of the chart `d` in words, with what its table writes before and after each number"
-amount(d::Data, x::Real) = (x < 0 ? "−" : "") * d.before * words(abs(x)) * d.after
+amount(d::Data, x::Real) = (x < 0 ? "−" : "") * d.before * spoken(abs(x)) * d.after
 
 "The least and the most of the numbers that `d` shows, or nothing when it shows none"
 extent(d::Data) = begin
@@ -394,6 +484,11 @@ plot(d::Data, kind::Symbol, wide::Real, tall::Real, measure) = begin
   kind == :pie && return pie(d, wide, tall, measure)
   marks, top = legend(d, wide, measure)
   top += 18
+  if d.apart !== nothing
+    name, v = d.apart
+    push!(marks, Mark(:words, (wide - 14, top + 4, 0, 0), text=name * "  " * amount(d, v), style=:end, tone=:ink, size=12.0))
+    top += 18
+  end
   ts = scale(d, kind)
   lo, hi = ts[1], ts[end]
   most = max(abs(lo), abs(hi))
@@ -476,17 +571,25 @@ pie(d::Data, wide::Real, tall::Real, measure) = begin
   end
   x = cx + r + 28
   row = 24.0
-  y = cy - row * length(values) / 2
   shares = ["$(amount(d, v))  ·  $(percent(v, total))" for v in values]
-  # The shares are in a column of their own, after the longest name
-  room = max(wide - x - 16 - maximum(s -> measure(s, 12.0), shares) - 40, 30.0)
+  total_words = d.apart === nothing ? "" : amount(d, d.apart[2])
+  # The shares are in a column of their own, after the longest name. The total sits under them.
+  room = max(wide - x - 16 - maximum(s -> measure(s, 12.0), [shares; total_words]) - 40, 30.0)
   names = [fit(l, room, measure, 12.0) for l in d.labels]
-  right = min(wide - 16, x + 16 + maximum(n -> measure(n, 12.0), names) + 40 + maximum(s -> measure(s, 12.0), shares))
+  named = d.apart === nothing ? names : [names; fit(d.apart[1], room, measure, 12.0)]
+  right = min(wide - 16, x + 16 + maximum(n -> measure(n, 12.0), named) + 40 + maximum(s -> measure(s, 12.0), [shares; total_words]))
+  y = cy - row * (length(values) + (d.apart === nothing ? 0 : 1)) / 2
   for i in eachindex(values)
     push!(marks, Mark(:swatch, (x, y + 7, 10, 10), colour=i))
     push!(marks, Mark(:words, (x + 16, y + 16, 0, 0), text=names[i], style=:start, tone=:ink, size=12.0))
     wide - x > 200 && push!(marks, Mark(:words, (right, y + 16, 0, 0), text=shares[i], style=:end, size=12.0))
     y += row
+  end
+  if d.apart !== nothing
+    y += 4
+    push!(marks, Mark(:rule, (x, y, right, y)))
+    push!(marks, Mark(:words, (x, y + 18, 0, 0), text=named[end], style=:start, tone=:ink, size=12.0))
+    wide - x > 200 && push!(marks, Mark(:words, (right, y + 18, 0, 0), text=total_words, style=:end, size=12.0))
   end
   marks
 end

@@ -75,6 +75,16 @@ show: Bill
 ```chart
 ```
 
+| Part | Cost |
+|---|---|
+| Satellites | !`sats = 22.4e9USD` |
+| Design | !`draw = 100e6USD` |
+| In all | !`sats + draw` |
+
+```chart
+kind: pie
+```
+
 The tiles cost this much of the budget: !`ProgressBar(value = price / 24)`. A switch: !`Toggle()`.
 """)
 
@@ -154,6 +164,15 @@ end
   @test chart().series[1].values == [1300.0, 650.0]
   K.undo!(e.buf); frames()
   @test chart().series[1].values == [1200.0, 600.0]
+end
+
+@testset "a chart reads the unit on a sum" begin
+  d = K.shown!(e.nodes[(:block, K.CHART, page, 3)])
+  sats = get(e.nodes, (:amount, page, "sats = 22.4e9USD", 1), nothing)
+  @test sats isa K.Units.Unit && Float64(sats.value) > 1e9
+  @test d.labels == ["Satellites", "Design"] && d.apart[1] == "In all" && d.after == " USD"
+  @test d.series[1].values[1] == Float64(sats.value) && d.series[1].values[2] == 100e6
+  @test d.series[1].values[1] > d.series[1].values[2] * 100
 end
 
 @testset "a node that a sum makes follows the numbers that it uses" begin

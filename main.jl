@@ -349,7 +349,8 @@
 @use "./markdown" Kind Line Span Cell classify spans tablecells isdivider words isdone front_matter MATTER TOML_MATTER MATH CALLOUTS callout opens_callout wikitarget block_id only_id
 @use "./markdown" COMMENT
 @use "./highlight" tokens left_open
-@use "./sheet" SHEET Result Given sheetcells parts uses tally known units shown number_at nudged name_values ident cases
+@use "./sheet" SHEET Result Given sheetcells parts uses tally known units shown number_at nudged name_values ident cases folded
+@use "github.com/jkroso/Units.jl" => Units
 @use "./spreadsheet" SPREADSHEET Value spreadcells spreadtexts isformula letters answers moved
 @use "./merge" changes combine follow
 @use "./agent" => Agent
@@ -4152,10 +4153,13 @@ evaluate(e, code::String; key=(:live, e.buf.path, code), inline=false) = begin
       # The code runs in the page's module, with the page's other code
       value = running_code(m -> (inline ? run_sum : run_in)(m, code, isempty(path) ? joinpath(e.folder, "untitled.md") : path), e)
       node = inline ? present_inline(value) : present(value)
+      # Keep the amount, with its unit, so a chart can read that and not the words around it
+      inline && node === nothing && (e.nodes[(:amount, key[2], key[3], key[4])] = value)
       node !== nothing ? node : inline ? (said(value), false) : note(repr("text/plain", value), colours.ink)
     end
   catch err
     err = err isa LoadError ? err.error : err
+    inline && length(key) == 4 && delete!(e.nodes, (:amount, key[2], key[3], key[4]))
     push!(problems, sprint(showerror, err))
     # A line of text has room for the first line of what went wrong
     inline ? (said(first(split(sprint(showerror, err), '\n'))), true) : note(sprint(showerror, err), colours.accent)
@@ -11724,7 +11728,7 @@ chart_data(e, v::ChartView) = begin
   tables = page_tables(e)
   k = isempty(c.from) ? something(findlast(t -> t.last < v.first, tables), findfirst(t -> t.first > v.last, tables), 0) :
                         something(named_table(e, tables, c.from), 0)
-  k == 0 || return Charts.data(c, tables[k].rows, headed=tables[k].headed, by_first=tables[k].ranged)
+  k == 0 || return Charts.data(c, tables[k].rows, headed=tables[k].headed, by_first=tables[k].ranged, values=table_amounts(e, tables[k]))
   names = chart_sources(c)
   length(names) > 1 && return Charts.joined(c, [chart_part(e, c, tables, name) for name in names], names)
   Charts.nothing_to_draw(isempty(c.from) ?
@@ -11743,7 +11747,33 @@ chart_part(e, c::Charts.Chart, tables, name) = begin
   end
   k = named_table(e, tables, name)
   k === nothing && return Charts.nothing_to_draw("This page has no table called “$(name)”. A table is called by the heading over it.")
-  Charts.data(c, tables[k].rows, headed=tables[k].headed, by_first=tables[k].ranged, part=true)
+  Charts.data(c, tables[k].rows, headed=tables[k].headed, by_first=tables[k].ranged, part=true, values=table_amounts(e, tables[k]))
+end
+
+"The amount of each cell of a Markdown table, where the cell is one sum and the amount has a unit. Any other cell is nothing, and so is a table that isn't rows of the page."
+table_amounts(e, t) = begin
+  b = e.buf
+  run = table(b, t.first)
+  (run === nothing || run[1] != t.first) && return nothing
+  rows = Vector{Any}[]
+  for r in tablerows(run)
+    push!(rows, Any[cell_amount(e, r, c.lo, rest(head(b.lines[r], c.hi), c.lo)) for c in tablecells(b.lines[r])])
+  end
+  rows
+end
+
+"The amount a cell holds, when the cell is one sum and that amount has a unit. The % in an amount goes into its number, as the cell shows it."
+cell_amount(e, i::Int, col::Int, text::AbstractString) = begin
+  m = match(r"!`([^`]+)`", text)
+  m === nothing && return nothing
+  strip(text) == INLINE * m[1] * "`" || return nothing
+  code = String(m[1])
+  n = ordinal(e, i, col + length(text, 1, m.offset) + 1, code)
+  made(e, code, n)
+  value = get(e.nodes, (:amount, e.buf.path, code, n), nothing)
+  value isa Units.Unit || return nothing
+  y = folded(value)
+  y isa Units.Unit ? y : nothing
 end
 
 "What the chart shows. It's worked out again when the page has changed."

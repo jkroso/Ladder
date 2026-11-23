@@ -2,6 +2,7 @@
 
 @use Test: @test, @testset
 @use "../chart" => C
+@use "github.com/jkroso/Units.jl/Money" USD
 
 const TABLE = [["Month", "Sales", "Costs", "Note"],
                ["Jan", "\$1,200", "\$800", "slow"],
@@ -17,6 +18,14 @@ const TABLE = [["Month", "Sales", "Costs", "Note"],
   @test C.words(54.0) == "54" && C.words(14285.714) == "14,285.7" && C.words(0.256) == "0.26" && C.words(-1200) == "−1,200"
   @test C.words(1234567.5) == "1,234,567.5" && C.words(-0.001) == "0"
   @test C.short(20000, 40000) == "20K" && C.short(2.5e6, 5e6) == "2.5M" && C.short(2000, 8000) == "2,000"
+  @test C.short(22.4e9, 24e9) == "22.4B"
+  # A million and a billion are different amounts, not two small numbers with different words after them
+  @test C.number("22.4 billion USD") == (22.4 * 1e9, "", " USD") && C.number("100 million USD") == (100e6, "", " USD")
+  @test C.number("€2.5 million") == (2.5e6, "€", "") && C.number("-3 billion USD") == (-3e9, "", " USD")
+  @test C.number("1.2 trillion USD")[1] == 1.2e12 && C.number("2.4 m") == (2.4, "", " m")
+  # The unit is on the value. The words in the cell are not what the chart measures.
+  @test C.reading(22.4e9USD)[1] == Float64((22.4e9USD).value) && C.reading(100e6USD) == (1.0e8, "", " USD")
+  @test C.reading(100e6USD)[1] < C.reading(22.4e9USD)[1] / 100
 end
 
 @testset "the numbers beside a chart" begin
@@ -129,6 +138,27 @@ end
   @test C.hit(marks, cx + r / 2, cy) === slices[1] && C.hit(marks, cx - r / 2, cy - r / 2) === slices[2] && C.hit(marks, cx + 2r, cy) === nothing
   @test C.said(pie, slices[1]) == "Lounge:  30 m²  ·  75%"
   @test "30 m²  ·  75%" in [m.text for m in marks if m.kind == :words]
+  # The total is not a slice. A million stays a million, and a billion stays a billion.
+  costs = [["Part", "Cost"], ["The satellites", "22.4 billion USD"], ["The launches", "1.65 billion USD"],
+           ["The design", "100 million USD"], ["Deorbit", "21 million USD"], ["In all", "24.2 billion USD"]]
+  d = C.data(C.chart(["pie"]), costs, headed=true)
+  @test d.labels == ["The satellites", "The launches", "The design", "Deorbit"]
+  @test d.apart == ("In all", 24.2 * 1e9) && d.after == " USD"
+  @test d.series[1].values == [22.4 * 1e9, 1.65 * 1e9, 100e6, 21e6]
+  @test C.amount(d, 22.4 * 1e9) == "22.4 billion USD" && C.amount(d, 100e6) == "100 million USD"
+  marks = C.plot(d, :pie, 700, 280, measure)
+  @test count(m -> m.kind == :slice, marks) == 4
+  texts = [m.text for m in marks if m.kind == :words]
+  @test all(t -> any(s -> occursin(t, s), texts), ["In all", "24.2 billion USD", "22.4 billion USD", "100 million USD", "21 million USD"])
+  bars = C.data(C.Chart(), costs, headed=true)
+  @test bars.labels == ["The satellites", "The launches", "The design", "Deorbit"] && bars.apart[1] == "In all"
+  @test C.data(C.Chart(), TABLE, headed=true).apart === nothing
+  # The cell text says 1 and 2. The amounts are in USD, so the pie uses those.
+  money = [["Part", "Cost"], ["Satellites", "1"], ["Design", "2"], ["In all", "3"]]
+  amounts = Any[Any[nothing, nothing], Any[nothing, 22.4e9USD], Any[nothing, 100e6USD], Any[nothing, 22.5e9USD]]
+  paid = C.data(C.chart(["pie"]), money, headed=true, values=amounts)
+  @test paid.series[1].values == [Float64((22.4e9USD).value), 1.0e8]
+  @test paid.apart == ("In all", Float64((22.5e9USD).value)) && paid.after == " USD"
 end
 
 @testset "a chart as a picture" begin
