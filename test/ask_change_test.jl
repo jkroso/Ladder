@@ -918,24 +918,37 @@ end
   @test length(b.lines) == length(before) + 1 && only(K.ask_boxes(e)) === a
   press(w, Keys.z, Keys.cmd)
   @test b.lines == before
-  # A question after the answer goes with the question and the answer before it. The answer stays, and the field is
-  # empty again. The new answer goes under the first.
+  # A question after the answer goes with the question and the answer before it. The field hides while the agent
+  # works, and shows again with the new answer under the first, and the field empty.
+  shows(a) = any(p -> p.key == K.box_key(a), popups(w))
+  K.AGENT_COMMAND[] = `sh $(agent("slow.sh", "sleep 1", "Because it is."))`
   K.focus(a.parts[:text])
   typed(w, "and why?")
   press(w, Keys.enter)
   @test only(K.ask_boxes(e)) === a && a.parts[:text].buf.lines == [""] && length(a.answers) == 1 && w.focus === e
-  @test any(p -> p.key == K.box_key(a), popups(w))
+  @test !shows(a) && picker().asked.words == "and why?" && picker().asked.ended == 0
   finish()
   @test occursin("Question: is this right?\nAnswer: I looked, and it's as you say.", asked()) && occursin("The user's words: and why?", asked())
-  @test only(K.ask_boxes(e)) === a && [x.asked for x in a.answers] == ["is this right?", "and why?"]
+  @test only(K.ask_boxes(e)) === a && [x.asked for x in a.answers] == ["is this right?", "and why?"] && a.answers[2].answer == "Because it is."
   frames(w, 2)
-  @test !haskey(a.parts, :to_end)   # it scrolled to the new answer
+  @test shows(a) && !haskey(a.parts, :to_end)   # it scrolled to the new answer
+  K.AGENT_COMMAND[] = `sh $quiet`
   # A third question goes with both questions and answers before it
   K.focus(a.parts[:text])
   typed(w, "and then?")
   press(w, Keys.enter)
   finish()
   @test occursin("Question: is this right?", asked()) && occursin("Question: and why?", asked()) && length(a.answers) == 3
+  # A question whose agent you stop has no answer: the field shows again as it was
+  K.AGENT_COMMAND[] = `sh -c "exec sleep 30"`
+  K.focus(a.parts[:text])
+  typed(w, "and how?")
+  press(w, Keys.enter)
+  @test !shows(a)
+  K.stop_agent!(e)
+  finish()
+  frames(w, 2)
+  @test shows(a) && length(a.answers) == 3 && only(K.ask_boxes(e)) === a
   K.close_ask!(a, w)
   picker().asked = nothing
   # When the agent can't take it, the field stays and says why

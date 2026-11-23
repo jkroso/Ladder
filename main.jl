@@ -43826,8 +43826,10 @@ end
 # An answer stays until you click its Close button, so that you never lose
 # one that you haven't read. Each of the words that you asked about has a
 # field of its own, and the fields of other words stay open while you ask
-# about these. A question that you ask in the field of an answer leaves the
-# answer where it is, and its answer goes under it, as does an answer to
+# about these. A question that you ask in the field of an answer hides the
+# field while the agent works on it, and the field shows again with the new
+# answer under the ones before. If the request ends with no answer, as when
+# you stop the agent, the field shows again as it was. An answer to
 # another question about the same words. When the window shows another file,
 # each field hides until the page shows again.
 
@@ -43850,6 +43852,7 @@ line to line, ⌘Z takes a change back, and long lines wrap.
   parts::Dict{Any,Any} = Dict{Any,Any}()  # the editor of its text, as :text
   answers::Vector{Any} = Any[]            # the agent's answers about the words, oldest first, over the field: see `box_answer`
   editing::Any = nothing                  # the request that waits, whose words the field changes, or nothing: see "change a request that waits"
+  sent::Bool = false                      # a question from the field went to the agent, so it hides until the answer comes: see `send_ask!`
 end
 
 "An answer of an agent in the field of a request in place: the question `asked`, the agent's `answer` in Markdown, and who answered"
@@ -43864,8 +43867,15 @@ box_key(a::AskBox) = Symbol("ask_box_", objectid(a))
 "The field of the request in place about the thing `c`, or nothing when `c` has none"
 box_about(e, c) = (k = findfirst(a -> a.editing === nothing && same_things([a.thing], [c]), ask_boxes(e)); k === nothing ? nothing : ask_boxes(e)[k])
 
-"Put the agent's answer `x` under the answers of the field `a`, and scroll to it"
-add_answer!(a::AskBox, x) = (push!(a.answers, x); a.parts[:to_end] = true; redraw_in!(a.of, 0); a)
+"Put the agent's answer `x` under the answers of the field `a`, and scroll to it. A field that hid while the agent worked shows again."
+add_answer!(a::AskBox, x) = (push!(a.answers, x); a.sent = false; a.parts[:to_end] = true; redraw_in!(a.of, 0); a)
+
+"True while a request about the words of the field `a` waits in the queue, or an agent works on it"
+asking_about(e, a::AskBox) = begin
+  t = code_picker(e)
+  any(((q, _),) -> same_things(q.places, [a.thing]), ask_queue(e)) ||
+    (t.asked !== nothing && t.asked.ended == 0 && !t.asked.stopped && same_things(t.asked.places, [a.thing]))
+end
 
 "The editor of the text of a request in place, which `e` shows: lines that no file holds, in the window's colours, at a field's size"
 ask_editor(e) = begin
@@ -43903,8 +43913,10 @@ page's menu does this, with the agent's name. See "a request in place".
 ask_selected!(e) = begin
   c = something(selected_thing(e), Some(line_thing(e)))
   c === nothing && return nothing
-  # Words that have a field already, with an answer or with what you typed, give it the keyboard
+  # Words that have a field already, with an answer or with what you typed, give it the keyboard. One that hid while
+  # the agent works on a question from it shows again.
   a = box_about(e, c)
+  a === nothing || (a.sent = false)
   a === nothing && (a = open_ask!(e, AskBox(of=e, thing=c)))
   a === nothing || focus(a.parts[:text])
   nothing
@@ -44144,9 +44156,10 @@ end
 
 """
 Give the agent what was typed in the field of `a`, about its words. If the
-agent can't take it, the field stays and says why. A field with answers stays
-too, with nothing typed in it, and the answer to this goes under them: only
-its Close button takes them away.
+agent can't take it, the field stays and says why. A field with answers hides
+while the agent works, and shows again with the new answer under them, or
+as it was when the request ends with no answer: only its Close button takes
+it away.
 """
 send_ask!(a::AskBox, w) = begin
   words = String(strip(join(a.parts[:text].buf.lines, "\n")))
@@ -44168,6 +44181,8 @@ send_ask!(a::AskBox, w) = begin
   isempty(a.answers) && return close_ask!(a, w)
   a.error = ""
   new_field!(a)
+  a.sent = true
+  close_popup!(w, box_key(a))
   focus(a.of)
   redraw_in!(a.of, 0)
   handled
@@ -44189,6 +44204,12 @@ ask_box_tick!(ctx, w, e, a::AskBox) = begin
   if away
     shown && close_popup!(w, key)
     return nothing
+  end
+  # A field that a question went from hides while the agent works on it, and the request has its own line and label.
+  # It shows again when the answer comes, or when the request ends with none.
+  if a.sent
+    asking_about(e, a) && (shown && close_popup!(w, key); return nothing)
+    a.sent = false
   end
   r = asked_rect(e, a.thing)
   # A request that waits has its own line and label

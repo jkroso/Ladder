@@ -262,7 +262,7 @@ To start from the thing itself, hold ⌘ and ⌥, click it, and click the agent'
 
 To ask about some words, select them, right-click them and choose Ask Claude…. The menu names the agent that Settings chose, or the one that shares the page. A box goes round the words, with a field under them. Type a change or a question, and press Return. The box stays round the words while the agent works, and its label says how the request goes. With nothing selected, the box goes round the line that the caret is on. Only the Close button under the field takes it away. Esc, a click on the page and another field leave it as it is, with what you typed.
 
-An answer to a question shows under the words, with a field under it to ask more. When an agent works on the page with you, it answers there too.
+An answer to a question shows under the words, with a field under it to ask more. When you ask more, the field hides while the agent works, and shows again with the new answer under the first. When an agent works on the page with you, it answers there too.
 
 While the agent works on a request, a ring turns in its label and the box pulses. A request that you make while the agent still works waits in a queue. Its label says its place, like "Number 1 in the queue". Click that label to change the request. A field opens under the words with the request in it. Change it and press Return, and it keeps its place. Take Back takes the request out, and Close leaves it as it was. Each request starts when the one before it ends. The field of a request and its answers always cover the labels and boxes of other requests.
 
