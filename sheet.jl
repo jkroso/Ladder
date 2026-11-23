@@ -330,6 +330,20 @@ end
 "What comes after the ? of a row that the sheet works out, or nothing when the row has no ?"
 unknown(expr::AbstractString) = (m = match(r"^\s*\?\s*(.*?)\s*$", expr); m === nothing ? nothing : String(m[1]))
 
+"""
+A value that a sheet has from outside it, in place of an expression: what a
+sum in a line of the page came to. The sheet takes it as it is and works
+nothing out for it, so a sum that takes long runs once, for its line, and not
+again for each sheet that reads it. It reads no names, and it's never a row
+over a range or a row that the sheet works out backwards.
+"""
+struct Given
+  value::Any
+end
+
+unknown(::Given) = nothing
+uses(::Given, names) = Tuple{Int,Int,String}[]
+
 "True when `left` is what a function's definition starts with, like f(x, y), where no value is the name of a row. `ids` are the names of the rows, as Julia knows them."
 signature(left, ids) =
   left isa Symbol || (Meta.isexpr(left, :call) && left.args[1] isa Symbol && all(a -> a isa Symbol && !(a in ids), left.args[2:end]))
@@ -392,6 +406,7 @@ end
 # the other rows come to over the range. A sheet has one such row: its first.
 
 "The two ends of a row over a range, like `8m to 20m`, as code. It's nothing for any other row. `names` are the names that the row can use."
+ends(::Given, names) = nothing
 ends(expr::AbstractString, names) = begin
   m = match(r"^(.*\S)\s+to\s+(\S.*)$", rewrite(expr, names))
   m === nothing || !all(code(collect(m.match))[m.offsets[1] + ncodeunits(m[1]):m.offsets[2] - 1]) ? nothing : (String(m[1]), String(m[2]))
@@ -467,7 +482,7 @@ work(rows; at::Real=0, over::Int=ranged(rows), prior=nothing, each=nothing) = be
     if free == 0
       unknown(expr) === nothing || (free = i)
     elseif unknown(expr) === nothing
-      ex = try read(expr, seen) catch; nothing end
+      ex = expr isa Given ? nothing : try read(expr, seen) catch; nothing end
       goal(ex, ids(seen)) === nothing || (pairs[free] = i; free = 0)
     end
     isempty(ident(name)) || push!(seen, String(strip(name)))
@@ -488,6 +503,10 @@ work(rows; at::Real=0, over::Int=ranged(rows), prior=nothing, each=nothing) = be
   end
   result_of(i, name, expr) = begin
     prior === nothing || i > prior.n || return prior.results[i]
+    if expr isa Given
+      keep!(name, expr.value)
+      return Result(brief(Base.invokelatest(shown, expr.value)), false)
+    end
     isempty(strip(expr)) && return NONE
     try
       start = unknown(expr)
@@ -656,7 +675,7 @@ keeps what it laid out, so that it's forgotten with the rest.
 """
 tally(rows; given=(), at=nothing, cache=KEPT) = begin
   given = needed(collect(given), rows)
-  all = Tuple{String,String}[given..., rows...]
+  all = Tuple{String,Any}[given..., rows...]
   kept(cache, (:tally, all, at)) do
     mine(results) = results[length(given)+1:end]
     # With a row over a range, each row shows what it comes to at the two ends, or at the one place `at`
@@ -684,7 +703,7 @@ a range, or with no row that changes. It's kept in `cache`, as `tally` says.
 """
 cases(rows; given=(), cache=KEPT) = begin
   given = needed(collect(given), rows)
-  all = Tuple{String,String}[given..., rows...]
+  all = Tuple{String,Any}[given..., rows...]
   over = range_row(all, length(given))
   over == 0 && return nothing
   kept(cache, (:cases, all)) do
@@ -710,4 +729,4 @@ name_values(rows) = work(rows)[2]
 "The names that the expression of row `r` can use: those of the rows above it, and those that the sheet has from outside it"
 known(rows, r::Int, given=()) = unique(String[strip(name) for (name, _) in Iterators.flatten((given, rows[1:r-1])) if !isempty(ident(name))])
 
-export SHEET, Result, sheetcells, parts, ident, uses, tally, known, name_values, ident, number_at, nudged, cases
+export SHEET, Result, Given, sheetcells, parts, ident, uses, tally, known, name_values, ident, number_at, nudged, cases

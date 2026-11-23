@@ -182,3 +182,35 @@ end
 end
 
 close(w)
+
+@testset "a sheet takes what a sum over it came to, and doesn't run the sum again" begin
+  # How many times the slow sum has run. It's in Main, which the page's code can name.
+  runs = Core.eval(Main, :(given_test_runs = Ref(0)))
+  slow = joinpath(dir, "slow.md")
+  write(slow, """
+  A sum that takes long: !`slow = (Main.given_test_runs[] += 1; 5)`. Twice that is !`twice = slow * 2`.
+
+  ```sheet
+  Price = 1 to 3
+  Cost = price * twice
+  ```
+
+  ```chart
+  kind: lines
+  show: Cost
+  ```
+  """)
+  e2 = K.build_editor(slow)
+  w2 = Window(e2, size=(1000px, 800px))
+  foreach(_ -> frame(w2), 1:2)
+  costs() = [r.text for r in K.item(e2, findfirst(==("```sheet"), e2.buf.lines) + 1).content.results]
+  # The sum ran for its line, and the sheet and its chart took its value
+  @test costs() == ["1 to 3", "10 to 30"] && runs[] == 1
+  @test K.shown!(e2.nodes[(:block, K.CHART, slow, 1)]).series[1].values[[1, end]] == [10.0, 30.0]
+  # A sum that the sheet reads changes, and the sheet follows it
+  at = findfirst("slow * 2", e2.buf.lines[1])
+  K.edit!(e2.buf, (1, at.stop - 1), (1, at.stop), "3", typing=true)
+  foreach(_ -> frame(w2), 1:2)
+  @test costs() == ["1 to 3", "15 to 45"] && runs[] == 1
+  close(w2)
+end

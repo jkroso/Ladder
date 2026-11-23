@@ -349,7 +349,7 @@
 @use "./markdown" Kind Line Span Cell classify spans tablecells isdivider words isdone front_matter MATTER TOML_MATTER MATH CALLOUTS callout opens_callout wikitarget block_id only_id
 @use "./markdown" COMMENT
 @use "./highlight" tokens left_open
-@use "./sheet" SHEET Result sheetcells parts uses tally known units shown number_at nudged name_values ident cases
+@use "./sheet" SHEET Result Given sheetcells parts uses tally known units shown number_at nudged name_values ident cases
 @use "./spreadsheet" SPREADSHEET Value spreadcells spreadtexts isformula letters answers moved
 @use "./merge" changes combine follow
 @use "./agent" => Agent
@@ -2343,7 +2343,7 @@ made(e, code::String, n::Int) = begin
   get!(e.nodes, key) do
     sums_run[] += 1
     out = evaluate(e, code, key=key, inline=true)
-    out isa Tuple && return out
+    out isa Tuple && (keep_value!(e, code, n, out[2]); return out)
     shown = Shown(value=out, inline=true)
     out isa SemanticUI && own!(shown, out)
     shown
@@ -3440,7 +3440,7 @@ sheetgrid(e, from::Int, to::Int) = begin
   caret = from < b.caret[1] < to && b.caret[1] == b.anchor[1] ? b.caret : nothing
   # The layout holds the number of each row's line, so it's kept for these lines only
   # The names that the sheet has from the parts of the page over it, like the measures of a takeoff and the sums in its lines of text
-  given = page_given(e, from, sums=true)
+  given = sheet_given(e, from)
   # While the mouse is on one value of a chart of a sheet with a row over a range, the sheet shows itself at that value
   at = sheet_case(e, [parts(b.lines[i]) for i in from+1:to-1], given)
   get!(e.flows, (:sheet, from, b.lines[from+1:to-1], caret, given, at)) do
@@ -11650,7 +11650,7 @@ page_tables(e) = begin
                   for (r, row) in enumerate(texts)]
         else
           texts = [parts(b.lines[r]) for r in i+1:t-1]
-          given = page_given(e, i, sums=true)
+          given = sheet_given(e, i)
           # A sheet with a row over a range is a table with a row for each value of that row
           over = get!(() -> cases(texts; given, cache=e.flows), e.flows, (:cases, texts, given))
           if over !== nothing
@@ -23451,15 +23451,18 @@ value: !`farm = 2GW` gives ("farm", "2GW"). A sum that gives no name, like
 can use !`farm_cost = …` as "farm cost", the way a sum uses the row "Farm
 cost" as `farm_cost`.
 """
-sum_names(text::AbstractString) = begin
-  out = Tuple{String,String}[]
+sum_names(text::AbstractString) = [(name, expr) for (name, expr, _, _) in named_sums(text)]
+
+"What `sum_names` gives, with the code of each sum and the column where its code starts in `text`"
+named_sums(text::AbstractString) = begin
+  out = Tuple{String,String,String,Int}[]
   occursin(INLINE, text) || return out
   for m in eachmatch(r"!`([^`]+)`", text)
     code = String(m[1])
     name = sum_name(code)
     name === nothing && continue
     # The name has no =, so the first = is the one after it
-    push!(out, (replace(String(name), '_' => ' '), String(strip(code[nextind(code, findfirst('=', code)):end]))))
+    push!(out, (replace(String(name), '_' => ' '), String(strip(code[nextind(code, findfirst('=', code)):end])), code, length(text, 1, m.offset) + 1))
   end
   out
 end
@@ -23494,10 +23497,17 @@ expression for its value. With no line, it's the names of the whole page.
 With `sums`, the sums in the lines of text give their names too, so a sheet
 can use !`farm = 2GW` as `farm`. They're found again when the page has changed.
 """
-page_given(e, upto::Int=typemax(Int); sums::Bool=false) = begin
+page_given(e, upto::Int=typemax(Int); sums::Bool=false) = given_and_sums(e, upto, sums)[1]
+
+"""
+`page_given`, and where each name that a sum gives is: its place in that
+list, and the code and the ordinal that `made` keeps the sum by.
+"""
+given_and_sums(e, upto::Int, sums::Bool) = begin
   b = e.buf
-  get!(e.flows, (:given, b.path, b.version, upto, sums)) do
+  get!(e.flows, (:given_sums, b.path, b.version, upto, sums)) do
     out = Tuple{String,String}[]
+    spots = Tuple{Int,String,Int}[]
     ks = kinds(b)
     i = 1
     while i <= length(ks) && i < upto
@@ -23510,11 +23520,61 @@ page_given(e, upto::Int=typemax(Int); sums::Bool=false) = begin
           i = t
         end
       elseif sums && !(k.kind in (Kind.fence, Kind.code))
-        append!(out, get!(() -> sum_names(b.lines[i]), e.flows, (:sum_names, b.lines[i])))
+        for (name, expr, code, col) in get!(() -> named_sums(b.lines[i]), e.flows, (:named_sums, b.lines[i]))
+          push!(out, (name, expr))
+          push!(spots, (length(out), code, ordinal(e, i, col, code)))
+        end
       end
       i += 1
     end
+    (out, spots)
+  end
+end
+
+"""
+What the sheet whose block opens on line `upto` has from the parts of the
+page over it: what `page_given` gives with `sums`, but a sum that didn't go
+wrong gives what it came to, as a `Given`, in place of its code. The sheet
+takes that value as it is. So a sum that takes long, like one that adds up
+thousands of numbers, runs once for its line, and not again for each sheet
+under it.
+
+A sum over the sheet that hasn't run since the page changed runs here, as it
+would when its line is laid out, from the top down. A chart near the top of
+the page asks for every table of the page before the sums under it are laid
+out, and the sheet then has the same values for it as for the rest of the frame.
+"""
+sheet_given(e, upto::Int) = begin
+  b = e.buf
+  given, spots = given_and_sums(e, upto, true)
+  foreach(((_, code, n),) -> made(e, code, n), spots)
+  get!(e.flows, (:sheet_given, b.path, b.version, upto, sums_run[])) do
+    values = get(e.nodes, (:sum_values, b.path), nothing)
+    out = Tuple{String,Any}[given...]
+    values === nothing && return out
+    for (k, code, n) in spots
+      made = get(e.nodes, (:inline, b.path, code, n), nothing)
+      (made isa Tuple && !made[2] && haskey(values, (code, n))) || continue
+      out[k] = (given[k][1], Given(values[(code, n)]))
+    end
     out
+  end
+end
+
+"""
+Keep what the `n`th sum `code` of the page came to, when it gives a name and
+didn't go wrong, so that `sheet_given` can give it to the sheets under it.
+"""
+keep_value!(e, code::String, n::Int, failed::Bool) = begin
+  values = get!(() -> Dict{Tuple{String,Int},Any}(), e.nodes, (:sum_values, e.buf.path))
+  delete!(values, (code, n))
+  name = sum_name(code)
+  (failed || name === nothing) && return
+  # A drag makes a new sum on each step, so the values of sums that the page no longer has are forgotten
+  length(values) > 400 && filter!(((k, _),) -> haskey(e.nodes, (:inline, e.buf.path, k...)), values)
+  try
+    values[(code, n)] = Base.invokelatest(getglobal, workspace(e), name)
+  catch
   end
 end
 
