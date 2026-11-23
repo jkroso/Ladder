@@ -1224,6 +1224,7 @@ end
   hidden::Bool = false                  # the sidebar lists the hidden files and folders too: the ones whose names start with a dot
   right::Bool = true                    # a page that has a panel at the right shows it, as a repository's page has git's panel. See `page_side`.
   own::Bool = false                     # you write the message of each commit, and Claude doesn't. See "Claude writes the commit's message".
+  pinned::Bool = false                  # a click on the file's name pinned the path in the top bar open. See "the path in the top bar".
   theme::Symbol = :sepia
   look::Symbol = :own                   # :site on a page of a blog, which looks as the blog's site does. See `page_look`.
   applied::Symbol = :none               # the theme the window was last told about
@@ -30603,6 +30604,8 @@ end
 #     the name. A pinned path is in the middle of the bar, where the file's
 #     name is, and has no border or shadow, since it's part of the bar. Its
 #     file's name isn't shaded, as no name is until the mouse is over it.
+#     The pin is a setting: every window has it, and it stays the next time
+#     the app opens.
 #
 # After the file's name come the headings over the caret, from the biggest,
 # and the component that the caret is on: `welcome.md › H2 › Sheet`. A heading
@@ -30665,8 +30668,12 @@ const TT_MOST = 80      # the most things that a list of a folder shows
 const TT_PART = 180px   # how wide the name of a component in the path can be
 const TT_MARK = 14px    # how big a heading's mark is in the path, like H2
 
-"True when a click on the file's name pinned the path open, so it stays when the mouse leaves it"
-trail_pinned(e) = get(e.nodes, :title_pinned, false) === true
+"""
+True when a click on the file's name pinned the path open, so it stays when
+the mouse leaves it. It's a setting: each window has the path pinned, and it
+stays pinned the next time the app opens.
+"""
+trail_pinned(e) = e.pinned
 
 "How wide each name of `steps` is in the top bar. The file's name is a little bolder."
 title_widths(steps) = [measure(Face(SANS, i == length(steps) ? "Medium" : "", 13px, colours.ink, false), n) + 2TT_PAD
@@ -30945,8 +30952,8 @@ cursor(::TitleArrow) = :hand
 
 onkey(c::TitleCrumb, ev::KeyPress{Keys.mouse_left}) = (c.last ? pin_trail!(editor(c)) : title_go!(editor(c), ev.window, c.path); handled)
 
-"Pin the path in the top bar open, or let it close again when the mouse leaves it"
-pin_trail!(e) = (e.nodes[:title_pinned] = !trail_pinned(e); nothing)
+"Pin the path in the top bar open, or let it close again when the mouse leaves it, in each window, and keep that in the settings"
+pin_trail!(e) = (e.pinned = !e.pinned; save_settings!(e); nothing)
 onkey(a::TitleArrow, ev::KeyPress{Keys.mouse_left}) = (open_folder_list!(editor(a), ev.window, a); handled)
 
 # A right-click on a name shows the menu of its folder or file, as in the sidebar. Only the file's own name can be renamed in the bar.
@@ -40796,7 +40803,7 @@ end
 const pages_dir = Ref(joinpath(@__DIR__, "pages"))
 
 "The settings that every window has the same: each is a field of the editor"
-const SHARED = (:theme, :font, :weight, :zoom, :widest, :plain, :spelling, :updates, :autosave, :peeks, :ai, :glide, :wrap, :numbers, :shade, :beside, :indent, :code_scale, :code_font, :code_weight, :guide, :bundle, :rebound, :side, :hidden, :right, :own)
+const SHARED = (:theme, :font, :weight, :zoom, :widest, :plain, :spelling, :updates, :autosave, :peeks, :ai, :glide, :wrap, :numbers, :shade, :beside, :indent, :code_scale, :code_font, :code_weight, :guide, :bundle, :rebound, :side, :hidden, :right, :own, :pinned)
 
 "The folder of the pages that have the settings"
 settings_dir() = joinpath(pages_dir[], "settings")
@@ -40866,8 +40873,9 @@ adopt_settings!(o, e) = begin
     # When the list of files is all that changed, the page's lines stay where they are
     changed == (:hidden,) && return (w = window_of(o); w === nothing || stale!(w); o)
   end
-  # The width of a sidebar that's hidden changes nothing that the window shows
+  # The width of a sidebar that's hidden changes nothing that the window shows, and the path in the top bar moves no lines
   o.panel || changed != (:side,) || return o
+  changed == (:pinned,) && return (w = window_of(o); w === nothing || stale!(w); o)
   # Text of another size or width wraps again, and that moves the lines
   y = o.scroll.offset
   i = findfirst(it -> it.top + it.tall > y, o.layout)
@@ -40909,7 +40917,7 @@ save_settings!(e) = begin
     mkpath(dirname(settings_file()))
     # After the bundle of key bindings comes a line for each command that has other keys than the bundle's, like key.save=ctrl+s
     changed = join(["key.$name=$(e.rebound[name])\n" for name in sort!(collect(keys(e.rebound)))])
-    write(settings_file(), "theme=$(e.theme)\nfont=$(e.font)\nweight=$(e.weight)\nzoom=$(e.zoom)\nwidth=$(e.widest.value)\nplain=$(e.plain)\nspelling=$(e.spelling)\nupdates=$(e.updates)\nautosave=$(e.autosave)\npeeks=$(e.peeks)\nagent=$(e.ai)\nglide=$(e.glide)\nwrap=$(e.wrap)\nnumbers=$(e.numbers)\nshade=$(e.shade)\nbeside=$(e.beside)\nindent=$(e.indent)\ncode=$(e.code_scale)\ncodefont=$(e.code_font)\ncodeweight=$(e.code_weight)\nguide=$(e.guide)\nsidebar=$(e.side.value)\nhidden=$(e.hidden)\nright=$(e.right)\nownmessage=$(e.own)\nkeys=$(e.bundle)\n$changed")
+    write(settings_file(), "theme=$(e.theme)\nfont=$(e.font)\nweight=$(e.weight)\nzoom=$(e.zoom)\nwidth=$(e.widest.value)\nplain=$(e.plain)\nspelling=$(e.spelling)\nupdates=$(e.updates)\nautosave=$(e.autosave)\npeeks=$(e.peeks)\nagent=$(e.ai)\nglide=$(e.glide)\nwrap=$(e.wrap)\nnumbers=$(e.numbers)\nshade=$(e.shade)\nbeside=$(e.beside)\nindent=$(e.indent)\ncode=$(e.code_scale)\ncodefont=$(e.code_font)\ncodeweight=$(e.code_weight)\nguide=$(e.guide)\nsidebar=$(e.side.value)\nhidden=$(e.hidden)\nright=$(e.right)\nownmessage=$(e.own)\npinned=$(e.pinned)\nkeys=$(e.bundle)\n$changed")
   catch
     # A file that can't be written only means the settings last as long as the window
   end
@@ -41046,6 +41054,8 @@ load_settings!(e) = begin
       e.right = value != "false"
     elseif name == "ownmessage"
       e.own = value == "true"
+    elseif name == "pinned"
+      e.pinned = value == "true"
     elseif name == "keys"
       any(b -> first(b) == value, BUNDLES) && (e.bundle = String(value))
     elseif startswith(name, "key.")

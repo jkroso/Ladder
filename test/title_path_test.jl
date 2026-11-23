@@ -268,9 +268,18 @@ end
   @test showing() && off_middle() <= 2
   K.toggle_panel!(e); sleep(1); frames()
   @test !e.panel && off_middle() <= 2
+  # The pin is kept in the settings file, so it's still there the next time the app opens
+  e.remember = true
+  K.save_settings!(e)
+  @test occursin("\npinned=true\n", read(K.settings_file(), String))
+  later = K.build_editor(a)
+  K.load_settings!(later)
+  @test K.trail_pinned(later)
   # A second click on the name lets it go when the mouse leaves it. Until then it stays where it is, under the mouse.
   click(middle(crumb(a)))
   @test !K.trail_pinned(e) && showing() && off_middle() <= 2
+  @test occursin("\npinned=false\n", read(K.settings_file(), String))
+  e.remember = false
   at((550, 400))
   @test !showing()
   hover!()
