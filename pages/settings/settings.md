@@ -6,7 +6,7 @@ Three more pages have the rest of the settings. Hold ⌘ and click a link to go 
 
 - [Code editor](code-editor.md) has how code shows.
 - [Key bindings](key-bindings.md) has the keys of each command.
-- [Startup](startup.md) is the page that Ladder opens first, and the code that it runs when it starts.
+- [Startup](startup.md) is the page that Ladder opens the first time, and the code that it runs when it starts. After that, Ladder opens where you were when you quit.
 
 These pages show what a page can do:
 

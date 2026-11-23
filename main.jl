@@ -50645,9 +50645,10 @@ add_command!(show_folder_as!, title="Show a folder as a kind of folder: a deskto
 # Ladder has one page that's yours from the start: the startup page. It does
 # two things.
 #
-#   - It's the page that shows when you open Ladder without a file. So it's
-#     the place for what you want to see first: links to your pages, a list
-#     of what's to do.
+#   - It's the page that shows the first time you open Ladder, and when
+#     Ladder can't open where you were when you last quit it: see "where
+#     Ladder opens". So it's the place for links to your pages and a list of
+#     what's to do.
 #   - Each time Ladder starts, it runs the Julia code of the page: each
 #     `julia` block, from the top, in one module. Julia does the same with
 #     its startup.jl. So the page is where you load code that adds to Ladder,
@@ -50673,14 +50674,14 @@ add_command!(show_folder_as!, title="Show a folder as a kind of folder: a deskto
 "A folder for the startup page that isn't the folder of the settings. A test names a folder of its own here."
 const STARTUP_FOLDER = Ref("")
 
-"The page that Ladder opens when no file is named, and whose Julia code it runs when it starts"
+"The page that Ladder opens when no file is named and it has no place to open from the last time (see `take_place!`), and whose Julia code it runs when it starts"
 startup_page() = isempty(STARTUP_FOLDER[]) ? settings_page("startup.md") : joinpath(STARTUP_FOLDER[], "startup.md")
 
 "What the startup page says the first time, before you change it. Its links go from the folder of the settings."
 startup_text() = """
   # Home
 
-  Ladder opens this page when you start it without a file. The page is yours, so change it as you like.
+  Ladder opens this page the first time it starts, and when the place where you last were is gone. The page is yours, so change it as you like.
 
   - [Welcome](../welcome.md) shows what Ladder can do.
   - [Settings](settings.md) has the colours, the font and the keys. ⌘, opens it too.
@@ -50819,7 +50820,8 @@ end
 """
 Open an editor window and run it until it closes. `args` can name a Markdown
 file or a folder, and `--paper` or `--night` to choose the colours for this
-window. With no file, the window shows the startup page.
+window. With no file, the window shows where Ladder was when it last quit, or
+else the startup page: see "where Ladder opens".
 """
 open_editor(args) = begin
   move_old_folders!()
@@ -50828,20 +50830,110 @@ open_editor(args) = begin
   Agent.announce()   # an agent's script knows from now on that this Ladder can send it a page
   home = startup_page!()
   run_startup!(home)
-  e = build_editor(isempty(paths) ? home : paths[1])
+  was = isempty(paths) ? take_place!() : nothing
+  # The code of the startup page can have made methods since this function started, like those of a kind of folder
+  e = was === nothing ? build_editor(isempty(paths) ? home : paths[1]) : Base.invokelatest(place_editor, was)
   load_settings!(e)
   "--night" in args && (e.theme = :night)
   "--paper" in args && (e.theme = :paper)
   e.remember = true
   e.size = paper_window(screen_room(), e.side)
-  # This returns when the last window has closed. The code of the startup page can have made methods since
-  # this function started, and the window is drawn with those too.
-  Base.invokelatest(display, window!(e, title="Ladder", size=e.size))
+  w = window!(e, title="Ladder", size=e.size)
+  was === nothing || put_place!(e, was)
+  # This returns when the last window has closed. The window is drawn with the methods of the startup page's code too.
+  Base.invokelatest(display, w)
+  keep_place!(quit_editor(e))
   # What code from the startup page does last, like the end of a look for email
   foreach(f -> Base.invokelatest(f), values(AT_QUIT))
   # A newer version of the app that's ready takes the app's place once Ladder has quit
   Update.quit!(Update.own())
 end
+
+# --- where Ladder opens --------------------------------------------------------------------
+#
+# Ladder opens where you were when you last quit it: the file or the folder
+# that the front window showed, with the caret and the scroll where they were.
+# The sidebar lists the folder that it listed then, and it stays closed until
+# you open it. A window whose file and folder ⌘W closed was at the folder that
+# its sidebar listed. The settings window doesn't count: Ladder opens where
+# the last window in front of the others was.
+#
+# Ladder reads the place when it opens, deletes it, and writes it again when it
+# quits. So a page that stops Ladder before it quits isn't where Ladder opens
+# the next time, and the startup page shows. The startup page shows too the
+# first time, and when the file or the folder has gone. A file that's named on
+# the command line, as in `julia main.jl notes.md`, shows in the place's
+# stead, and Ladder keeps the place for the next time. A file that macOS opens
+# Ladder with, after a double-click in the Finder or the `ladder` command,
+# shows after the place, so ⌘⌥← goes back to the place.
+
+"The file that keeps where Ladder was when it last quit. A test names a file of its own here."
+const PLACE_FILE = Ref(joinpath(homedir(), "Library", "Application Support", "Ladder", "place"))
+
+"The last window that was in front, of the windows that aren't the settings window, or nothing"
+const LAST_FRONT = Ref{Any}(nothing)
+
+"""
+Where the window of `e` is, for the next time Ladder opens: the file or the
+folder that its page shows, the folder that its sidebar lists, its caret, its
+anchor and how far it's scrolled. A window that shows no file is at the folder
+that its sidebar lists. It's nothing when that's nowhere on the Mac.
+"""
+quit_place(e) = begin
+  p = place_now(e)
+  path = isempty(p.path) ? e.folder : p.path
+  ispath(path) || return nothing
+  (; p..., path, folder=e.folder)
+end
+
+"Write where the window of `e` is into the place file, for the next time Ladder opens. A place that's nowhere leaves the file as it was."
+keep_place!(e) = begin
+  p = quit_place(e)
+  p === nothing && return nothing
+  try
+    mkpath(dirname(PLACE_FILE[]))
+    write(PLACE_FILE[], "path=$(p.path)\nfolder=$(p.folder)\ncaret=$(p.caret[1]),$(p.caret[2])\nanchor=$(p.anchor[1]),$(p.anchor[2])\noffset=$(p.offset.value)\n")
+  catch
+    # A file that can't be written only means that Ladder opens on the startup page
+  end
+  nothing
+end
+
+"""
+Where Ladder was when it last quit, as `quit_place` gives it, or nothing when
+there's no place or it has gone from the Mac. It deletes the place file, which
+`keep_place!` writes again when Ladder quits.
+"""
+take_place!() = begin
+  file = PLACE_FILE[]
+  isfile(file) || return nothing
+  kept = Dict{String,String}()
+  for line in eachline(file)
+    i = findfirst('=', line)
+    i === nothing || (kept[line[1:i-1]] = line[i+1:end])
+  end
+  rm(file, force=true)
+  path = get(kept, "path", "")
+  # A folder that the Finder shows as one file, like an app, would open in its own app
+  (ispath(path) && !(isdir(path) && ispackage(path))) || return nothing
+  pair(s) = (m = match(r"^(\d+),(\d+)$", s); m === nothing ? (1, 0) : (parse(Int, m[1]), parse(Int, m[2])))
+  (path=path, folder=get(kept, "folder", ""), caret=pair(get(kept, "caret", "")), anchor=pair(get(kept, "anchor", "")),
+   offset=px(something(tryparse(Float64, get(kept, "offset", "")), 0.0)))
+end
+
+"An editor at the place `p` that `take_place!` gave: its file, or its folder in the page, and the folder that its sidebar listed"
+place_editor(p) = begin
+  e = blank_editor()
+  isdir(p.path) ? open_folder!(e, p.path) : open!(e, p.path)
+  isdir(p.folder) && e.folder != p.folder && go_folder!(e, p.folder)
+  e
+end
+
+"Put the caret and the scroll of the window of `e` where they were at the place `p`, when it's a file that shows"
+put_place!(e, p) = (e.buf.path == p.path && !isdir(p.path) && go_place!(e, p); e)
+
+"The window whose place Ladder keeps when it quits: the last one that was in front, of those that aren't the settings window, or else `first`"
+quit_editor(first) = (f = LAST_FRONT[]; f isa Editor ? f : first)
 
 # The close, minimise and zoom buttons line up with the sidebar's button, in the middle of the top bar
 onopen(e::Editor, w::Window) = (watch_front!(e, w); place_window_buttons!(hide_titlebar!(w), TOPBAR_H / 2, TOPBAR_H / 2))
@@ -50877,7 +50969,7 @@ watch_front!(e, w) = begin
   isempty(w.glfw) && return w
   GLFW.SetWindowFocusCallback(w.glfw[1], (_, front) -> begin
     # A name of a page's module that acts on a window acts on the front one, when it shows the page
-    front && (FRONT_WINDOW[] = e; return)
+    front && (FRONT_WINDOW[] = e; e.settings || (LAST_FRONT[] = e); return)
     try
       Base.invokelatest(left!, e)
     catch
