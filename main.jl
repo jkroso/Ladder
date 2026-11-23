@@ -42127,6 +42127,12 @@ tool_input(t::CodePicker, w, ::KeyPress{Keys.mouse_left}) = begin
       return true
     end
   end
+  # A click on the label of an agent that answers a question stops it
+  if q !== nothing && q.ended == 0 && q.label !== nothing
+    x, y = num(w.mouse[1]), num(w.mouse[2])
+    left, top, wide, tall = q.label
+    left <= x <= left + wide && top <= y <= top + tall && (t.swallow = true; stop_agents!(t.editor, Any[q]); return true)
+  end
   # A click on the label of an agent stops it while it works, and shows the change that it made after
   a = t.asked
   if a !== nothing && (a.ended == 0 || a.changed) && a.label !== nothing
@@ -42134,7 +42140,7 @@ tool_input(t::CodePicker, w, ::KeyPress{Keys.mouse_left}) = begin
     left, top, wide, tall = a.label
     if left <= x <= left + wide && top <= y <= top + tall
       t.swallow = true
-      a.ended == 0 ? stop_agent!(t.editor) : show_change!(t.editor)
+      a.ended == 0 ? stop_agents!(t.editor, Any[a]) : show_change!(t.editor)
       return true
     end
   end
@@ -42218,20 +42224,17 @@ tool_input(t::CodePicker, w, ::KeyPress{Keys.c}) = begin
 end
 # While a block is dragged by its handle, the mouse selects no text, and the line where the block would go follows it
 tool_input(t::CodePicker, w, ::MouseMove) = dragging(t) ? (redraw_in!(t.editor, 0); true) : false
-# Esc stops the drag of a block, takes the line of a thing that a click with ⌘ and ⌥ down chose away, stops an
-# agent that's working, and takes the card of an agent's answer away, while no popup and no search shows. The field of a
-# request in place takes its own Esc: see "a request in place".
+# Esc stops the drag of a block, and takes the line of a thing that a click with ⌘ and ⌥ down chose away, while no
+# popup and no search shows. It does nothing to an agent or to its answer, as it's easy to press by mistake: a click
+# on the label stops an agent, and a click on the card takes an answer away. The field of a request in place takes
+# its own Esc: see "a request in place".
 tool_input(t::CodePicker, w, ::KeyPress{Keys.escape}) = begin
   (unmodified(w) && t.editor.popup == :none && !finding(t.editor) && !typing_ask(t.editor, w)) || return false
   dragging(t) && (block_drag(t.editor).lines = nothing; redraw_in!(t.editor, 0); return true)
   t.chosen === nothing || (unchoose!(t); return true)
-  isempty(working_agents(t.editor)) || (stop_agent!(t.editor); return true)
   # The values of Show Steps go: see "the steps of a check"
   haskey(t.editor.nodes, :steps) && (delete!(t.editor.nodes, :steps); redraw_in!(t.editor, 0); return true)
-  (t.about !== nothing && t.about.ended > 0) || return false
-  t.about = nothing
-  redraw_in!(t.editor, 0)
-  true
+  false
 end
 
 const PICK_LINE = colorant"rgb(48,128,236)"
@@ -44163,8 +44166,8 @@ agent_free(e; command=true) = (command && agent_command(e); nothing)
 # has a grey line round it, with its place in the queue on its label, like
 # "Number 1 in the queue". A click on that label takes it out. When a request
 # ends while others wait, its label stays a few seconds with what came of it,
-# as it does when none wait. Esc stops only the agent that works, and the next
-# request then starts.
+# as it does when none wait. A click on the label of the request that an agent
+# works on stops that agent, and the next request then starts.
 
 const QUEUED_LINE = colorant"rgb(128,146,176)"   # the line round a thing whose request waits
 
@@ -44228,9 +44231,9 @@ end
 # it does after a new agent's change.
 #
 # An agent that's still working on what you sent last gets the change when it
-# waits for the page again. Until then the label on the thing says so, and Esc
-# takes the change back. After that Esc, Ladder no longer counts the page as
-# shared, so the next change goes to a new agent.
+# waits for the page again. Until then the label on the thing says so, and a
+# click on the label takes the change back. After that click, Ladder no longer
+# counts the page as shared, so the next change goes to a new agent.
 
 "Lines `from` to `to` of `lines`, each indented, for an agent to read: no more than 12 lines, and no more than 400 characters of each"
 quoted_lines(lines, from, to) = begin
@@ -44344,15 +44347,15 @@ end
 "What the label on the thing of the change `a` says"
 asked_label(a::AskedChange) =
   a.ended > 0 ? (a.changed ? "$(a.said)  ·  Show Change" : a.said) :
-  isempty(a.by) ? asking_words(a.words, a.step) * "  ·  Esc stops it" :
-  a.sent ? "Asked $(a.by): $(request_words(a.words)) …  ·  Esc hides this" :
-  "For $(a.by) when it waits for the page again: $(request_words(a.words))  ·  Esc takes it back"
+  isempty(a.by) ? asking_words(a.words, a.step) * "  ·  Click to stop it" :
+  a.sent ? "Asked $(a.by): $(request_words(a.words)) …  ·  Click to hide this" :
+  "For $(a.by) when it waits for the page again: $(request_words(a.words))  ·  Click to take it back"
 
 # --- stop an agent ---
 #
-# Esc stops the agent that's making a change or answering a question, while
-# no popup and no search shows, and so does a click on its label, or the
-# command Stop Agent. What the agent changed before it stopped stays in its
+# A click on its label stops the agent that's making a change or answering a
+# question, and so does the command Stop Agent. Esc doesn't, as it's easy to
+# press by mistake. What the agent changed before it stopped stays in its
 # files, and doesn't run, because it can be half done. Undo Change puts it
 # back, and Show Change shows it.
 
@@ -44371,6 +44374,11 @@ and doesn't run. Undo Change puts it back. See "stop an agent".
 stop_agent!(e) = begin
   found = working_agents(e)
   isempty(found) && error("No agent is working now.")
+  stop_agents!(e, found)
+end
+
+"Stop each agent of `found`, which are working in the window of `e`, as `stop_agent!` does"
+stop_agents!(e, found) = begin
   t = code_picker(e)
   for a in found
     a.process === nothing || process_exited(a.process) || kill(a.process)
@@ -44392,11 +44400,11 @@ works_here(e, ::Val{:stop_agent}) = !isempty(working_agents(e))
 # the code and answers, and changes no file. The answer shows in a card beside
 # the thing. Ask More on the card asks another question about the same
 # thing, and Change It asks for a change to it: the agent gets the questions
-# and answers so far with the new words. A click on the card, or Esc, takes
-# it away. A click anywhere else leaves it, and so does a new question: the
+# and answers so far with the new words. A click on the card takes it away.
+# Esc and a click anywhere else leave it, and so does a new question: the
 # answer then goes to a field under its thing, as an answer in place does.
 # While an agent works, the label on the thing says what it's doing, like
-# "Reading main.jl": see `agent_step`.
+# "Reading main.jl", and a click on the label stops it: see `agent_step`.
 
 """
 A question that an agent was asked about `places`, the things of Ask About.
@@ -44404,7 +44412,8 @@ A question that an agent was asked about `places`, the things of Ask About.
 what the agent is doing until then. `talk` has the questions that were asked
 about the things before, each with its answer. `card` is where the card with
 the answer was drawn last, and `buttons` where each of its buttons was, for a
-click on them.
+click on them. `label` is where the label on the thing was drawn last, while
+the agent works.
 """
 @def mutable struct AskedAbout
   words::String = ""
@@ -44419,6 +44428,7 @@ click on them.
   ended::Float64 = 0.0
   card::Any = nothing
   buttons::Vector{Any} = Any[]
+  label::Any = nothing
 end
 
 "True when `as` and `bs` are the same things of Ask About, in the same order"
@@ -44566,10 +44576,15 @@ draw_answer(ctx, w, t::CodePicker) = begin
   q = t.about
   q === nothing && return nothing
   e = t.editor
+  q.label = nothing
   for (n, c) in enumerate(q.places)
     r = asked_rect(e, c)
-    label = n == 1 && q.ended == 0 ? asking_words(q.words, q.step) * "  ·  Esc stops it" : length(q.places) > 1 ? string('A' + n - 1) : ""
-    r === nothing || pick_mark(ctx, w, r, label; colour=CHIP_MARKS[mod1(n, length(CHIP_MARKS))], busy=n == 1 && q.ended == 0)
+    label = n == 1 && q.ended == 0 ? asking_words(q.words, q.step) * "  ·  Click to stop it" : length(q.places) > 1 ? string('A' + n - 1) : ""
+    # The label of what was asked is where a click stops the agent. A thing that doesn't show has it under the top bar, as a change does.
+    working = n == 1 && q.ended == 0
+    r === nothing && !working && continue
+    at = pick_mark(ctx, w, r, label; colour=CHIP_MARKS[mod1(n, length(CHIP_MARKS))], busy=working)
+    working && (q.label = at)
   end
   q.ended == 0 && (q.card = nothing; redraw_in!(e, SPIN_FRAME); return nothing)
   W, H = num(w.size[1]), num(w.size[2])

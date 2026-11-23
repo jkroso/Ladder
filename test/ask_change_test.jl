@@ -374,7 +374,10 @@ end
   @test K.reload_changed!(mod, realpath(source), K.text(source)) == (0, "")
 end
 
-@testset "Esc, a click on the label, or Stop Agent stops the agent, and what it changed doesn't run" begin
+"Press Esc, which goes on to the page and hides the caret, and show the caret again for the tests after"
+esc!() = (press(w, Keys.escape); e.buf.reading = false; frames(w, 2))
+
+@testset "A click on the label, or Stop Agent, stops the agent, and what it changed doesn't run. Esc doesn't." begin
   level = first(offered(e, (3, 0)))
   # An agent that changes the file, and then works on
   half = agent("half.sh", "sed -i '' 's/^wide(l::Level) = 80px/wide(l::Level) = 60px/' \"$source\"\nexec sleep 30")
@@ -386,7 +389,13 @@ end
   end
   @test picker().asked.ended == 0 && K.works_here(e, Val(:stop_agent))
   runs = K.CODE_RUNS[]
-  press(w, Keys.escape)
+  # Esc does nothing to the agent, as it's easy to press by mistake
+  esc!()
+  @test picker().asked.ended == 0 && !picker().asked.stopped
+  @test endswith(K.asked_label(picker().asked), "Click to stop it")
+  # A click on the label stops it
+  left, top, wide, tall = picker().asked.label
+  click(w, left + wide / 2, top + tall / 2)
   finish()
   a = picker().asked
   @test a.stopped && a.changed && a.said == "You stopped the agent. Ladder didn't run what it changed. Undo Change puts it back."
@@ -394,7 +403,7 @@ end
   @test K.CODE_RUNS[] == runs   # Ladder didn't run the half-done change
   K.undo_change!(e)
   @test occursin("wide(l::Level) = 80px", read(source, String))
-  # A click on the label while the agent works stops it
+  # An agent that changed nothing says so
   K.AGENT_COMMAND[] = `sh -c "exec sleep 30"`
   K.ask_for_change!(e, level, "make it red")
   frames(w, 2)
@@ -409,11 +418,15 @@ end
   @test picker().asked.stopped
   @test_throws ErrorException K.stop_agent!(e)
   picker().asked = nothing
-  # Esc stops an agent that's answering a question too, and there's no card
+  # An agent that's answering a question keeps working after Esc too. A click on its label stops it, and there's no card.
   K.ask_about!(e, level, "why is it blue?")
   @test picker().about.ended == 0
   process = picker().about.process
-  press(w, Keys.escape)
+  frames(w, 2)
+  esc!()
+  @test picker().about !== nothing && !process_exited(process)
+  left, top, wide, tall = picker().about.label
+  click(w, left + wide / 2, top + tall / 2)
   @test picker().about === nothing
   sleep(0.2)
   @test process_exited(process)
@@ -473,10 +486,11 @@ end
   click(w, px(left + wide / 2), px(top + tall / 2))
   @test picker().about === nothing
   @test e.buf.caret == was
-  # So does Esc
+  # Esc leaves it, so that an answer stays until you've read it
   ask_about(answers, level, "why?")
-  press(w, Keys.escape)
-  @test picker().about === nothing
+  esc!()
+  @test picker().about !== nothing && picker().about.ended > 0
+  picker().about = nothing
   # A thing at the bottom of a window with no room at its side has its card over it
   @test K.answer_place((left=10px, top=500px, width=880px, height=60px), 380.0, 120.0, (900.0, 600.0)) == (10.0, 370.0)
   @test K.answer_place((left=10px, top=100px, width=880px, height=60px), 380.0, 120.0, (900.0, 600.0)) == (10.0, 170.0)
@@ -670,13 +684,20 @@ end
   @test a.by == "Claude" && !a.sent && !isfile(sent) && startswith(K.asked_label(a), "For Claude when it waits for the page again")
   waits()
   @test a.sent && occursin("The user's words: make it green", got())
-  # Esc takes the label of a change that Claude has away
-  press(w, Keys.escape)
+  "Click the label of the change that the agent was asked for"
+  click_label() = (frames(w, 2); (left, top, wide, tall) = picker().asked.label; click(w, left + wide / 2, top + tall / 2); frames(w, 2))
+  # Esc leaves the label of a change that Claude has. A click on the label takes it away.
+  frames(w, 2)
+  esc!()
+  @test picker().asked === a && endswith(K.asked_label(a), "Click to hide this")
+  click_label()
   @test picker().asked === nothing
-  # Esc takes back a change that Claude hasn't got, and the page isn't shared any more
+  # Esc leaves a change that Claude hasn't got. A click on its label takes it back, and the page isn't shared any more.
   K.ask_for_change!(e, level, "make it blue")
-  @test !picker().asked.sent
-  press(w, Keys.escape)
+  @test !picker().asked.sent && endswith(K.asked_label(picker().asked), "Click to take it back")
+  esc!()
+  @test picker().asked !== nothing && K.sharer(e) != ""
+  click_label()
   @test picker().asked === nothing && K.sharer(e) == ""
   # So the next change goes to a new agent
   K.ask_for_change!(e, level, "make it blue")

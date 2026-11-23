@@ -273,11 +273,11 @@ Before you press Return, you can choose more:
 
 After you press Return:
 
-- To stop Claude Code while it works, press Esc or click the label. You can also run Stop Agent. What it changed before it stopped stays in the file, but Ladder doesn't run it, because it can be half done.
+- To stop Claude Code while it works, click the label. You can also run Stop Agent. Esc doesn't stop it, because Esc is easy to press by mistake. What it changed before it stopped stays in the file, but Ladder doesn't run it, because it can be half done.
 - Click the label after the change to see what Claude Code changed. The page lists each change since Ladder started, the newest first. Each part has a Reject button that takes it out again, and Reject all takes out the whole change.
 - The command Undo Change puts back all of the newest change. Run it again to put back the one before.
 
-To ask a question in place of a change, run Ask About, and choose the thing in the same way. Or hold ⌘ and ⌥, click the thing, and click the agent's logo on its blue line. Type a question like `why is this bar red?` and press Return. Claude Code reads the code and changes nothing. Its answer shows in a card beside the thing. Click Ask More on the card for another question about the same thing, or Change It to ask for a change to it. Claude Code gets your earlier questions and its answers with your new words. Click anywhere else, or press Esc, to close the card.
+To ask a question in place of a change, run Ask About, and choose the thing in the same way. Or hold ⌘ and ⌥, click the thing, and click the agent's logo on its blue line. Type a question like `why is this bar red?` and press Return. Claude Code reads the code and changes nothing. Its answer shows in a card beside the thing. Click Ask More on the card for another question about the same thing, or Change It to ask for a change to it. Claude Code gets your earlier questions and its answers with your new words. Click the card to close it. Esc and a click anywhere else leave it open, so that you don't lose an answer before you read it.
 
 In a file of code, Fix It and Ask For Checks give Claude Code one check or one function. The next section says how.
 
@@ -981,7 +981,7 @@ An agent like Claude Code can write a page and show it to you here: a plan with 
 
 To ask an agent about one part of the window, no agent has to wait. Run Ask For Change or Ask About, and Ladder starts Claude Code with that part and your words. [Ask an agent about one thing](#ask-an-agent-about-one-thing) says how.
 
-When an agent works on the page with you, Ask For Change and Ask Agent ask that agent, not a new one, because it knows what the page is for. It answers a question in its own window, not in a card. It gets your words, the part that you marked and the lines that you changed. If it's still working on what you sent before, it gets them when it waits for the page again. Until then, Esc takes them back.
+When an agent works on the page with you, Ask For Change and Ask Agent ask that agent, not a new one, because it knows what the page is for. It answers a question in its own window, not in a card. It gets your words, the part that you marked and the lines that you changed. If it's still working on what you sent before, it gets them when it waits for the page again. Until then, a click on the label takes them back.
 
 An agent can ask a question in a block of its own. Click an answer, or type one in the field, and then send the page. A round mark means that you choose one answer, and a square box means that you choose as many as you like.
 
