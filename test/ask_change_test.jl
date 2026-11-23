@@ -377,7 +377,7 @@ end
 "Press Esc, which goes on to the page and hides the caret, and show the caret again for the tests after"
 esc!() = (press(w, Keys.escape); e.buf.reading = false; frames(w, 2))
 
-@testset "A click on the label, or Stop Agent, stops the agent, and what it changed doesn't run. Esc doesn't." begin
+@testset "The × on the label, or Stop Agent, stops the agent, and what it changed doesn't run. Esc doesn't." begin
   level = first(offered(e, (3, 0)))
   # An agent that changes the file, and then works on
   half = agent("half.sh", "sed -i '' 's/^wide(l::Level) = 80px/wide(l::Level) = 60px/' \"$source\"\nexec sleep 30")
@@ -392,9 +392,22 @@ esc!() = (press(w, Keys.escape); e.buf.reading = false; frames(w, 2))
   # Esc does nothing to the agent, as it's easy to press by mistake
   esc!()
   @test picker().asked.ended == 0 && !picker().asked.stopped
-  @test endswith(K.asked_label(picker().asked), "Click to stop it")
-  # A click on the label stops it
+  @test endswith(K.asked_label(picker().asked), "Click to open")
+  # A click on the label opens a field under the thing, with what was asked and what the agent does. The agent works on.
   left, top, wide, tall = picker().asked.label
+  click(w, left + wide / 2, top + tall / 2)
+  frames(w, 2)
+  f = only(K.ask_boxes(e))
+  @test K.same_things([f.thing], [level]) && any(p -> p.key == K.box_key(f), popups(w)) && w.focus === f.parts[:text]
+  @test K.unanswered(e, f) == [("make it thinner", "Claude is working on it.")] && K.box_shows(e, w, picker().asked)
+  @test picker().asked.ended == 0 && !picker().asked.stopped && !endswith(K.asked_label(picker().asked, open=false), "Click to open")
+  # Its Close button closes only the field, which has nothing in it, and the label stays
+  x = rect(f.parts[:close])
+  click(w, x.left + x.width / 2, x.top + x.height / 2)
+  @test isempty(K.ask_boxes(e)) && picker().asked.ended == 0 && !picker().asked.stopped && w.focus === e
+  # The × at the end of the label stops it
+  frames(w, 2)
+  left, top, wide, tall = K.close_spot(picker().asked.label)
   click(w, left + wide / 2, top + tall / 2)
   finish()
   a = picker().asked
@@ -407,7 +420,7 @@ esc!() = (press(w, Keys.escape); e.buf.reading = false; frames(w, 2))
   K.AGENT_COMMAND[] = `sh -c "exec sleep 30"`
   K.ask_for_change!(e, level, "make it red")
   frames(w, 2)
-  left, top, wide, tall = picker().asked.label
+  left, top, wide, tall = K.close_spot(picker().asked.label)
   click(w, left + wide / 2, top + tall / 2)
   finish()
   @test picker().asked.stopped && picker().asked.said == "You stopped the agent. Nothing changed."
@@ -686,11 +699,21 @@ end
   @test a.sent && occursin("The user's words: make it green", got())
   "Click the label of the change that the agent was asked for"
   click_label() = (frames(w, 2); (left, top, wide, tall) = picker().asked.label; click(w, left + wide / 2, top + tall / 2); frames(w, 2))
-  # Esc leaves the label of a change that Claude has. A click on the label takes it away.
+  "Click the × at the end of that label"
+  click_close() = (frames(w, 2); (left, top, wide, tall) = K.close_spot(picker().asked.label); click(w, left + wide / 2, top + tall / 2); frames(w, 2))
+  # Esc leaves the label of a change that Claude has. A click on the label opens a field with the request and how it goes.
   frames(w, 2)
   esc!()
-  @test picker().asked === a && endswith(K.asked_label(a), "Click to hide this")
+  @test picker().asked === a && endswith(K.asked_label(a), "Click to open")
   click_label()
+  f = only(K.ask_boxes(e))
+  @test K.unanswered(e, f) == [("make it green", "Claude is working on it.")] && picker().asked === a
+  # Its Close button closes only the field, and the label stays. The × at the label's end takes it away.
+  x = rect(f.parts[:close])
+  click(w, x.left + x.width / 2, x.top + x.height / 2)
+  @test isempty(K.ask_boxes(e)) && picker().asked === a
+  @test K.close_words(e, a) == "Hide this. Claude still has the request."
+  click_close()
   @test picker().asked === nothing
   # Esc leaves a change that Claude hasn't got. A click on its label opens a field to change its words.
   K.ask_for_change!(e, level, "make it blue")
@@ -1043,7 +1066,7 @@ end
   K.close_ask!(box(), w)
 end
 
-@testset "an answer in place stays until its Close button takes it away" begin
+@testset "an answer in place stays until the × on its box takes it away" begin
   b = e.buf
   picker().asked = picker().about = nothing
   K.AGENT_COMMAND[] = `sh $quiet`
@@ -1096,14 +1119,103 @@ end
   @test length(K.ask_boxes(e)) == 3 && !any(shows, K.ask_boxes(e))
   K.open!(e, page); frames(w, 3)
   @test are(answer, typing, tank) && all(shows, K.ask_boxes(e))
-  # The Close button takes each away. The newest is on top of the others.
+  # The Close button closes each, and the box round its words stays, with a label that opens it again. The newest is on
+  # top of the others.
   for a in reverse(copy(K.ask_boxes(e)))
     x = rect(a.parts[:close])
     click(w, x.left + x.width / 2, x.top + x.height / 2)
     frames(w)
+    @test any(o -> o === a, K.ask_boxes(e)) && a.closed && !shows(a) && endswith(K.box_label(a), "  ·  Click to open")
+  end
+  # The × at the end of the label of each box takes it away, with its answers. The label of the request that ended goes
+  # after a few seconds: until then it's the box's label.
+  @test K.labelled_box(e, answer) && !K.labelled_box(e, tank)
+  picker().asked = nothing
+  for a in copy(K.ask_boxes(e))
+    frames(w, 2)
+    left, top, wide, tall = K.close_spot(a.label)
+    click(w, left + wide / 2, top + tall / 2)
+    frames(w)
     @test !any(o -> o === a, K.ask_boxes(e)) && !shows(a)
   end
   @test isempty(K.ask_boxes(e))
+end
+
+@testset "a click on the label of a request opens its field, Close closes only the field, and the × takes both away" begin
+  b = e.buf
+  picker().asked = picker().about = nothing
+  empty!(K.asks_ended(e))
+  K.focus(e)
+  shows(a) = any(p -> p.key == K.box_key(a), popups(w))
+  "Click the middle of `r`, a label's place"
+  click_at(r) = (frames(w, 2); click(w, px(r[1] + r[3] / 2), px(r[2] + r[4] / 2)); frames(w, 2))
+  "Click the Close button of the field `a`"
+  close!(a) = (x = rect(a.parts[:close]); click(w, x.left + x.width / 2, x.top + x.height / 2); frames(w, 2))
+  "Open a field under the words \"The end.\" and ask `words` in it"
+  ask!(words) = begin
+    K.focus(e)
+    b.anchor, b.caret = (7, 0), (7, 8)
+    K.page_act!(e, 1)
+    frames(w, 2)
+    typed(w, words)
+    press(w, Keys.enter)
+    frames(w, 2)
+    picker().asked
+  end
+  # A question that an agent works on: its field goes when it's sent, and the label says how it goes
+  K.AGENT_COMMAND[] = `sh -c "exec sleep 30"`
+  a = ask!("is this right?")
+  @test isempty(K.ask_boxes(e)) && a.ended == 0 && a.label !== nothing && endswith(K.asked_label(a), "Click to open")
+  # A click on the label opens a field under the words, with the question and what the agent does, and the keyboard in it
+  click_at(a.label)
+  f = only(K.ask_boxes(e))
+  @test shows(f) && w.focus === f.parts[:text] && K.unanswered(e, f) == [("is this right?", "Claude is working on it.")]
+  @test a.ended == 0 && !a.stopped && K.box_shows(e, w, a) && f.label === nothing   # the request's label is the box's
+  # Close closes only the field. It keeps what you typed in it, and the label opens it again.
+  typed(w, "and why?")
+  close!(f)
+  @test only(K.ask_boxes(e)) === f && f.closed && !shows(f) && picker().asked === a && a.ended == 0 && w.focus === e
+  click_at(a.label)
+  @test shows(f) && !f.closed && f.parts[:text].buf.lines == ["and why?"] && w.focus === f.parts[:text]
+  # Over the × at the end of the label, a tooltip says what a click does
+  r = K.close_spot(a.label)
+  K.focus(e)
+  w.mouse = typeof(w.mouse)(px(r[1] + r[3] / 2), px(r[2] + r[4] / 2))
+  onmouse(w, MouseMove(Vec2{px}(px(r[1] + r[3] / 2), px(r[2] + r[4] / 2)), w))
+  @test any(p -> p.key == :tooltip, popups(w)) && K.close_words(e, a) == "Stop the agent"
+  # The × stops the agent, and takes the field away
+  click_at(r)
+  finish()
+  @test a.stopped && isempty(K.ask_boxes(e)) && !shows(f)
+  picker().asked = nothing
+  # The field of an answer: Close hides it, and the box round the words has a label of its own that opens it again
+  K.AGENT_COMMAND[] = `sh $quiet`
+  ask!("is this right?")
+  finish()
+  f = only(K.ask_boxes(e))
+  @test length(f.answers) == 1 && shows(f)
+  picker().asked = nothing   # the label of the request that ended goes after a few seconds
+  frames(w, 2)
+  @test f.label !== nothing && K.box_label(f) == "Claude's answer" && K.close_words(e, f) == "Take the box and its answers away"
+  close!(f)
+  @test only(K.ask_boxes(e)) === f && f.closed && !shows(f) && K.box_label(f) == "Claude's answer  ·  Click to open"
+  click_at(f.label)
+  @test shows(f) && !f.closed && w.focus === f.parts[:text]
+  # A new answer shows a field that Close hid
+  close!(f)
+  K.show_answer!(e, K.AskedChange(words="and?", places=[f.thing]), "Yes.")
+  frames(w, 2)
+  @test shows(f) && !f.closed && length(f.answers) == 2 && K.box_label(f) == "Claude's answers"
+  # The × at the end of the box's label takes it away, with its answers
+  click_at(K.close_spot(f.label))
+  @test isempty(K.ask_boxes(e)) && !shows(f)
+  # A field with nothing typed in it and no answer goes with its Close button: there's nothing to open again
+  b.anchor, b.caret = (7, 0), (7, 8)
+  K.page_act!(e, 1)
+  frames(w, 2)
+  close!(only(K.ask_boxes(e)))
+  @test isempty(K.ask_boxes(e))
+  K.focus(e)
 end
 
 @testset "a click on a field goes to the field, never to a label that the field covers" begin

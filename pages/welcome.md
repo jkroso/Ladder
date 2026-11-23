@@ -260,7 +260,7 @@ Claude Code changes the function, and the thing is drawn the new way. While it w
 
 To start from the thing itself, hold ⌘ and ⌥, click it, and click the agent's logo on its blue line. That runs Ask Agent, which takes a change or a question. The A is already round the thing, so type what you want and press Return. A change shows as below, and an answer shows in a card beside the thing.
 
-To ask about some words, select them, right-click them and choose Ask Claude…. The menu names the agent that Settings chose, or the one that shares the page. A box goes round the words, with a field under them. Type a change or a question, and press Return. The box stays round the words while the agent works, and its label says how the request goes. With nothing selected, the box goes round the line that the caret is on. Only the Close button under the field takes it away. Esc, a click on the page and another field leave it as it is, with what you typed.
+To ask about some words, select them, right-click them and choose Ask Claude…. The menu names the agent that Settings chose, or the one that shares the page. A box goes round the words, with a field under them. Type a change or a question, and press Return. The box stays round the words while the agent works, and its label says how the request goes. With nothing selected, the box goes round the line that the caret is on. Click the label to open the field again, with your questions, the answers and what the agent is doing. The Close button under the field closes only the field. The × at the end of the label takes the box away, with its answers. If Ladder started an agent for the request, the × stops it. Esc, a click on the page and another field leave the field as it is, with what you typed.
 
 An answer to a question shows under the words, with a field under it to ask more. When you ask more, the field hides while the agent works, and shows again with the new answer under the first. When an agent works on the page with you, it answers there too.
 
@@ -273,7 +273,7 @@ Before you press Return, you can choose more:
 
 After you press Return:
 
-- To stop Claude Code while it works, click the label. You can also run Stop Agent. Esc doesn't stop it, because Esc is easy to press by mistake. What it changed before it stopped stays in the file, but Ladder doesn't run it, because it can be half done.
+- To stop Claude Code while it works, click the × at the end of the label. You can also run Stop Agent. A click on the rest of the label opens a field under the thing, with what you asked and what Claude Code is doing. Esc doesn't stop it, because Esc is easy to press by mistake. What it changed before it stopped stays in the file, but Ladder doesn't run it, because it can be half done.
 - Click the label after the change to see what Claude Code changed. The page lists each change since Ladder started, the newest first. Each part has a Reject button that takes it out again, and Reject all takes out the whole change.
 - The command Undo Change puts back all of the newest change. Run it again to put back the one before.
 

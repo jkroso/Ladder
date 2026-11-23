@@ -42330,25 +42330,25 @@ tool_input(t::CodePicker, w, ::KeyPress{Keys.mouse_left}) = begin
     left, top, wide, tall = q.label
     left <= x <= left + wide && top <= y <= top + tall && (t.swallow = true; stop_agents!(t.editor, Any[q]); return true)
   end
-  # A click on the label of an agent stops it while it works, and shows the change that it made after. A change that
-  # waits for the page's agent to wait again gets a field to change it.
-  a = t.asked
-  if a !== nothing && (a.ended == 0 || a.changed) && a.label !== nothing
-    x, y = num(w.mouse[1]), num(w.mouse[2])
-    left, top, wide, tall = a.label
-    if left <= x <= left + wide && top <= y <= top + tall
-      t.swallow = true
-      waiting(t.editor, a) ? edit_request!(t.editor, a) : a.ended == 0 ? stop_agents!(t.editor, Any[a]) : show_change!(t.editor)
-      return true
-    end
-  end
-  # A click on the label of a request that waits opens a field to change it, and one on the label of a change that ended shows it
+  # The × at the end of the label of a request takes it away, with the field of its words. A click on the rest of the
+  # label of one that an agent works on opens the field, with the questions and answers about its words. One on the
+  # label of a request that waits opens a field to change it, and one on the label of a change that ended shows it.
   x, y = num(w.mouse[1]), num(w.mouse[2])
   on(r) = r !== nothing && r[1] <= x <= r[1] + r[3] && r[2] <= y <= r[2] + r[4]
-  q = ask_queue(t.editor)
-  k = findfirst(((a, _),) -> on(a.label), q)
-  k === nothing || (edit_request!(t.editor, q[k][1]); t.swallow = true; return true)
-  any(a -> a.changed && on(a.label), asks_ended(t.editor)) && (t.swallow = true; show_change!(t.editor); return true)
+  for a in labelled_requests(t)
+    on(a.label) || continue
+    t.swallow = true
+    on(close_spot(a.label)) ? drop_request!(t.editor, a, w) :
+      waiting(t.editor, a) ? edit_request!(t.editor, a) : a.ended > 0 && a.changed ? show_change!(t.editor) : open_about!(t.editor, a)
+    return true
+  end
+  # So does the label of the box round the words of a field: the × takes the field away, and the rest opens it
+  for o in ask_boxes(t.editor)
+    on(o.label) || continue
+    t.swallow = true
+    on(close_spot(o.label)) ? close_ask!(o, w) : reopen_ask!(o)
+    return true
+  end
   # A button of a check of a file of Julia code, like Fix It: see "a check that fails"
   check_button!(t.editor, w) && (t.swallow = true; return true)
   picks(t, w) || return false
@@ -42420,10 +42420,11 @@ tool_input(t::CodePicker, w, ::KeyPress{Keys.c}) = begin
   copy_text!(e, text)
   true
 end
-# While a block is dragged by its handle, the mouse selects no text, and the line where the block would go follows it
-tool_input(t::CodePicker, w, ::MouseMove) = dragging(t) ? (redraw_in!(t.editor, 0); true) : false
+# While a block is dragged by its handle, the mouse selects no text, and the line where the block would go follows it.
+# Over the × of a label, a tooltip says what a click on it does.
+tool_input(t::CodePicker, w, ::MouseMove) = dragging(t) ? (redraw_in!(t.editor, 0); true) : close_tip!(t, w)
 # Esc stops the drag of a block, and takes the line of a thing that a click with ⌘ and ⌥ down chose away, while no
-# popup and no search shows. It does nothing to an agent or to its answer, as it's easy to press by mistake: a click
+# popup and no search shows. It does nothing to an agent or to its answer, as it's easy to press by mistake: the ×
 # on the label stops an agent, and a click on the card takes an answer away. The field of a request in place takes
 # its own Esc: see "a request in place".
 tool_input(t::CodePicker, w, ::KeyPress{Keys.escape}) = begin
@@ -42439,8 +42440,19 @@ const PICK_LINE = colorant"rgb(48,128,236)"
 
 const PICK_FAILED = colorant"rgb(200,60,50)"
 
-"Draw a line round the place `r` of the window `w`, and a label with `words` over its top left corner. With no place, the label is under the top bar. With no words, there's no label. `room` is the width that something after the label, on the same line, needs in the window."
-pick_mark(ctx, w, r, words; colour=PICK_LINE, room=0.0, lift=0.0, busy=false, avoid=nothing) = begin
+const LABEL_CLOSE = 18.0   # how wide the × at the end of a label is: see `pick_mark`
+
+"Where the × at the end of the label at `r`, as `pick_mark` gives it, is"
+close_spot(r) = (r[1] + r[3] - LABEL_CLOSE, r[2], LABEL_CLOSE, r[4])
+
+"""
+Draw a line round the place `r` of the window `w`, and a label with `words`
+over its top left corner. With no place, the label is under the top bar. With
+no words, there's no label. `room` is the width that something after the
+label, on the same line, needs in the window. With `close`, the label ends
+with an ×, at `close_spot` of where it is.
+"""
+pick_mark(ctx, w, r, words; colour=PICK_LINE, room=0.0, lift=0.0, busy=false, avoid=nothing, close=false) = begin
   x, y = 16.0, 64.0
   if r !== nothing
     x, y, wide, tall = num(r.left), num(r.top), num(r.width), num(r.height)
@@ -42452,7 +42464,7 @@ pick_mark(ctx, w, r, words; colour=PICK_LINE, room=0.0, lift=0.0, busy=false, av
   face = Face(SANS, "", 11px, colorant"white", false)
   # and the label has a ring that turns before its words
   turn = busy ? 15.0 : 0.0
-  across = num(measure(face, words)) + 12 + turn
+  across = num(measure(face, words)) + 12 + turn + (close ? LABEL_CLOSE - 2 : 0.0)
   # The label sits on the thing's top edge, and comes down into the thing where the window has no room over it.
   # A thing whose top is above the window, like a whole file, has its label at the top of the window.
   # `room` is how much more the label needs after it, for the buttons that follow it
@@ -42472,6 +42484,14 @@ pick_mark(ctx, w, r, words; colour=PICK_LINE, room=0.0, lift=0.0, busy=false, av
   round_box(ctx, left, top, across, 18, 3; fill=colour)
   busy && spin_ring(ctx, left + 11, top + 9, 4.0, colorant"white")
   write_ink(ctx, words, left + 6 + turn, top + 13, face)
+  if close
+    x, y, wide, tall = close_spot((left, top, across, 18.0))
+    mx, my = num(w.mouse[1]), num(w.mouse[2])
+    # The × is darker under the mouse
+    x <= mx <= x + wide && y <= my <= y + tall && round_box(ctx, x + 1, y + 2, wide - 3, tall - 4, 3; fill=RGBA(0, 0, 0, 0.22))
+    shape = load_icon("x-lg")
+    render_svg(ctx, px(x + 4.5), px(y + 4.5), px(9), px(9), shape.paths, shape.viewbox, colorant"white")
+  end
   (left, top, across, 18.0)   # where the label is, for a click on it
 end
 
@@ -42494,9 +42514,11 @@ end
 draw_tool_under(ctx, w, t::CodePicker, scene) = begin
   mark_chips(ctx, w, t.editor)
   mark_preview(ctx, w, t.editor)
-  # The words that each request in place is about, while you type it and while its answers show
+  # The words that each request in place is about, while you type it and while its answers show. A label that would
+  # cover one drawn before it goes a row higher.
+  placed = NTuple{4,Float64}[]
   for k in copy(ask_boxes(t.editor))
-    ask_box_tick!(ctx, w, t.editor, k)
+    ask_box_tick!(ctx, w, t.editor, k, placed)
   end
   a = t.asked
   if a !== nothing
@@ -42508,19 +42530,18 @@ draw_tool_under(ctx, w, t::CodePicker, scene) = begin
     end
   end
   # The request that an agent works on, those that wait, with their places in the queue, and those that ended while
-  # others waited: see "a queue of requests". A label that would cover one drawn before it goes a row higher.
+  # others waited: see "a queue of requests". Each label has an × at its end, that takes the request away.
   shown = Any[]
   # The request that an agent works on has a ring that turns, and a colour that pulses. One that waits for the page's agent to wait again has neither.
   busy = a !== nothing && a.ended == 0 && (isempty(a.by) || a.sent)
-  a === nothing || push!(shown, (a, asked_label(a), a.failed ? PICK_FAILED : PICK_LINE, busy))
+  a === nothing || push!(shown, (a, asked_label(a, open=!box_shows(t.editor, w, a)), a.failed ? PICK_FAILED : PICK_LINE, busy))
   for (n, (q, _)) in enumerate(ask_queue(t.editor))
     push!(shown, (q, queued_label(n, q.words), QUEUED_LINE, false))
   end
   foreach(d -> push!(shown, (d, asked_label(d), d.failed ? PICK_FAILED : PICK_LINE, false)), asks_ended(t.editor))
-  placed = NTuple{4,Float64}[]
   for (x, words, colour, turns) in shown
     r = asked_rect(t.editor, isempty(x.places) ? nothing : first(x.places))
-    x.label = pick_mark(ctx, w, r, label_words(words); colour, busy=turns, avoid=placed)
+    x.label = pick_mark(ctx, w, r, label_words(words); colour, busy=turns, avoid=placed, close=true)
   end
   busy && redraw_in!(t.editor, SPIN_FRAME)   # the ring turns, and the colour pulses
   nothing
@@ -42590,7 +42611,9 @@ end
 """
 A hand over a button on the line round the thing that a click with ⌘ and ⌥
 down chose, over the handle of a block, and while a block is dragged by its
-handle. The label does nothing, so it has the arrow.
+handle. The label of that thing does nothing, so it has the arrow. The label
+of a request, and of the box round the words of a field, has the hand where
+no popup covers it: a click on it does something.
 """
 tool_cursor(t::CodePicker, w, pos) = begin
   x, y = num(pos[1]), num(pos[2])
@@ -42598,7 +42621,8 @@ tool_cursor(t::CodePicker, w, pos) = begin
   over = any(((action, place),) -> action != :label && on(place...), t.buttons)
   d = get(t.editor.nodes, :block_drag, nothing)
   handle = d isa BlockDrag && (d.lines !== nothing || (d.at !== nothing && on(d.at...)))
-  over || handle ? :hand : nothing
+  label = popup_at(w, pos) === nothing && any(r -> r !== nothing && on(r...), mark_labels(t))
+  over || handle || label ? :hand : nothing
 end
 
 # --- move a block by its handle ------------------------------------------------------------------
@@ -44017,15 +44041,21 @@ end
 # selected, or round the caret's line when none are, and a field under them for
 # what you want. Return gives the words and what you typed to the agent, as Ask
 # Agent does. The box stays round the words while the agent works, with a
-# label that says how it goes, and then what the agent did or its answer. The
-# Close button takes the field and the box away, and nothing else does: not
-# Esc, not a click on the page or on the field, and not another field that
-# opens, as all are easy to do by mistake. The field stays, with what you
-# typed, and a click in it gives it the keyboard again. A click on the field
-# goes to the field, even where a request's label is under it. The field
-# follows its words as the page scrolls.
+# label that says how it goes, and then what the agent did or its answer. A
+# click on the label opens the field, with the questions and answers about the
+# words, and what the agent is doing. The × at the end of the label takes the
+# box away, with its field and answers, and stops an agent that Ladder started
+# for it.
+# The Close button closes only the field: the box stays, and a click on its
+# label opens the field again. A field with no answer and nothing typed in it
+# goes with its box. Nothing else closes a field: not Esc, not a click on the
+# page or on the field, and not another field that opens, as all are easy to
+# do by mistake. The field keeps what you typed, and a click in it gives it
+# the keyboard again. A click on the field goes to the field, even where a
+# request's label is under it. The field follows its words as the page
+# scrolls.
 #
-# An answer stays until you click its Close button, so that you never lose
+# An answer stays until you click the × on its box, so that you never lose
 # one that you haven't read. Each of the words that you asked about has a
 # field of its own, and the fields of other words stay open while you ask
 # about these. A question that you ask in the field of an answer hides the
@@ -44055,6 +44085,8 @@ line to line, ⌘Z takes a change back, and long lines wrap.
   answers::Vector{Any} = Any[]            # the agent's answers about the words, oldest first, over the field: see `box_answer`
   editing::Any = nothing                  # the request that waits, whose words the field changes, or nothing: see "change a request that waits"
   sent::Bool = false                      # a question from the field went to the agent, so it hides until the answer comes: see `send_ask!`
+  closed::Bool = false                    # its Close button hid it, and a click on the label of its box shows it again: see `hide_ask!`
+  label::Any = nothing                    # where the label of the box round its words was drawn last, for a click on it, or nothing
 end
 
 "An answer of an agent in the field of a request in place: the question `asked`, the agent's `answer` in Markdown, and who answered"
@@ -44070,7 +44102,7 @@ box_key(a::AskBox) = Symbol("ask_box_", objectid(a))
 box_about(e, c) = (k = findfirst(a -> a.editing === nothing && same_things([a.thing], [c]), ask_boxes(e)); k === nothing ? nothing : ask_boxes(e)[k])
 
 "Put the agent's answer `x` under the answers of the field `a`, and scroll to it. A field that hid while the agent worked shows again."
-add_answer!(a::AskBox, x) = (push!(a.answers, x); a.sent = false; a.parts[:to_end] = true; redraw_in!(a.of, 0); a)
+add_answer!(a::AskBox, x) = (push!(a.answers, x); a.sent = a.closed = false; a.parts[:to_end] = true; redraw_in!(a.of, 0); a)
 
 "True while a request about the words of the field `a` waits in the queue, or an agent works on it"
 asking_about(e, a::AskBox) = begin
@@ -44116,9 +44148,9 @@ ask_selected!(e) = begin
   c = something(selected_thing(e), Some(line_thing(e)))
   c === nothing && return nothing
   # Words that have a field already, with an answer or with what you typed, give it the keyboard. One that hid while
-  # the agent works on a question from it shows again.
+  # the agent works on a question from it, or that its Close button hid, shows again.
   a = box_about(e, c)
-  a === nothing || (a.sent = false)
+  a === nothing || (a.sent = a.closed = false)
   a === nothing && (a = open_ask!(e, AskBox(of=e, thing=c)))
   a === nothing || focus(a.parts[:text])
   nothing
@@ -44150,7 +44182,7 @@ shows when they do.
 """
 open_ask!(e, a::AskBox; anyway=false) = begin
   w = window_of(e)
-  r = w === nothing ? nothing : asked_rect(e, a.thing)
+  r = w === nothing ? nothing : box_place(e, a)
   r === nothing && !anyway && return nothing
   new_field!(a)
   push!(get!(Vector{AskBox}, e.nodes, ASK_BOXES), a)
@@ -44192,36 +44224,67 @@ answer_flows(e, text) = begin
 end
 
 """
-What shows over the field of `a` when it has the agent's answers: who
-answered, and the answers, which scroll when they're long. With more than one,
-each has the question that it answers over it, and a new one scrolls into
-sight.
+The requests about the words of the field `a` that have no answer yet: the one
+that an agent works on, and those that wait. Each is its words, and how it
+goes, like "Grok is working on it.".
+"""
+unanswered(e, a::AskBox) = begin
+  t = code_picker(e)
+  out = Tuple{String,String}[]
+  x = t.asked
+  if x !== nothing && x.ended == 0 && !x.stopped && on_box(x, a)
+    who = isempty(x.by) ? e.ai : x.by
+    push!(out, (x.words, !isempty(x.by) && !x.sent ? "$who gets it when it waits for the page again." :
+                         isempty(x.step) ? "$who is working on it." : "$who is working on it: $(x.step)"))
+  end
+  for (n, (q, _)) in enumerate(ask_queue(e))
+    on_box(q, a) && push!(out, (q.words, "Number $n in the queue."))
+  end
+  out
+end
+
+"True when the label of the request `q` is on the words of the field `a`: its first thing is their thing"
+on_box(q, a::AskBox) = !isempty(q.places) && same_things(q.places[1:1], [a.thing])
+
+"""
+What shows over the field of `a` when it has the agent's answers, or
+requests about its words that have none yet: who answered, the answers, which
+scroll when they're long, and then each request that waits with how it goes.
+With more than one, each answer has the question that it answers over it, and
+a new one scrolls into sight.
 """
 answer_part(a::AskBox) = begin
   e = a.of
   dim = found_colours().dim
   face = Face(SANS, "", 12px, dim, false)
-  several = length(a.answers) > 1
+  waits = unanswered(e, a)
+  several = length(a.answers) + length(waits) > 1
   rows, total = Any[], 0px
+  # Lines of `words` in the colour `colour`, wrapped to the field's width, and a gap between two answers or requests
+  say(words, colour) = for l in wrapped(Face(face, color=colour), replace(words, r"\s+" => " "), num(ASK_TEXT_W))
+    push!(rows, Row(height(17px), Alignment.Center, label(l, 12px, color=colour)))
+    total += 17px
+  end
+  gap() = isempty(rows) || (push!(rows, Box(width(grow=grow), height(12px))); total += 12px)
   for (k, x) in enumerate(a.answers)
-    if several
-      k > 1 && (push!(rows, Box(width(grow=grow), height(12px))); total += 12px)
-      for l in wrapped(face, "You asked: " * replace(x.asked, r"\s+" => " "), num(ASK_TEXT_W))
-        push!(rows, Row(height(17px), Alignment.Center, label(l, 12px, color=dim)))
-        total += 17px
-      end
-    end
+    several && (gap(); say("You asked: " * x.asked, dim))
     flows = get!(() -> answer_flows(e, x.answer), a.parts, (:answer, k, x.answer, e.zoom, e.theme))
     append!(rows, [describe(e, Item(0, 0, 0px, tall(f), f), f) for f in flows])
     total += sum(tall, flows, init=0px)
+  end
+  for (words, goes) in waits
+    gap()
+    say("You asked: " * words, dim)
+    say(goes, colours.ink)
   end
   scroll = get!(() -> Scroll(width(grow=grow)), a.parts, :answer_scroll)
   scroll.height = height(min(total, ANSWER_MAX_H))
   pop!(a.parts, :to_end, false) && (scroll.offset = max(0px, total - ANSWER_MAX_H))
   reuse!(scroll, Column(width(grow=grow), Alignment.Start, rows...))
-  who = last(a.answers).by
+  heading = isempty(a.answers) ? () :
+    (Row(height(20px), Alignment.Center, label(length(a.answers) > 1 ? "$(last(a.answers).by)'s answers" : "$(last(a.answers).by)'s answer", 12px, color=dim)),)
   Column(width(grow=grow), Alignment.Start, child_gap=2px, padding(4px, 8px, 6px, 10px),   # top, right, bottom, left
-    Row(height(20px), Alignment.Center, label(several ? "$(who)'s answers" : "$(who)'s answer", 12px, color=dim)), scroll)
+    heading..., scroll)
 end
 
 # It looks as the floating lists do (see `float_list`), with a field that's as tall as its lines
@@ -44247,7 +44310,7 @@ describe(a::AskBox) = begin
               Box(width(grow=grow), padding(8px, 7px), radius(6px), border(1px, :solid, c.line), background(c.frame), text))
   Box(width(grow=grow), padding(6px), radius(8px), background(c.frame), border(1px, :solid, c.line),
       shadow(0, 6, 16, RGBA(60 / 255, 45 / 255, 20 / 255, 0.2)), name="Ask",
-    Column(width(grow=grow), Alignment.Start, child_gap=4px, (isempty(a.answers) ? () : (answer_part(a),))..., field,
+    Column(width(grow=grow), Alignment.Start, child_gap=4px, (isempty(a.answers) && isempty(unanswered(e, a)) ? () : (answer_part(a),))..., field,
       Row(width(grow=grow), padding(4px, 2px, 4px, 8px), Alignment.Center, child_gap=6px,   # top, right, bottom, left
         Column(width(grow=grow), Alignment.Start, rows...),
         (a.editing === nothing ? () : (get!(() -> own!(a, AskTakeBack(of=a)), a.parts, :take_back),))...,
@@ -44255,9 +44318,11 @@ describe(a::AskBox) = begin
 end
 
 """
-The button at the bottom right of the field of a request in place, that takes
-the field and its box away. Nothing else closes the field: not Esc, not a
-click on the page, and not another field that opens.
+The button at the bottom right of the field of a request in place, that
+closes the field. The box round its words stays when the field has answers
+or words that you typed, and a click on the box's label shows the field
+again. Nothing else closes the field: not Esc, not a click on the page, and
+not another field that opens.
 """
 @def mutable struct AskClose <: SemanticUI
   of::Any = nothing
@@ -44271,17 +44336,35 @@ field_button(x, name, inside...) =
 describe(x::AskClose) = field_button(x, "Close",
   Row(height(24px), Alignment.Center, child_gap=6px, Icon("x-lg", size=10px, color=colours.ink), label("Close", 12px)))
 cursor(::AskClose) = :hand
-onkey(x::AskClose, ev::KeyPress{Keys.mouse_left}) = close_ask!(x.of, ev.window)
+onkey(x::AskClose, ev::KeyPress{Keys.mouse_left}) = hide_ask!(x.of, ev.window)
 # A tooltip in a popup is put by its rectangle: the form that takes a node closes at once there
 onmouse(x::AskClose, ev::MouseMove) = begin
   r = rect(x)
-  tip = x.of.editing === nothing ? "Close without asking" : "Close, and leave the request as it was"
+  tip = hides_on_close(x.of) ? "Close this. A click on the label of the box round the words opens it again." :
+        x.of.editing === nothing ? "Close without asking" : "Close, and leave the request as it was"
   r === nothing || show_tooltip!(ev.window, tip_label(tip), r.left, r.top, r.width, r.height; placement=:bottom, gap=6px)
   handled
 end
 
 placed!(a::AskBox, side) = (a.side = side; nothing)
-draw(ctx, size, ui::ConcreteRect, a::AskBox) = caret(ctx, ui, a.side, asked_rect(a.of, a.thing))
+draw(ctx, size, ui::ConcreteRect, a::AskBox) = caret(ctx, ui, a.side, box_place(a.of, a))
+
+"""
+Where the field `a` of `e` goes under: its words, or, when they don't show,
+the label of a request about them, as a thing that doesn't show has its
+label under the top bar. Nothing when neither shows.
+"""
+box_place(e, a::AskBox) = begin
+  r = asked_rect(e, a.thing)
+  r === nothing || return r
+  for q in labelled_requests(code_picker(e))
+    if on_box(q, a) && q.label !== nothing
+      left, top, wide, tall = q.label
+      return (left=px(left), top=px(top), width=px(wide), height=px(tall))
+    end
+  end
+  nothing
+end
 
 # --- change a request that waits ---
 #
@@ -44305,7 +44388,7 @@ edit_request!(e, a::AskedChange) = begin
   o = k === nothing ? open_ask!(e, AskBox(of=e, thing=first(a.places), editing=a); anyway=true) : ask_boxes(e)[k]
   k === nothing && edit!(o.parts[:text].buf, (1, 0), (1, 0), a.words)
   # A thing that doesn't show has its field when it shows
-  asked_rect(e, o.thing) === nothing || focus(o.parts[:text])
+  box_place(e, o) === nothing || focus(o.parts[:text])
   redraw_in!(e, 0)
   nothing
 end
@@ -44392,15 +44475,18 @@ end
 
 """
 In each frame, for the field of a request in place `a`: draw the box round
-its words, and keep the field under them as the page scrolls. When the window
-shows another file, the field of words of that page hides, and shows again
-with the page. A field that opened while its words didn't show shows when
-they do.
+its words, with its label, and keep the field under them as the page scrolls.
+When the window shows another file, the field of words of that page hides,
+and shows again with the page. A field that opened while its words didn't
+show shows when they do. A field that its Close button hid stays hidden: its
+box and label stay. `placed` has the labels drawn already, which the box's
+label moves off.
 """
-ask_box_tick!(ctx, w, e, a::AskBox) = begin
+ask_box_tick!(ctx, w, e, a::AskBox, placed=nothing) = begin
   b = e.buf
   key = box_key(a)
   shown = any(p -> p.key == key, popups(w))
+  a.label = nothing
   # Words of the page are in its file. A part of the window is in the file of the code that draws it.
   away = a.thing.node isa PickedText && (isempty(b.path) || page_key(b.path) != a.thing.file)
   if away
@@ -44413,15 +44499,87 @@ ask_box_tick!(ctx, w, e, a::AskBox) = begin
     asking_about(e, a) && (shown && close_popup!(w, key); return nothing)
     a.sent = false
   end
-  r = asked_rect(e, a.thing)
-  # A request that waits has its own line and label
-  a.editing === nothing ? pick_mark(ctx, w, r, isempty(a.answers) ? "Ask $(asks_whom(e))" : "") : still_waits!(a)
+  r = box_place(e, a)
+  # A request that waits has its own line and label, and so does any request about the words, whose label is the box's
+  if a.editing !== nothing
+    still_waits!(a)
+  elseif r !== nothing && !labelled_box(e, a)
+    a.label = pick_mark(ctx, w, r, box_label(a); avoid=placed, close=true)
+  end
   r === nothing && return nothing
+  a.closed && (shown && close_popup!(w, key); return nothing)
   shown || (show_ask!(e, w, a, r); redraw_in!(e, 0); return nothing)
   for p in popups(w)
     p.key == key && (p.anchor = (r.left, r.top, r.width, r.height))
   end
   nothing
+end
+
+"What the label of the box round the words of the field `a` says. A field that its Close button hid opens with a click on it."
+box_label(a::AskBox) = begin
+  n = length(a.answers)
+  name = n == 0 ? "Ask $(asks_whom(a.of))" : n == 1 ? "$(last(a.answers).by)'s answer" : "$(last(a.answers).by)'s answers"
+  a.closed ? name * "  ·  Click to open" : name
+end
+
+"""
+The requests of the window of the picker `t` that have a label on their thing:
+the one that an agent works on or ended a moment ago, those that wait in the
+queue, and those that ended while others waited.
+"""
+labelled_requests(t::CodePicker) = begin
+  out = Any[]
+  t.asked === nothing || push!(out, t.asked)
+  foreach(((q, _),) -> push!(out, q), ask_queue(t.editor))
+  append!(out, asks_ended(t.editor))
+end
+
+"Where each label of a request, and of the box round the words of a field, was drawn last, for a click on it"
+mark_labels(t::CodePicker) = Any[(x.label for x in labelled_requests(t))..., (o.label for o in ask_boxes(t.editor))...]
+
+"True when the field of the words of the request `a` shows in the window `w` of `e`"
+box_shows(e, w, a::AskedChange) = begin
+  o = isempty(a.places) ? nothing : box_about(e, first(a.places))
+  o !== nothing && any(p -> p.key == box_key(o), popups(w))
+end
+
+"""
+Over the × at the end of the label of a request, or of the box round the
+words of a field, show a tooltip that says what a click on it does, and tint
+the ×. True while the mouse is over one, so that the page doesn't take the move.
+"""
+close_tip!(t::CodePicker, w) = begin
+  e = t.editor
+  mx, my = num(w.mouse[1]), num(w.mouse[2])
+  over(r) = r !== nothing && (s = close_spot(r); s[1] <= mx <= s[1] + s[3] && s[2] <= my <= s[2] + s[4])
+  marks = Any[labelled_requests(t)..., ask_boxes(e)...]
+  k = popup_at(w, w.mouse) === nothing ? findfirst(m -> over(m.label), marks) : nothing
+  was = pop!(e.nodes, :over_close, false)
+  (was || k !== nothing) && redraw_in!(e, 0)
+  k === nothing && return false
+  e.nodes[:over_close] = true
+  x, y, wide, tall = close_spot(marks[k].label)
+  show_tooltip!(w, tip_label(close_words(e, marks[k])), px(x), px(y), px(wide), px(tall); placement=:bottom, gap=6px)
+  true
+end
+
+"What a click on the × at the end of the label of `x`, a request or the box round the words of a field, does, for its tooltip"
+close_words(e, o::AskBox) = isempty(o.answers) ? "Take the box away" : "Take the box and its answers away"
+close_words(e, a::AskedChange) = begin
+  t = code_picker(e)
+  o = isempty(a.places) ? nothing : box_about(e, first(a.places))
+  with = o === nothing || isempty(o.answers) ? "" : ", with the answers"
+  any(((q, _),) -> q === a, ask_queue(e)) ? "Take the request out of the queue" * with :
+  a.ended > 0 || t.asked !== a ? "Take this away" * with :
+  waiting(e, a) ? "Take the request back" * with :
+  isempty(a.by) ? "Stop the agent" * with :
+  "Hide this$with. $(a.by) still has the request."
+end
+
+"True when the label of a request is on the words of the field `a` of `e`, so that the field's box has no label of its own"
+labelled_box(e, a::AskBox) = begin
+  t = code_picker(e)
+  (t.asked !== nothing && on_box(t.asked, a)) || any(((q, _),) -> on_box(q, a), ask_queue(e)) || any(q -> on_box(q, a), asks_ended(e))
 end
 
 "True while the field of a request in place, in the window `w` of `e`, has the keyboard"
@@ -44433,6 +44591,75 @@ close_ask!(a::AskBox, w) = begin
   forget_ask!(a.of, a)
   focus(a.of)
   handled
+end
+
+"True when the Close button of the field `a` hides it and leaves its box: when it has answers, or words that you typed"
+hides_on_close(a::AskBox) = a.editing === nothing && (!isempty(a.answers) || a.parts[:text].buf.lines != [""])
+
+"""
+What the Close button of the field `a` does: it hides the field, and the box
+round its words stays, so that a click on the box's label shows it again. A
+field with nothing in it, and the field of a request that waits, go, as
+there's nothing to show again: the label of a request stays.
+"""
+hide_ask!(a::AskBox, w) = begin
+  hides_on_close(a) || return close_ask!(a, w)
+  a.closed = true
+  close_popup!(w, box_key(a))
+  focus(a.of)
+  redraw_in!(a.of, 0)
+  handled
+end
+
+"Show the field `a` again, after its Close button hid it or while an agent works on a question from it, and give it the keyboard"
+reopen_ask!(a::AskBox) = begin
+  e = a.of
+  a.sent = a.closed = false
+  w = window_of(e)
+  r = w === nothing ? nothing : box_place(e, a)
+  r === nothing || any(p -> p.key == box_key(a), popups(w)) || show_ask!(e, w, a, r)
+  r === nothing || focus(a.parts[:text])
+  redraw_in!(e, 0)
+  nothing
+end
+
+"""
+Show the field of the words of the request `a`, with the questions and
+answers about them, and what the agent is doing: a click on the label of the
+request does this. Words with no field get one.
+"""
+open_about!(e, a::AskedChange) = begin
+  isempty(a.places) && return nothing
+  o = box_about(e, first(a.places))
+  o === nothing || return reopen_ask!(o)
+  o = open_ask!(e, AskBox(of=e, thing=first(a.places)); anyway=true)
+  box_place(e, o) === nothing || focus(o.parts[:text])
+  nothing
+end
+
+"""
+Take the request `a` away, with the field of its words: the × on its label
+does this. It stops an agent that works on it, takes it out of the queue, or
+back from the agent of the page while it waits. A page's agent that has it
+works on in its own terminal, and Ladder no longer shows it. The label of a
+request that an agent was stopped on stays a few seconds to say what came
+of it.
+"""
+drop_request!(e, a::AskedChange, w) = begin
+  t = code_picker(e)
+  q = ask_queue(e)
+  k = findfirst(((x, _),) -> x === a, q)
+  if k !== nothing
+    deleteat!(q, k)
+  elseif t.asked === a
+    a.ended > 0 ? (t.asked = nothing) : waiting(e, a) ? take_back!(e, a) : stop_agents!(e, Any[a])
+  else
+    filter!(x -> x !== a, asks_ended(e))
+  end
+  o = isempty(a.places) ? nothing : box_about(e, first(a.places))
+  o === nothing || close_ask!(o, w)
+  redraw_in!(e, 0)
+  nothing
 end
 
 """
@@ -44487,7 +44714,7 @@ agent_free(e; command=true) = (command && agent_command(e); nothing)
 # "Number 1 in the queue". A click on that label opens a field under its thing
 # with its words, to change them: see "change a request that waits". When a
 # request ends while others wait, its label stays a few seconds with what came of it,
-# as it does when none wait. A click on the label of the request that an agent
+# as it does when none wait. The × on the label of the request that an agent
 # works on stops that agent, and the next request then starts.
 
 const QUEUED_LINE = colorant"rgb(128,146,176)"   # the line round a thing whose request waits
@@ -44667,17 +44894,21 @@ sharer_tick!(e, t::CodePicker, a::AskedChange) = begin
   nothing
 end
 
-"What the label on the thing of the change `a` says"
-asked_label(a::AskedChange) =
+"""
+What the label on the thing of the change `a` says. A click on the label of
+one that an agent works on opens the field of its words, unless `open` is
+false because the field shows already. The × at the label's end takes it away.
+"""
+asked_label(a::AskedChange; open=true) =
   a.ended > 0 ? (a.changed ? "$(a.said)  ·  Show Change" : a.said) :
-  isempty(a.by) ? asking_words(a.words, a.step) * "  ·  Click to stop it" :
-  a.sent ? "Asked $(a.by): $(request_words(a.words)) …  ·  Click to hide this" :
+  isempty(a.by) ? asking_words(a.words, a.step) * (open ? "  ·  Click to open" : "") :
+  a.sent ? "Asked $(a.by): $(request_words(a.words)) …" * (open ? "  ·  Click to open" : "") :
   "For $(a.by) when it waits for the page again: $(request_words(a.words))  ·  Click to change it"
 
 # --- stop an agent ---
 #
-# A click on its label stops the agent that's making a change or answering a
-# question, and so does the command Stop Agent. Esc doesn't, as it's easy to
+# The × on its label stops the agent that's making a change, and a click on the
+# label of one that answers a question. So does the command Stop Agent. Esc doesn't, as it's easy to
 # press by mistake. What the agent changed before it stopped stays in its
 # files, and doesn't run, because it can be half done. Undo Change puts it
 # back, and Show Change shows it.
