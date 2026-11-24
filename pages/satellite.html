@@ -23,7 +23,7 @@
 import * as THREE from 'three';
 
 // ------------------------------------------------------------------ the sizes
-const FIRST = { span: 70, array_area: 3407776, nsat: 6667, rad_use: 9, pipe_gap: 50, pipe_d: 20, sat_kg: 2000, lens: 0.02, alt: 1e6, sat: 150000 };
+const FIRST = { span: 70, array_area: 3406586, nsat: 6667, rad_use: 14, loop_d: 0.03, loop_out: 0.3, sat_kg: 2180, lens: 0.02, alt: 1e6, sat: 150000 };
 const sums = () => Object.assign({}, FIRST, (window.ladder && ladder.sums) || {});
 const shown = (name, or) => (window.ladder && ladder.shown && ladder.shown[name]) || or;
 
@@ -107,6 +107,7 @@ const darkMetal = new THREE.MeshStandardMaterial({ color: 0x2b2e33, metalness: 0
 const blackAnodised = new THREE.MeshStandardMaterial({ color: 0x0c0c0e, metalness: 0.2, roughness: 0.6 });
 const glass = new THREE.MeshPhysicalMaterial({ color: 0x0a1422, metalness: 0, roughness: 0.02, clearcoat: 1, clearcoatRoughness: 0 });
 const ceramic = new THREE.MeshStandardMaterial({ color: 0xe9e4da, roughness: 0.7 });
+const loopLine = new THREE.LineBasicMaterial({ color: 0x9aa4b0 });
 
 // ------------------------------------------------------------------ light
 const sun = new THREE.DirectionalLight(0xfff6ec, 5.2);
@@ -215,6 +216,23 @@ const satellite = new THREE.Group();
 satellite.rotation.x = -Math.asin(SUN.y);
 scene.add(satellite);
 
+// A loop of tube in a level plane at the height `y`, from `from` to `to` along the line of a wing (x) or of the radiator
+// (z), and `wide` out to each side of that line at its widest. It's widest nearer its far end, as an egg is.
+const loop = (from, to, y, wide, r, along = 'x') => {
+  const points = [];
+  for (let i = 0; i <= 96; i++) {
+    const a = Math.PI - 2 * Math.PI * i / 96, c = Math.cos(a);
+    const u = (from + to) / 2 + (to - from) / 2 * c, v = wide * Math.sin(a) * (0.72 + 0.28 * c);
+    points.push(along === 'x' ? new THREE.Vector3(u, y, v) : new THREE.Vector3(v, y, u));
+  }
+  const curve = new THREE.CatmullRomCurve3(points);
+  const pipe = new THREE.Mesh(new THREE.TubeGeometry(curve, 192, r, 8), pipeMetal);
+  pipe.castShadow = pipe.receiveShadow = true;
+  // A tube a few centimetres across is less than a pixel wide from afar, so a line of a pixel follows it
+  const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(curve.getPoints(192)), loopLine);
+  return new THREE.Group().add(pipe, line);
+};
+
 // The texture of a shape repeats `x` times across it and `y` times up it
 const scaled = (g, x, y) => { const uv = g.attributes.uv; for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * x, uv.getY(i) * y); return g };
 const box = (w, h, d, m) => { const o = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m); o.castShadow = o.receiveShadow = true; return o };
@@ -229,10 +247,9 @@ const build = () => {
   const body = THREE.MathUtils.clamp(Math.cbrt(s.sat_kg / 450), 0.8, 4);   // m, a side of the body, at 450 kg a cubic metre
   const reach = Math.max(1, (s.span - body) / 2 - 0.6);    // m, how far each wing reaches past its drum
   const chord = area / (2 * reach);                        // m, how tall each wing is
-  const gap = Math.max(0.05, s.pipe_gap / 100);            // m between pipes
-  const pipeR = Math.max(0.004, s.pipe_d / 2000);          // m
+  const loopR = s.loop_d / 2;                             // m
   const radArea = s.array_area * s.rad_use / 100 / s.nsat; // m² of the radiator
-  const radDeep = Math.min(Math.sqrt(radArea), 12), radWide = radArea / radDeep;
+  const radHigh = chord, radLong = radArea / radHigh;      // m: the radiator stands up behind the body, as tall as the cells
 
   // The body, wrapped in gold foil, with a silver deck on top
   const hull = box(body, body, body, gold);
@@ -254,7 +271,7 @@ const build = () => {
       cap.position.set(side * (body / 2 + 0.6), end * (chord / 2 + 0.15), 0);
       satellite.add(cap);
     }
-    // The fabric of cells, held flat by the pressure in its pipes. The cells face the Sun, and amber film is behind them.
+    // The fabric of cells, held taut between the drum and the bar at its tip. The cells face the Sun, and amber film is behind them.
     const x0 = side * (body / 2 + 0.6) + side * reach / 2;
     const front = new THREE.Mesh(scaled(new THREE.PlaneGeometry(reach, chord), reach / (4 * CELL), chord / (4 * CELL)), cells);
     front.position.set(x0, 0, 0.002);
@@ -265,29 +282,32 @@ const build = () => {
     back.position.set(x0, 0, -0.002);
     back.receiveShadow = true;
     satellite.add(back);
-    // The pipes run out along the wing, behind the cells
-    const n = Math.max(2, Math.floor(chord / gap) + 1);
-    for (let i = 0; i < n; i++) {
-      const y = -chord / 2 + chord * i / (n - 1);
-      const p = tube(pipeR, reach, pipeMetal, 10);
-      p.rotation.z = Math.PI / 2;
-      p.position.set(x0, y, -pipeR - 0.004);
-      satellite.add(p);
-    }
-    // The bar at the tip, where the pipes turn back
+    // Two wide loops of tube hold the tip out, one level with each edge of the cells. Each leaves the drum on the sunny
+    // side, sweeps out to the tip, and comes back on the shaded side. It touches the cells only at the tip, and the
+    // pressure in it pushes the tip out, as a bow does. The coolant from the chips runs through it.
+    const root = side * (body / 2 + 0.6), end = root + side * reach;
+    for (const y of [-chord / 2, chord / 2]) satellite.add(loop(root, end, y, s.loop_out * reach, loopR));
+    // The bar at the tip, where the loops meet the cells
     const tip = tube(0.06, chord + 0.1, pipeMetal);
-    tip.position.set(side * (body / 2 + 0.6 + reach), 0, -0.03);
+    tip.position.set(end, 0, 0);
     satellite.add(tip);
   }
 
-  // The radiator: flat, edge-on to the Sun, behind the body on a short boom. One face sees the Earth.
-  const boom = box(0.12, 0.12, 1.2, darkMetal);
-  boom.position.set(0, -body / 2 + 0.2, -body / 2 - 0.6);
-  satellite.add(boom);
-  const rad = box(radWide, 0.025, radDeep, whitePaint);
-  scaled(rad.geometry, 1, radDeep / 0.1);
-  rad.position.set(0, -body / 2 + 0.2, -body / 2 - 1.2 - radDeep / 2);
+  // The radiator stands up behind the body, edge-on to the Sun, and two loops of tube hold it out as they hold the wings
+  const radRoot = -body / 2 - 0.4, radEnd = radRoot - radLong;
+  const arm = box(0.12, 0.12, 0.4, darkMetal);
+  arm.position.set(0, 0, -body / 2 - 0.2);
+  satellite.add(arm);
+  const rad = box(0.02, radHigh, radLong, whitePaint);
+  scaled(rad.geometry, radLong / 0.1, 1);
+  rad.position.set(0, 0, (radRoot + radEnd) / 2);
   satellite.add(rad);
+  for (const y of [-radHigh / 2, radHigh / 2]) satellite.add(loop(radRoot, radEnd, y, s.loop_out * radLong, loopR, 'z'));
+  for (const z of [radRoot, radEnd]) {
+    const bar = tube(0.04, radHigh + 0.06, pipeMetal);
+    bar.position.set(0, 0, z);
+    satellite.add(bar);
+  }
 
   // The laser to the next satellite, which looks along the orbit
   const mount = tube(0.09, 0.25, darkMetal);
