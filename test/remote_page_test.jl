@@ -425,6 +425,44 @@ end
   at((5, 400))
 end
 
+@testset "the › after a server's page searches the page" begin
+  page!("https://example.com/guide.md", "# Guide\n\nIntro.\n\n## Tea\n\n" * "Words.\n\n"^60 * "## Milk\n\nThe milk is cold.\n\n- [ ] Buy milk\n")
+  K.navigate!(e, "example.com/guide.md"); frames()
+  @test e.buf.path == "https://example.com/guide.md" && K.searchable(e)
+  at((x, y)) = (w.mouse = typeof(w.mouse)(px(x), px(y)); onmouse(w, MouseMove(Vec2{px}(px(x), px(y)), w)); frames(1))
+  middle(node) = (r = rect(node); (K.num(r.left) + K.num(r.width) / 2, K.num(r.top) + K.num(r.height) / 2))
+  mouse_click() = (w.keys |= Keys.mouse_left; onkey(w, KeyPress{Keys.mouse_left}(0, w)); frames(1); w.keys ⊻= Keys.mouse_left; onkey(w, KeyRelease{Keys.mouse_left}(0, w)); frames(2))
+  at(middle(e.nodes[:title])); sleep(K.TT_WAIT + 0.05); frames()
+  v = e.nodes[:title_trail]
+  @test haskey(v.drops, 0)   # a › follows the page's name
+  at(middle(v.drops[0])); mouse_click()
+  @test any(p -> p.key == K.TS_KEY, popups(w))
+  s = e.nodes[:title_search]
+  # With nothing asked, it lists the page's headings
+  @test [r.x.title for r in s.rows if r.kind == :entry] == ["Guide", "Tea", "Milk"]
+  @test K.search_place(s) == "guide.md" && K.search_field(s).placeholder == "Search guide.md"
+  # The places to look are the page alone: a server doesn't say what's in its folders
+  @test [o.key for o in K.scope_options(s)] == [(:file, 0)]
+  shot("remote_search.png")
+  # Words find the lines that have them, and Return goes to the line
+  typed("cold")
+  @test [r.m.text for r in s.rows if r.kind == :thing] == ["The milk is cold."]
+  press(Keys.enter)
+  @test !any(p -> p.key == K.TS_KEY, popups(w))
+  @test e.buf.path == "https://example.com/guide.md" && e.buf.caret[1] == findfirst(==("The milk is cold."), e.buf.lines)
+  shot("remote_search_found.png")
+  # The page has no caret to show, so it scrolls to bring the line in sight
+  @test e.scroll.offset > 0px
+  # A kind with no words finds every thing of that kind
+  at(middle(e.nodes[:title])); sleep(K.TT_WAIT + 0.05); frames()
+  at(middle(e.nodes[:title_trail].drops[0])); mouse_click()
+  s = e.nodes[:title_search]
+  s.wants = [:todo]; frames()
+  @test [r.m.text for r in s.rows if r.kind == :thing] == ["Buy milk"]
+  press(Keys.escape)
+  at((5, 400))
+end
+
 @testset "a link in a page of your own" begin
   mine = joinpath(dir, "mine.md")
   write(mine, "# Mine\n\n[Notes](https://example.com/notes.md)\n\n```ui\n1 + 1\n```\n")

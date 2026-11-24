@@ -31987,8 +31987,8 @@ part_width(x::Entry) = (x.level < 7 ? TT_MARK : measure(Face(SANS, "", 13px, col
 "How wide the headings and the component after the file's name are, with a › before each"
 parts_wide(parts) = sum((part_width(x) + TT_ARROW for x in parts), init=0px)
 
-"True when the path has a › after the file's name, to search the file: a Markdown page"
-searchable(e) = e.buf.view == :markdown && isfile(e.buf.path)
+"True when the path has a › after the file's name, to search the file: a Markdown page, of the Mac or from a web server"
+searchable(e) = e.buf.view == :markdown && (isfile(e.buf.path) || isremote(e.buf.path))
 
 "How wide the path's parts after the file's name are: each heading and the component, with the › before each, and the › after the last heading"
 trail_parts_wide(e, parts) = searchable(e) ? parts_wide(parts) + (isempty(parts) || parts[end].level < 7 ? TT_ARROW : 0px) : 0px
@@ -32644,10 +32644,13 @@ search_kind_name(k::Symbol) = k == :page ? "Page" : uppercasefirst(Searches.WHAT
 "The heading that the search looks under, as the sidebar has it, or nothing"
 search_heading(s::TitleSearch) = s.under == 0 ? nothing : (i = findfirst(x -> x.line == s.under, outline(s.of, s.page)); i === nothing ? nothing : outline(s.of, s.page)[i])
 
+"The name of the page at `path` in the search: its file's name, or the last name of the address of a page from a web server"
+search_file_name(path) = isremote(path) ? Remote.trail(path)[end][1] : basename(path)
+
 "The name of the place where the search looks: its folder, as the path names it, its heading, or its file"
 search_place(s::TitleSearch) =
   !isempty(s.folder) ? steps(s.folder, home_folder())[end][1] :
-  s.under > 0 ? (h = search_heading(s); h === nothing ? basename(s.page) : h.title) : basename(s.page)
+  s.under > 0 ? (h = search_heading(s); h === nothing ? search_file_name(s.page) : h.title) : search_file_name(s.page)
 
 "Where the search looks, as a choice of the list of places: (:folder, path), (:under, line) or (:file, 0)"
 search_scope(s::TitleSearch) = !isempty(s.folder) ? (:folder, s.folder) : s.under > 0 ? (:under, s.under) : (:file, 0)
@@ -32951,7 +32954,10 @@ scope_options(s::TitleSearch) = begin
   v = s.arrow === nothing ? nothing : s.arrow.parent
   heads = v isa TitleTrail ? [x for x in v.parts if x.level < 7] : Entry[]
   out = Any[(key=(:under, x.line), name=x.title, icon=x.icon, words=[x.title]) for x in reverse(heads)]
-  push!(out, (key=(:file, 0), name=basename(s.page), icon=file_icon(s.page), words=[basename(s.page)]))
+  named = search_file_name(s.page)
+  push!(out, (key=(:file, 0), name=named, icon=isremote(s.page) ? "file-earmark-text" : file_icon(s.page), words=[named]))
+  # A web server doesn't say what pages a folder has, so a page from one is searched by itself
+  isremote(s.page) && return out
   for (n, p) in reverse(steps(dirname(s.page), home_folder()))
     push!(out, (key=(:folder, p), name=n, icon="folder", words=[n]))
   end
