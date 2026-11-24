@@ -330,4 +330,33 @@ end
   @test !(e.layout[1].content isa K.Live && e.layout[1].content.node isa K.ReviewHead)
 end
 
+"True when the page's front matter takes no room and shows nothing"
+matter_hidden() = (it = e.layout[1]; it.first == 1 && it.last == K.front_matter(e.buf.lines) > 1 && it.tall == 0px && !(it.content isa K.Live))
+
+@testset "a folder's own page shows no front matter, as its site shows none" begin
+  # The blog's own page, a section's Readme and the Readme of a folder of book reviews
+  Base.invokelatest(K.open!, e, K.FS.get(FSPath(canon))); frames()
+  @test e.buf.path == joinpath(canon, "Readme.md") && matter_hidden()
+  Base.invokelatest(K.open!, e, K.FS.get(FSPath(humans))); frames()
+  @test e.buf.path == joinpath(humans, "Readme.md") && matter_hidden()
+  reviews = joinpath(canon, "Book Reviews")
+  Base.invokelatest(K.open!, e, Base.invokelatest(K.FS.get, FSPath(reviews))); frames()
+  @test e.buf.path == joinpath(reviews, "Readme.md") && matter_hidden()
+  # A post keeps its card
+  Base.invokelatest(K.show_path!, e, joinpath(humans, "Dating.md")); frames()
+  @test e.layout[1].content isa K.Live && e.layout[1].content.node isa K.MatterCard
+  # ↑ from the first line goes onto the front matter as a whole, which then shows as a card. Return shows its lines.
+  Base.invokelatest(K.show_path!, e, joinpath(canon, "Readme.md")); frames()
+  e.buf.caret = e.buf.anchor = (5, 0); frames()
+  @test matter_hidden()
+  delete!(e.nodes, :chose)   # an earlier test chose in the sidebar with no key, so the next key would be the sidebar's
+  foreach(_ -> (Base.invokelatest(onkey, w, KeyPress{Keys.up}(0, w)); frames()), 1:2)
+  @test K.picked(e.buf) == (1, 3) && e.layout[1].content isa K.Live && e.layout[1].content.node isa K.MatterCard
+  Base.invokelatest(onkey, w, KeyPress{Keys.enter}(0, w)); frames()
+  @test K.picked(e.buf) === nothing && e.buf.caret[1] <= 3 && !(e.layout[1].content isa K.Live)
+  # With the caret out of it, it hides again
+  e.buf.caret = e.buf.anchor = (5, 0); frames()
+  @test matter_hidden()
+end
+
 close(w)

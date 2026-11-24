@@ -210,6 +210,23 @@ end
   page!("https://blog.test/essays/post.md", "# A post\n\nSome words.\n")
 end
 
+@testset "a folder's page of a blog shows no front matter, as its site shows none" begin
+  page!("https://blog.test/", "+++\nsite = \"https://blog.test\"\n+++\n\n# The blog\n\nWords.\n")
+  page!("https://blog.test/essays/post.md", "+++\ndescription = \"A post\"\n+++\n\n# A post\n\nSome words.\n")
+  K.navigate!(e, "https://blog.test/")
+  frames()
+  @test e.buf.path == "https://blog.test/" && e.look == :site
+  top = e.layout[1]
+  @test top.first == 1 && top.last == 3 && top.tall == 0px && !(top.content isa K.Live)
+  # A post keeps its card
+  K.navigate!(e, "https://blog.test/essays/post.md")
+  frames()
+  top = e.layout[1]
+  @test top.last == 3 && top.content isa K.Live && top.content.node isa K.MatterCard
+  page!("https://blog.test/", "# The blog\n\n[A post](essays/post.md)\n")
+  page!("https://blog.test/essays/post.md", "# A post\n\nSome words.\n")
+end
+
 @testset "a site with no page of code asks nothing" begin
   n = length(asks)
   K.navigate!(e, "https://html.test/a.md")

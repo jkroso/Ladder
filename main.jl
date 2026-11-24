@@ -1706,11 +1706,12 @@ page_foot(e, d, o) = nothing
 
 """
 What shows in place of the card of the front matter of the page `o`, which the
-directory `d` holds, while the caret isn't in it: a node, or nothing for the
-card. A kind of folder has a method of this to show the front matter of the
-pages that it holds its own way, as a blog shows a book review's title and
-stars. `rows` are the front matter's keys, each as its line, the key and what
-it's set to, as it's written.
+directory `d` holds, while the caret isn't in it: a node, nothing for the
+card, or `false` for nothing at all. A kind of folder has a method of this to
+show the front matter of the pages that it holds its own way, as a blog shows
+a book review's title and stars, and shows none on a folder's own page.
+`rows` are the front matter's keys, each as its line, the key and what it's
+set to, as it's written.
 """
 matter_view(e, d, o, rows) = nothing
 
@@ -25762,7 +25763,7 @@ end
 cursor(::CoverPicture) = :arrow
 onkey(c::CoverPicture, ev::KeyPress{Keys.mouse_left}) = click_page!(c, ev)
 
-"The front matter that ends at line `t`, as a card, as the top of an email, or as what code from the startup page shows there. A `cover` key puts a picture over it."
+"The front matter that ends at line `t`, as a card, as the top of an email, or as what code from the startup page shows there, or nothing when its page's kind of folder hides it. A `cover` key puts a picture over it."
 matter_card(e, t) = begin
   rows = matter_rows(e.buf.lines, t)
   cover = cover_key(e, rows)
@@ -25771,6 +25772,12 @@ matter_card(e, t) = begin
   # A kind of folder can show the front matter of a page that it holds its own way, as a blog shows a book review's
   o = card === nothing ? text_object(e) : nothing
   o === nothing || (card = matter_view(e, o.parent, o, rows))
+  if card === false
+    # ... or nothing in its place. With the caret on it as a whole, it shows as a card, so you see what ⌫ would take
+    # away, and Return shows its lines.
+    picked(e.buf) == (1, t) || return nothing
+    card = nothing
+  end
   if card === nothing
     # An email that came or went shows the top of an email in place of its keys. That top has levels of its own.
     card = email_shows(e, Dict(lowercase(k) => v for (_, k, v) in rows)) ? email_head!(e) : node!(MatterCard, e, :matter)
@@ -26190,8 +26197,12 @@ layout!(e, width=text_width(e)) = begin
       t = front_matter(b.lines)
       if t > 1
         content = matter_card(e, t)
-        push!(items, Item(1, t, top, content.tall, content))
-        top += content.tall
+        if content === nothing
+          push!(items, flat(e, Item(1, t, top, 0px, nothing)))
+        else
+          push!(items, Item(1, t, top, content.tall, content))
+          top += content.tall
+        end
         i = t + 1
         continue
       end
@@ -53688,12 +53699,18 @@ describe(l::SiteLink) = Box(name="Link", border(1px, :solid, RGBA(colours.accent
 cursor(::SiteLink) = :hand
 onkey(l::SiteLink, ::KeyPress{Keys.mouse_left}) = (isempty(l.url) || BROWSER[](l.url); handled)
 
+# A folder's own page, its Readme or index.md, shows no front matter, as its site shows none. A post keeps its card.
+matter_view(e, d::BlogFolder, o::FS.File, rows) = path_of(o) == front_page(d) ? false : nothing
 matter_view(e, ::BlogFolder, ::FS.File{:review}, rows) = review_head(e, rows)
-matter_view(e, ::BookReviewDirectory, ::FS.File{:md}, rows) = review_head(e, rows)
+matter_view(e, d::BookReviewDirectory, o::FS.File{:md}, rows) = path_of(o) == front_page(d) ? false : review_head(e, rows)
 
 # A page of a blog on a web server has no .review at the end of its address, so its front matter says that it's a
 # book review: it has a rating, as each .review file has
-matter_view(e, ::WebFolder{<:BlogFolder}, ::WebPage, rows) = any(r -> lowercase(r[2]) == "rating", rows) ? review_head(e, rows) : nothing
+matter_view(e, d::WebFolder{<:BlogFolder}, o::WebPage, rows) =
+  web_folder_page(d, o) ? false : any(r -> lowercase(r[2]) == "rating", rows) ? review_head(e, rows) : nothing
+
+"True when the page `o` from a web server is the own page of the web folder `d`: the page at the folder's address"
+web_folder_page(d::WebFolder, o::WebPage) = rstrip(Remote.bare(o.address), '/') == rstrip(d.address, '/')
 
 "The top of a book review of a blog, with what its front matter `rows` say"
 review_head(e, rows) = begin
