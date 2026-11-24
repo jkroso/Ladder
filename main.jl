@@ -30477,9 +30477,9 @@ tip(::ReadOnly) = "Read only"
 
 const LOCK_W = 26px   # how wide the lock is in the top bar
 
-# UI.jl's lock is 10 wide and 14 tall, so in the top bar it looked stretched. This one is 12 wide and 13 tall, in a
+# UI.jl's lock is 10 wide and 14 tall, so in the top bar it looked stretched. This one is 11 wide and 13 tall, in a
 # square 16 wide: a body with round corners, and a shackle over it. Each line is 1 wide, as in UI.jl's icons.
-const LOCK_SHAPES = ("M4 7H12A2 2 0 0 1 14 9V12.5A2 2 0 0 1 12 14.5H4A2 2 0 0 1 2 12.5V9A2 2 0 0 1 4 7ZM4 8A1 1 0 0 0 3 9V12.5A1 1 0 0 0 4 13.5H12A1 1 0 0 0 13 12.5V9A1 1 0 0 0 12 8Z",
+const LOCK_SHAPES = ("M4.5 7H11.5A2 2 0 0 1 13.5 9V12.5A2 2 0 0 1 11.5 14.5H4.5A2 2 0 0 1 2.5 12.5V9A2 2 0 0 1 4.5 7ZM4.5 8A1 1 0 0 0 3.5 9V12.5A1 1 0 0 0 4.5 13.5H11.5A1 1 0 0 0 12.5 12.5V9A1 1 0 0 0 11.5 8Z",
                      "M4.5 7V5A3.5 3.5 0 0 1 11.5 5V7H10.5V5A2.5 2.5 0 0 0 5.5 5V7Z")
 
 "The name of the lock's icon. Its shapes go among UI.jl's icons the first time that it's asked for, as the snake's do."
