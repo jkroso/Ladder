@@ -103,7 +103,13 @@ end
   tb = e.nodes[(:folder_table, repo)]
   @test tb isa K.FolderTable && rect(tb) !== nothing
   @test sort!([basename(it.path) for it in tb.items]) == ["Readme.md", "new.md", "notes.md", "src"]
-  @test K.holds_words(tb) == "1 folder  ·  3 files"
+  # The line under its name says how big the repository is, with its .git folder, which the table leaves out.
+  # git writes in .git while it's asked things, so the bytes are read until they're the same.
+  bytes_in(path) = sum((lstat(joinpath(r, f)).size for (r, _, fs) in walkdir(path) for f in fs), init=0)
+  sized() = (tb.read = 0.0; frames(1); tb.bytes == bytes_in(repo))
+  t0 = time(); while !sized() && time() - t0 < 10; sleep(0.05) end
+  @test sized() && tb.bytes > bytes_in(joinpath(repo, ".git"))
+  @test K.holds_words(tb) == "1 folder  ·  3 files  ·  " * K.Zips.size_words(tb.bytes)
   @test sort!([k[2] for k in keys(tb.rows) if k[1] == :item]) == sort!(joinpath.(repo, ["Readme.md", "new.md", "notes.md", "src"]))
   # Each row has git's mark, as the sidebar has
   line(name) = tb.rows[(:item, joinpath(repo, name))]

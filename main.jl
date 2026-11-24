@@ -30406,8 +30406,7 @@ tip(b::ToolButton) = begin
   b.action in BLOG_ACTIONS && return blog_tip(e, b.action)
   haskey(BUTTONS, b.action) && return BUTTONS[b.action].tip(e)
   b.action == :outside || return ""
-  app = opener(e.buf.path)
-  isempty(app) ? "Show in Finder" : "Open in $(app_name(app))"
+  "Open in $(app_name(opener(e.buf.path)))"
 end
 tip(s::SendButton) = begin
   e = editor(s)
@@ -30799,6 +30798,7 @@ describe(t::TopBar) = begin
   more = (bar_parts(e)..., blog_part(e)...)
   checks = check_part(e)
   mode = mode_part(e)
+  outside = readonly(b) ? outside_button(e) : ()
   # What a file that's only shown says of itself, like how many rows a CSV file has, can need more room than that.
   # The words move aside as the slider of the levels opens, so then they need its room too.
   grown = isempty(mode) ? 0px : slider_grown(e)
@@ -30854,11 +30854,10 @@ describe(t::TopBar) = begin
       # A folder of a blog that shows only its list has the blog's buttons in place of the words
       # A page that has a panel at the right has the button that hides it, at the end
       (page_covered(e) || nofile(e) ? right_part(e) :
-       readonly(b) && page_object(e) isa BlogFolder ? (more..., mode..., button(e, :outside, "box-arrow-up-right")) :
-       readonly(b) ? (said_part(isempty(b.about) ? "Read only" : b.about * "  ·  Read only", side - 40px - (isempty(mode) ? 0px : MODE_W + grown)),
+       readonly(b) && page_object(e) isa BlogFolder ? (more..., mode..., outside...) :
+       readonly(b) ? (said_part(isempty(b.about) ? "Read only" : b.about * "  ·  Read only", side - (isempty(outside) ? 0px : 40px) - (isempty(mode) ? 0px : MODE_W + grown)),
                       mode...,
-                      # The app that the Mac uses for the file can change it, so a button opens the file there
-                      button(e, :outside, "box-arrow-up-right")) :
+                      outside...) :
                      (more..., job_part(e)..., agent_part(e)..., checks..., diff_part(e)..., commit_part(e)..., mode...,
                       # A page that's never changed says so at the end
                       (b.fixed ? (Box(height(28px), padding(8px, 0px), label("Read only", 12px, color=colours.dim)),) : ())...))...))
@@ -36676,6 +36675,13 @@ end
 
 "Open the file that the page shows in the app that the Mac uses for it"
 open_outside!(e) = (open_outside(e.buf.path); e)
+
+"""
+The top bar's button that opens the file of a page that's only shown in the
+app that the Mac uses for it, since that app can change it. A folder, or a
+file that no app opens, has no button: it would only show it in the Finder.
+"""
+outside_button(e) = isempty(opener(e.buf.path)) ? () : (button(e, :outside, "box-arrow-up-right"),)
 
 "The name of the app at `path`, like Ladder for /Applications/Ladder.app"
 app_name(path) = splitext(basename(path))[1]
@@ -48451,7 +48457,7 @@ line of words under it, like what it holds. The path to the folder is in the
 top bar, so it isn't under the name. With no words, there's no line.
 """
 page_title(icon, name, about) =
-  Column(width(grow=grow), Alignment.Start, padding(8px, 0px, 14px, 8px), child_gap=6px,
+  Column(width(grow=grow), Alignment.Start, padding(8px, 0px, 14px, 8px), child_gap=13px,   # the name's box ends at its baseline, so its p, g and y use about 5px of this
     Row(child_gap=10px, Icon(icon, size=22px, color=colours.dim), Box(label(name, 24px, weight="Bold"))),
     (isempty(about) ? () : (Box(label(about, 13px, color=colours.dim)),))...)
 
@@ -48616,14 +48622,20 @@ BUTTONS[:right_panel] = (run=toggle_right!, tip=e -> (e.right ? "Hide " : "Show 
 add_command!(toggle_right!, name=:right_panel, title="Show or hide the panel at the right of the page, like git's panel beside a repository's files")
 works_here(e, ::Val{:right_panel}) = right_view(e) !== nothing
 
-"How many folders and files the table `t`, a `FolderTable`, lists, in words. The type is defined further on, with the table."
+"""
+How many folders and files the table `t`, a `FolderTable`, lists, in words,
+and what the folder holds, once that's known. The type is defined further on,
+with the table.
+"""
 holds_words(t) = begin
   folders = count(it -> it.folder, t.items)
   files = length(t.items) - folders
   parts = String[]
   folders > 0 && push!(parts, folders == 1 ? "1 folder" : "$(commas(folders)) folders")
   files > 0 && push!(parts, files == 1 ? "1 file" : "$(commas(files)) files")
-  isempty(parts) ? "Empty" : join(parts, "  ·  ")
+  isempty(parts) && return "Empty"
+  t.bytes >= 0 && push!(parts, Zips.size_words(t.bytes))
+  join(parts, "  ·  ")
 end
 
 # The page has its own scroll, since it covers the page's space to leave git's panel the room at its right
@@ -51658,6 +51670,7 @@ end
   was::Any = nothing                             # what that column had when its menu opened, which esc puts back
   parts::Dict{Any,Any} = Dict{Any,Any}()         # the menu, and its orders and kinds
   kindof::Dict{String,String} = Dict{String,String}()   # what macOS called the kind of each thing, by its path
+  bytes::Int = -1                                # what the folder holds, at any depth, hidden files too, or -1 while that isn't known
 end
 
 "The heading of a column of a folder's table. A click on it opens the column's menu."
@@ -51710,6 +51723,8 @@ Read the folder of the table `t` again: the folders and files that the
 sidebar lists, each with its kind, its size and when it last changed. A
 folder's size and time are of everything in it. It's read a second after it
 was last read, or at once when the sidebar starts or stops listing hidden files.
+It also adds up what the whole folder holds, as the Finder does, with the
+hidden folders and files that the table leaves out.
 """
 folder_items!(e, t::FolderTable) = begin
   time() - t.read < 1 && t.hidden == e.hidden && return t.items
@@ -51717,8 +51732,14 @@ folder_items!(e, t::FolderTable) = begin
   d = try object(e, t.path) catch; nothing end
   found = d isa AbstractDirectory ? entries(e, d) : FSObject[]
   paths = String[joinpath(t.path, o.path.name) for o in found]
+  # What the table leaves out, like hidden files, still counts in the folder's size. With a folder in it that
+  # isn't read, like ~/Library, that size is never known, so its hidden folders, like ~/.julia, aren't read for it.
+  out = try setdiff(readdir(t.path, join=true), paths) catch; String[] end
+  whole = !any(Folders.unread, [paths; out])
+  stats = whole ? [(p, try lstat(p) catch; nothing end) for p in out] : []
+  out_folders = [p for (p, st) in stats if st !== nothing && isdir(st)]
   # When anything in each folder last changed, for the folders that have been read
-  deep = Folders.newest(t.path, [p for (p, o) in zip(paths, found) if o isa AbstractDirectory])
+  deep = Folders.newest(t.path, [[p for (p, o) in zip(paths, found) if o isa AbstractDirectory]; out_folders])
   # How big each folder is, for the folders that have been read to the end
   bytes = Folders.sizes(t.path)
   length(t.kindof) > 10_000 && empty!(t.kindof)
@@ -51731,6 +51752,10 @@ folder_items!(e, t::FolderTable) = begin
                size=folder ? get(bytes, path, 0) : st === nothing ? 0 : Int(st.size), sized=!folder || haskey(bytes, path),
                when=folder ? max(own, get(deep, path, 0.0)) : own, known=!folder || haskey(deep, path))
   end
+  known = whole && all(it -> it.sized, t.items) && all(p -> haskey(bytes, p), out_folders)
+  t.bytes = !known ? -1 : sum(it -> it.size, t.items, init=0) + sum(p -> bytes[p], out_folders, init=0) +
+                          sum(((p, st),) -> st === nothing || isdir(st) ? 0 : Int(st.size), stats, init=0)
+  t.items
 end
 
 "The folders and files of the table `t`, in the order of the column that it's sorted by. Rows with the same value keep the sidebar's order."

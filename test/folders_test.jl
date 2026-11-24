@@ -30,6 +30,7 @@ made("Code/app/.gitignore", "build/\n")
 const main_file = made("Code/app/main.jl", "f(x) = x\n")
 const notes = made("Code/app/notes.md", "# Notes\n")
 const built = made("Code/app/build/out.bin")
+const finder_file = made("Code/.DS_Store", "what the Finder keeps")   # hidden, so the table leaves it out, but it counts in the folder's size
 const plan = mkpath(joinpath(home, "Desktop", "Plan"))
 run(pipeline(`git -C $plan init -q`, stdout=devnull, stderr=devnull))
 const report = made("Desktop/Plan/2026/report.md", "# Report\n")
@@ -66,6 +67,8 @@ stamp(path, t) = run(`touch -m -t $(Libc.strftime("%Y%m%d%H%M.%S", t)) $path`)
 stamp_all(path, t) = run(`find $path -exec touch -m -t $(Libc.strftime("%Y%m%d%H%M.%S", t)) "{}" +`)
 "Wait until `f()` is true, for no longer than `s` seconds, and say whether it is"
 wait_until(f; s=10) = (t0 = time(); while !f() && time() - t0 < s; sleep(0.05) end; f())
+"The bytes of every file in the folder at `path`, at any depth, hidden ones too"
+bytes_in(path) = sum((lstat(joinpath(r, f)).size for (r, _, fs) in walkdir(path) for f in fs), init=0)
 
 @testset "a folder's time is when anything in it last changed, at any depth" begin
   root = mkpath(joinpath(dir, "times"))
@@ -231,6 +234,8 @@ end
   @test names()[3:end] == ["Mail", "page.md", "list.csv", "Alpha", "Beta", "Gamma", "Library"]
   sizes = Dict(basename(it.path) => K.size_cell(it) for it in v.items)
   @test sizes["Mail"] == "16 bytes" && sizes["Alpha"] == "0 bytes" && sizes["Library"] == "" && sizes["page.md"] == "13 bytes"
+  # The Library isn't read, so the line under the home folder's name can't say how big the home folder is
+  @test v.bytes == -1 && K.holds_words(v) == "7 folders  ·  2 files"
   # A new column starts with the newest first, and a second click puts the oldest first
   sort_by(v, :when, true)
   @test v.sort == :when && v.desc && names() == order
@@ -253,8 +258,11 @@ end
   @test e.buf.path == code && e.nodes[(:folder_page, code)] isa K.FolderPage
   t = e.nodes[(:folder_table, code)]
   @test [basename(it.path) for it in t.items] == ["app"]
-  # Under its name is what it holds. Its path is in the top bar, not there.
-  @test K.holds_words(t) == "1 folder"
+  # Under its name is what it holds, and how big that is once its folders are read, with the hidden file that
+  # the table leaves out. Its path is in the top bar, not there.
+  @test wait_until(() -> (t.read = 0.0; frames(1); t.bytes >= 0))
+  @test t.bytes == bytes_in(code) > bytes_in(app)
+  @test K.holds_words(t) == "1 folder  ·  " * K.Zips.size_words(bytes_in(code))
   @test t.sort == :when && t.desc
   @test rect(t.rows[(:item, app)]) !== nothing && rect(t.heads[:when]) !== nothing
   shot("folder-table")
