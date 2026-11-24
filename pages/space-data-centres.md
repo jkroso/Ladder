@@ -271,12 +271,14 @@ kind: pie
 
 McCalip compares it with a data centre that has its own gas power station beside it, as some new AI data centres do.
 
-A data centre uses more power than its computers do, for cooling and for losses in its wiring. The ratio is its PUE, its power usage effectiveness. Here it's !`pue = 1.2`, so the power station must make !`station = compute * pue`. That's !`ceil(Int, station / 430MW)` big gas turbines of 430 megawatts each.
+A data centre uses more power than its computers do, for cooling and for losses in its wiring. The ratio is its PUE, its power usage effectiveness. Here it's !`pue = 1.2`, so the power station must make !`station = compute * pue`. That's !`turbines = ceil(Int, station / 430MW)` big gas turbines of 430 megawatts each.
 
-- **The power station** costs !`per_kw = 1000USD/kW`. That's !`plant = per_kw * station`.
+A gas turbine is ready to run about !`ready = 90Percent` of the time. It stops the rest of the time for upkeep and repairs.[^21] So a data centre that makes its own power has spare turbines. Say this station has !`spares = 2` of them: one for upkeep and one for a failure. The computers then lose power only when more than !`spares` turbines are down at once. They have power !`uptime = let n = turbines + round(Int, spares), p = float(ready); 100Percent * round(sum(binomial(n, k) * p^k * (1 - p)^(n - k) for k in turbines:n), digits=3) end` of the time.
+
+- **The power station** costs !`per_kw = 1000USD/kW`. With the spares, that's !`plant = per_kw * (station + spares * 430MW)`.
 - **The building.** For each watt of computers, the electrical gear costs !`elec = 5.00USD/W`, the cooling !`cool = 3.00USD/W`, the land and the shell !`shell = 2.50USD/W`, and the network and the fit-out !`fitout = 1.75USD/W`. That's !`building = (elec + cool + shell + fitout) * compute`.
 - **The computers.** They cost !`chip_bill` here too.
-- **Gas.** The turbines burn !`heat_rate = 6200` BTU of gas for each kilowatt-hour. A BTU is a British thermal unit. Gas costs $!`gas = 4.30` for a million BTU, so each megawatt-hour takes $!`fuel_mwh = round(heat_rate * gas / 1000, digits=2)` of gas. The station lasts !`ground_life = 20yr` and runs !`uptime = 85Percent` of the time, so its gas costs !`fuel = fuel_mwh * 1USD/MWh * station * ground_life * uptime`.
+- **Gas.** The turbines burn !`heat_rate = 6200` BTU of gas for each kilowatt-hour. A BTU is a British thermal unit. Gas costs $!`gas = 4.30` for a million BTU, so each megawatt-hour takes $!`fuel_mwh = round(heat_rate * gas / 1000, digits=2)` of gas. The station lasts !`ground_life = 20yr`. It runs the computers !`uptime` of that time, so its gas costs !`fuel = fuel_mwh * 1USD/MWh * station * ground_life * uptime`.
 
 In all, the data centre on the ground costs !`ground = plant + building + fuel + chip_bill`.
 
@@ -316,33 +318,63 @@ One reading of his gap does not fit the surveys. From about $55 a watt down to a
 
 ## Side by side
 
-The two don't do the same work. The fleet does !`energy` of work before it's gone. On the ground the computers stop when the station stops, !`100Percent - uptime` of the time, for repairs and upkeep. Over its !`round(Int, ground_life / 1yr)` years the station gives them !`energy_ground = convert(TWh, compute * ground_life * uptime)`. It's interesting to convert that to $/token though there is no standard energy to token conversion rate. Here we use !`joules = 1J` for each token.
-
-These figures are the chip, not the whole building.[^20] An 8-billion-parameter chat used about 0.05 joules a token, and a 405-billion-parameter model about 2. The same 32-billion-parameter model used 0.15 joules for a chat and 0.31 for a problem. A mixture-of-experts model of that size used about 28% as much on the problem.
+The two don't do the same work. The fleet does !`energy` of work before it's gone. On the ground, the computers stop !`100Percent - uptime` of the time, when more turbines are down than the spares can cover. Over its !`round(Int, ground_life / 1yr)` years the station gives them !`energy_ground = convert(TWh, compute * ground_life * uptime)`. It's interesting to convert that to $/token though there is no standard energy to token conversion rate. Here we use !`joules = 0.6J` for each token.[^20]
 
 | | What it costs | The work it does | Each billion tokens |
 |---|---|---|---|
 | In orbit | !`orbit` | !`energy` | $!`per_orbit = round(float(orbit / energy / (1USD/MWh)) * float(joules / 1J) / 3.6e9 * 1e9, sigdigits=3)` |
 | On the ground | !`ground` | !`energy_ground` | $!`per_ground = round(float(ground / energy_ground / (1USD/MWh)) * float(joules / 1J) / 3.6e9 * 1e9, sigdigits=3)` |
 
-```chart
-kind: bars
-title: What each billion tokens costs
-show: Each billion tokens
-from: Side by side
+```columns
+2
 ```
 
-In orbit, a billion tokens costs !`round(per_orbit / per_ground, digits=1)` times as much as on the ground. !`per_orbit > per_ground ? "The ground wins." : "Orbit wins."`
+```chart
+from: Side by side
+kind: bars
+title: The work that each one does
+show: The work it does
+```
 
+Before it's gone, the fleet produces !`orbit_tokens = round(convert(J, energy) / joules / 1e18, digits=2)` million trillion tokens. 
+In its !`round(Int, ground_life / 1yr)` years, the data centre on the ground produces !`ground_tokens = round(convert(J, energy_ground) / joules / 1e18, digits=2)` million trillion. 
+So the fleet produces !`round(orbit_tokens / ground_tokens, digits=1)` times as many tokens.
 ## Why the same chips do more work
 
-Both sides buy the chips once, at the same price. The station on the ground lasts !`ground_life`, and it is on for !`uptime` of that time. While it is on, the ground sum keeps the chips at full power. That is !`full_ground = round(float(ground_life / 1yr) * float(uptime), digits=1)` years at full size.
+Both sides buy the chips once, at the same price. The station on the ground lasts !`ground_life`, and it gives the computers power for !`uptime` of that time. While they have power, the ground sum keeps the chips at full power. That is !`full_ground = round(float(ground_life / 1yr) * float(uptime), digits=1)` years at full size.
 
 In orbit a dead chip stays dead, and the cells fade. Each year the fleet does only as much as the weaker of the cells and the chips. That still adds up to !`years` years at full size, which is !`work_ratio = round(years / full_ground, digits=1)` times the work on the ground.
 
 The computers on the ground stop because their gas station stops. The price includes one station, and that station lasts !`ground_life`. When it stops, the computers stop with it. After those years, !`still = let a = float(fail * 1yr), g = float(ageing), t = float(ground_life / 1yr); round(Int, 100 * (g == 0 ? exp(-a * t) : exp(-a / log(1 + g) * ((1 + g)^t - 1)))) end`% of the chips are still working.
 
 The panels are already big enough to run every computer on the first day. The extra work comes from counting the fleet past this station.
+
+## What the tokens are worth today
+
+Most of the fleet's work comes long after launch. Money spent at launch could earn a return somewhere else. So a token that comes in 50 years is worth less than a token that comes today. This part counts each token and each bill at what it's worth on the day of launch. That gives each option its net present value.
+
+Say the owner wants !`discount = 9.6Percent` a year back on its money.[^22] A token that comes $t$ years after launch is then worth $(1 + \text{discount})^{-t}$ of a token today. So the work, counted today, is
+
+$$
+\text{years today} = \int_0^{\infty} (1 + \text{discount})^{-t}\,\min\big(\text{power}(t),\ \text{working}(t)\big)\,dt
+$$
+
+The fleet's !`years` years at full size are worth !`years_now = let d = float(fade * 1yr), a = float(fail * 1yr), g = float(ageing), ρ = log(1 + float(discount)); round(0.05 * sum(exp(-ρ * t) * min(exp(-d * t), g == 0 ? exp(-a * t) : exp(-a / log(1 + g) * ((1 + g)^t - 1))) for t in 0.025:0.05:2000), digits=1) end` years today. The station's !`full_ground` years are worth !`ground_years_now = let ρ = log(1 + float(discount)), L = float(ground_life / 1yr); round(float(uptime) * (ρ == 0 ? L : (1 - exp(-ρ * L)) / ρ), digits=1) end` years today. So the fleet does !`round(years_now / ground_years_now, digits=1)` times the work of the ground, not !`work_ratio` times.
+
+The bills move less, because most of them come first. Orbit pays for the satellites, the computers, the launches and the design before it starts. It pays for the link as the work is done, for the people each year, and for the deorbit fuel at the end. Counted today, orbit costs !`orbit_now = let ρ = log(1 + float(discount)); build + chip_bill + launch + design + link * years_now / years + people * (ρ == 0 ? 1 : (1 - exp(-ρ * life)) / (ρ * life)) + deorbit_cost * exp(-ρ * life) end`, not !`orbit`. The ground pays for its gas each year for !`round(Int, ground_life / 1yr)` years. Counted today, it costs !`ground_cost_now = let ρ = log(1 + float(discount)), L = float(ground_life / 1yr); plant + building + chip_bill + fuel * (ρ == 0 ? 1 : (1 - exp(-ρ * L)) / (ρ * L)) end`, not !`ground`.
+
+Say a million tokens sells for !`price = 2.50USD`. That's what Kimi K2, a model of a trillion parameters, charges for the tokens that it writes.[^23] The net present value is what the tokens sell for, counted today, less the bills, counted today.
+
+| | Costs, counted today | Tokens, counted today | Each billion tokens | Net present value |
+|---|---|---|---|---|
+| In orbit | !`orbit_now` | !`tokens_now = round(convert(J, compute * years_now * yr) / joules, sigdigits=3)` | $!`per_orbit_now = round(float(orbit_now / 1USD) / tokens_now * 1e9, sigdigits=3)` | !`npv_orbit = price * tokens_now / 1e6 - orbit_now` |
+| On the ground | !`ground_cost_now` | !`ground_tokens_now = round(convert(J, compute * ground_years_now * yr) / joules, sigdigits=3)` | $!`per_ground_now = round(float(ground_cost_now / 1USD) / ground_tokens_now * 1e9, sigdigits=3)` | !`npv_ground = price * ground_tokens_now / 1e6 - ground_cost_now` |
+
+```chart
+kind: bars
+title: The net present value of each option
+show: Net present value
+```
 
 > [!NOTE] Where these sums differ from McCalip's
 > His calculator keeps the fleet at full size for a set number of years. It pays each year to build again the hardware that breaks. This page launches the fleet once, lets it wear down, and counts the work that it does before it's gone.
@@ -381,8 +413,14 @@ The panels are already big enough to run every computer on the first day. The ex
 
 [^17]: The March 2026 air permit for MZX Tech, a SpaceX company, at Southaven, Mississippi. It allows 17 Solar Titan 130 turbines at 16.48 megawatts, 16 Solar Titan 350 turbines at 35 megawatts, and 8 ProEnergy 6000PE turbines at 50 megawatts. The 6000PE is a jet engine rebuilt as a generator. The permit board upheld the permit on 10 November 2026. An agreed order says the temporary turbines come out by July 2027. The plant is simple cycle. It has no steam turbine behind the gas turbine, which is why the heat rate is the higher one.
 
-[^20]: The joules in that paragraph are the GPU's, not the building's. [Lead Green](https://leadgreen.ai/compare/) lines up the ML.ENERGY Leaderboard v3.0 for text chats, at each model's lowest measured energy, as of 19 October 2026. Llama 3.1 8B on one B200 used 13.0 watt-hours for a million tokens, about 0.05 joules a token. Llama 3.1 405B in FP8 on eight H100s used 572.9 watt-hours for a million tokens, about 2 joules a token. [ML.ENERGY](https://ml.energy/blog/measurement/energy/diagnosing-inference-energy-consumption-with-the-mlenergy-leaderboard-v30/) measured Qwen 3 32B on one B200: 0.151 joules a token for a chat at the largest batch, and 0.312 for a problem. On that problem, their 30-billion-parameter mixture-of-experts model used 3.56 times less energy for each token than the dense 32-billion-parameter model, which is about 28%.
+[^20]: Measured figures differ by more than ten times. The first ones here count only the GPU, not the building. [Lead Green](https://leadgreen.ai/compare/) lines up the ML.ENERGY Leaderboard v3.0 for text chats, at each model's lowest measured energy, as of 19 October 2026. Llama 3.1 8B on one B200 used 13.0 watt-hours for a million tokens, about 0.05 joules a token. Llama 3.1 405B in FP8 on eight H100s used 572.9 watt-hours for a million tokens, about 2 joules a token. [ML.ENERGY](https://ml.energy/blog/measurement/energy/diagnosing-inference-energy-consumption-with-the-mlenergy-leaderboard-v30/) measured Qwen 3 32B on one B200: 0.151 joules a token for a chat at the largest batch, and 0.312 for a problem. On that problem, their 30-billion-parameter mixture-of-experts model used 3.56 times less energy for each token than the dense 32-billion-parameter model, which is about 28%. The models that people use most are bigger. Most of them are mixtures of experts too, so only part of the model runs for each token. DeepSeek R1 has 671 billion parameters, and 37 billion of them run for each token. SemiAnalysis's InferenceX compares it on a GB200 NVL72 rack and on H200 GPUs ([InferenceX](https://inferencex.semianalysis.com/compare/deepseek-r1-gb200-vs-h200)). The GB200 NVL72 writes about 3.2 million tokens a second for each megawatt when each user gets 65 tokens a second, and about 1.57 million at 133. A megawatt is a million joules a second, so those are about 0.31 and 0.64 joules a token. These two figures count the whole building. InferenceX counts the megawatts that the utility supplies, so the cooling and the power supply are in them ([its definition](https://inferencex.semianalysis.com/glossary/tokens-per-megawatt)). The site's figures change when it runs the tests again. Kimi K2 has 1.04 trillion parameters, and 32 billion of them run for each token. Nobody has published how much energy it uses.
 
 [^19]: One token of text is about 2 bytes, which is 16 bits. A busy H100 uses about 1 to 2 joules to write a token once the building's power is counted, and a well-packed run can be near 0.2 joules. SemiAnalysis, as collected by [SAVRN](https://savrn.com/blog/tokens-per-watt-per-dollar): about 540,000 tokens a second for each megawatt is 1.85 joules a token. [ML.ENERGY](https://ml.energy/blog/measurement/energy/diagnosing-inference-energy-consumption-with-the-mlenergy-leaderboard-v30/) measured 0.15 to 0.3 joules a token for one 32-billion-parameter model at a large batch. Sixteen bits in one joule is 16 bits each second for each watt.
 
 [^18]: Henry Hub spot price, weekly, from the US Energy Information Administration, as [FRED](https://fred.stlouisfed.org/series/WHHNGSP) publishes it. The reading for 13 November 2026 is $3.03 a million BTU. Front-month futures in the week of 23 November 2026 traded around $3.20 to $3.50. A data centre in Memphis pays a local pipeline price on top of Henry Hub. The sums do not add that.
+
+[^21]: WSP, "[Engineering near-perfect uptime for the next generation of data centers](https://www.wsp.com/en-au/insights/engineering-near-perfect-uptime-for-the-next-generation-of-data-centers)". It says that a typical power plant is available 88% to 90% of the time, so a data centre that makes its own power needs spare units. Some data centres ask for power 99.999% of the time. The sum above takes each turbine to be down at random, apart from the others. Upkeep can be planned for one turbine at a time, so the real share of time with power is a little higher.
+
+[^22]: Lazard's reports on the cost of electricity assume 60% debt at 8% interest and 40% equity at 12%, unless they say otherwise ([Lazard LCOE+, June 2025](https://www.lazard.com/media/uounhon4/lazards-lcoeplus-june-2025.pdf)). That mix comes to 0.6 × 8% + 0.4 × 12% = 9.6% a year. The 9.6% includes inflation, but the prices on this page don't rise with it. A rate without inflation would be about 2 or 3 points lower.
+
+[^23]: Artificial Analysis lists Kimi K2 0905 at $0.60 for a million tokens read and $2.50 for a million tokens written ([Artificial Analysis](https://artificialanalysis.ai/models/releases/kimi-k2-0905)). Kimi K2 has 1.04 trillion parameters, and 32 billion of them run for each token ([Kimi K2 technical report](https://arxiv.org/abs/2507.20534)).
