@@ -6508,30 +6508,107 @@ cursor(::FileView) = :arrow
 file_item(e, b::Buffer) = begin
   v = node!(() -> FileView(path=b.path), e, (:fileview, b.path))
   # What covers the page's whole space isn't one of the page's items, so it has no height to learn
-  b === e.buf && (page_covered(e) || html_shown(e) || model_shown(e)) && return Item(1, 1, 0px, 1px, Live(v, 1px))
+  b === e.buf && (page_covered(e) || html_shown(e) || file_covers(e)) && return Item(1, 1, 0px, 1px, Live(v, 1px))
   # Lay it out once to learn how tall it is
   concrete = describe(Column(fixed(e.width), Alignment.Start, geometry(v)), (e.width, 9999px))
   high = concrete.height + 2LIVE_GAP
   Item(1, 1, 0px, high, Live(v, high))
 end
 
-# A file that you open is all that its page shows, so a model's file covers the page's whole space in the
-# window, under the top bar, as the page of an HTML file does. A model in another page, like one in a
-# gallery, has the room that the page gives it.
+# A file that you open is all that its page shows. So a model, a picture, a PDF file and a video cover the
+# page's whole space in the window, under the top bar, as the page of an HTML file does. One in another
+# page, like a model in a gallery, has the room that the page gives it, and so does a part of another page.
 
 "The viewer that covers the page's space with the model in the file that shows, or nothing if the page shows no file that can be read as a model"
 model_part(e) = begin
   b = e.buf
-  (b.view == :file && lowercase(splitext(b.path)[2]) in MODELS && isfile(b.path)) || return nothing
+  (b.view == :file && hosted(e) === nothing && lowercase(splitext(b.path)[2]) in MODELS && isfile(b.path)) || return nothing
   m = node!(() -> STLViewer(path=b.path, fill=true), e, (:model_page, b.path))
   load!(m) isa Mesh || return nothing
   # The top bar says how big the file is and when it changed, as it does for a table
-  b.about = bytes(filesize(b.path)) * "  ·  Changed " * Libc.strftime("%-d %b %Y, %H:%M", mtime(b.path))
+  b.about = file_about(b.path)
   m
 end
 
 "True when the page shows a model's file as the model, which covers the page's whole space"
 model_shown(e) = model_part(e) !== nothing
+
+"What the top bar says of a file that's only shown: how big it is and when it changed"
+file_about(path) = bytes(filesize(path)) * "  ·  Changed " * Libc.strftime("%-d %b %Y, %H:%M", mtime(path))
+
+"What of the file at `path` fills its own page as a picture does: a picture, or the first page of a PDF file. Nothing for any other file."
+file_fill(path) = begin
+  ext = lowercase(splitext(path)[2])
+  if ext in PICTURES || ext in MAC_PICTURES
+    key = picture_key(path)
+    key === nothing ? nothing : (:picture, key)
+  elseif Sys.isapple() && ext == ".pdf"
+    pdf_pages(path) > 0 ? (:pdf, path, 1) : nothing
+  end
+end
+
+"""
+The view that covers the page's space with the picture or the PDF file that
+shows, or nothing if the page shows no such file. It's what fills the window
+for a picture in a document, without the room round it and the button that
+closes it: the picture fits the page's space, a pinch or a scroll with ⌘ makes
+it bigger, a drag moves it, and a PDF file turns its pages. Its bar of buttons
+shows while the mouse is over the foot of the page.
+"""
+file_zoom(e) = begin
+  b = e.buf
+  (b.view == :file && hosted(e) === nothing && isfile(b.path)) || return nothing
+  v = get(e.nodes, (:file_zoom, b.path), nothing)
+  # The file is looked at again only when it changes, since this is asked several times in each frame
+  read = mtime(b.path)
+  if v === nothing || v.read != read
+    what = file_fill(b.path)
+    what === nothing && return nothing
+    v = node!(() -> ZoomView(bare=true), e, (:file_zoom, b.path))
+    v.read = read
+    if !same_what(v.what, what)
+      v.what, v.path, v.zoom, v.fits, v.grab = what, b.path, 0.0, true, nothing
+      what[1] == :pdf && ((v.page, v.pages) = (1, max(1, pdf_pages(b.path))))
+    end
+  end
+  about = v.what[1] == :pdf ? "$(v.pages) page$(v.pages == 1 ? "" : "s")" : (s = subject_size(v); s === nothing ? "" : "$(round(Int, s[1])) × $(round(Int, s[2]))")
+  b.about = (isempty(about) ? "" : about * "  ·  ") * file_about(b.path)
+  v
+end
+
+"The player that covers the page's space with the video in the file that shows, or nothing if the page shows no video"
+video_part(e) = begin
+  b = e.buf
+  (b.view == :file && hosted(e) === nothing && Sys.isapple() && lowercase(splitext(b.path)[2]) in VIDEOS && isfile(b.path)) || return nothing
+  p = node!(() -> VideoPlayer(path=b.path), e, (:video_page, b.path))
+  b.about = file_about(b.path)
+  p
+end
+
+"True when the file that shows covers the page's whole space: a model, a picture, a PDF file or a video"
+file_covers(e) = model_shown(e) || file_zoom(e) !== nothing || video_part(e) !== nothing
+
+"""
+Do what the key `K` does to the picture, the PDF file or the video that covers
+a file's own page. It's `handled`, or nothing for a key that the page takes as
+it always does. The keys that change the size of a page's text change the size
+of a picture, and the arrows turn the pages of a PDF file.
+"""
+file_key!(e, K, w, command) = begin
+  v = file_zoom(e)
+  if v !== nothing
+    command == :bigger && return zoom_by!(v, ZOOM_STEP, view_middle(v)...)
+    command == :smaller && return zoom_by!(v, 1 / ZOOM_STEP, view_middle(v)...)
+    command == :usual_size && return fit_now!(v)
+    unmodified(w) && v.what[1] == :pdf && K in (Keys.left, Keys.right, Keys.up, Keys.down) && return turn!(v, K in (Keys.left, Keys.up) ? -1 : 1)
+    return nothing
+  end
+  p = video_part(e)
+  (p === nothing || !unmodified(w)) && return nothing
+  # F makes the video fill the screen. Space plays and stops it, and ← and → go back and on in it.
+  K == Keys.f && return screen_video!(e, p)
+  K in (Keys.space, Keys.left, Keys.right) ? onkey(p, KeyPress{K}(0, w)) : nothing
+end
 
 "The picture kept under `key`, `wide` across, and no wider than the page's text"
 fitted(e, key, wide; line=false) = begin
@@ -10874,6 +10951,8 @@ const PAGE_COMMANDS = (:save, :open, :open_project, :print, :close, :settings, :
   screen::Bool = false                      # its video fills the screen: the window is full screen, and the video is all that it shows
   was_full::Bool = false                    # the window filled its screen before the video did, so it stays so after
   screen_at::Float64 = 0.0                  # when the video began to fill the screen
+  bare::Bool = false                        # it's the page of a file itself: it has no room round it and nothing closes it. See `file_zoom`.
+  read::Float64 = -1.0                      # when the file of such a page had last changed, the last time it was looked at
 end
 
 "The part of a ZoomView that shows the picture. It takes the mouse and the keys."
@@ -11276,7 +11355,7 @@ describe(v::ZoomView) = begin
   bar(buttons...) = Column(width(grow=grow), height(grow=grow), Alignment.Center, justify=Alignment.End, padding(0px, 0px, 16px, 0px),
     Row(height(36px), padding(4px), child_gap=2px, radius(8px), Alignment.Center, background(colours.float),
         border(1px, :solid, colours.line), lifted, buttons...))
-  close = button!(v, :close, :close, icon="x-lg", tip="Back to the page  esc")
+  close = v.bare ? nothing : button!(v, :close, :close, icon="x-lg", tip="Back to the page  esc")
   if what[1] == :node
     # A model or a video is as tall as the window has room for. Its own bar is under its picture.
     node = what[2]
@@ -11302,9 +11381,12 @@ describe(v::ZoomView) = begin
       gallery_edges(v)..., bar(gallery_buttons(v, rest=60 + 40length(buttons))..., buttons...))
   end
   what[1] == :diagram && lay_diagram!(v)
-  # The view is the whole window under the top bar, so it's fitted here, and the bar says how big the picture is in this frame
+  # The view is the whole window under the top bar, so it's fitted here, and the bar says how big the picture is in this frame.
+  # The page of a file itself is beside the sidebar, where it was drawn last.
   w, h = window_size(e)
-  reframe!(v, (0.0, num(TOPBAR_H), num(w), num(h) - num(TOPBAR_H)))
+  place = v.bare ? rect(part!(() -> ZoomArea(of=v), v, :area)) : nothing
+  v.bare || reframe!(v, (0.0, num(TOPBAR_H), num(w), num(h) - num(TOPBAR_H)))
+  place === nothing || reframe!(v, (num(place.left), num(place.top), num(place.width), num(place.height)))
   buttons = Any[diagram_buttons(v)..., button!(v, :smaller, (:zoom, 1 / ZOOM_STEP), icon="zoom-out", tip="Smaller  pinch, or ⌘ and scroll"),
                 Box(width(46px), Alignment.Center, justify=Alignment.Center,
                     label(v.zoom > 0 ? "$(round(Int, 100v.zoom))%" : "", 12px, color=colours.dim)),
@@ -11320,8 +11402,21 @@ describe(v::ZoomView) = begin
           Box(Alignment.Center, padding(4px, 0px), label("Page $(v.page) of $(v.pages)", 12px, color=colours.dim)),
           button!(v, :on, (:page, 1), icon="chevron-right", tip="The next page  $next", off=v.page >= v.pages))
   end
-  push!(buttons, close)
-  Stack(width(grow=grow), height(grow=grow), Alignment.Start, part!(() -> ZoomArea(of=v), v, :area), gallery_edges(v)..., bar(buttons...))
+  v.bare || push!(buttons, close)
+  # On the page of a file itself the bar lies over the foot of the picture, so it shows only while the mouse is near it
+  Stack(width(grow=grow), height(grow=grow), Alignment.Start, part!(() -> ZoomArea(of=v), v, :area), gallery_edges(v)...,
+        (!v.bare || bar_near(v) ? (bar(buttons...),) : ())...)
+end
+
+const BAR_NEAR = 110.0   # px from the bottom of a file's own page within which the mouse brings its bar of buttons
+
+"True while the mouse is over the foot of the view, where the bar of buttons is"
+bar_near(v::ZoomView) = begin
+  w = window_of(editor(v))
+  w === nothing && return false
+  x, y = num(w.mouse[1]), num(w.mouse[2])
+  left, top, wide, tall = v.box
+  left <= x < left + wide && top + tall - BAR_NEAR <= y < top + tall
 end
 
 describe(::ZoomArea) = Box(width(grow=grow), height(grow=grow))
@@ -11408,11 +11503,16 @@ subject_size(v::ZoomView) = begin
   end
 end
 
+"How many px of room are round a picture that fits the view. The page of a file itself has none."
+zoom_edge(v::ZoomView) = v.bare ? 0.0 : ZOOM_EDGE
+"How many px at the bottom of the view are kept for the bar of buttons. On the page of a file itself the bar lies over the picture."
+bar_room(v::ZoomView) = v.bare ? 0.0 : num(BAR_ROOM)
+
 "The middle of the part of the view that's above the bar of buttons"
-view_middle(v::ZoomView) = (v.box[1] + v.box[3] / 2, v.box[2] + (v.box[4] - num(BAR_ROOM)) / 2)
+view_middle(v::ZoomView) = (v.box[1] + v.box[3] / 2, v.box[2] + (v.box[4] - bar_room(v)) / 2)
 
 "How many px to a px of the picture fits the whole of something `s` big in the view, above the bar and with room round it"
-fit_zoom(v::ZoomView, s) = max(min((v.box[3] - 2ZOOM_EDGE) / s[1], (v.box[4] - num(BAR_ROOM) - 2ZOOM_EDGE) / s[2]), 1e-3)
+fit_zoom(v::ZoomView, s) = max(min((v.box[3] - 2zoom_edge(v)) / s[1], (v.box[4] - bar_room(v) - 2zoom_edge(v)) / s[2]), 1e-3)
 
 "Show the whole picture, in the middle of the view"
 fit!(v::ZoomView, s) = (v.zoom = fit_zoom(v, s); v.fits = true; hold!(v, s))
@@ -11423,8 +11523,8 @@ the middle, and so it does where it's shorter. Otherwise it moves no further
 than its edges, with room round them.
 """
 hold!(v::ZoomView, s) = begin
-  w, h = v.box[3] / v.zoom, (v.box[4] - num(BAR_ROOM)) / v.zoom
-  edge = ZOOM_EDGE / v.zoom
+  w, h = v.box[3] / v.zoom, (v.box[4] - bar_room(v)) / v.zoom
+  edge = zoom_edge(v) / v.zoom
   v.at = (s[1] + 2edge <= w ? (s[1] - w) / 2 : clamp(v.at[1], -edge, s[1] - w + edge),
           s[2] + 2edge <= h ? (s[2] - h) / 2 : clamp(v.at[2], -edge, s[2] - h + edge))
   v
@@ -25676,6 +25776,17 @@ describe(p::Page) = begin
   # A model's file covers it with the model, which is a component, so it gets a live block's colours and text size
   model = model_part(e)
   model === nothing || return with_theme(() -> Box(width(grow=grow), height(grow=grow), Alignment.Start, model), component_theme(e.zoom))
+  # A picture and a PDF file fit it, and can be made bigger and moved
+  shown = file_zoom(e)
+  shown === nothing || return Box(width(grow=grow), height(grow=grow), Alignment.Start, shown)
+  # A video has all of it, with black round its picture and its controls over the foot of the picture, as when it fills a
+  # screen. While it does fill the screen, it's there and not here.
+  video = video_part(e)
+  if video !== nothing
+    zoomed_node(e, video) && return Box(width(grow=grow), height(grow=grow), background(RGBA(0, 0, 0, 1)))
+    video.screen, video.height = true, page_room(e)[2]
+    return with_theme(() -> Box(width(grow=grow), height(grow=grow), Alignment.Start, background(RGBA(0, 0, 0, 1)), video), component_theme(e.zoom))
+  end
   # Long lines that don't wrap go on to the right edge of the window. The text moves left as the page
   # scrolls sideways. None of it shows past the edges of the page, and the numbers of the lines go over it.
   # A kind of folder can show something under the text of each page that it holds
@@ -29173,6 +29284,8 @@ onkey(e::Editor, ev::KeyPress{K}) where K = begin
   # While a picture or a model fills the window, the keys are its own. Esc puts the page back.
   zoomed = zooming(e)
   zoomed === nothing || e.popup != :none || zoom_key!(zoomed, K, w, command) !== handled || return
+  # The picture, the PDF file or the video that covers a file's own page takes the keys that are its own
+  zoomed === nothing && e.popup == :none && file_key!(e, K, w, command) === handled && return
   # While the page shows as slides, the keys go from one slide to another. Esc shows the page again.
   slideshow(e) === nothing || slide_key!(e, K, w, command) !== handled || return
   shift = only_held(w, Keys.shft)

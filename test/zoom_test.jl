@@ -268,6 +268,104 @@ end
   shot("8-satellite")
 end
 
+@testset "a picture's own file covers the page's space, with no room round it" begin
+  K.open!(e, joinpath(dir, "shot.png"))
+  frames(3)
+  v = K.file_zoom(e)
+  @test v !== nothing && v.bare && v.what[1] == :picture
+  # Nothing fills the window over the page: the page itself is the picture, and it has no button that fills the window
+  @test view() === nothing
+  @test !any(n -> n isa K.FillButton && rect(n) !== nothing, values(e.nodes))
+  r = rect(v.parts[:area])
+  @test (r.left, r.top, r.width, r.height) == (0px, K.TOPBAR_H, 1000px, 1400px - K.TOPBAR_H)
+  # The picture fits that space, so it touches two edges of it that face each other
+  s = K.subject_size(v)
+  fit = min(1000 / s[1], (1400 - K.num(K.TOPBAR_H)) / s[2])
+  @test v.fits && v.zoom ≈ fit
+  # The bar of buttons lies over the foot of the picture, so it shows only while the mouse is near it. Nothing closes the view.
+  at((500, 400))
+  @test rect(v.parts[(:button, :fit)]) === nothing
+  at((500, 1380))
+  @test rect(v.parts[(:button, :fit)]) !== nothing
+  @test !haskey(v.parts, (:button, :close))
+  shot("9-picture")
+  # A pinch makes it bigger, and the keys that change the size of a page's text change its size
+  at((500, 700))
+  onpinch(w, 2.0); frames()
+  @test v.zoom ≈ 2fit && !v.fits
+  # A drag moves it
+  was = v.at
+  press((500, 700)); at((460, 700)); release()
+  @test v.at[1] > was[1]
+  command(getproperty(Keys, Symbol(0)))
+  @test v.zoom ≈ fit && v.fits
+  command(Keys.equal)
+  @test v.zoom ≈ fit * K.ZOOM_STEP
+  command(getproperty(Keys, Symbol(0)))
+  # Esc doesn't take the picture away, since it's the page
+  key(Keys.escape)
+  @test K.file_zoom(e) === v && e.buf.path == joinpath(dir, "shot.png")
+  # The top bar says how big the picture is
+  @test occursin("$(round(Int, s[1])) × $(round(Int, s[2]))", e.buf.about)
+end
+
+"Write a PDF file with `n` empty pages, each 200 by 300 points"
+write_pdf(path, n) = begin
+  objects = ["<< /Type /Catalog /Pages 2 0 R >>", "<< /Type /Pages /Kids [$(join(("$(2 + k) 0 R" for k in 1:n), " "))] /Count $n >>"]
+  # Every page draws the one empty stream of drawing, which is the last object
+  append!(objects, fill("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 300] /Contents $(n + 3) 0 R >>", n))
+  push!(objects, "<< /Length 0 >>\nstream\n\nendstream")
+  io = IOBuffer()
+  print(io, "%PDF-1.4\n")
+  places = Int[]
+  for (k, o) in enumerate(objects)
+    push!(places, position(io))
+    print(io, "$k 0 obj\n$o\nendobj\n")
+  end
+  table = position(io)
+  print(io, "xref\n0 $(length(objects) + 1)\n0000000000 65535 f \n")
+  foreach(at -> print(io, lpad(at, 10, '0'), " 00000 n \n"), places)
+  print(io, "trailer\n<< /Size $(length(objects) + 1) /Root 1 0 R >>\nstartxref\n$table\n%%EOF\n")
+  mkpath(dirname(path))
+  write(path, take!(io))
+  path
+end
+
+@testset "a PDF file's own page covers the page's space, and its pages turn" begin
+  write_pdf(joinpath(dir, "three.pdf"), 3)
+  K.open!(e, joinpath(dir, "three.pdf"))
+  frames(3)
+  v = K.file_zoom(e)
+  @test v !== nothing && v.bare && v.what[1] == :pdf && v.page == 1 && v.pages == 3
+  r = rect(v.parts[:area])
+  @test (r.left, r.top, r.width, r.height) == (0px, K.TOPBAR_H, 1000px, 1400px - K.TOPBAR_H)
+  s = K.subject_size(v)
+  @test v.zoom ≈ min(1000 / s[1], (1400 - K.num(K.TOPBAR_H)) / s[2])
+  key(Keys.right)
+  @test v.page == 2
+  key(Keys.left)
+  @test v.page == 1
+  @test occursin("3 pages", e.buf.about)
+  # The plan has one page, with drawing on it
+  K.open!(e, joinpath(dir, "plan.pdf"))
+  frames(3)
+  @test K.file_zoom(e).pages == 1 && occursin("1 page ", e.buf.about)
+  shot("10-pdf")
+end
+
+Sys.isapple() && @testset "a video's own file covers the page's space" begin
+  cp(joinpath(@__DIR__, "..", "pages", "knot.mp4"), joinpath(dir, "knot.mp4"))
+  K.open!(e, joinpath(dir, "knot.mp4"))
+  frames(3)
+  p = K.video_part(e)
+  # It's as it is when it fills a screen: black round its picture, and its controls over the foot of the picture
+  @test p !== nothing && p.screen && p.height == 1400px - K.TOPBAR_H
+  r = rect(p)
+  @test (r.left, r.top, r.width) == (0px, K.TOPBAR_H, 1000px) && r.height >= 1400px - K.TOPBAR_H
+  @test view() === nothing
+  shot("11-video")
+end
+
 @testset "it closes when another document shows" begin
   K.open!(e, page)
   frames(3)
