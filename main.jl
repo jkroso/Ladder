@@ -49246,7 +49246,7 @@ end
 
 """
 Give the editor of the sheet `s` the colours and the keys of the page that
-shows the design, with text as big as a field's. Its rows have the names of
+shows the design, with text of `Designs.sheet_size`. Its rows have the names of
 the design's parameters, with their values.
 """
 follow_page!(s::DesignSheet) = begin
@@ -49255,7 +49255,7 @@ follow_page!(s::DesignSheet) = begin
   sub.wrap = true
   sub.font, sub.look = SANS, :own
   # `sheetgrid` makes a sheet's text 0.86 times as big as the page's
-  sub.zoom = num(Designs.field_size(s.parent)) / (num(TEXT_SIZE) * 0.86)
+  sub.zoom = num(Designs.sheet_size(s.parent)) / (num(TEXT_SIZE) * 0.86)
   key = (sub.zoom, sub.font)
   get(sub.nodes, :field_style, nothing) == key || (sub.nodes[:field_style] = key; empty!(sub.flows))
   v = s.parent

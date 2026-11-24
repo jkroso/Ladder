@@ -343,6 +343,12 @@ const FIELD_TEXT = 12px
 "How big the text of the field `box` is, in its theme"
 field_size(box) = FIELD_TEXT * scale(theme(box))
 
+"How big the text of the sheet of parameters is, before the theme makes it bigger or smaller. Its thin code font looks smaller than a field's at the same size."
+const SHEET_TEXT = 14px
+
+"How big the text of the sheet `box` is, in its theme"
+sheet_size(box) = SHEET_TEXT * scale(theme(box))
+
 "A field to type in, kept under `key`. `text` is what it holds when it's first shown."
 input!(v::DesignView, key; text="", placeholder="") = part!(() -> new_field(v, text, placeholder, false), v, key)
 
