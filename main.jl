@@ -30477,7 +30477,20 @@ tip(::ReadOnly) = "Read only"
 
 const LOCK_W = 26px   # how wide the lock is in the top bar
 
-describe(::ReadOnly) = Box(width(LOCK_W), height(28px), Alignment.Center, Icon("lock", size=14px, color=colours.dim))
+# UI.jl's lock is 10 wide and 14 tall, so in the top bar it looked stretched. This one is 12 wide and 13 tall, in a
+# square 16 wide: a body with round corners, and a shackle over it. Each line is 1 wide, as in UI.jl's icons.
+const LOCK_SHAPES = ("M4 7H12A2 2 0 0 1 14 9V12.5A2 2 0 0 1 12 14.5H4A2 2 0 0 1 2 12.5V9A2 2 0 0 1 4 7ZM4 8A1 1 0 0 0 3 9V12.5A1 1 0 0 0 4 13.5H12A1 1 0 0 0 13 12.5V9A1 1 0 0 0 12 8Z",
+                     "M4.5 7V5A3.5 3.5 0 0 1 11.5 5V7H10.5V5A2.5 2.5 0 0 0 5.5 5V7Z")
+
+"The name of the lock's icon. Its shapes go among UI.jl's icons the first time that it's asked for, as the snake's do."
+lock_icon() = begin
+  kept = get(icon_cache, "ladder-lock", nothing)
+  (kept === nothing || [p.d for p in kept.paths] != collect(LOCK_SHAPES)) &&
+    (icon_cache["ladder-lock"] = (paths=[SVGPath(d=LOCK_SHAPES[1], evenodd=true), SVGPath(d=LOCK_SHAPES[2])], viewbox=(0f0, 0f0, 16f0, 16f0)))
+  "ladder-lock"
+end
+
+describe(::ReadOnly) = Box(width(LOCK_W), height(28px), Alignment.Center, Icon(lock_icon(), size=15px, color=colours.dim))
 
 "The lock in the top bar of `e`"
 lock_part(e) = node!(() -> ReadOnly(), e, :read_only)
