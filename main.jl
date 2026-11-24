@@ -3203,6 +3203,20 @@ align(f::Flow, room::px, side::Symbol) = begin
   Flow(lines, f.lh, f.size, f.above, f.below, f.kind, f.raw)
 end
 
+"""
+How wide each column of a table is, when the table has `space` across it.
+`natural` is how wide each column's text is on one line, and `least` is how
+wide its longest word or number is. When the columns all fit, they share out
+the room that's left by their natural widths. When they don't, each column
+keeps the room that its longest word needs, and the columns share what's left
+by how much more each one needs. So text wraps before a word or a number is cut
+short, as in a spreadsheet or a browser.
+"""
+share_widths(natural, least, space) =
+  sum(natural) <= space ? natural .* (num(space) / num(sum(natural))) :
+  sum(least) >= space ? least .* (num(space) / num(sum(least))) :
+  least .+ (natural .- least) .* (num(space - sum(least)) / num(sum(natural .- least)))
+
 "Lay out the table in lines `from` to `to` of the document"
 grid(e, from::Int, to::Int) = begin
   b = e.buf
@@ -3225,11 +3239,11 @@ grid(e, from::Int, to::Int) = begin
                    r == 1 ? emboldened(base) : base, false; open=active ? open : nothing)
       end
     end
-    # Each column gets room in proportion to its longest cell
+    # Each column gets room in proportion to its longest cell, and never less than its longest word needs
     natural = [maximum(row -> sum(wide, row[c], init=0px), parts, init=0px) + 2CELL_X for c in 1:ncols]
     natural = [clamp(w, 60px, e.width * 0.75) for w in natural]
-    space = e.width - 1px * (ncols + 1)
-    widths = natural .* (num(space) / num(sum(natural)))
+    least = [min(natural[c], max(maximum(row -> maximum(unbroken, row[c], init=0px), parts, init=0px) + 2CELL_X, 36px)) for c in 1:ncols]
+    widths = share_widths(natural, least, e.width - 1px * (ncols + 1))
     sides = aligns(b.lines[from+1])
     flows = [[align(wrap(row[c], widths[c] - 2CELL_X; lh, size=base.size, left=CELL_X), widths[c] - 2CELL_X, get(sides, c, :left))
               for c in 1:ncols] for row in parts]
@@ -3336,12 +3350,8 @@ spreadgrid(e, from::Int, to::Int) = begin
     natural = [clamp(maximum(row -> sum(wide, row[c], init=0px), resting, init=0px) + 2CELL_X, 60px, e.width * 0.75) for c in 1:ncols]
     gutter = max(measure(Face(base, family=SANS, size=base.size * 0.72), string(length(rows))) + 14px, base.size * 1.9)
     space = e.width - gutter - 1px * (ncols + 2)
-    # When the columns don't all fit, text wraps before a number is cut short: each column keeps
-    # the room its longest word or number needs, and the columns share what's left
     least = [min(natural[c], max(maximum(row -> maximum(unbroken, row[c], init=0px), resting, init=0px) + 2CELL_X, 36px)) for c in 1:ncols]
-    widths = sum(natural) <= space ? natural .* (num(space) / num(sum(natural))) :
-             sum(least) >= space ? least .* (num(space) / num(sum(least))) :
-             least .+ (natural .- least) .* (num(space - sum(least)) / num(sum(natural .- least)))
+    widths = share_widths(natural, least, space)
     flows = [[align(wrap(row[c], widths[c] - 2CELL_X; lh, size=base.size, left=CELL_X), widths[c] - 2CELL_X,
                     # A number stays on the right while you type it. A formula is on the left while its cell shows it.
                     c <= length(cells[r]) && values[r][c].number && !(typing(r, c) && isformula(texts[r][c])) ? :right : :left)
@@ -37156,13 +37166,11 @@ file_grid(e, path, t::Csvs.Table, whole::Bool) = get!(e.flows, (:file_grid, path
   natural = [clamp(maximum(r -> wide(r, c), 1:n) + 2CELL_X, 60px, e.width * 0.75) for c in 1:ncols]
   space = e.width - 1px * (ncols + 1)
   widths = if sum(natural) <= space
-    natural .* (num(space) / num(sum(natural)))
+    share_widths(natural, natural, space)
   else
     # Each column keeps the room that its longest word or number needs, and the columns share what's left
     word(r, c) = maximum(w -> measure(face(r), w), split(t.rows[r][c]), init=0px)
-    least = [min(natural[c], max(maximum(r -> word(r, c), 1:n) + 2CELL_X, 36px)) for c in 1:ncols]
-    sum(least) >= space ? least .* (num(space) / num(sum(least))) :
-                          least .+ (natural .- least) .* (num(space - sum(least)) / num(sum(natural .- least)))
+    share_widths(natural, [min(natural[c], max(maximum(r -> word(r, c), 1:n) + 2CELL_X, 36px)) for c in 1:ncols], space)
   end
   g = FileGrid(t, n, widths, px[], px[], Dict{Int,Vector{Flow}}(), base, head, lh)
   top = 1px
