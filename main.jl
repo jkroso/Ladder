@@ -50323,8 +50323,9 @@ end
 # of the folder's files and folders, with what each is about, how big it is,
 # and when it was made and last saved. blog.jl says what the list leaves out.
 # A click on a folder in the sidebar shows that folder's page, and the sidebar
-# lists the folder. A folder with no Readme shows only its list. Every page of
-# the blog has the look of the site: see "the look of a blog's site".
+# lists the folder. A folder with no Readme shows only its list. A section with
+# its own index.md shows only that page, with no list, as its site does. Every
+# page of the blog has the look of the site: see "the look of a blog's site".
 #
 # The top bar of a page of the blog has three buttons:
 #
@@ -50644,27 +50645,33 @@ send_step!(job::Publishing) = begin
 end
 
 """
-The page of the folder `d` of a blog that goes over its list, as its site
-shows it: the blog's index.md or Readme, or a section's Readme. It's "" for a
-folder that has none.
+The page of the folder `d` of a blog that shows at the top, as its site shows
+it: the blog's index.md or Readme, or a section's own index.md or else its
+Readme. It's "" for a folder that has none.
 """
 front_page(d::BlogDirectory) = Blogs.front(path_of(d))
 front_page(d::BlogSection) = begin
   folder = path_of(d)
   names = try readdir(folder) catch; String[] end
-  k = findfirst(Blogs.isreadme, names)
+  k = findfirst(Blogs.isindex, names)
+  k === nothing && (k = findfirst(Blogs.isreadme, names))
   k === nothing ? "" : joinpath(folder, names[k])
 end
 
+"True for a section of a blog with its own index.md, which its site shows alone, with no list"
+section_index(d::BlogSection) = Blogs.isindex(basename(front_page(d)))
+section_index(::BlogDirectory) = false
+
 # A click on a folder of a blog shows its page as the site does: its Readme, with the list of the folder under
-# it, or only the list when it has no Readme. The sidebar lists the folder.
+# it, or only the list when it has no Readme. A section with its own index.md shows only that page. The sidebar
+# lists the folder.
 open!(e, d::BlogFolder; record=true) = begin
   top = front_page(d)
   open!(e, isempty(top) ? string(d.path) : top; record)
   go_folder!(e, string(d.path))
 end
 
-page_foot(e, d::BlogFolder, o::FS.File) = path_of(o) == front_page(d) ? site_listing(e, d) : nothing
+page_foot(e, d::BlogFolder, o::FS.File) = path_of(o) == front_page(d) && !section_index(d) ? site_listing(e, d) : nothing
 page_view(e, d::BlogFolder) = site_listing(e, d)
 
 "Show the site of the blog in `folder` in the browser: at its address on the web when it has one, or else the first page that Publish wrote"
@@ -50678,8 +50685,10 @@ end
 """
 The address of the page at `path` on the site of the blog in `folder`: the
 site's address, and then the page's path in the blog, as the site names it. A
-folder and its Readme are the folder's own address, which ends in a /. A post
-ends in .html. It's "" when the site has no address.
+folder, its Readme and its own index.md are the folder's own address, which
+ends in a /. A post ends in .html. Each character that an address can't hold,
+such as a space or a ?, is written as its %-code, as the site writes its links.
+It's "" when the site has no address.
 """
 site_address(folder, path) = begin
   site = blog_address(folder)
@@ -50690,15 +50699,18 @@ site_address(folder, path) = begin
   name = parts[end]
   if isdir(path)
     push!(parts, "")
-  elseif Blogs.isreadme(name) || (length(parts) == 1 && lowercase(name) == Blogs.INDEX)
+  elseif Blogs.isreadme(name) || Blogs.isindex(name)
     parts[end] = ""
   else
     ending = Blogs.ending(name, true)
     ending === nothing || (parts[end] = name[1:end-length(ending)] * ".html")
   end
   parts == [""] && return site   # the blog's own Readme is the site's first page
-  (endswith(site, "/") ? site : site * "/") * join([replace(p, " " => "%20") for p in parts], "/")
+  (endswith(site, "/") ? site : site * "/") * join(url_coded.(parts), "/")
 end
+
+"`part` of an address with each character that an address can't hold as it is, such as a space or a ?, as its %-code"
+url_coded(part::AbstractString) = replace(part, r"[^A-Za-z0-9\-._~]" => c -> join(string('%', uppercase(string(b, base=16, pad=2))) for b in codeunits(c)))
 
 "Show the page that's in the window as the blog in `folder` has it on its site, or else the site's first page"
 open_site_page(e, folder) = begin

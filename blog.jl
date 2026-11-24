@@ -28,7 +28,8 @@
 # folder is no post either. The text of that page, or else of the blog's
 # `Readme.md`, goes over the list of the posts on the site's first page. That
 # page can say where the site is, as `site: https://sam.example.com` in its
-# front matter. A file or a folder whose name starts with a dot or an
+# front matter. A section's own `index.md` is a post, and it's the section's
+# page on the site: the site shows it alone, with no list. A file or a folder whose name starts with a dot or an
 # underscore is left out.
 #
 # Ladder writes the site into the folder `docs` in the blog's folder: a page
@@ -133,6 +134,9 @@ end
 
 "True for the page that says what its folder is"
 isreadme(name::AbstractString) = occursin(r"^readme\.(md|markdown)$"i, name)
+
+"True for a folder's own page, `index.md` in any case, which the site shows at the folder's address"
+isindex(name::AbstractString) = occursin(r"^index\.(md|markdown)$"i, name)
 
 "The post in the file at `path`, whose lines are `lines`. `section` is the folder that it's in, from the blog's folder."
 post(path::AbstractString, lines=readlines(path); section::AbstractString="") = begin

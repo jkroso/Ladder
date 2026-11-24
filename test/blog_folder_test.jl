@@ -235,6 +235,28 @@ end
   shot("canon-city.png")
 end
 
+@testset "a section with its own index.md shows only that page, as its site does" begin
+  proof = joinpath(canon, "Proof")
+  mkpath(proof)
+  write(joinpath(proof, "Readme.md"), "+++\ndescription = \"Why groups decide badly\"\n+++\n")
+  write(joinpath(proof, "index.md"), "# The Fundamental Problem\n\nWords.\n")
+  write(joinpath(proof, "red.png"), UInt8[1, 2, 3])
+  empty!(K.SITE_LISTS)
+  Base.invokelatest(K.open!, e, K.FS.get(FSPath(proof))); frames()
+  # The index.md shows, and not the Readme, with no list under it
+  @test e.buf.path == joinpath(proof, "index.md") && e.folder == proof && K.page_blog_folder(e) isa K.BlogSection
+  @test !haskey(e.nodes, (:listing, proof))
+  @test e.look == :site
+  # The blog's own folder still lists the section, with what its Readme says
+  entry = only(x for x in K.site_entries(canon, canon) if x.path == proof)
+  @test entry.about == "Why groups decide badly"
+  # A section with only a Readme still has its list under it
+  Base.invokelatest(K.open!, e, K.FS.get(FSPath(humans))); frames()
+  @test e.buf.path == joinpath(humans, "Readme.md") && haskey(e.nodes, (:listing, humans))
+  @test K.site_address(canon, joinpath(proof, "index.md")) == "https://canon.example.com/Proof/"
+  rm(proof, recursive=true)
+end
+
 @testset "a page of a blog looks as its site does" begin
   quotes = joinpath(canon, "Quotes.md")
   write(quotes, "Words.\n\n# Quotes\n\nMore words.\n")
@@ -266,6 +288,8 @@ end
   @test K.site_address(canon, joinpath(humans, "Dating.md")) == "https://canon.example.com/Humans/Dating.html"
   @test K.site_address(canon, review) == "https://canon.example.com/Humans/Gene.html"
   @test K.site_address(canon, joinpath(city, "future city.md")) == "https://canon.example.com/City/future%20city.html"
+  # A ? in a name would start a query, so the address has its %-code, as the site's own links do
+  @test K.site_address(canon, joinpath(humans, "Why Things Happened?.md")) == "https://canon.example.com/Humans/Why%20Things%20Happened%3F.html"
   @test K.site_address(canon, city) == "https://canon.example.com/City/" && K.site_address(canon, joinpath(canon, "Readme.md")) == "https://canon.example.com"
   # Open Site shows the page that's in the window, on the site
   was, opened = K.BROWSER[], String[]
