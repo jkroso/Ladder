@@ -23080,6 +23080,8 @@ view_content(v::ViewBlock, e) = begin
     inner === nothing || (inner.what = nothing)
   end
   about = basename(path) * "  ·  Changed " * Libc.strftime("%-d %b %Y, %H:%M", mtime(path))
+  # A SolidCraft design takes the page's numbers whose names its parameters have. It has them before it opens.
+  lowercase(splitext(path)[2]) in DESIGNS && Designs.give!(design(l, path), design_sums(e))
   content = try
     peek(l, path, lowercase(splitext(path)[2]), words -> (about *= "  ·  " * words))
   catch
@@ -23104,6 +23106,20 @@ bare_view(content) = Column(width(grow=grow), Alignment.Start, name="View", cont
 
 "`n` things of a kind, like 3 files or 1 folder, or nothing when there are none"
 how_many(n, thing) = n == 0 ? "" : "$n $thing$(n == 1 ? "" : "s")"
+
+"""
+The numbers of the document of `e` that a SolidCraft design in a `view` block
+gets: those that the scripts of a page get, in SI units. They're read again
+only when the sums may have changed.
+"""
+design_sums(e) = begin
+  key = (:design_sums, e.buf.path)
+  had = get(e.nodes, key, nothing)
+  had !== nothing && had[1] == sums_run[] && return had[2]
+  sums = script_sums(e)[1]
+  e.nodes[key] = (sums_run[], sums)
+  sums
+end
 
 own_button(::ViewBlock) = true
 

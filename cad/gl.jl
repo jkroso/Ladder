@@ -14,7 +14,10 @@
 # plane, or a closed region of a sketch. A body in front hides it.
 #
 # The pixels come as red, green, blue and alpha bytes, a row at a time from the
-# top. Each thing keeps its corners on the graphics card under its `key`, so a
+# top. A stage that shares the context of the window it's shown in, as
+# `Stage(share)` does, can leave them on the graphics card instead
+# (`picture!(...; read=false)`), and the window's context shows them from
+# there: see `over!`. Each thing keeps its corners on the graphics card under its `key`, so a
 # body that didn't change costs nothing to draw again. Give a thing a new key
 # when its corners change.
 #
@@ -201,15 +204,31 @@ end
 
 made(f) = (n = Ref{GLuint}(0); f(1, n); n[])
 
-"A place to draw designs, or nothing when macOS can't make an OpenGL context"
-Stage() = begin
-  attrs = Int32[99, 0x4100, 73, 96, 0]   # OpenGL 4.1, on the graphics card, which can be one that shows no screen
-  pix, n = Ref{Ptr{Cvoid}}(C_NULL), Ref{Int32}(0)
-  ccall((:CGLChoosePixelFormat, GL), Int32, (Ptr{Int32}, Ref{Ptr{Cvoid}}, Ref{Int32}), attrs, pix, n) == 0 && pix[] != C_NULL || return nothing
+"""
+A place to draw designs, or nothing when macOS can't make an OpenGL context.
+
+`share` is another context, like the one that a window is drawn with. The
+stage then uses that context's own kind of pixels, and the two have the
+same renderbuffers: the window can show the stage's picture with no copy
+through the CPU. See `over!`.
+"""
+Stage(share::Ptr{Cvoid}=C_NULL) = begin
   ctx = Ref{Ptr{Cvoid}}(C_NULL)
-  failed = ccall((:CGLCreateContext, GL), Int32, (Ptr{Cvoid}, Ptr{Cvoid}, Ref{Ptr{Cvoid}}), pix[], C_NULL, ctx)
-  ccall((:CGLReleasePixelFormat, GL), Cvoid, (Ptr{Cvoid},), pix[])
+  if share == C_NULL
+    attrs = Int32[99, 0x4100, 73, 96, 0]   # OpenGL 4.1, on the graphics card, which can be one that shows no screen
+    pix, n = Ref{Ptr{Cvoid}}(C_NULL), Ref{Int32}(0)
+    ccall((:CGLChoosePixelFormat, GL), Int32, (Ptr{Int32}, Ref{Ptr{Cvoid}}, Ref{Int32}), attrs, pix, n) == 0 && pix[] != C_NULL || return nothing
+    failed = ccall((:CGLCreateContext, GL), Int32, (Ptr{Cvoid}, Ptr{Cvoid}, Ref{Ptr{Cvoid}}), pix[], C_NULL, ctx)
+    ccall((:CGLReleasePixelFormat, GL), Cvoid, (Ptr{Cvoid},), pix[])
+  else
+    # The other context keeps its kind of pixels, so it isn't released here
+    pix = ccall((:CGLGetPixelFormat, GL), Ptr{Cvoid}, (Ptr{Cvoid},), share)
+    pix == C_NULL && return nothing
+    failed = ccall((:CGLCreateContext, GL), Int32, (Ptr{Cvoid}, Ptr{Cvoid}, Ref{Ptr{Cvoid}}), pix, share, ctx)
+  end
   (failed == 0 && ctx[] != C_NULL) || return nothing
+  # A context that was destroyed can leave its address to this one, with places of uniforms that aren't this one's
+  filter!(p -> p.first[1] != ctx[], PLACES)
   s = Stage(ctx[], 0, 0, 0, 0, 0, 0, 0, 0, 0, Dict{Any,Kept}(), 0, UInt8[])
   was = current()
   setcurrent(s.cgl)
@@ -327,7 +346,10 @@ kept!(s::Stage, t) = begin
   k
 end
 
-uniform(p, name) = glGetUniformLocation(p, name)
+"Where each uniform of each program is, by the context, the program and the uniform's name. OpenGL took a third of a µs to find one, and a design with 80 bodies asked 1,300 times a picture."
+const PLACES = Dict{Tuple{Ptr{Cvoid},UInt32,String},GLint}()
+
+uniform(p, name) = get!(() -> glGetUniformLocation(p, name), PLACES, (current(), UInt32(p), name))
 
 const NO_CUT = (0f0, 0f0, 0f0, -1f0)
 
@@ -343,7 +365,8 @@ draw!(s::Stage, t::Solid, mvp, look, lift, cut=NO_CUT) = begin
   glEnable(GL_DEPTH_TEST)
   glDepthFunc(GL_LEQUAL)
   glEnable(GL_POLYGON_OFFSET_FILL)
-  glPolygonOffset(1f0, 1f0)
+  # A body that shows through goes a little further back, so that a solid on its surface, like a piece that a fillet takes away, shows in front of it
+  glPolygonOffset(t.through ? 3f0 : 1f0, t.through ? 4f0 : 1f0)
   glDepthMask(t.through ? GL_FALSE : GL_TRUE)
   glUniform1f(uniform(p, "plain"), 0f0)
   if !t.bare
@@ -417,8 +440,14 @@ the colour `background`, and give its pixels: red, green, blue and alpha
 bytes, a row at a time from the top. `reach` is how far from the eye's target
 the things go. `cut` is a plane, as a point on it and the way it faces:
 the part of each body that's on the side that it faces doesn't show.
+
+With `read=false` the pixels stay on the graphics card, in the stage's
+renderbuffer, and this gives nothing. A context that shares with the stage
+shows them: see `over!`. Reading them took longer than drawing them: the CPU
+waited for the graphics card to finish, then for the bytes, and then sent
+them back to the card to draw the window.
 """
-picture!(s::Stage, w::Int, h::Int, e::Eye, things, background; reach=1000.0, cut=nothing) = begin
+picture!(s::Stage, w::Int, h::Int, e::Eye, things, background; reach=1000.0, cut=nothing, read=true) = begin
   was = current()
   setcurrent(s.cgl)
   try
@@ -457,9 +486,14 @@ picture!(s::Stage, w::Int, h::Int, e::Eye, things, background; reach=1000.0, cut
     glBindFramebuffer(GL_READ_FRAMEBUFFER, s.msfbo)
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, s.fbo)
     glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST)
-    glBindFramebuffer(GL_READ_FRAMEBUFFER, s.fbo)
-    glPixelStorei(GL_PACK_ALIGNMENT, 4)
-    glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, s.pixels)
+    if read
+      glBindFramebuffer(GL_READ_FRAMEBUFFER, s.fbo)
+      glPixelStorei(GL_PACK_ALIGNMENT, 4)
+      glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, s.pixels)
+    else
+      # Another context sees what this one drew once it has gone to the graphics card
+      glFlush()
+    end
     # What wasn't drawn for a while leaves the graphics card
     for (key, k) in s.kept
       s.frame - k.used > 120 || continue
@@ -470,5 +504,26 @@ picture!(s::Stage, w::Int, h::Int, e::Eye, things, background; reach=1000.0, cut
   finally
     setcurrent(was)
   end
-  s.pixels
+  read ? s.pixels : nothing
+end
+
+"""
+A framebuffer of the current context that has the stage's last picture, for
+a context that shares with the stage: see `Stage(share)`. `fbo` is the one
+that `over!` gave before, or 0 for none. Call it again when the picture
+changes size, since a context sees a change that another made to a
+renderbuffer only when it's attached again. What's bound is bound again
+after, so Skia, which draws with the context, finds it as it left it.
+"""
+over!(s::Stage, fbo=0) = begin
+  draw, read = Ref{GLint}(0), Ref{GLint}(0)
+  glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, draw)
+  glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, read)
+  fbo == 0 && (fbo = made(glGenFramebuffers))
+  glBindFramebuffer(GL_FRAMEBUFFER, fbo)
+  glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, s.colour)
+  complete = glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE
+  glBindFramebuffer(GL_DRAW_FRAMEBUFFER, draw[])
+  glBindFramebuffer(GL_READ_FRAMEBUFFER, read[])
+  complete ? fbo : (glDeleteFramebuffers(1, Ref(fbo)); UInt32(0))
 end

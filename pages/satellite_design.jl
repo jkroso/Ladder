@@ -14,9 +14,13 @@
 # two. Then it asks the program for the triangles of each part, and makes a
 # model of them with the materials, the Sun and the sky that satellite.jl has.
 #
-# The design has a named length for each size: `body`, `reach`, `chord`,
-# `loop_d`, `deep`, `rad_high` and `lens`. Every part is placed with sums of
-# those names, so the whole satellite follows them.
+# The design has a parameter for each number that it takes from the page, with
+# the page's name for it: `span`, `sat_kg`, `chord`, `loop_d`, `loop_out`,
+# `rad_high` and `lens`. It works out its other lengths from those, like
+# `body`, `reach` and `deep`. Every part is placed with sums of the names, so
+# the whole satellite follows them. A `view` block of satellite.sc itself, in
+# the page, gives these parameters the page's numbers, as SolidCraft's
+# editor shows the design.
 #
 #     julia --project=. pages/satellite_design.jl            # builds satellite.sc again from nothing
 #     julia --project=. pages/satellite_design.jl out.glb    # and writes the model to out.glb
@@ -30,7 +34,7 @@
 #
 # SolidCraft has z up and works in mm: the wings go along x, the cells face -y
 # and the radiator reaches along +y. A model has y up and metres.
-@use "./satellite" sizes satellite glb sky VIEW_SKY Shape CELL noise tinted dot cross unit
+@use "./satellite" sizes satellite glb sky VIEW_SKY Shape CELL noise tinted dot cross unit FIRST LIMITS
 @use "../cad/engine" => Engines
 @use "../cad/json" => JSON
 
@@ -93,13 +97,40 @@ stop!(p::Program) = (try close(p.process.in) catch end; nothing)
 
 # --- the design ------------------------------------------------------------------
 
-"The lengths of the design, in mm, for the sizes `s` of a satellite, as `sizes` gives them"
-lengths(s) = map(x -> round(1000x, digits=3),
-                 (body=s.body, reach=s.reach, chord=s.chord, loop_d=2s.loop_r, deep=s.deep, rad_high=max(s.rad_high, 0.05), lens=s.lens))
+"""
+The body grows in steps of this many metres. Nearly every number of the page
+changes the weight, and a body that changes makes SolidCraft make every part
+again, which takes three seconds. A body that stays as it was makes half of
+them again.
+"""
+const BODY_STEP = 0.05
 
-"Lengths that the design works out from the ones above"
-const WORKED = ["root" => "body/2 + 600 mm",             # from the middle to each drum
+"""
+The lengths of the design, in mm, for the sizes `s` of a satellite, as `sizes`
+gives them. The body is a whole number of `BODY_STEP`s, as the design makes it.
+"""
+lengths(s) = map(x -> round(1000x, digits=3),
+                 (body=round(s.body / BODY_STEP) * BODY_STEP, reach=s.reach, chord=s.chord, loop_d=2s.loop_r, deep=s.deep, rad_high=max(s.rad_high, 0.05), lens=s.lens))
+
+"""
+The parameters of the design that a page gives it, with the page's names,
+for the page's numbers `sums`: each one's expression and unit, as SolidCraft
+reads them. The design works out its other lengths from these: see `WORKED`.
+"""
+inputs(sums=Dict{String,Any}()) = begin
+  s = sizes(sums)
+  page(name) = (x = get(sums, String(name), nothing); x isa Real && isfinite(x) ? clamp(Float64(x), LIMITS[name]...) : FIRST[name])
+  mm(x) = ("$(round(1000x, digits=3)) mm", "mm")
+  (span=mm(page(:span)), sat_kg=(string(page(:sat_kg)), ""), chord=mm(s.chord), loop_d=mm(page(:loop_d)),
+   loop_out=(string(page(:loop_out)), ""), rad_high=mm(max(s.rad_high, 0.05)), lens=mm(page(:lens)))
+end
+
+"Lengths that the design works out from the ones that a page gives it. Each is the sum that `sizes` does, but that the body is a whole number of `BODY_STEP`s."
+const WORKED = ["body" => "round(min(max((sat_kg/450)^(1/3) * 1 m, 800 mm), 4000 mm) / 50 mm) * 50 mm", # a side of the body, at 450 kg a cubic metre
+                "root" => "body/2 + 600 mm",             # from the middle to each drum
+                "reach" => "max(1000 mm, span/2 - root)", # how far each wing reaches past its drum
                 "tip" => "root + reach",                 # from the middle to the tip of each wing
+                "deep" => "max(loop_out*tip, body/2 + 1400 mm)", # from the middle to the front of each loop, and to its back
                 "rad_long" => "deep - body/2 - 400 mm",
                 "scope" => "max(50 mm, 2.5*lens)",       # the radius of the laser's tube
                 "sleeve_r" => "1.1*loop_d",
@@ -124,11 +155,12 @@ end
 
 """
 The commands that build the design from nothing, each with what it takes.
-`l` has the design's lengths, as `lengths` gives them. A length in a command
-is a sum of the names, so that the part follows them later. Only the place of
-an edge to round has to be a number.
+`l` has the design's lengths, as `lengths` gives them, and `from_page` the
+parameters that a page gives it, as `inputs` gives them, for the same
+numbers. A length in a command is a sum of the names, so that the part
+follows them later. Only the place of an edge to round has to be a number.
 """
-steps(l) = begin
+steps(l, from_page=inputs()) = begin
   out = Any[]
   step!(command; given...) = push!(out, (command, NamedTuple(given)))
   box!(name, long, wide, high, middle) = step!("solid.box", length=long, width=wide, height=high, center=middle, body_name=name, name=name)
@@ -136,8 +168,8 @@ steps(l) = begin
   round!(name, radius, edges) = step!("solid.fillet", edges=edges, radius=radius, body=name, name="$name edges")
   half, root = l.body / 2, l.body / 2 + 600
 
-  for (name, value) in pairs(l)
-    step!("parameters.add", name=String(name), expression="$value mm")
+  for (name, (expression, unit)) in pairs(from_page)
+    step!("parameters.add", name=String(name), expression=expression, unit=unit)
   end
   for (name, sum) in WORKED
     step!("parameters.add", name=name, expression=sum)
@@ -180,7 +212,7 @@ steps(l) = begin
 
   # The radiator stands up behind the body, edge-on to the Sun, and reaches back to the loops
   box!("Radiator arm", 120, 400, 120, (0, "body/2 + 200 mm", 0))
-  box!("Radiator panel", 20, "rad_long", "rad_high", (0, "(body/2 + 400 mm + deep)/2", 0))
+  box!("Radiator panel", 20, "rad_long", "max(rad_high, 50 mm)", (0, "(body/2 + 400 mm + deep)/2", 0))
   bar!("Radiator bar, near", (0, "body/2 + 400 mm", "-(rad_high + 60 mm)/2"), "rad_high + 60 mm", 40)
   bar!("Radiator bar, far", (0, "deep", "-(max(rad_high, chord) + 60 mm)/2"), "max(rad_high, chord) + 60 mm", 40)
   bar!("Radiator sleeve, top", (-140, "deep", "chord/2"), 280, "sleeve_r", axis="X")
@@ -247,14 +279,14 @@ end
 bodies(p::Program) = String[b isa AbstractDict ? b["name"] : b for b in tool(p, "measure", (names_only=true,))["bodies"]]
 
 """
-Build the design of a satellite with the sizes `s` from nothing, with
-SolidCraft's program, and save it as the file `path`. The file that was there
-is replaced.
+Build the design of a satellite from nothing, with SolidCraft's program, at the
+page's numbers `sums`, and save it as the file `path`. The file that was
+there is replaced.
 """
-build(path=DESIGN, s=sizes()) = begin
+build(path=DESIGN, sums=Dict{String,Any}()) = begin
   p = program(path, empty=true)
   try
-    for (command, given) in steps(lengths(s))
+    for (command, given) in steps(lengths(sizes(sums)), inputs(sums))
       try
         ask(p, command, given)
       catch e

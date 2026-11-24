@@ -62,10 +62,11 @@ end
 
 @testset "the steps that build the design" begin
   l = D.lengths(S.sizes())
-  @test l.body ≈ 1692.056 && l.loop_d == 30.0 && l.lens == 20.0
+  @test l.body == 1700.0 && l.loop_d == 30.0 && l.lens == 20.0
   steps = D.steps(l)
-  # Every one of the design's lengths is named first, so that the parts can use the names
-  @test [given.name for (command, given) in steps if command == "parameters.add"] == vcat(String.(collect(keys(l))), first.(D.WORKED))
+  # The numbers that a page gives the design have the page's names, and they and the lengths worked out from them are named first, so that the parts can use the names
+  @test keys(D.inputs()) == (:span, :sat_kg, :chord, :loop_d, :loop_out, :rad_high, :lens) && D.inputs().sat_kg == ("2180.0", "")
+  @test [given.name for (command, given) in steps if command == "parameters.add"] == vcat(String.(collect(keys(D.inputs()))), first.(D.WORKED))
   names = [given.body_name for (_, given) in steps if haskey(given, :body_name)]
   @test allunique(names) && "Bus" in names && "Top loop" in names
   # Every look that a body gets is one that satellite.jl has a material for

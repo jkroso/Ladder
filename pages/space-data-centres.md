@@ -124,6 +124,11 @@ Starmind AI1 is a satellite of about this power. Its wings span 70 metres, and i
 Here is a model, drawn from the parameters on this page. It changes as you change them: the span of the wings, the pipes, the radiator, the height. Drag it to turn it. Pinch it, or scroll with ⌘ held, to come nearer.
 
 ```view
+satellite.sc
+aspect: 16:9
+```
+
+```view
 satellite.jl
 aspect: 16:9
 ```

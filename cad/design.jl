@@ -65,8 +65,12 @@ Model(path) = Model(path, nothing, "", "", JSON.Object(), Shape[], nothing, Dict
                     Any[], nothing, true, false, Any[], 0, nothing,
                     Dict{Int,JSON.Object}(), Any[], Dict{String,JSON.Object}(), 0, 0, "", 0.0, Any[], Dict{Int,Int}(), Dict{Int,Int}())
 
-"Open the design at `path`. With no SolidCraft on this Mac, the model says so in `problem`."
-open_design(path::AbstractString) = begin
+"""
+Open the design at `path`. With no SolidCraft on this Mac, the model says so
+in `problem`. `changes` gives parameters other values before the bodies are
+asked for, as `vary!` does. The file keeps its own.
+"""
+open_design(path::AbstractString; changes=Dict{String,String}()) = begin
   m = Model(String(path))
   m.read = mtime(path)
   m.origin_hidden = origin_hidden(path)
@@ -88,18 +92,22 @@ open_design(path::AbstractString) = begin
     end
     m.version += 1
   end
+  vary!(m, changes)
   refresh!(m)
   finalizer(close!, m)
 end
 
-"Does the design's file say that its origin is hidden? A design that says nothing has it hidden."
-origin_hidden(path::AbstractString) = try
+"The design's lists as its file at `path` has them, or nothing when the file can't be read"
+file_document(path::AbstractString) = try
   z = Zips.contents(path)
   i = findfirst(en -> en.name == "document.json", z.entries)
-  origin_hidden(i === nothing ? nothing : JSON.parse(String(Zips.bytes(path, z.entries[i]))))
+  i === nothing ? nothing : JSON.parse(String(Zips.bytes(path, z.entries[i])))
 catch
-  true
+  nothing
 end
+
+"Does the design's file say that its origin is hidden? A design that says nothing has it hidden."
+origin_hidden(path::AbstractString) = origin_hidden(file_document(path))
 origin_hidden(doc) = begin
   seen = doc isa JSON.Object ? get(doc, "visibility", nothing) : nothing
   !(seen isa JSON.Object && get(seen, "origin_hidden", true) === false)
@@ -157,6 +165,16 @@ plane_shown(m::Model, name) = !(name in get_list(m, "hidden_origin"))
 shown(m::Model, name) = begin
   i = findfirst(b -> b isa JSON.Object && get(b, "name", "") == name, bodies(m))
   i === nothing ? true : get(bodies(m)[i], "visible", true) === true
+end
+
+"""
+A function that says whether a shape shows, as `shown` does for its name. It
+finds the hidden bodies once, so a check of every body doesn't search the
+list of bodies for each one.
+"""
+shows(m::Model) = begin
+  hidden = Set{String}(String(get(b, "name", "")) for b in bodies(m) if b isa JSON.Object && get(b, "visible", true) !== true)
+  s -> !(s.name in hidden)
 end
 
 """
@@ -417,7 +435,7 @@ try!(m::Model, key, command::AbstractString, params) = begin
   m.trying = true
   before = get(m.doc, "undo", 0)
   finish(shapes, colours, changed, problem) = begin
-    m.trial = (key=key, shapes=shapes, colours=colours, changed=changed, problem=problem)
+    m.trial = (key=key, shapes=shapes, colours=colours, changed=changed, problem=problem, made=nothing)
     m.trying = false
     m.version += 1
     waiting = copy(m.later)
@@ -444,6 +462,17 @@ try!(m::Model, key, command::AbstractString, params) = begin
       end
     end
   end
+  m
+end
+
+"""
+Show what Ladder worked out itself that the command `key` would make, in place
+of a trial of SolidCraft's: see preview.jl. `made` has the pieces and how they
+show. SolidCraft's program isn't asked anything.
+"""
+made!(m::Model, key, made) = begin
+  m.trial = (key=key, shapes=made.shapes, colours=Dict{String,Vec3}(), changed=String[s.name for s in made.shapes], problem="", made=made)
+  m.version += 1
   m
 end
 
@@ -506,4 +535,78 @@ save!(m::Model; then=nothing) = free(m) do
     then === nothing || then(problem)
   end
   refresh!(m)
+end
+
+# --- numbers from a page ----------------------------------------------------------
+#
+# A design that a page shows takes the page's numbers: each parameter of the
+# design that has the name of a sum on the page gets the sum's value. With
+#
+#     !`span = 70m`
+#
+# on the page, a parameter `span` of the design is 70000 mm. The values are
+# only in the program. The file keeps its own.
+
+"The parameters that the design's file at `path` names: each one's name, unit and expression. The lengths of the steps, like d1, aren't in it."
+file_params(path::AbstractString) = begin
+  doc = file_document(path)
+  list = doc isa JSON.Object ? get(doc, "params", nothing) : nothing
+  list isa Vector || return NamedTuple{(:name, :unit, :expr),NTuple{3,String}}[]
+  [(name=String(p["name"]), unit=String(something(get(p, "unit", nothing), "mm")), expr=string(get(p, "expr", "")))
+   for p in list if p isa JSON.Object && get(p, "name", nothing) isa AbstractString && get(p, "model", false) !== true]
+end
+
+"""
+What the numbers `sums` of a page change in a design whose parameters are
+`params`, as `parameters.change` takes it: the expression of each parameter
+that has the name of a number. A page gives each number in SI units, so a
+length is in metres and an angle in radians: 0.03 for a parameter in mm is
+30 mm. A parameter that can't take its number keeps its own value.
+"""
+changes(params, sums) = begin
+  out = Dict{String,String}()
+  for p in params
+    x = get(sums, p.name, nothing)
+    text = x === nothing ? nothing : amount(x, p.unit)
+    text === nothing || (out[p.name] = text)
+  end
+  out
+end
+
+"The units of a parameter that's a length"
+const LENGTHS = ("mm", "cm", "m", "in", "ft")
+
+"What SolidCraft reads for `x`, a number in SI units, in a parameter whose unit is `unit`, or nothing when the parameter can't take it"
+amount(x::Bool, unit) = nothing
+amount(x::Real, unit) = !isfinite(x) ? nothing :
+  unit in LENGTHS ? written(1000x) * " mm" : unit in ("deg", "rad") ? written(x) * " rad" : unit == "" ? written(x) : nothing
+amount(x::AbstractString, unit) = unit == "text" ? String(x) : nothing
+amount(x, unit) = nothing
+
+"A number as SolidCraft reads it, to a millionth"
+written(x) = (r = round(Float64(x), digits=6); isinteger(r) && abs(r) < 1e15 ? string(Int(r)) : string(r))
+
+"""
+Give the design's parameters other values in the program: `changes` has each
+name with its expression, as `changes` makes them. The file keeps its own,
+unless the design is saved. What SolidCraft couldn't make with them is in
+`m.said`.
+"""
+vary!(m::Model, changes) = begin
+  (m.engine === nothing || isempty(changes)) && return m
+  Engines.run!(m.engine, "parameters.change", JSON.Object("changes" => JSON.Object(changes))) do answer, problem
+    m.said = problem === nothing ? unmade(answer) : problem
+    m.version += 1
+  end
+  m
+end
+
+"What a change of parameters says of the steps that SolidCraft couldn't make after it, in words, or \"\" when it made them all"
+unmade(answer) = begin
+  errors = answer isa JSON.Object ? get(answer, "errors", nothing) : nothing
+  errors isa Vector || return ""
+  steps = unique(String(e["feature"]) for e in errors if e isa JSON.Object && get(e, "feature", nothing) isa AbstractString)
+  isempty(steps) && return ""
+  named = length(steps) <= 3 ? join(steps, ", ", " and ") : join(steps[1:2], ", ") * " and $(length(steps) - 2) more steps"
+  "SolidCraft can't make $named with these numbers."
 end

@@ -13,8 +13,12 @@
 @use "../cad/commands" => Commands
 @use "../cad/engine" => Engines
 @use "../cad/design" => Models
+@use "../cad/pieces" => Pieces
 @use "github.com/jkroso/MiniFB.jl" Window KeyPress KeyRelease MouseMove Typed Keys onkey onmouse onscroll ontype
-@use "github.com/jkroso/UI.jl/Interface/draw" frame rect popups
+@use "github.com/jkroso/UI.jl/Interface/draw" frame rect popups scene draw
+@use "github.com/jkroso/MiniFB.jl/skia" gpus GPU srgb
+@use ModernGL...
+@use Skia
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
 @use GeometryBasics: Vec2
 const px = K.px
@@ -228,6 +232,19 @@ end
   palette = (number=:N, call=:C, string=:S, comment=:M, keyword=:K, type=:T)
   @test X.pieces("sqrt(2)*10mm", palette) == [4 => :C, 1 => nothing, 1 => :N, 2 => nothing, 2 => :N, 2 => nothing]
   @test sum(first, X.pieces("a = 2mm  # wall", palette)) == length("a = 2mm  # wall")
+end
+
+@testset "the browser lays out only the lines in sight" begin
+  rows = [V.Press() for _ in 1:100]
+  line = K.num(V.ROW_H)
+  laid = collect(V.in_sight(rows, 40line, 300.0))
+  lines = filter(r -> r isa V.Press, laid)
+  @test 12 <= length(lines) < 25 && rows[42] in lines && !(rows[1] in lines) && !(rows[100] in lines)
+  # Room above and below keeps each line where it was
+  @test !(first(laid) isa V.Press) && !(last(laid) isa V.Press) && lines == rows[findfirst(==(lines[1]), rows) .+ (0:length(lines)-1)]
+  # At the top there's no room above, and a short list is all laid out
+  @test first(V.in_sight(rows, 0.0, 300.0)) === rows[1]
+  @test collect(V.in_sight(rows[1:5], 0.0, 300.0)) == rows[1:5]
 end
 
 if !Engines.available()
@@ -450,6 +467,9 @@ else
     @test length(v.form.shows["profiles"]) == 1 && v.form.shows["profiles"][1].kind == :region
     v.form.values["operation"] = "cut"
     v.form.values["extent"] = "through_all"
+    # Ladder shows what the cut takes away itself
+    frame(w)
+    @test m.trial !== nothing && m.trial.made !== nothing && all(==(:cut), values(m.trial.made.tints))
     shot("design-4-extrude.png")
     key(Keys.enter)
     settle()
@@ -801,6 +821,78 @@ else
     @test v.eye == was
   end
 
+  @testset "a window that the graphics card draws shows the picture with no copy through the CPU" begin
+    v = view()
+    # A context like a window's, with a framebuffer like its screen's, that Skia draws on as MiniFB does
+    screen = V.GLs.Stage()
+    if screen === nothing
+      @info "macOS gave no OpenGL context, so the picture on the graphics card isn't checked"
+    else
+      W, H = round(Int, 2 * K.num(w.size[1])), round(Int, 2 * K.num(w.size[2]))
+      was = V.GLs.current()
+      V.GLs.setcurrent(screen.cgl)
+      fbo, colour, stencil = V.GLs.made(glGenFramebuffers), V.GLs.made(glGenRenderbuffers), V.GLs.made(glGenRenderbuffers)
+      glBindRenderbuffer(GL_RENDERBUFFER, colour); glRenderbufferStorage(GL_RENDERBUFFER, GL_RGBA8, W, H)
+      glBindRenderbuffer(GL_RENDERBUFFER, stencil); glRenderbufferStorage(GL_RENDERBUFFER, GL_STENCIL_INDEX8, W, H)
+      glBindFramebuffer(GL_FRAMEBUFFER, fbo)
+      glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, colour)
+      glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_STENCIL_ATTACHMENT, GL_RENDERBUFFER, stencil)
+      face = Skia.gr_glinterface_create_native_interface()
+      gr = Skia.gr_direct_context_make_gl(face)
+      Skia.gr_glinterface_unref(face)
+      target = Skia.gr_backendrendertarget_new_gl(Cint(W), Cint(H), Cint(0), Cint(8), Ref(Skia.gr_gl_framebufferinfo_t(fbo, 0x8058, false)))
+      surface = Skia.sk_surface_new_backend_render_target(gr, target, Skia.GR_SURFACE_ORIGIN_BOTTOM_LEFT, Skia.SK_COLOR_TYPE_RGBA_8888, srgb[], C_NULL)
+      V.GLs.setcurrent(was)
+      "Draw the window's last layout with Skia on the graphics card, as MiniFB draws a window that's on the screen, and give its pixels"
+      drawn() = begin
+        V.GLs.setcurrent(screen.cgl)
+        try
+          Skia.gr_direct_context_reset(gr)
+          canvas = Skia.sk_surface_get_canvas(surface)
+          Skia.sk_canvas_save(canvas)
+          Skia.sk_canvas_clear(canvas, 0x00000000)
+          Skia.sk_canvas_scale(canvas, 2f0, 2f0)
+          draw(canvas, w.size, scene(w))
+          Skia.sk_canvas_restore(canvas)
+          Skia.gr_direct_context_flush_and_submit(gr, false)
+          glBindFramebuffer(GL_READ_FRAMEBUFFER, fbo)
+          out = zeros(UInt8, 4W * H)
+          glReadPixels(0, 0, W, H, GL_RGBA, GL_UNSIGNED_BYTE, out)
+          out
+        finally
+          V.GLs.setcurrent(was)
+        end
+      end
+      try
+        frame(w)
+        gpus[objectid(w)] = GPU(gr, target, surface, (W, H))
+        direct = drawn()
+        @test v.parts[:direct] === true          # the stage shares the window's context
+        # Without the window's own context the stage reads its picture back, as it did before, and Skia draws the bytes
+        delete!(gpus, objectid(w))
+        read_back = drawn()
+        @test v.parts[:direct] === false
+        @test count(i -> abs(Int(direct[i]) - Int(read_back[i])) > 3, eachindex(direct)) == 0
+        # The picture follows the eye
+        gpus[objectid(w)] = GPU(gr, target, surface, (W, H))
+        eye = v.eye
+        v.eye = Scenes.Eye(eye.target, eye.turn + 30, eye.tilt, eye.distance, eye.wide)
+        turned = drawn()
+        v.eye = eye
+        @test turned != direct && drawn() == direct
+      finally
+        delete!(gpus, objectid(w))
+        V.GLs.setcurrent(screen.cgl)
+        Skia.sk_surface_unref(surface)
+        Skia.gr_backendrendertarget_delete(target)
+        Skia.gr_direct_context_release_resources_and_abandon_context(gr)
+        Skia.gr_direct_context_unref(gr)
+        V.GLs.setcurrent(was)
+        frame(w)
+      end
+    end
+  end
+
   @testset "the browser and the history" begin
     v = view()
     m = v.model
@@ -1038,6 +1130,9 @@ else
     v = view()
     m = v.model
     home()
+    # SolidCraft's program tries a command that Ladder doesn't make itself. Ladder makes a fillet, so here it doesn't.
+    own_fillet = pop!(V.Previews.MAKERS, "solid.fillet")
+    try
     steps, undo, edited = length(Models.timeline(m)), m.doc["undo"], Models.edited(m)
     faces = length(m.shapes[1].flat)
     V.start!(v, "solid.fillet")
@@ -1089,6 +1184,48 @@ else
     click(v.parts[(:form, :ok)])
     settle()
     @test v.form === nothing && length(Models.timeline(m)) == steps + 1 && isempty(m.said)
+    key(Keys.z, Keys.cmd)
+    settle()
+    @test length(Models.timeline(m)) == steps
+    finally
+      V.Previews.MAKERS["solid.fillet"] = own_fillet
+    end
+  end
+
+  @testset "Ladder shows what a fillet would make at once, and SolidCraft's program makes it at OK" begin
+    v = view()
+    m = v.model
+    home()
+    settle()
+    steps = length(Models.timeline(m))
+    V.start!(v, "solid.fillet")
+    frame(w)
+    click_edge()
+    @test length(v.form.values["edges"]) == 1
+    asked = m.engine.next
+    V.set_text!(v.parts[(:field, "solid.fillet", "radius")], "1mm")
+    frame(w)
+    # It's there in the same frame, and nothing was asked of SolidCraft's program
+    t = m.trial
+    @test t !== nothing && t.made !== nothing && t.key == v.form.key && m.engine.next == asked
+    @test !isempty(t.shapes) && all(==(:cut), values(t.made.tints)) && t.made.ghost == [m.shapes[1].name]
+    # The body shows faintly, and the piece that the fillet takes away shows in it
+    list = drawn()
+    @test any(x -> x isa V.GLs.Solid && x.key == (:solid, objectid(m.shapes[1])) && isapprox(x.colour[4], V.GHOST), list)
+    @test count(x -> x isa V.GLs.Solid && any(s -> x.key == (:solid, objectid(s)), t.shapes), list) == length(t.shapes)
+    shot("design-13-own-preview.png")
+    piece, before = sum(Pieces.volume, t.shapes), Pieces.volume(m.shapes[1])
+    # Another radius shows at once too
+    V.set_text!(v.parts[(:field, "solid.fillet", "radius")], "1.5mm")
+    frame(w)
+    @test m.trial.key == v.form.key && m.trial !== t && m.engine.next == asked
+    V.set_text!(v.parts[(:field, "solid.fillet", "radius")], "1mm")
+    frame(w)
+    click(v.parts[(:form, :ok)])
+    settle()
+    @test v.form === nothing && isempty(m.said) && length(Models.timeline(m)) == steps + 1
+    # SolidCraft took away what the piece showed
+    @test isapprox(before - Pieces.volume(m.shapes[1]), piece, rtol=0.1)
     key(Keys.z, Keys.cmd)
     settle()
     @test length(Models.timeline(m)) == steps
@@ -1302,6 +1439,95 @@ if Engines.available()
     @test e2.buf.path == shown && full isa V.DesignView && !full.readonly && full !== d
     until(() -> full.model !== nothing && !isempty(full.model.shapes) && !Models.busy(full.model))
     @test haskey(full.parts, :ribbon) && full.model.engine !== nothing
+    K.close_designs!(e2)
+  end
+
+  @testset "a design in a view block takes the page's numbers by the names of its parameters" begin
+    # A block whose height is the parameter `high`, and a parameter `wide` that no part uses
+    given = joinpath(dir, "given.sc")
+    let again = Engines.start(joinpath(dir, "given-new.sc"))
+      Engines.tell(again, "new_design")
+      Engines.ask(again, "parameters.add", JSON.Object("name" => "high", "expression" => "10 mm"))
+      Engines.ask(again, "parameters.add", JSON.Object("name" => "wide", "expression" => "40 mm"))
+      Engines.ask(again, "parameters.add", JSON.Object("name" => "turns", "expression" => "2", "unit" => ""))
+      Engines.ask(again, "sketch.create", JSON.Object("plane" => "XY", "name" => "Base"))
+      Engines.ask(again, "sketch.rectangle.center", JSON.Object("center" => Any[0, 0], "corner" => Any[20, 10]))
+      Engines.ask(again, "sketch.finish")
+      Engines.ask(again, "solid.extrude", JSON.Object("distance" => "high", "name" => "Block"))
+      Engines.ask(again, "file.save", JSON.Object("path" => given))
+      Engines.stop!(again)
+    end
+    @test [(p.name, p.unit) for p in Models.file_params(given)] == [("high", "mm"), ("wide", "mm"), ("turns", "")]
+    # What a page's numbers change: a length in metres, a plain number, words for no parameter that takes words
+    @test Models.changes(Models.file_params(given), Dict{String,Any}("high" => 0.025, "turns" => 3.5, "wide" => "words", "other" => 1.0)) ==
+          Dict("high" => "25 mm", "turns" => "3.5")
+    @test Models.amount(0.5235987755982988, "deg") == "0.523599 rad" && Models.amount(true, "") === nothing && Models.amount(NaN, "mm") === nothing
+    saved = read(given)
+    page = joinpath(dir, "gives.md")
+    write(page, "# A design that follows the page\n\nThe block is !`high = 25mm` tall, and !`other = 7` is no parameter of it.\n\n```view\ngiven.sc\n```\n")
+    e2 = K.build_editor(page)
+    w2 = Window(e2, size=(900px, 700px))
+    block() = e2.nodes[(:block, K.VIEW_BLOCK, page, 1)]
+    until(done) = for _ in 1:1500
+      frame(w2)
+      done() && break
+      sleep(0.01)
+    end
+    top(d) = maximum(s.high[3] for s in d.model.shapes)
+    settled(d) = d.model !== nothing && !isempty(d.model.shapes) && !Models.busy(d.model) && !haskey(d.parts, :next)
+    # The program stays open for as long as the checks take, here. A new process takes seconds to compile them.
+    V.KEEP_OPEN[] = 600.0
+    number!(from, to) = begin
+      i = findfirst(l -> occursin("high = $from", l), e2.buf.lines)
+      col = length(e2.buf.lines[i], 1, findfirst(from, e2.buf.lines[i])[1])
+      K.edit!(e2.buf, (i, col - 1), (i, col - 1 + length(from) - 2), to, typing=true)
+      e2.buf.caret = e2.buf.anchor = (1, 0)
+    end
+    frame(w2); frame(w2)
+    d = block().crumb.viewer
+    until(() -> settled(d))
+    frame(w2)
+    # The design opened with the page's number: the block is 25 mm tall
+    @test d.parts[:given] == Dict("high" => "25 mm")
+    @test top(d) ≈ 25 atol=0.01
+    @test isempty(d.model.said)
+    # SolidCraft's program stays open for a while, since a number that's dragged changes again soon
+    @test d.model.engine !== nothing && V.kept_open(d)
+    first_eye, first_model = d.eye, d.model
+    # The page's number changes, and the program that's open makes the block again. It stays turned as it was.
+    number!("25mm", "40")
+    until(() -> settled(d) && top(d) > 30)
+    frame(w2)
+    @test d.parts[:given] == Dict("high" => "40 mm")
+    @test top(d) ≈ 40 atol=0.01
+    @test d.model === first_model && d.model.engine !== nothing && d.eye == first_eye
+    # Frames with no change ask for nothing
+    at = d.parts[:changed]
+    foreach(_ -> frame(w2), 1:5)
+    @test d.parts[:changed] == at && !Models.busy(d.model)
+    # A number that SolidCraft can't make the block with is said over the design. From this change, the program stays open for a second.
+    V.KEEP_OPEN[] = 1.0
+    number!("40mm", "0")
+    until(() -> !Models.busy(d.model) && !isempty(d.model.said))
+    frame(w2)
+    @test occursin("SolidCraft can't make", d.model.said) && occursin("Block", d.model.said)
+    # The program ends by itself when the numbers haven't changed for a while, with no frame drawn
+    sleep(V.KEEP_OPEN[] + 1)
+    @test d.model.engine === nothing && !V.kept_open(d)
+    frame(w2)
+    @test d.model === first_model
+    # Then a change opens the design again with the new number, and the one that showed stays until it's made
+    number!("0mm", "30")
+    frame(w2)
+    @test haskey(d.parts, :next) && d.model === first_model
+    until(() -> settled(d) && d.model !== first_model)
+    frame(w2)
+    @test top(d) ≈ 30 atol=0.01
+    @test isempty(d.model.said)
+    @test d.eye == first_eye
+    V.KEEP_OPEN[] = 30.0
+    # The file kept its own numbers
+    @test read(given) == saved
     K.close_designs!(e2)
   end
 

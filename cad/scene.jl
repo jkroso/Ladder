@@ -306,12 +306,23 @@ Where the point `p` of the design shows in a view of `size` px: px from its
 left and from its top, and how far in front of the eye the point is. A point
 behind the eye has a distance under 0, and shows nowhere.
 """
-at(e::Eye, size, p::Vec3) = begin
+at(e::Eye, size, p::Vec3) = seer(e, size)(p)
+
+"""
+`at` for many points: a function that gives where a point shows, with the
+eye's axes worked out once. A check of the edges under the mouse looks at
+thousands of points, and the axes took most of its time.
+"""
+seer(e::Eye, size) = begin
   right, up, back = axes(e)
-  d = p .- e.target
-  x, y, depth = dot(d, right), dot(d, up), e.distance - dot(d, back)
-  k = e.wide > 0 ? (size[2] / 2) / (tand(e.wide / 2) * max(depth, 1e-9)) : scale(e, size)
-  (size[1] / 2 + x * k, size[2] / 2 - y * k, depth)
+  wide = e.wide > 0
+  k = wide ? (size[2] / 2) / tand(e.wide / 2) : scale(e, size)
+  p -> begin
+    d = p .- e.target
+    x, y, depth = dot(d, right), dot(d, up), e.distance - dot(d, back)
+    f = wide ? k / max(depth, 1e-9) : k
+    (size[1] / 2 + x * f, size[2] / 2 - y * f, depth)
+  end
 end
 
 "The line of sight through the place `px` of the view: a point that it starts at, and the way it goes"
@@ -465,23 +476,42 @@ The edge of `shapes` that shows nearest the place `px` of the view, within
 edge_at(shapes, e::Eye, size, px, front; reach=6.0, shown=s -> true) = begin
   best, found = reach, nothing
   sight = ray(e, size, px)
-  limit = front === nothing ? Inf : at(e, size, front.point)[3] * 1.002 + 1e-6
+  see = seer(e, size)
+  limit = front === nothing ? Inf : see(front.point)[3] * 1.002 + 1e-6
   for (n, s) in enumerate(shapes)
-    shown(s) || continue
+    (!isempty(s.edges) && shown(s) && near(see, s.low, s.high, px, best)) || continue
     for (k, edge) in enumerate(s.edges)
+      a = see(edge.points[1])
       for i in 1:length(edge.points)-1
-        a, b = at(e, size, edge.points[i]), at(e, size, edge.points[i+1])
-        (a[3] <= 0 || b[3] <= 0) && continue
-        d, t = off(px, a, b)
-        d < best || continue
-        # Far things look smaller, so halfway along the line as it shows isn't halfway along the edge.
-        # The point of the edge is the one nearest the line of sight.
-        p = closest(edge.points[i], edge.points[i+1], sight)
-        # An edge at the back of a body is hidden by the face in front of it
-        at(e, size, p)[3] <= limit || continue
-        best, found = d, (n, k, p)
+        b = see(edge.points[i+1])
+        if a[3] > 0 && b[3] > 0
+          d, _ = off(px, a, b)
+          if d < best
+            # Far things look smaller, so halfway along the line as it shows isn't halfway along the edge.
+            # The point of the edge is the one nearest the line of sight.
+            p = closest(edge.points[i], edge.points[i+1], sight)
+            # An edge at the back of a body is hidden by the face in front of it
+            see(p)[3] <= limit && ((best, found) = (d, (n, k, p)))
+          end
+        end
+        a = b
       end
     end
   end
   found
+end
+
+"""
+Can a point of the box from `low` to `high` show within `reach` px of the
+place `px`? `see` is the eye's `seer`. With every corner in front of the eye,
+all of the box shows inside the rectangle round its corners.
+"""
+near(see, low::Vec3, high::Vec3, px, reach) = begin
+  left, top, right, bottom = Inf, Inf, -Inf, -Inf
+  for x in (low[1], high[1]), y in (low[2], high[2]), z in (low[3], high[3])
+    q = see((x, y, z))
+    q[3] > 0 || return true
+    left, top, right, bottom = min(left, q[1]), min(top, q[2]), max(right, q[1]), max(bottom, q[2])
+  end
+  left - reach <= px[1] <= right + reach && top - reach <= px[2] <= bottom + reach
 end

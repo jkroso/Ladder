@@ -630,7 +630,7 @@ The page [space-data-centres.md](space-data-centres.md) shows its satellite this
 
 ## SolidCraft designs
 
-A SolidCraft design is a file whose name ends in `.sc`. Ladder shows it in two ways. A `view` block shows the design alone, and the file's own page is an editor that's laid out as SolidCraft's window is. Ladder works out no shapes by itself. It uses the program that's inside SolidCraft.app, so both ways need SolidCraft on your Mac.
+A SolidCraft design is a file whose name ends in `.sc`. Ladder shows it in two ways. A `view` block shows the design alone, and the file's own page is an editor that's laid out as SolidCraft's window is. Ladder doesn't make a design's steps itself. It uses the program that's inside SolidCraft.app, so both ways need SolidCraft on your Mac.
 
 ```view
 bracket.sc
@@ -643,13 +643,15 @@ This block shows the design in the file `bracket.sc`, which is beside this page.
 - Pinch, or scroll with ⌘ held, to bring it nearer.
 - Click twice to see all of it again.
 
+A design takes numbers from your page too. The two holes in the bracket's base are !`hole = 6mm` across. Drag that number, and the holes in the view follow it. The design has a parameter called `hole`, and each parameter of a design takes the value of the sum on the page that has its name. A number with no unit is in SI units, so it's metres for a length and radians for an angle. The file keeps its own numbers. When SolidCraft can't make a step with the page's numbers, the view says which step.
+
 To change the design, move the mouse over the block and click the second button beside its top right corner. The window goes to the file, where the design has its editor, and ⌘⌥← comes back to this page. When you save a change there, this block shows the changed design.
 
 In the editor, the design fills the window. A toolbar is at the top, a browser is at the left, and the history of the design's steps is along the bottom.
 
 - **The view.** Drag to turn the design. Drag with ⇧ held, or with the middle button, to move it. Two fingers on the trackpad move it too. The wheel, a pinch, or two fingers with ⌘ held bring it nearer. The three balls at the top right show the design's axes. Click one to look along that axis.
 - **Selecting.** The mouse lights the face or the edge that it's over. Click to select it, and hold ⇧ to select one more.
-- **Commands.** The toolbar has SolidCraft's commands, like Extrude, Fillet and Hole. A command opens a form at the right. You type its lengths there, and click the faces, the edges or the regions of a sketch that it takes. When the form has what the command needs, the design shows what the command would make, in a tint. OK runs the command. The letters E, F and H start Extrude, Fillet and Hole.
+- **Commands.** The toolbar has SolidCraft's commands, like Extrude, Fillet and Hole. A command opens a form at the right. You type its lengths there, and click the faces, the edges or the regions of a sketch that it takes. When the form has what the command needs, the design shows what the command would make. What it adds is in the accent colour. What it takes away is red, inside a body that shows faintly. Ladder works this out itself, so it changes as you type. It's the piece alone, not yet joined to the body or cut out of it. For a command that Ladder can't work out, SolidCraft's program tries the command, and the design shows the result in a tint a moment later. OK runs the command. The letters E, F and H start Extrude, Fillet and Hole.
 - **Lengths are Julia code.** A length, an angle or a count is Julia code, like `4.5cm + 2mm*1.5`, in the colours of a code block. Units like mm, cm, inch, deg and ° are there, and so is each parameter of the design by its name, like `d1`. Press ⌘Return in a field to see what its code comes to, under the field. Select part of the code first to run only that part. When SolidCraft reads the code as Julia does, the file keeps the code, and the step follows the parameters that it names. When SolidCraft reads it in another way, the file gets the number, and the parameter's comment keeps the code. The field then shows the code again.
 - **Sketches.** Two clicks on a sketch, in the browser or in the history, open it. The toolbar then has the sketch's tools. The letters L, R, C and D start a line, a rectangle, a circle and a dimension. A tool takes clicks in the sketch, and goes to a point that's near. With no tool, drag a point or a curve to move it as far as its constraints allow. Two clicks on a dimension change its length. Finish Sketch, in the panel at the right, closes the sketch.
 - **The browser.** It lists the origin, the bodies, the sketches and the construction planes. The eye at the end of a line shows or hides what the line names.
@@ -878,15 +880,8 @@ text size 28 0,0 The bathroom
 note 0,60 Tiles to the ceiling
 note 425.8,-27.9 Grey tiles on the walls
 note -165.6,252.9 White grout
-note 131.9,247.6 hfkjhffhd hsdjhf kjsda sdsa
-  dsad 
-  sad
-  sa 
-  d
-  sa
 join 2 3
 join 2 4
-join 4 5
 ```
 
 Paste a picture, a web address or a wiki link like `[[Ideas]]` onto the board, and it becomes a card. You can drop pictures and pages from the Finder onto it too. A card of a page shows the page's own board, when it has one. Click the card twice to go into that board, and Back comes out again. The text tool writes words straight on the board, with no card round them, and the pen draws by hand. Each card is a line of the block, so ⌘Z takes back the last change.

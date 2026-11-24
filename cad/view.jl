@@ -66,10 +66,11 @@
 
 @use "github.com/jkroso/Prospects.jl" @def
 @use "github.com/jkroso/MiniFB.jl" Keys KeyPress KeyRelease MouseMove Typed onkey onmouse ontype onscroll flt
+@use "github.com/jkroso/MiniFB.jl/skia" gpus
 @use "github.com/jkroso/Font.jl" ["units" px]
 @use "github.com/jkroso/UI.jl/Interface/Geometric"...
 @use "github.com/jkroso/UI.jl/Interface/Specific"...
-@use "github.com/jkroso/UI.jl/Interface/abstract" SemanticUI WrapMode describe focus theme handled window_of scale
+@use "github.com/jkroso/UI.jl/Interface/abstract" SemanticUI WrapMode describe focus theme handled window_of scale reuse!
 @use "github.com/jkroso/UI.jl/Interface/draw" draw cursor rect redraw_in! MouseScroll Pinch onpinch ishovered popup! close_popup! show_tooltip! hide_tooltip! hittest
 @use "github.com/jkroso/UI.jl/Interface/image" register_image has_image
 @use "github.com/jkroso/UI.jl/Interface/Semantic/TextInput" TextInput
@@ -84,6 +85,8 @@
 @use "./ink" => Ink
 @use "./ink" Glyph
 @use "./commands" => Commands
+@use "./preview" => Previews
+@use "./pieces" => Pieces
 @use "./expressions" => Expressions
 @use "../zip" => Zips
 @use "github.com/jkroso/UI.jl/Interface/Specific" text_width
@@ -390,6 +393,8 @@ const LIGHT_CODE = (comment=colorant"rgb(140,140,140)", string=colorant"rgb(30,1
 const DARK_CODE = (comment=colorant"rgb(112,112,118)", string=colorant"rgb(160,200,120)", number=colorant"rgb(230,170,100)",
                    keyword=colorant"rgb(200,130,220)", call=colorant"rgb(120,170,250)", type=colorant"rgb(110,200,200)")
 const WRONG = colorant"rgb(226,96,84)"
+"How solid a body shows that a piece of the open form is cut from, so that the piece shows in it"
+const GHOST = 0.28
 code_look(v) = CODE_LOOK[] !== nothing ? CODE_LOOK[]() : (dark(theme(v)) ? DARK_CODE : LIGHT_CODE, theme(v).family)
 
 "A field of Julia code, kept under `key`, in the colours of code. `text` is what it holds when it's first shown."
@@ -594,10 +599,11 @@ dark(t) = Ink.bright(t.surface) < 0.5
 
 # --- the design ----------------------------------------------------------------------
 
-"Open the design of `v`, if it isn't open"
+"Open the design of `v`, if it isn't open, with the numbers that its page gives it"
 load!(v::DesignView) = begin
   v.model === nothing || return v.model
-  v.model = Designs.open_design(v.path)
+  m = v.model = Designs.open_design(v.path; changes=given!(v))
+  isempty(v.parts[:given]) ? m : keep!(v, m)
 end
 
 "End SolidCraft's program for `v`. What wasn't saved is lost."
@@ -643,16 +649,23 @@ saved_picture(v::DesignView) = begin
 end
 
 """
-The design of `v`, which is only shown, read again when its file has changed.
-The design that showed stays until SolidCraft's program has given the new one.
+The design of `v`, which is only shown, read again when its file has changed,
+or when its page gives it other numbers. The design that showed stays until
+SolidCraft's program has given the new one.
 """
 follow!(v::DesignView) = begin
   m = load!(v)
   next = get(v.parts, :next, nothing)
   if next === nothing
-    changed = isfile(v.path) && mtime(v.path) != m.read
+    # While SolidCraft's program is still open, it only changes the numbers
+    running = m.engine !== nothing && !isempty(m.doc) && isfile(v.path) && mtime(v.path) == m.read
+    running && get(v.parts, :given, NO_CHANGES) != from_page(v) && return (Designs.busy(m) || vary!(v, m); m)
+    changed = isfile(v.path) && mtime(v.path) != m.read || get(v.parts, :given, NO_CHANGES) != from_page(v)
+    # A design that's still opening, with nothing to show yet, opens again at once
+    changed && Designs.busy(m) && isempty(m.doc) && (Designs.close!(m); v.model = nothing; return load!(v))
     (changed && !Designs.busy(m) && time() >= get(v.parts, :again, 0.0)) || return m
-    next = v.parts[:next] = Designs.open_design(v.path)
+    next = v.parts[:next] = Designs.open_design(v.path; changes=given!(v))
+    isempty(v.parts[:given]) || keep!(v, next)
   end
   Designs.tick!(next)
   if !isempty(next.problem)
@@ -670,6 +683,73 @@ follow!(v::DesignView) = begin
     v.image === nothing || (v.image.of = nothing)
   end
   m
+end
+
+# A design in a `view` block takes the numbers of its page: each parameter of
+# the design that has the name of a sum on the page gets the sum's value, as
+# `Designs.changes` says. The file is never changed.
+#
+# SolidCraft's program stays open for a while after the numbers change, since
+# a number that's dragged changes again soon. Then it only changes the numbers
+# and makes the parts again: about a second for the satellite. When it has
+# ended, the design is opened again with the new numbers, which takes about
+# three, and the one that shows stays until the new one is made.
+
+"No change to a design's parameters"
+const NO_CHANGES = Dict{String,String}()
+
+"Seconds that SolidCraft's program stays open after the numbers of a page last changed the design. It holds hundreds of MB."
+const KEEP_OPEN = Ref(30.0)
+
+"Does SolidCraft's program stay open for the numbers of the page?"
+kept_open(v::DesignView) = !isempty(get(v.parts, :given, NO_CHANGES)) && time() - get(v.parts, :changed, 0.0) < KEEP_OPEN[]
+
+"Keep the program of `m` open for `KEEP_OPEN[]` seconds more, and end it then, even when the design isn't drawn again"
+keep!(v::DesignView, m) = begin
+  at = v.parts[:changed] = time()
+  Timer(KEEP_OPEN[] + 0.5) do _
+    get(v.parts, :changed, 0.0) == at && v.model === m && !Designs.busy(m) && Designs.close!(m)
+  end
+  m
+end
+
+"""
+Give the design that's open in SolidCraft's program the numbers that the page
+has now, and ask for its parts again. A parameter that the page no longer
+gives gets its own value back.
+"""
+vary!(v::DesignView, m) = begin
+  had, now = get(v.parts, :given, NO_CHANGES), from_page(v)
+  change = Dict{String,String}(name => text for (name, text) in now if get(had, name, nothing) != text)
+  for p in file_params(v)
+    haskey(had, p.name) && !haskey(now, p.name) && (change[p.name] = p.expr)
+  end
+  v.parts[:given] = now
+  Designs.vary!(m, change)
+  Designs.refresh!(m)
+  keep!(v, m)
+end
+
+"Give the design that `v` shows the numbers of its page: each name with its value in SI units, as the scripts of a page get them"
+give!(v::DesignView, sums) = (v.parts[:sums] = sums; v)
+
+"What the numbers that the page gave `v` change in its design's parameters, as `Designs.changes` gives it"
+from_page(v::DesignView) = begin
+  sums = get(v.parts, :sums, nothing)
+  sums === nothing || isempty(sums) ? NO_CHANGES : Designs.changes(file_params(v), sums)
+end
+
+"What the page changes in the design now, kept as what the design that opens next is given"
+given!(v::DesignView) = (v.parts[:given] = from_page(v))
+
+"The parameters that the design's file names, read again only when the file has changed"
+file_params(v::DesignView) = begin
+  at = isfile(v.path) ? mtime(v.path) : 0.0
+  had = get(v.parts, :params, nothing)
+  had !== nothing && had[1] == at && return had[2]
+  list = Designs.file_params(v.path)
+  v.parts[:params] = (at, list)
+  list
 end
 
 """
@@ -690,14 +770,16 @@ shown_only(v::DesignView) = begin
   Designs.tick!(m)
   if Designs.busy(m)
     redraw_in!(v, 0.016)
-  elseif !isempty(m.doc) && m.engine !== nothing
+  elseif !isempty(m.doc) && m.engine !== nothing && !kept_open(v)
     Designs.close!(m)
   end
   if !v.fitted && !isempty(m.shapes)
     home!(v)
     v.fitted = true
   end
-  Stack(width(grow=grow), frame..., Alignment.Start, background(t.surface), clip=true, part!(() -> Scene(of=v), v, :scene))
+  # Which steps SolidCraft couldn't make with the numbers that the page gave
+  note = isempty(m.said) ? () : (Box(padding(8px, 12px), Text(m.said, size=11px, color=t.dim)),)
+  Stack(width(grow=grow), frame..., Alignment.Start, background(t.surface), clip=true, part!(() -> Scene(of=v), v, :scene), note...)
 end
 
 "Show all of the design, turned as it is when it's first shown. No panels lie over it, so it has little room round it."
@@ -1038,13 +1120,30 @@ browser(v::DesignView) = begin
     push!(rows, Box(padding(10px, 8px), Alignment.Start, Text("This design is empty. Start with New Sketch, or with a box from Create.", size=12px, color=t.dim)))
   room = max(120.0, v.area[4] - 300)
   tall = min(room, length(rows) * num(ROW_H) + 8 + (isempty(bodies) && isempty(sketches) ? 30 : 0))
+  scroll = get!(() -> Scroll(width(grow=grow), height(grow=grow)), v.parts, :browser_scroll)
   card!(v, :browser) do
     Column(width(244px), panel_look(t)..., Alignment.Start,
       Row(width(grow=grow), height(36px), padding(12px, 0px), border(1px, :solid, Ink.faded(t.line, 0.7))[:bottom],
         Box(words("Browser", 13px, weight="Semibold")), Box(width(grow=grow))),
-      Scroll(width(grow=grow), height(px(tall)), key=:browser,
-        Column(width(grow=grow), padding(4px), Alignment.Start, rows...)))
+      Box(width(grow=grow), height(px(tall)), Alignment.Start,
+        reuse!(scroll, Column(width(grow=grow), padding(4px), Alignment.Start, in_sight(rows, num(scroll.offset), tall)...))))
   end
+end
+
+"""
+The lines of the browser that show when it has scrolled `top` px in a room
+`tall` px high, and a few more, with room as high as the others in their
+place. A design with 80 bodies has 100 lines, and laying all of them out on
+each frame took as long as drawing the design.
+"""
+in_sight(rows, top, tall) = begin
+  # Every line is ROW_H high, but for the one that says the design is empty
+  all(r -> r isa Press, rows) || return rows
+  line, pad, n = num(ROW_H), 4.0, length(rows)
+  above = clamp(floor(Int, (top - pad) / line) - 2, 0, n)
+  upto = clamp(ceil(Int, (top + tall - pad) / line) + 2, above, n)
+  room(k) = k == 0 ? () : (Box(width(grow=grow), height(px(k * line))),)
+  (room(above)..., rows[above+1:upto]..., room(n - upto)...)
 end
 
 "Ask for a new name of something, in a field over its line of the browser or its step of the history"
@@ -1330,14 +1429,15 @@ history(v::DesignView) = begin
     tip = bad ? name * ": " * String(f["error"]) : off ? name * " (suppressed)" : name
     press!(v, (:step, id); tip, act=e -> pick!(v, (kind=:step, of=name, n=id, at=(0.0, 0.0, 0.0)), false),
            twice=e -> edit_step!(v, id, e.window), other=e -> step_menu(v, f, e.window)) do hovered
-      Box(width(26px), height(26px), radius(5px),
+      # As wide as STEP_W says, however many steps there are: a history that's wider than the room moves with the wheel
+      Box(width(min=26px, preferred=26px), height(26px), radius(5px),
           background(on ? t.select : hovered ? t.hover : Ink.faded(t.hover, 0.6)),
           border(1px, :solid, bad ? colorant"rgb(220,80,70)" : warned ? colorant"rgb(220,160,50)" : on ? t.accent : Ink.faded(t.line, 0.9)),
         Glyph(Ink.step_icon(String(f["type"])), size=17px, color=Ink.faded(t.text, back || off ? 0.35 : 1.0),
               accent=Ink.faded(t.accent, back || off ? 0.3 : 1.0)))
     end
   end
-  mark = Box(width(3px), height(30px), radius(2px), background(t.accent))
+  mark = Box(width(min=3px, preferred=3px), height(30px), radius(2px), background(t.accent))
   shown = Any[]
   for (i, f) in enumerate(steps)
     i == marker + 1 && push!(shown, mark)
@@ -1347,6 +1447,15 @@ history(v::DesignView) = begin
   # A history that's wider than the window moves left with the wheel
   room = max(100.0, v.area[3] - 290)
   v.along = clamp(v.along, 0.0, max(0.0, length(steps) * STEP_W + 20 - room))
+  # Only the steps that can show are laid out. Those to their left are room of the same width.
+  x, xs = 0.0, Float64[]
+  for item in shown
+    push!(xs, x)
+    x += (item === mark ? 3.0 : STEP_W - 4) + 4
+  end
+  from = something(findfirst(i -> xs[i] + STEP_W >= v.along - 2STEP_W, eachindex(xs)), length(shown) + 1)
+  upto = something(findlast(<=(v.along + v.area[3]), xs), 0)
+  shown = from > upto ? Any[] : Any[(from > 1 ? (Box(width(min=px(xs[from] - 4), preferred=px(xs[from] - 4))),) : ())..., shown[from:upto]...]
   card!(v, :history) do
     Row(width(grow=grow), height(44px), panel_look(t)..., padding(12px, 0px), child_gap=10px,
       Box(words("History", 13px, weight="Semibold")),
@@ -1391,7 +1500,7 @@ flat_or_deep(e::Scenes.Eye, size) = begin
 end
 
 "The bodies that show"
-showing(v::DesignView) = [s for s in v.model.shapes if Designs.shown(v.model, s.name)]
+showing(v::DesignView) = filter(Designs.shows(v.model), v.model.shapes)
 
 "Show all of the design, as it's turned now"
 fit!(v::DesignView) = begin
@@ -1672,10 +1781,12 @@ apply!(v::DesignView) = begin
 end
 
 """
-Keep what the design shows of the open form's command up to date. When the
-form has what its command needs, and has stayed the same for a quarter of a
-second, SolidCraft's program tries the command: see `Designs.try!`. The
-picture then shows the bodies as the command would leave them.
+Keep what the design shows of the open form's command up to date. Ladder
+works out what most commands make itself, at once, as the form changes: see
+preview.jl. For any other command, when the form has what the command needs
+and has stayed the same for a quarter of a second, SolidCraft's program tries
+it: see `Designs.try!`. The picture then shows the bodies as the command would
+leave them.
 """
 preview!(v::DesignView) = begin
   f, m = v.form, v.model
@@ -1688,6 +1799,8 @@ preview!(v::DesignView) = begin
   key === nothing && return Designs.forget!(m)
   trial = m.trial
   trial !== nothing && trial.key == key && return
+  made = Previews.made(want[1], want[2], want[3], f.shows, showing(v), m.sketches; arrangement=s -> arrangement(v, s))
+  made === nothing || return (Designs.made!(m, key, made); nothing)
   # A command that's tried takes away what could be redone, so none is tried while there's a step to redo
   (m.trying || Designs.busy(m) || Designs.redoable(m) > 0) && return
   wait = 0.25 - (time() - f.since)
@@ -2204,7 +2317,10 @@ form_picks(v::DesignView) = v.form === nothing ? Any[] : reduce(vcat, values(v.f
 shown_trial(v::DesignView) = begin
   f, trial = v.form, v.model.trial
   # What was tried for the form as it was a moment ago shows until the new trial comes, so that the picture doesn't blink
-  (f === nothing || trial === nothing || f.key === nothing || !v.previews || !isempty(trial.problem) || isempty(trial.changed)) ? nothing : trial
+  (f === nothing || trial === nothing || f.key === nothing || !v.previews || !isempty(trial.problem)) && return nothing
+  # What Ladder makes can be only lines, or faces that a command takes away
+  made = trial.made
+  isempty(trial.changed) && (made === nothing || (isempty(made.lines) && isempty(made.faces))) ? nothing : trial
 end
 
 "The edges of the body `s`, or one of them, as the numbers of lines"
@@ -2352,8 +2468,13 @@ things(v::DesignView, size, dense, t) = begin
   length(v.data) > length(m.shapes) + 8 && filter!(p -> any(s -> s === p.first, m.shapes) || (trial !== nothing && any(s -> s === p.first, trial.shapes)), v.data)
   length(v.faces) > 4000 && empty!(v.faces)
   h = v.hover
+  visible = Designs.shows(m)
+  # What Ladder made itself for the form, when it did: see preview.jl
+  made = trial === nothing ? nothing : trial.made
   for s in m.shapes
-    Designs.shown(m, s.name) || continue
+    visible(s) || continue
+    # A piece shows in the place of a body that the command takes away or replaces
+    made !== nothing && s.name in made.hide && continue
     a = arrays(v, s)
     faces = Pair{Int,GLs.Colour}[]
     whole = among(marked, (kind=:body, of=s.name, n=0))
@@ -2361,11 +2482,18 @@ things(v::DesignView, size, dense, t) = begin
       p.kind == :face && p.of == s.name && push!(faces, p.n => chosen_)
     end
     h !== nothing && h.kind == :face && h.of == s.name && !any(f -> f.first == h.n, faces) && push!(faces, h.n => lit)
+    # The faces that the command takes away are red
+    if made !== nothing
+      for (name, n) in made.faces
+        name == s.name && push!(faces, n => rgba(WRONG, 0.85))
+      end
+    end
     over = h !== nothing && h.kind == :body && h.of == s.name
     # A body with a colour of its own in the design shows in it. Any other is the grey that suits the page.
     own = get(m.colours, s.name, nothing)
     base = own === nothing ? RGB(c.body[1:3]...) : RGB(own...)
-    solid = get(m.opacity, s.name, 1.0)
+    # A body that a piece is cut from shows faintly, so that the piece shows in it
+    solid = get(m.opacity, s.name, 1.0) * (made !== nothing && s.name in made.ghost ? GHOST : 1.0)
     body = rgba(whole ? Ink.mixed(base, t.accent, 0.45) : over ? Ink.mixed(base, t.accent, 0.2) : base, solid)
     painted = Pair{Int,GLs.Colour}[]
     for f in m.painted
@@ -2375,7 +2503,8 @@ things(v::DesignView, size, dense, t) = begin
     end
     # While a command's result shows, a body that it changes shows as the command leaves it: see below.
     # Of the body as it is now, only what's lit and what's selected shows.
-    replaced = trial !== nothing && (s.name in trial.changed || !any(b -> b.name == s.name, trial.shapes))
+    # What Ladder makes is only pieces, so every body shows as it is.
+    replaced = trial !== nothing && made === nothing && (s.name in trial.changed || !any(b -> b.name == s.name, trial.shapes))
     push!(out, GLs.Solid((:solid, objectid(s)), a.solid, body; painted, lit=faces, bare=replaced, through=replaced ? false : body[4] < 1))
     replaced || push!(out, GLs.Lines((:edges, objectid(s)), a.lines, c.edge, 1.5dense; cut=true))
     edge(p, wide, hidden) = begin
@@ -2386,9 +2515,19 @@ things(v::DesignView, size, dense, t) = begin
     h === nothing || among(marked, h) || edge(h, 3.5, true)
   end
   # What the command of the open form would make
-  if trial !== nothing
+  if trial !== nothing && made !== nothing
+    # The pieces that Ladder made: what's added in the accent colour, what's taken away in red
     for s in trial.shapes
-      (s.name in trial.changed && Designs.shown(m, s.name)) || continue
+      a = arrays(v, s)
+      tint = get(made.tints, s.name, :add)
+      colour = tint == :cut ? WRONG : t.accent
+      push!(out, GLs.Solid((:solid, objectid(s)), a.solid, rgba(Ink.mixed(RGB(c.body[1:3]...), colour, 0.55), tint == :around ? GHOST : 1.0)))
+      push!(out, GLs.Lines((:edges, objectid(s)), a.lines, rgba(Ink.mixed(RGB(c.edge[1:3]...), colour, 0.55)), 1.5dense))
+    end
+    isempty(made.lines) || push!(out, GLs.Lines((:made_lines, objectid(made)), made.lines, rgba(t.accent), 2.5dense; hidden=false))
+  elseif trial !== nothing
+    for s in trial.shapes
+      (s.name in trial.changed && visible(s)) || continue
       a = arrays(v, s)
       own = get(trial.colours, s.name, nothing)
       base = own === nothing ? RGB(c.body[1:3]...) : RGB(own...)
@@ -2467,24 +2606,32 @@ draw(ctx, size, ui::ConcreteRect, scene::Scene) = begin
   dense = clamp(density(ctx), 1.0, 3.0)
   dense = min(dense, sqrt(9e6 / (area[1] * area[2])))
   w, h = max(round(Int, area[1] * dense), 1), max(round(Int, area[2] * dense), 1)
-  v.stage === nothing && (v.stage = something(GLs.Stage(), false))
   shot = v.image === nothing ? (v.image = Shot()) : v.image
+  gpu = skia_gpu(v, ctx)
+  direct = stage!(v, gpu === nothing ? C_NULL : GLs.current())
   c = palette(t)
   if v.stage !== false
-    of = (m.version, v.eye, w, h, v.hover, hash(v.picked), v.form === nothing ? UInt(0) : hash((v.form.shows, v.form.active, v.form.key)), c, t.accent, Designs.editing(m), v.slice)
+    of = (m.version, v.eye, w, h, v.hover, hash(v.picked), v.form === nothing ? UInt(0) : hash((v.form.shows, v.form.active, v.form.key)), c, t.accent, Designs.editing(m), v.slice, v.stage)
     if shot.of != of
       list = things(v, area, dense, t)
-      pixels = GLs.picture!(v.stage, w, h, v.eye, list, c.back; reach=far(v), cut=cut(v))
-      shot.image == C_NULL || Skia.sk_image_unref(shot.image)
-      info = Ref(Skia.sk_image_info_t(C_NULL, Skia.SK_COLOR_TYPE_RGBA_8888, Skia.SK_ALPHA_TYPE_OPAQUE, w, h))
-      GC.@preserve info pixels begin
-        data = Skia.sk_data_new_with_copy(pointer(pixels), UInt64(4w * h))
-        shot.image = Skia.sk_image_new_raster_data(info, data, Csize_t(4w))
-        Skia.sk_data_unref(data)
+      if direct
+        GLs.picture!(v.stage, w, h, v.eye, list, c.back; reach=far(v), cut=cut(v), read=false)
+        shot.image == C_NULL || (Skia.sk_image_unref(shot.image); shot.image = C_NULL)
+      else
+        pixels = GLs.picture!(v.stage, w, h, v.eye, list, c.back; reach=far(v), cut=cut(v))
+        shot.image == C_NULL || Skia.sk_image_unref(shot.image)
+        info = Ref(Skia.sk_image_info_t(C_NULL, Skia.SK_COLOR_TYPE_RGBA_8888, Skia.SK_ALPHA_TYPE_OPAQUE, w, h))
+        GC.@preserve info pixels begin
+          data = Skia.sk_data_new_with_copy(pointer(pixels), UInt64(4w * h))
+          shot.image = Skia.sk_image_new_raster_data(info, data, Csize_t(4w))
+          Skia.sk_data_unref(data)
+        end
       end
       shot.of = of
     end
   end
+  # The picture of a stage that shares the window's context is lent to Skia for this frame only
+  image = direct && shot.of !== nothing ? lent_image(v, gpu, w, h) : direct ? C_NULL : shot.image
   # A design that's only shown in a page stops inside its line and its round corners
   framed = v.readonly && !v.fill
   clip = C_NULL
@@ -2495,13 +2642,15 @@ draw(ctx, size, ui::ConcreteRect, scene::Scene) = begin
     Skia.sk_canvas_save(ctx)
     Skia.sk_canvas_clip_path_with_operation(ctx, clip, Skia.SK_CLIP_OP_INTERSECT, true)
   end
-  if shot.image == C_NULL
+  if image == C_NULL
     Ink.box(ctx, v.area..., RGB(c.back...))
   else
     from = Ref(Skia.sk_rect_t(0f0, 0f0, Float32(w), Float32(h)))
     to = Ref(Skia.sk_rect_t(Float32(v.area[1]), Float32(v.area[2]), Float32(v.area[1] + v.area[3]), Float32(v.area[2] + v.area[4])))
     sampling = Ref(Skia.sk_sampling_options_t(0, false, Skia.sk_cubic_resampler_t(0f0, 0f0), Skia.SK_FILTER_MODE_LINEAR, Skia.SK_MIPMAP_MODE_NONE))
-    Ink.painted(p -> Skia.sk_canvas_draw_image_rect(ctx, shot.image, from, to, sampling, p, Skia.SRC_RECT_CONSTRAINT_FAST), colorant"white")
+    Ink.painted(p -> Skia.sk_canvas_draw_image_rect(ctx, image, from, to, sampling, p, Skia.SRC_RECT_CONSTRAINT_FAST), colorant"white")
+    # Skia holds on to what it draws until the frame is done, so the lent image can go now
+    direct && Skia.sk_image_unref(image)
   end
   if v.readonly
     # Only the origin's point is drawn over the picture of a design that's only shown
@@ -2516,6 +2665,59 @@ draw(ctx, size, ui::ConcreteRect, scene::Scene) = begin
   draw_origin(ctx, v, t)
   draw_axes(ctx, v, t)
   nothing
+end
+
+"""
+What Skia draws the window of `v` with on the graphics card, when `ctx` is
+the canvas that it draws on. Nothing when the window is drawn by the CPU, as
+a window that isn't on the screen is.
+"""
+skia_gpu(v::DesignView, ctx) = begin
+  window = window_of(v)
+  window === nothing && return nothing
+  g = get(gpus, objectid(window), nothing)
+  g !== nothing && g.surface != C_NULL && Skia.sk_surface_get_canvas(g.surface) == ctx ? g : nothing
+end
+
+"""
+Give `v` a stage that shares `share`, the OpenGL context that the window is
+drawn with, or C_NULL when the CPU draws the window. True when the stage
+does share it, so that its picture can stay on the graphics card.
+"""
+stage!(v::DesignView, share) = begin
+  had = get(v.parts, :stage_for, nothing)
+  if v.stage === nothing || (v.stage !== false && had != share)
+    stage = share == C_NULL ? nothing : GLs.Stage(share)
+    v.parts[:direct] = stage !== nothing
+    v.stage = stage !== nothing ? stage : something(GLs.Stage(), false)
+    v.parts[:stage_for] = share
+    delete!(v.parts, :over)
+  end
+  v.stage !== false && share != C_NULL && get(v.parts, :direct, false) === true
+end
+
+"""
+The stage's last picture as an image of Skia's on the graphics card, or
+C_NULL. Skia wraps a framebuffer of the window's context that has the
+stage's renderbuffer, and copies it: a copy on the card, which is quick. The
+caller lets go of the image when it has drawn it.
+"""
+lent_image(v::DesignView, g, w, h) = begin
+  over = get(v.parts, :over, nothing)
+  if over === nothing || over.size != (w, h)
+    fbo = GLs.over!(v.stage, over === nothing ? 0 : over.fbo)
+    fbo == 0 && return C_NULL
+    v.parts[:over] = over = (size=(w, h), fbo=fbo)
+  end
+  info = Ref(Skia.gr_gl_framebufferinfo_t(over.fbo, 0x8058, false))   # 0x8058 is GL_RGBA8
+  target = Skia.gr_backendrendertarget_new_gl(Cint(w), Cint(h), Cint(0), Cint(0), info)
+  target == C_NULL && return C_NULL
+  # The stage drew it with its rows from the top, so the first row of the framebuffer is the top
+  surface = Skia.sk_surface_new_backend_render_target(g.context, target, Skia.GR_SURFACE_ORIGIN_TOP_LEFT, Skia.SK_COLOR_TYPE_RGBA_8888, C_NULL, C_NULL)
+  image = surface == C_NULL ? C_NULL : Skia.sk_surface_make_image_snapshot(surface)
+  surface == C_NULL || Skia.sk_surface_unref(surface)
+  Skia.gr_backendrendertarget_delete(target)
+  image
 end
 
 """
@@ -2550,6 +2752,17 @@ regions(v::DesignView, s) = begin
   r = Sketching.Regions(s)
   v.regions[id] = (s, r)
   r
+end
+
+"The closed regions of the sketch `s` along its curves, as Ladder's pieces take them, worked out when the sketch changes: see pieces.jl"
+arrangement(v::DesignView, s) = begin
+  kept = get!(() -> Dict{Int,Any}(), v.parts, :arrangements)
+  id = Int(s["id"])
+  k = get(kept, id, nothing)
+  k !== nothing && k[1] === s && return k[2]
+  a = Pieces.Arrangement(s)
+  kept[id] = (s, a)
+  a
 end
 
 const MARK_ICONS = Dict("Horizontal" => "c_hv", "Vertical" => "c_hv", "Tangent" => "c_tangent", "Equal" => "c_equal", "Parallel" => "c_parallel",
@@ -2761,7 +2974,7 @@ end
 point_at(v::DesignView, at) = begin
   size = (v.area[3], v.area[4])
   line = Scenes.ray(v.eye, size, at)
-  hit = Scenes.hit(v.model.shapes, line; shown=s -> Designs.shown(v.model, s.name))
+  hit = Scenes.hit(v.model.shapes, line; shown=Designs.shows(v.model))
   hit === nothing || return hit.point
   s = sketch(v)
   if s !== nothing
@@ -2837,7 +3050,7 @@ shows there, or else a flat face of a body. A face in front of a sketch hides it
 profile_under(v::DesignView, at) = begin
   m = v.model
   line = Scenes.ray(v.eye, (v.area[3], v.area[4]), at)
-  hit = Scenes.hit(m.shapes, line; shown=b -> Designs.shown(m, b.name))
+  hit = Scenes.hit(m.shapes, line; shown=Designs.shows(m))
   region = region_under(v, at; before=hit === nothing ? Inf : hit.far)
   region === nothing || return region
   hit === nothing && return nothing
@@ -2860,7 +3073,7 @@ under(v::DesignView, at) = begin
   kind = field === nothing ? :any : field.kind
   kind == :profiles && return profile_under(v, at)
   size = (v.area[3], v.area[4])
-  shown = b -> Designs.shown(m, b.name)
+  shown = Designs.shows(m)
   hit = Scenes.hit(m.shapes, Scenes.ray(v.eye, size, at); shown)
   # A plane of the origin or a construction plane. A form that asks for a plane takes the nearest of it and a body's face.
   # With no form, a body in front or behind wins, so that a plane never gets in the way of a face.
