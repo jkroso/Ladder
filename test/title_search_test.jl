@@ -348,3 +348,52 @@ end
   b = e.buf; b.caret = b.anchor = (1, 3); frames()
   @test [x.title for x in K.focus_parts(e)] == ["Runs"]
 end
+
+@testset "while a picture or a block fills the window, a click on the path's heading goes back to it in the page" begin
+  figs = made(joinpath(jobs, "figures.md"), """
+  # Figures
+
+  Words.
+
+  ## Flow
+
+  ```mermaid
+  graph TD
+  A --> B
+  ```
+
+  After the diagram.
+  """)
+  K.open!(e, figs); frames()
+  caret!(1)
+  code = join(e.buf.lines[8:9], "\n")
+  K.zoom_in!(e, (:diagram, code)); frames()
+  @test K.zooming(e) !== nothing
+  hover!()
+  @test titles() == ["Figures"]
+  # The heading is the last part, where the caret is. While the diagram fills the window, a click on it goes there all the same.
+  @test K.cursor(trail().marks[1]) == :hand
+  click(middle(trail().marks[1]))
+  @test K.zooming(e) === nothing && e.buf.path == figs && e.buf.caret[1] == 1 && w.focus === e
+  frames()
+  hover!()
+  @test K.cursor(trail().marks[1]) == :arrow   # in the page, the last part is where the caret is
+  shot("unzoomed")
+  # A heading chosen in the search under the › after the file's name goes back to the page too
+  K.zoom_in!(e, (:diagram, code)); frames()
+  open!(0)
+  k = findfirst(r -> r.kind == :entry && r.x.title == "Flow", search().rows)
+  @test k !== nothing
+  K.search_go!(search(), w, k); frames()
+  @test K.zooming(e) === nothing && e.buf.caret[1] == 5
+  # A sketch that fills the window goes back in the page when the path's heading is clicked
+  K.open!(e, room); frames()
+  caret!(4)
+  s = only(v for v in values(e.nodes) if v isa K.SketchView)
+  K.full!(s, true); frames()
+  @test K.full_block(e) === s
+  hover!()
+  @test titles()[1] == "Bathroom"
+  click(middle(trail().marks[1]))
+  @test K.full_block(e) === nothing && !s.full && e.buf.caret[1] == 1
+end

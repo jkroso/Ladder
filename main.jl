@@ -31667,7 +31667,7 @@ describe(p::TitlePart) = begin
   last = p.k == length(v.parts)
   # A heading shows only its mark, like H2, and a component its icon and its kind
   Row(height(grow=grow), padding(TT_PAD, 0px), radius(5px), child_gap=4px, Alignment.Center, name="Part",
-      background(!last && ishovered(p) ? colours.hover : clear),
+      background(part_goes(p) && ishovered(p) ? colours.hover : clear),
     (x.level < 7 ? (heading_mark(x, last ? colours.ink : colours.dim),) :
      (Icon(x.icon, size=11px, color=colours.faint), label(elide(x.title, 13px, TT_PART), 13px, color=last ? colours.ink : colours.dim)))...)
 end
@@ -31682,14 +31682,37 @@ describe(a::PartArrow) = begin
 end
 
 cursor(::TitleCrumb) = :hand
-cursor(p::TitlePart) = p.k == length(p.parent.parts) ? :arrow : :hand
+cursor(p::TitlePart) = part_goes(p) ? :hand : :arrow
 cursor(::PartArrow) = :hand
 
-# A click on a heading puts the caret on it, as a click on it in the sidebar does. The last part is where the caret is already.
+"""
+True when a click on the part `p` of the path goes somewhere. The last part is
+where the caret is already, so it goes nowhere while the page shows. While a
+view, a model or a block fills the window, every part goes back to the page.
+"""
+part_goes(p::TitlePart) = (v = p.parent; p.k in eachindex(v.parts) && (p.k < length(v.parts) || filled(editor(p))))
+
+"""
+Put the page back when something fills the window in its place: a view, a
+picture or a model, a takeoff or a sketch, or the lines of a block. A click on
+a heading or a component in the path in the top bar does this before it goes
+to that heading or component in the page.
+"""
+unfill_page!(e) = begin
+  v = zooming(e)
+  v === nothing || zoom_out!(v, false)
+  # Only this page's block: a block of another page still fills the window when Back goes to that page
+  block = full_block(e)
+  block === nothing || (block.full = false)
+  lowered(e) === nothing || widen!(e)
+  nothing
+end
+
+# A click on a heading puts the caret on it, as a click on it in the sidebar does. While something fills the window, the page comes back first.
 onkey(p::TitlePart, ev::KeyPress{Keys.mouse_left}) = begin
   v = p.parent
   e = editor(p)
-  p.k in eachindex(v.parts) && p.k < length(v.parts) && (focus(e); go_entry!(e, v.parts[p.k].line, v.parts[p.k].caret))
+  part_goes(p) && (unfill_page!(e); focus(e); go_entry!(e, v.parts[p.k].line, v.parts[p.k].caret))
   handled
 end
 onkey(a::PartArrow, ev::KeyPress{Keys.mouse_left}) = open_title_search!(editor(a), ev.window, a)
@@ -32229,6 +32252,8 @@ search_go!(s::TitleSearch, w, k) = begin
   row = s.rows[k]
   e = s.of
   close_title_search!(e, w)
+  # A view or a block that fills the window goes back in the page, so the page shows what was chosen
+  row.path == e.buf.path && unfill_page!(e)
   if row.kind == :entry
     row.path == e.buf.path || open!(e, row.path)
     focus(e)
