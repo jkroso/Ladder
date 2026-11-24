@@ -121,6 +121,7 @@ On a page with a `schedule` block, an item that repeats has a bar for each time 
 | ⌘Return | Sends the page to an agent that waits for it |
 | ⌘, | Opens the settings in a window of their own. Press it again to close that window. |
 | ⌘T | Opens a new tab and the file finder. The file that you choose shows in the new tab. |
+| ⌘⇧T | Makes a new terminal in the folder of the file that shows, and shows it |
 | ⌘1 to ⌘9 | Show the first tab to the ninth tab in the sidebar |
 | ⌘W | Closes the file's tab and shows the tab under it. On the last tab, it shows the file's folder. On a folder, it shows the tab that showed last, or with no tabs it closes the folder. In a window with no file, it closes the window. |
 | ⌘\ | Shows and hides the list of files |
@@ -1160,7 +1161,7 @@ export PATH="$HOME/Library/Application Support/Ladder/bin:$PATH"
 
 ## Terminals
 
-A file whose name ends in `.vt` is a terminal. Open one, and a shell runs in the window, in the folder that the file is in. To make one, right-click a folder in the sidebar and choose New Terminal. Or press ⌘⇧P and run New Terminal.
+A file whose name ends in `.vt` is a terminal. Open one, and a shell runs in the window, in the folder that the file is in. To make one, right-click a folder in the sidebar and choose New Terminal. Or press ⌘⇧T, which makes one in the folder of the file that shows.
 
 The file keeps what the terminal shows: its text, with its colours. So when you open the file again, you see what the terminal last showed. No shell runs then until you press Return. Kero keeps each of its sessions in a file of this kind, and Ladder shows those files too.
 

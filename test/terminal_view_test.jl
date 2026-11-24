@@ -299,6 +299,23 @@ end
   @test e.buf.path == joinpath(dir, "Terminal 2.vt")
 end
 
+@testset "⌘⇧T makes a terminal in the folder of the file that shows" begin
+  # From a terminal, which has the keyboard
+  @test w.focus === view()
+  key(Keys.t, Keys.cmd | Keys.shft)
+  frames()
+  @test e.buf.path == joinpath(dir, "Terminal 3.vt") && K.term_shown(e) && e.popup == :none
+  @test Terms.running(view())
+  # From a page
+  K.open!(e, notes)
+  frames()
+  key(Keys.t, Keys.cmd | Keys.shft)
+  frames()
+  @test e.buf.path == joinpath(dir, "Terminal 4.vt") && K.term_shown(e) && e.popup == :none
+  @test Terms.running(view())
+  @test K.COMMANDS[:new_terminal].keys == "cmd+shift+t"
+end
+
 @testset "a terminal whose file goes ends, and a window that closes ends them all" begin
   v2 = view(joinpath(dir, "Terminal 2.vt"))
   v1 = view(joinpath(dir, "Terminal.vt"))

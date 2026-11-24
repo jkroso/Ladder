@@ -45116,7 +45116,8 @@ let group = "The file or the folder in focus"
   add_command!(copy_path; group, title="Copy the path of the file or the folder")
   add_command!(new_page!; group, title="Make a new page in the folder")
   add_command!(new_folder!; group, title="Make a new folder in the folder")
-  add_command!(new_terminal!; group, title="Make a new terminal in the folder")
+  # ⌘⇧T makes a terminal at once, in the folder of the file that shows
+  add_command!(new_terminal!; group, title="Make a new terminal in the folder", keys="cmd+shift+t")
 end
 
 """
