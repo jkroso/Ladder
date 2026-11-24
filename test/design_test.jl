@@ -181,6 +181,15 @@ else
     shot("design-1-open.png")
   end
 
+  @testset "a button's tip is in the page's font, which has ⌘" begin
+    # The tip is made when the mouse moves, where no theme is set. In UI.jl's own font, Helvetica, ⌘ was a box.
+    at(rect_middle(view().parts[:undo]))
+    tip = only(p for p in popups(w) if p.key == :tooltip)
+    words = first(tip.content.content.children)
+    @test words.content == "Undo (⌘Z)" && words.family == K.SANS
+    V.hide_tooltip!(w)
+  end
+
   @testset "the editor has the page's colours" begin
     was = e.theme
     for name in (:sepia, :paper, :night)

@@ -95,10 +95,12 @@ onkey(p::Press, e::KeyPress{Keys.mouse_right}) = (p.other === nothing || (hide_t
 onkey(::Press, ::KeyRelease{Keys.mouse_left}) = handled
 
 const TIP_INK = colorant"rgb(236,236,238)"
-tip_label(words) = Box(padding(10px, 7px), Text(words, size=12px, color=TIP_INK, wrap=WrapMode.none))
+# A tip is made when the mouse moves, where no theme is set, so it takes the font of the button's
+# theme. With none it gets UI.jl's Helvetica, which has no ⌘ or ⇧ and draws a box for each.
+tip_label(words, t=theme()) = Box(padding(10px, 7px), Text(words, size=12px, family=t.family, color=TIP_INK, wrap=WrapMode.none))
 
 onmouse(p::Press, e::MouseMove) = begin
-  (p.quiet || isempty(p.tip) || rect(p) === nothing) || show_tooltip!(e.window, tip_label(p.tip), p, placement=:bottom, gap=6px)
+  (p.quiet || isempty(p.tip) || rect(p) === nothing) || show_tooltip!(e.window, tip_label(p.tip, theme(p)), p, placement=:bottom, gap=6px)
   handled
 end
 
