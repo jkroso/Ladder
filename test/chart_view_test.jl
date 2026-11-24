@@ -242,3 +242,34 @@ end
   # A chart of two sheets lists the columns of both
   @test K.chart_columns(show_chart(6)) == ["Power", "Working"]
 end
+
+@testset "a title with no room beside the buttons hides them while the mouse is off the chart" begin
+  K.show_line!(e, 1); frames(3)
+  v = chart(1)
+  title = "The sales and the costs of each month of the first three months of the year, before tax"
+  K.write_block!(v, K.CHART, ["title: $title"]); frames()
+  r = rect(v)
+  off, on = (K.num(r.left) - 60, K.num(r.top) + 100), (K.num(r.left) + 60, K.num(r.top) + 100)
+  # The room that the bar leaves for the title is what chart_title_room says
+  at(on); frames()
+  columns = rect(v.parts[:columns])
+  @test abs(K.num(r.left + r.width) - 13 - (K.num(columns.left + columns.width) + 19) - K.chart_title_room(v)) <= 1
+  # Off the chart, the title has the whole bar
+  at(off); frames()
+  @test all(k -> rect(v.parts[k]) === nothing, (:kind, :source, :columns))
+  shot("title.png")
+  # The mouse on the chart brings the buttons back
+  at(on); frames()
+  @test all(k -> rect(v.parts[k]) !== nothing, (:kind, :source, :columns))
+  # A list keeps its button while the mouse is on the list, off the chart
+  click(middle(rect(v.parts[:kind])))
+  m = v.parts[(:menu, :kind)]
+  at(middle(rect(m.rows[2]))); frames()
+  @test v.parts[:kind].open && rect(v.parts[:kind]) !== nothing
+  onkey(w, KeyPress{Keys.escape}(0, w)); frames()
+  at(off); frames()
+  @test rect(v.parts[:kind]) === nothing
+  # A short title leaves room for the buttons
+  K.write_block!(v, K.CHART, ["title: Sales and costs"]); frames()
+  @test rect(v.parts[:kind]) !== nothing
+end

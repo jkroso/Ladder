@@ -12419,15 +12419,52 @@ onkey(r::ChartMenuRow, ev::KeyPress{Keys.mouse_left}) = take_chart_row!(r.menu, 
 # The mouse picks the row that it's over, as the arrow keys do. It's in sight already, so the list doesn't scroll to it.
 onmouse(r::ChartMenuRow, ::MouseMove) = (m = r.menu; m.pick = m.seen = r.k; handled)
 
+"True when one of the lists of the chart `v` is open: its kinds, its columns, its tables or its files"
+chart_list_open(v::ChartView) = begin
+  v.sourcing && return true
+  any(k -> (b = get(v.parts, k, nothing); b !== nothing && b.open), (:kind, :columns)) && return true
+  c = get(v.parts, :sources, nothing)
+  c !== nothing && c.asking !== nothing
+end
+
+"""
+How wide the title of the chart `v` can be beside its three buttons, from its
+width when it was last laid out, or nothing before then. The widths here are
+those that the `describe` of the bar and of each button give.
+"""
+chart_title_room(v::ChartView) = begin
+  r = rect(v)
+  r === nothing && return nothing
+  # A button's edges are as wide as its padding, its icons, the gaps between them and its words, and 2 for its border
+  source = 54 + num(measure(Face(SANS, "Semibold", 12px, colours.ink, false), source_words(v)))
+  # Its two edges, the bar's ends and the gaps between its 7 parts, the two lists of 43 each, the
+  # spaces round the button of the source, the line before the title, and the ends of the title's row
+  num(r.width) - (2 + 12 + 12 + 2 * 43 + source + 8 + 9 + 12)
+end
+
+"""
+True when the chart `v` shows its three buttons. When its title doesn't fit
+beside them, they give way to it, and come back while the mouse is on the
+chart or one of their lists is open.
+"""
+chart_buttons_shown(v::ChartView) = begin
+  (isempty(v.spec.title) || ishovered(v) || chart_list_open(v)) && return true
+  room = chart_title_room(v)
+  room === nothing || num(measure(Face(SANS, "Semibold", 13px, colours.ink, false), v.spec.title)) <= room
+end
+
 describe(v::ChartView) = begin
   e = editor(v)
   d = shown!(v)
   with_theme(component_theme(e.zoom)) do
-    bar = block_bar(chart_menu_button(v, :kind), Box(width(4px)), source_button(v), Box(width(4px)), chart_menu_button(v, :columns),
-      # The title's row is as tall as the bar, so what it clips is only a title too long for it. A row as tall as the text
-      # would clip the tails of letters like p and y, which hang under the text's box.
-      (isempty(v.spec.title) ? () : (rule(), Row(width(grow=grow), height(grow=grow), padding(6px, 0px), Alignment.Center, clip=true,
-                                                 Box(label(v.spec.title, 13px, weight="Semibold")))))...)
+    # The title's row is as tall as the bar, so what it clips is only a title too long for it. A row as tall as the text
+    # would clip the tails of letters like p and y, which hang under the text's box.
+    title = isempty(v.spec.title) ? () : (Row(width(grow=grow), height(grow=grow), padding(6px, 0px), Alignment.Center, clip=true,
+                                              Box(label(v.spec.title, 13px, weight="Semibold"))),)
+    bar = chart_buttons_shown(v) ?
+      block_bar(chart_menu_button(v, :kind), Box(width(4px)), source_button(v), Box(width(4px)), chart_menu_button(v, :columns),
+                (isempty(title) ? () : (rule(), title...))...) :
+      block_bar(title...)
     Column(block_look()..., clip=true, name="Chart", bar, (v.sourcing ? from_picker_section(v) : ())...,
            isempty(d.problem) ? block_part!(() -> PlotArea(of=v), v, :area) : block_note(d.problem))
   end
