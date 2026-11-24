@@ -88,6 +88,19 @@ part!(name="here.md", there="there.md") = begin
   again()
 end
 
+"""
+The names of the commands that the palette of the window `o` lists. The
+palette closes again at once, with no slide, so a click after it isn't lost.
+"""
+listed(o) = begin
+  K.open_palette!(o)
+  found = [K.palette_name(c.name) for c in K.palette(o).listed]
+  K.close_palette!(o)
+  K.palette(o).moved = 0.0
+  o === e && frames(1)
+  found
+end
+
 K.show_beside!(e, repo)
 settle()
 
@@ -133,7 +146,7 @@ end
   git(other, "push")
   commit(repo, "More here")
   mine = head(repo)
-  @test press(:pull) == "main and origin/main each have commits that the other hasn't, so git didn't pull. Click the arrow at the right of Pull to merge or rebase them."
+  @test press(:pull) == "main and origin/main each have commits that the other hasn't, so git didn't pull. To join them, click the arrow at the right of Pull, or run Merge or Rebase in the command palette."
   @test button(:pull).words == "Pull 1" && button(:push).words == "Push 1"
   @test press(:push) == "origin/main has commits that main hasn't got, so git didn't push. Pull them first."
   @test head(repo) == mine && head(hub, "main") == head(other)
@@ -207,6 +220,7 @@ end
   again()
   @test isempty(G.state(repo).follows)
   @test button(:pull).off
+  @test !("Pull" in listed(e)) && "Push" in listed(e)
   @test press(:push) == "Pushed side to origin."
   @test head(hub, "side") == head(repo)
   @test G.state(repo).follows == "origin/side"
@@ -223,4 +237,67 @@ end
   frames(2)
   @test isempty(K.GIT_RUNS)
   @test button(:push).words == "Push" && !button(:push).off
+end
+
+# --- the same from the command palette ---
+
+"A window that isn't on the screen, on the file at `path`"
+window_on(path) = (o = K.build_editor(path); v = Window(o, size=(900px, 600px)); foreach(_ -> Base.invokelatest(frame, v), 1:2); o)
+"Run the palette's command called `name`. It gives the words under the top bar while git runs."
+run_command(name) = (K.open_palette!(e, K.COMMANDS[name]); first(e.nodes[:result]))
+
+@testset "the command palette has Push and Pull in a repository, and not outside one" begin
+  again()
+  @test "Push" in listed(e) && "Pull" in listed(e)
+  @test !("Merge" in listed(e)) && !("Rebase" in listed(e))
+  # A file in the repository has them too, where git's panel doesn't show
+  @test "Push" in listed(window_on(joinpath(repo, "Readme.md")))
+  write(joinpath(dir, "loose.md"), "# Not in a repository\n")
+  outside = listed(window_on(joinpath(dir, "loose.md")))
+  @test !("Push" in outside) && !("Pull" in outside) && "Theme" in outside
+end
+
+@testset "Push and Pull from the palette say what git does, and then what came of it" begin
+  commit(repo, "From the palette")
+  again()
+  @test run_command(:push) == "Pushing side to origin/side…"
+  @test e.popup != :commands   # the palette closed when the command ran
+  @test finish() == "Pushed side to origin/side."
+  @test head(hub, "side") == head(repo)
+  git(other, "fetch")
+  git(other, "checkout", "side")
+  commit(other, "Side there")
+  git(other, "push")
+  git(repo, "fetch")
+  again()
+  @test run_command(:pull) == "Pulling the new commits of origin/side into side…"
+  @test finish() == "Pulled the new commits of origin/side into side."
+  @test head(repo) == head(other)
+end
+
+@testset "while the branches have gone apart, the palette has Merge and Rebase" begin
+  part!("palette-here.md", "palette-there.md")
+  @test K.diverged(G.state(repo))
+  @test "Merge" in listed(e) && "Rebase" in listed(e)
+  @test run_command(:pull) == "Pulling the new commits of origin/side into side…"
+  @test finish() == "side and origin/side each have commits that the other hasn't, so git didn't pull. To join them, click the arrow at the right of Pull, or run Merge or Rebase in the command palette."
+  withenv(me...) do
+    @test run_command(:merge) == "Merging origin/side into side…"
+    @test finish() == "Merged origin/side into side."
+  end
+  @test length(split(strip(read(`git -C $repo log -1 --format=%P`, String)))) == 2
+  @test !("Merge" in listed(e))
+end
+
+@testset "the palette doesn't start git while it runs in the repository" begin
+  K.GIT_RUNS[repo] = (what=:push, run=(run(`sleep 5`, wait=false), IOBuffer()), e=e, since=time(), branch="side", follows="origin/side")
+  K.open_palette!(e, K.COMMANDS[:pull])
+  @test K.palette(e).fault == "Command failed: git hasn't finished the push that it's doing in this repository"
+  @test K.GIT_RUNS[repo].what == :push
+  K.close_palette!(e)
+  p = first(K.GIT_RUNS[repo].run)
+  kill(p)
+  wait(p)
+  frames(2)
+  @test isempty(K.GIT_RUNS)
 end

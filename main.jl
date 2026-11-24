@@ -50429,7 +50429,7 @@ git_said(r, done, said) = begin
   done && r.what == :rebase && return "Rebased $(r.branch) onto $there."
   done && return "Pulled the new commits of $there into $(r.branch)."
   occursin("Not possible to fast-forward", said) &&
-    return "$(r.branch) and $there each have commits that the other hasn't, so git didn't pull. Click the arrow at the right of Pull to merge or rebase them."
+    return "$(r.branch) and $there each have commits that the other hasn't, so git didn't pull. To join them, click the arrow at the right of Pull, or run Merge or Rebase in the command palette."
   occursin("would be overwritten", said) &&
     return "The new commits change files that have changes you haven't committed, so git didn't pull. Commit those changes first."
   occursin("cannot pull with rebase", said) &&
@@ -50446,7 +50446,13 @@ end
 git_run_tick!(e) = for (root, r) in collect(GIT_RUNS)
   p, out = r.run
   late = time() - r.since > PUSH_LIMIT
-  process_running(p) && !late && (redraw_in!(e, 0.1); continue)
+  if process_running(p) && !late
+    # A run from the palette says what it does under the top bar until it ends, since git's panel may not show
+    words = get(r, :words, "")
+    isempty(words) || keep_saying!(r.e, words)
+    redraw_in!(e, 0.1)
+    continue
+  end
   process_running(p) && kill(p)
   wait(p)   # the last of what git printed can still be on its way
   said = String(take!(out))
@@ -50591,6 +50597,73 @@ onkey(r::PullWay, ev::KeyPress{Keys.mouse_left}) = begin
   push_or_pull!(e, r.root, r.way)
   handled
 end
+
+# --- push and pull in the command palette ----------------------------------------------------
+#
+# The command palette has Push and Pull while the file or the folder that the
+# window shows is in a git repository. They do what the buttons of git's panel
+# do, in that repository, so they work on a page where the panel doesn't show.
+# While each branch has commits that the other hasn't, the palette has Merge
+# and Rebase too: the ways to join them that the list under Pull has.
+#
+# Git's panel may not be in sight, so while git runs, the words under the top
+# bar say what it does, like "Pushing main to origin/main…". When git ends,
+# they say what came of it, as they do for the buttons.
+
+"What the window says under the top bar while git does `what` in a repository where git says `s`"
+sending_words(what, s) = begin
+  s.known || return SENDING_WORDS[what]
+  there = isempty(s.follows) ? "origin" : s.follows
+  what == :push ? "Pushing $(s.branch) to $there…" :
+  what == :merge ? "Merging $there into $(s.branch)…" :
+  what == :rebase ? "Rebasing $(s.branch) onto $there…" :
+  "Pulling the new commits of $there into $(s.branch)…"
+end
+
+"Say `words` under the top bar of `e` again when they're still there, so that they stay while something takes long"
+keep_saying!(e, words) = begin
+  said = get(e.nodes, :result, nothing)
+  (said === nothing || said[1] != words || time() - said[2] > 2) && (e.nodes[:result] = (words, time()))
+  nothing
+end
+
+"""
+Start git's push (`what` is :push), pull (:pull), merge (:merge) or rebase
+(:rebase) in the repository of what the window `e` shows, as the buttons of
+git's panel do. The words under the top bar say what git does until it ends.
+"""
+send_from_palette!(e, what) = begin
+  root = repo_of(e)
+  isempty(root) && error("git doesn't keep $(basename(e.buf.path))")
+  r = get(GIT_RUNS, root, nothing)
+  r === nothing || error("git hasn't finished the $(r.what) that it's doing in this repository")
+  s = Git.state(root)
+  what != :push && s.known && isempty(s.follows) && error("$(s.branch) follows no branch, so there's nothing to pull")
+  push_or_pull!(e, root, what)
+  haskey(GIT_RUNS, root) || return nothing   # git didn't start, and Ladder said so
+  words = sending_words(what, s)
+  GIT_RUNS[root] = merge(GIT_RUNS[root], (words=words,))
+  say_result!(e, words)
+  nothing
+end
+
+"Send the branch's new commits to the branch that it follows, like origin/main"
+push_branch!(e) = send_from_palette!(e, :push)
+"Bring the new commits of the branch that this one follows, like origin/main"
+pull_branch!(e) = send_from_palette!(e, :pull)
+"Pull the commits of the branch that this one follows, and join the two with a new commit"
+merge_branch!(e) = send_from_palette!(e, :merge)
+"Pull the commits of the branch that this one follows, and make this branch's own commits again after them"
+rebase_branch!(e) = send_from_palette!(e, :rebase)
+
+# Push shows in any repository. Pull shows while the branch follows one, and Merge and Rebase while the two have gone apart.
+works_here(e, ::Val{:push}) = !isempty(repo_of(e))
+works_here(e, ::Val{:pull}) = (root = repo_of(e); !isempty(root) && (s = watch_git!(e, root); !s.known || !isempty(s.follows)))
+works_here(e, ::Union{Val{:merge},Val{:rebase}}) = (root = repo_of(e); !isempty(root) && diverged(watch_git!(e, root)))
+add_command!(push_branch!, name=:push, title="Send the branch's new commits to the branch that it follows, like origin/main")
+add_command!(pull_branch!, name=:pull, title="Bring the new commits of the branch that this one follows, like origin/main")
+add_command!(merge_branch!, name=:merge, title="Pull the commits of the branch that this one follows, and join the two branches with a new commit")
+add_command!(rebase_branch!, name=:rebase, title="Pull the commits of the branch that this one follows, and make this branch's own commits again after them")
 
 # --- commits from git's panel --------------------------------------------------------------
 #
