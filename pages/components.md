@@ -54,13 +54,21 @@ ColorPicker()
 
 ## 3D models
 
-The viewer shows the model in an STL file or a 3MF file, the kinds of file that a 3D printer's program reads. Drag the model to turn it. Hold ⌘ and scroll to make it bigger or smaller. Click it twice to put it back as it was.
+The viewer shows the model in an STL file or a 3MF file, the kinds of file that a 3D printer's program reads. Drag the model to turn it. Hold ⌘ and scroll, or pinch, to make it bigger or smaller. Click it twice to put it back as it was.
 
 ```ui
 STLViewer("knot.stl")
 ```
 
 Under the model are its number of triangles and its width, depth and height, in the units of its file. The path can start from the folder of this page, as `knot.stl` does. Give the viewer a `height` or a `color` to change how it looks.
+
+The viewer shows a glTF file too. Its name ends in `.glb` or `.gltf`. That kind of file also says what each part is made of: its colour, how much it's a metal, how rough it is, and the pictures wrapped round it. So the viewer shows it in its own colours, in the light of a studio, in front of a grey wall.
+
+```ui
+STLViewer("satellite.glb")
+```
+
+This is a satellite whose wings of solar cells are 70 metres across. The model grows towards the mouse. Put the mouse on the gold body in the middle, hold ⌘ and scroll, and you can go close enough to see the laser on its deck. A drag then turns the model round the part that you pressed.
 
 ## Sound and video
 

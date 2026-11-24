@@ -255,6 +255,20 @@ end
   @test m.height == tall
 end
 
+@testset "a glTF model shows what it's made of" begin
+  cp(joinpath(@__DIR__, "..", "pages", "satellite.glb"), joinpath(dir, "satellite.glb"))
+  K.open!(e, joinpath(dir, "satellite.glb"))
+  frames(3)
+  fv = only(n for n in values(e.nodes) if n isa K.FileView && n.path == joinpath(dir, "satellite.glb"))
+  m = fv.viewer
+  @test m isa K.STLViewer && m.model isa K.Mesh
+  # The satellite has ten materials, and the file's first is for a part that names none
+  @test m.model.look !== nothing && length(m.model.look.materials) == 11
+  # Its wings span 70 metres
+  @test 69 < m.model.size[1] < 71
+  shot("8-satellite")
+end
+
 @testset "it closes when another document shows" begin
   K.open!(e, page)
   frames(3)

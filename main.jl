@@ -4703,13 +4703,13 @@ end
 
 const PICTURES = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp")
 const PREVIEW_LINES = 12
-const MODELS = (".stl", ".3mf")   # the files of 3D models that the viewer reads
+const MODELS = (".stl", ".3mf", ".glb", ".gltf")   # the files of 3D models that the viewer reads
 const MODEL_HEIGHT = 260px
 # The sound and the video files that macOS plays
 const SOUNDS = (".mp3", ".m4a", ".wav", ".aif", ".aiff", ".aac", ".flac", ".caf")
 const VIDEOS = (".mp4", ".mov", ".m4v")
 
-"The viewer of the model in the STL or 3MF file at `path`, or nothing if the file can't be read as a model"
+"The viewer of the model in the STL, 3MF or glTF file at `path`, or nothing if the file can't be read as a model"
 model(l::Breadcrumb, path) = begin
   v = l.viewer
   (v isa STLViewer && v.path == path) || (hush!(l); v = l.viewer = own!(l, STLViewer(path=path, height=MODEL_HEIGHT)))

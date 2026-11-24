@@ -619,7 +619,7 @@ length(rooms) == 4
 
 ### Code that runs
 
-A code block in the language `ui` is Julia code that Ladder runs when the page opens. It shows what the code makes, like a slider or a 3D model. Code between backticks straight after a `!` runs too. Use it for sums, as in "Sums in a line of text". Use other code that runs only if the user asks for it.
+A code block in the language `ui` is Julia code that Ladder runs when the page opens. It shows what the code makes, like a slider or a 3D model. `STLViewer("part.glb")` shows the model in a file beside the page: an STL file, a 3MF file or a glTF file (`.glb`, `.gltf`). A glTF file shows in its own colours and materials. Code between backticks straight after a `!` runs too. Use it for sums, as in "Sums in a line of text". Use other code that runs only if the user asks for it.
 
 ## Show what a command prints
 
