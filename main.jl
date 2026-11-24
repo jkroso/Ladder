@@ -2593,7 +2593,8 @@ shows as something other than its text, which is only so while it's typed: a
 ``` line, a line across the page, a picture, a table's line of dashes.
 """
 israw(b::Buffer, i::Int) =
-  alone(b, i) && (!rich(b) ? !by_runs(b, i) : (picked(b) === nothing && (kinds(b)[i].kind in (Kind.fence, Kind.rule, Kind.table) || pictured(b, i) || maths_line(b, i) || transcludes(b, i) || only_id(b.lines[i]))))
+  alone(b, i) && (!rich(b) ? !by_runs(b, i) : (picked(b) === nothing && (kinds(b)[i].kind in (Kind.fence, Kind.rule, Kind.table) || pictured(b, i) || maths_line(b, i) || transcludes(b, i) || only_id(b.lines[i]) ||
+                                                                          html_block(b, i) !== nothing)))
 
 """
 True when line `i`, as plain text, shows its markup a run at a time, and not
@@ -2601,7 +2602,7 @@ all at once: a line of text, but not one that shows as one thing, like a
 picture or a formula on a line of its own.
 """
 by_runs(b::Buffer, i::Int) =
-  b.view == :markdown && kinds(b)[i].kind in TEXT_KINDS && !(pictured(b, i) || maths_line(b, i) || transcludes(b, i) || only_id(b.lines[i]))
+  b.view == :markdown && kinds(b)[i].kind in TEXT_KINDS && !(pictured(b, i) || maths_line(b, i) || transcludes(b, i) || only_id(b.lines[i]) || html_block(b, i) !== nothing)
 
 """
 The columns of line `i` that show their markup as plain text, as a list of the
@@ -2745,6 +2746,9 @@ solid(b::Buffer, i::Int) = begin
   # So is a comment on lines of its own, with the empty lines after it that take no room
   fold = comment_fold(b, i)
   fold === nothing || return fold
+  # So are lines of HTML
+  tags = html_block(b, i)
+  tags === nothing || return tags
   ks = kinds(b)
   k = ks[i]
   if k.kind in (Kind.fence, Kind.code)
@@ -26179,7 +26183,8 @@ layout!(e, width=text_width(e)) = begin
     columns === nothing || (top = column_turn!(columns, e, items, i, top))
     if kept !== nothing
       was = kept[i]
-      if was !== nothing && pointer(was.text) == pointer(b.lines[i]) && was.line === ks[i] && was.raw == israw(b, i) && raw_part(b, i) === nothing
+      if was !== nothing && pointer(was.text) == pointer(b.lines[i]) && was.line === ks[i] && was.raw == israw(b, i) && raw_part(b, i) === nothing &&
+         html_runs(b)[i][1] == 0
         push!(items, Item(i, i, top, was.tall, was.flow))
         top += was.tall
         i += 1
@@ -26356,6 +26361,16 @@ layout!(e, width=text_width(e)) = begin
       push!(items, flat(e, Item(i, t, top, 0px, nothing)))
       i = t + 1
       continue
+    end
+    # Lines of HTML show as a browser draws them, unless the caret is in them: see "HTML in a page"
+    if ks[i].kind == Kind.paragraph && (tags = html_block(b, i)) !== nothing && tags[1] == i && !html_typed(b, tags...)
+      content = html_item(e, tags...)
+      if content !== nothing
+        push!(items, Item(i, tags[2], top, content.tall, content))
+        top += content.tall
+        i = tags[2] + 1
+        continue
+      end
     end
     # A line that holds only a picture shows the picture, unless the caret is on the line
     if ks[i].kind == Kind.paragraph && !israw(b, i) && occursin("![", b.lines[i])
@@ -37004,6 +37019,260 @@ picture_item(e, i) = begin
   node.line, node.key, node.w, node.h = i, key, w, h
   own!(node!(Document, e, :document), node)
   Live(node, h + 2LIVE_GAP)
+end
+
+# --- HTML in a page ------------------------------------------------------------------------
+#
+# Markdown can have HTML on lines of its own, and Ladder draws those lines as
+# a browser does, with its own HTML engine (web/), in the page's font and
+# colours. So <h2 style="text-align: center">Plans</h2> is a heading in the
+# middle of the page, and <img src="plan.png" width="300"> is a picture 300 px
+# wide. Which lines are HTML is as CommonMark says:
+#
+#   - A line that starts with the tag of a block, like <div, <h2, <p or
+#     <table, or with its closing tag, like </div>. The HTML goes on to the
+#     line before the next empty line.
+#   - A line that holds only one tag of another kind, like <img src="a.png">
+#     or <span>, and doesn't come straight after a line of text. Its HTML goes
+#     on to the line before the next empty line too.
+#   - A line that starts with <pre, <script, <style or <textarea. Its HTML
+#     goes on to the line that closes it, over empty lines too.
+#
+# HTML in a line of text, like <b>bold</b> or <br>, shows as it's written.
+# The lines of the HTML show as they're written while the caret is in them,
+# as the code of a diagram does. Each run of lines is a page of its own: a
+# <style> in it styles only those lines, and no script runs. A picture is
+# named from the page's folder, or from the page's address in a page from a
+# web server, which shows no file of the Mac. Ladder fetches a picture from
+# the web once, as it does a picture on a line of Markdown. A click on a link
+# of the HTML follows it as a click on a link of the text does. An email's
+# lines are never HTML: its text was typed as text.
+
+"The tags that start HTML wherever they start a line, as CommonMark lists them"
+const HTML_BLOCK_TAGS = Set(split("""address article aside base basefont blockquote body caption center col colgroup dd details
+  dialog dir div dl dt fieldset figcaption figure footer form frame frameset h1 h2 h3 h4 h5 h6 head header hr html iframe
+  legend li link main menu menuitem nav noframes ol optgroup option p param search section summary table tbody td tfoot th
+  thead title tr track ul"""))
+"The tags whose HTML goes on to the line that closes them, over empty lines too"
+const HTML_RAW_TAGS = ("pre", "script", "style", "textarea")
+const HTML_OPENS = r"^ {0,3}<(/?)([A-Za-z][A-Za-z0-9-]*)(?=[ \t>]|/>|$)"   # a tag at the start of a line, and its name
+const HTML_ATTRIBUTE = "\\s+[A-Za-z_:][A-Za-z0-9_.:-]*(?:\\s*=\\s*(?:[^\\s\"'=<>`]+|'[^']*'|\"[^\"]*\"))?"
+const HTML_LONE = Regex("^ {0,3}(?:<[A-Za-z][A-Za-z0-9-]*(?:" * HTML_ATTRIBUTE * ")*\\s*/?>|</[A-Za-z][A-Za-z0-9-]*\\s*>)\\s*\$")   # a line with one tag and nothing else
+const HTML_CLOSES = r"</(?:pre|script|style|textarea)>"i
+# The lines of HTML of each page, with the kinds of line that they were found from
+const HTML_RUNS = WeakKeyDict{Any,Tuple{Any,Vector{Tuple{Int,Int}}}}()
+
+"The last line of the HTML that starts at line `i`, or 0 when no HTML starts there"
+html_end(b::Buffer, ks, i::Int) = begin
+  ks[i].kind == Kind.paragraph || return 0
+  text = b.lines[i]
+  startswith(lstrip(text), '<') || return 0
+  m = match(HTML_OPENS, text)
+  name = m === nothing ? "" : lowercase(m[2])
+  if m !== nothing && isempty(m[1]) && name in HTML_RAW_TAGS
+    # It goes on to the line that closes it. With none, or with a code block first, it's no HTML.
+    for j in i:length(ks)
+      j > i && ks[j].kind in (Kind.fence, Kind.code) && return 0
+      occursin(HTML_CLOSES, b.lines[j]) && return j
+    end
+    return 0
+  end
+  (name in HTML_BLOCK_TAGS || (occursin(HTML_LONE, text) && !(name in HTML_RAW_TAGS) && (i == 1 || ks[i-1].kind != Kind.paragraph))) || return 0
+  # A code block ends it, as an empty line does, since its lines aren't the page's text
+  j = i
+  while j < length(ks) && !(ks[j+1].kind in (Kind.blank, Kind.fence, Kind.code))
+    j += 1
+  end
+  j
+end
+
+"Where each line of the page is HTML: the first and the last line of the HTML that it's in, or (0, 0) for a line that isn't"
+html_runs(b::Buffer) = begin
+  ks = kinds(b)
+  kept = get(HTML_RUNS, b, nothing)
+  kept !== nothing && kept[1] === ks && return kept[2]
+  runs = fill((0, 0), length(ks))
+  if b.view == :markdown && !Eml.isemail(b.path)
+    i = 1
+    while i <= length(ks)
+      t = html_end(b, ks, i)
+      t == 0 ? (i += 1) : (fill!(view(runs, i:t), (i, t)); i = t + 1)
+    end
+  end
+  HTML_RUNS[b] = (ks, runs)
+  runs
+end
+
+"The first and the last line of the HTML that line `i` is in, or nothing when it isn't HTML"
+html_block(b::Buffer, i::Int) = (runs = html_runs(b); 1 <= i <= length(runs) && runs[i][1] > 0 ? runs[i] : nothing)
+
+"True when the caret is in the HTML of lines `s` to `t`, as it is while they're typed. They show as they're written then."
+html_typed(b::Buffer, s::Int, t::Int) = !caretless(b) && s <= b.caret[1] <= t && s <= b.anchor[1] <= t && picked(b) === nothing
+
+"HTML on lines of the page, as web/ draws it"
+@def mutable struct HTMLBlock <: SemanticUI
+  page::Any = nothing                    # what web/ made of the HTML, or nothing when it couldn't
+  want::Any = nothing                    # what it was laid out for: the HTML, the CSS, the width, the page and the pictures that had come
+  store::Any = nothing                   # its pictures that are read already
+  waiting::Set{String} = Set{String}()   # the addresses of its pictures that are on their way from the web
+  arrived::Int = 0                       # how many of them have come, or couldn't be fetched
+  said::Bool = false                     # its tooltip shows, with where a link goes
+end
+
+describe(v::HTMLBlock) = Box(width(grow=grow), height(v.page === nothing ? 0px : px(v.page.tall)))
+
+draw(ctx, size, ui::ConcreteRect, v::HTMLBlock) = (v.page === nothing || Web.draw(ctx, v.page; x=num(ui.left), y=num(ui.top)); nothing)
+
+"The address that the HTML of the page names its pictures and links from: the page's own"
+html_base(e) = begin
+  path = e.buf.path
+  isremote(path) && return path
+  path = isempty(path) ? joinpath(docdir(e), "page.md") : abspath(path)
+  "file://" * replace(path, '%' => "%25", ' ' => "%20", '#' => "%23", '?' => "%3F")
+end
+
+"The file of Ladder's own at the address `src`, or nothing. A page from a web server reads no other file."
+html_file(e, src) = begin
+  path = Remote.unescaped(replace(src, r"^file://"i => ""))
+  (path in LADDER_FONT_FILES || !isremote(e.buf.path)) ? path : nothing
+end
+
+"""
+The bytes of the file at the address `src` that the HTML names, like a
+picture, or nothing while it's on its way from the web. A window that isn't on
+the screen fetches nothing.
+"""
+html_bytes(e, v::HTMLBlock, src) = begin
+  if startswith(src, r"https?://"i)
+    url = replace(src, ' ' => "%20")
+    (on_screen(e) || haskey(fetches, url)) || return nothing
+    file = fetched(e, url)
+    if file === nothing
+      get(fetches, url, nothing) isa Base.Process && push!(v.waiting, url)
+      return nothing
+    end
+    return try read(file) catch; nothing end
+  end
+  startswith(src, r"file:"i) || return nothing
+  path = html_file(e, src)
+  path !== nothing && isfile(path) ? (try read(path) catch; nothing end) : nothing
+end
+
+"Note which of the pictures of the HTML have come from the web, so that it's laid out again with them"
+html_arrivals!(e, v::HTMLBlock) = begin
+  for url in collect(v.waiting)
+    fetched(e, url)   # this looks whether the picture has come, and asks for another frame while it hasn't
+    get(fetches, url, nothing) isa Base.Process && continue
+    delete!(v.waiting, url)
+    v.arrived += 1
+  end
+end
+
+# Each family of a font whose files are in Ladder's fonts folder, like Literata, with its files. web/ finds no font that
+# Ladder reads from a file, so the HTML's CSS names these files.
+const LADDER_FONT_FILES = Set{String}()
+const LADDER_FACES = Dict{String,String}()
+
+"The @font-face rules of `family` when its files are in Ladder's fonts folder, or \"\" for a font of the Mac"
+font_faces(family::AbstractString) = get!(LADDER_FACES, family) do
+  dir = joinpath(@__DIR__, "fonts")
+  rules = String[]
+  for name in (isdir(dir) ? readdir(dir) : String[])
+    m = match(r"^(.+)-([A-Za-z]+)\.(?:ttf|otf)$", name)
+    (m === nothing || m[1] != family) && continue
+    style = String(m[2])
+    italic = endswith(style, "Italic")
+    w = replace(style, "Italic" => "")
+    weight = isempty(w) || w == "Regular" ? 400 : weight_of(w)
+    path = joinpath(dir, name)
+    push!(LADDER_FONT_FILES, path)
+    push!(rules, "@font-face { font-family: \"$family\"; font-weight: $weight; font-style: $(italic ? "italic" : "normal"); " *
+                 "src: url(\"file://$(replace(path, ' ' => "%20"))\") }")
+  end
+  join(rules, "\n")
+end
+
+"The CSS that gives HTML the look of the page's text: its font, its colours and its headings"
+html_css(e) = begin
+  f = body(e)
+  site = e.look == :site
+  sizes = site ? SITE_HEADINGS : HEADINGS
+  # The weights of the page's text and of its headings, as the settings choose them. A blog's site has its headings a little lighter than bold.
+  w = site ? 400 : nearest_weight(e.font, e.weight).weight
+  heavy = site ? 600 : w >= 700 ? w : bolder(w)
+  """
+  $(font_faces(f.family))
+  html, body { margin: 0; padding: 0; background: transparent }
+  body { display: flow-root; font-family: "$(f.family)"; font-size: $(num(f.size))px; font-weight: $w; line-height: 1.65; color: $(css_colour(f.color)) }
+  h1, h2, h3, h4, h5, h6, b, strong, th { font-weight: $heavy }
+  h1, h2, h3, h4, h5, h6 { line-height: 1.35; margin: 0.4em 0 0.2em }
+  $(join(("h$k { font-size: $(sizes[k])em }" for k in 1:6), "\n"))
+  a { color: $(css_colour(colours.accent)); text-decoration: none }
+  img, video, svg { max-width: 100% }
+  code, pre, kbd, samp { font-family: "$(codefont())"; font-size: $(CODE_SCALE)em }
+  body > :first-child { margin-top: 0 }
+  body > :last-child { margin-bottom: 0 }
+  """
+end
+
+"What the HTML on lines `s` to `t` of the page shows, or nothing when web/ can't draw it"
+html_item(e, s::Int, t::Int) = begin
+  b = e.buf
+  source = join(view(b.lines, s:t), '\n')
+  v = node!(HTMLBlock, e, (:html_lines, source))
+  own!(node!(Document, e, :document), v)
+  html_arrivals!(e, v)
+  want = (round(Int, num(e.width)), html_css(e), b.path, v.arrived)
+  if v.want != want
+    if v.store === nothing
+      v.store = Web.Pictures(src -> html_bytes(e, v, src))
+    elseif v.want !== nothing && v.want[4] != v.arrived
+      Web.retry!(v.store)   # a picture that wasn't here may be now
+    end
+    v.page = try
+      Web.page(source; wide=want[1], css=want[2], pictures=v.store, base=html_base(e))
+    catch err
+      @debug "Ladder couldn't draw the HTML of a page" exception=err
+      nothing
+    end
+    v.want = want
+  end
+  v.page === nothing ? nothing : Live(v, px(v.page.tall) + 2LIVE_GAP)
+end
+
+"The link of the HTML that the mouse is over, as `Web.link` gives it, and its rectangle in the window, or nothing"
+html_link(v::HTMLBlock) = begin
+  w = window_of(v)
+  (w === nothing || v.page === nothing) && return nothing
+  r = rect(v)
+  l = Web.link(v.page, num(w.mouse[1] - r.left), num(w.mouse[2] - r.top))
+  l === nothing ? nothing : (url=l.url, box=(r.left + px(l.left), r.top + px(l.top), px(l.wide), px(l.tall)))
+end
+
+"Follow the link `url` of the HTML of the page, as a link of the page's text goes"
+html_follow!(e, url) = startswith(url, r"file:"i) ? (path = html_file(e, url); path === nothing ? e : follow!(e, path)) : follow!(e, url)
+
+cursor(v::HTMLBlock) = html_link(v) === nothing ? :arrow : :hand
+
+# The mouse over a link says where the link goes
+onmouse(v::HTMLBlock, ev::MouseMove) = begin
+  l = html_link(v)
+  if l !== nothing
+    show_tooltip!(ev.window, tip_label(sent_address(l.url)), l.box..., placement=:bottom, gap=6px)
+  elseif v.said
+    hide_tooltip!(ev.window)
+  end
+  v.said = l !== nothing
+  nothing
+end
+
+# A click on a link with ⌘ held follows it, as a click on a link of the text does. In a page that's never changed, a
+# click with no key held follows it too. Any other click goes to the page, which selects the HTML as a whole.
+onkey(v::HTMLBlock, ev::KeyPress{Keys.mouse_left}) = begin
+  e, l = editor(v), html_link(v)
+  (l !== nothing && (only_held(e, Keys.cmd) || (e.buf.fixed && only_held(e, Keys(0))))) || return click_page!(v, ev)
+  html_follow!(e, l.url)
+  handled
 end
 
 # --- video and sound from the web --------------------------------------------------------

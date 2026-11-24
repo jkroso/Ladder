@@ -120,6 +120,7 @@ Exit code 3 means that Ladder is not installed, or that it is too old to send a 
 | Maths | TeX between dollar signs: `$x^2$` in a line of text, and on lines of its own between a line of `$$` and another. A dollar sign before a number, like `$5`, stays a dollar sign. |
 | A picture | `![what it shows](picture.png)` on a line of its own. The path starts at the page's folder. A web address works too. |
 | A picture across the top of the page | `cover: picture.png` in the front matter: the lines between two lines of `---` at the very top of the file. |
+| HTML that Markdown has no form for, like a heading in the middle of the page | HTML on lines of its own, with an empty line before and after it, like `<h2 style="text-align: center">Plans</h2>` or `<img src="plan.png" width="300">`. Ladder draws it in the page's font and colours. A picture's path starts at the page's folder. No script runs. HTML inside a line of text shows as it's written. |
 | A video or a sound | `![what it is](walk.mov)` on a line of its own, as for a picture. `walk.mov#t=61,86` plays only from second 61 to second 86. |
 | Several pictures or files as a grid | A `gallery` code block. See below. |
 | A web page as a card, with its title, its description and its picture | `![what it is](https://julialang.org)` on a line of its own. Ladder gets the page. An address that ends as a picture's does, like `.png`, shows the picture. A bare address stays text. |

@@ -59,6 +59,10 @@ A line that holds only a video file shows a player for it, like `![The kitchen](
 
 To play a video or a sound faster or slower, move the mouse over its player, and click the small 1× circle on the player's bottom edge. The circle also shows while the file plays. Each click goes to the next speed: 1½×, 2×, ½×, then 1× again. Once you've clicked a player, < and > change the speed by a quarter at a time, the space bar plays and stops, and ← and → go back and on by 5 seconds.
 
+Markdown can have HTML on lines of its own, and the page shows it as a browser does, in the page's own font and colours. The heading under this paragraph is written as `<h3 style="text-align: center">`. To see its HTML, press ⌘E and move the caret onto it. A picture in HTML, like `<img src="plan.png" width="300">`, is named from the page's folder. HTML in a line of text, like `<b>`, shows as it's written, and no script in the HTML runs.
+
+<h3 style="text-align: center">A heading in the middle of the page</h3>
+
 ## Parts of other pages
 
 A wiki link with a ! before it, on a line of its own, shows a part of another page. This part is the list of tasks from the page schedule.md:
