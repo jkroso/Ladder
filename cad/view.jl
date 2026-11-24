@@ -32,8 +32,16 @@
 # colours of a code block. It has the units of Units.jl, `deg` for a degree,
 # and each parameter of the design by its name, like `d1`. ⌘Return runs the
 # code of the field that has the keyboard, or the part of it that's selected,
-# and shows what it comes to under the field, as it does in a Julia file.
+# and shows what it comes to, as it does in a Julia file.
 # expressions.jl says what SolidCraft gets for the code.
+#
+# In Ladder, each field to type in is Ladder's own editor of text, as a page
+# is: its selection, its caret and its keys are a page's, and what ⌘Return
+# shows is the box that a Julia file shows, after the code. Ladder gives the
+# fields through `FIELD`. Without it, a field is a TextInput, and what
+# ⌘Return shows is under the field. The panel at the right is wider while
+# the text of one of its fields needs the room, up to half the design. A
+# longer text goes on to another line in the field.
 #
 # Two clicks on a sketch, in the browser or the history, open it. The toolbar
 # then has the sketch's tools. A tool takes clicks in the sketch, and snaps to
@@ -61,10 +69,11 @@
 @use "github.com/jkroso/Font.jl" ["units" px]
 @use "github.com/jkroso/UI.jl/Interface/Geometric"...
 @use "github.com/jkroso/UI.jl/Interface/Specific"...
-@use "github.com/jkroso/UI.jl/Interface/abstract" SemanticUI WrapMode describe focus theme handled window_of
+@use "github.com/jkroso/UI.jl/Interface/abstract" SemanticUI WrapMode describe focus theme handled window_of scale
 @use "github.com/jkroso/UI.jl/Interface/draw" draw cursor rect redraw_in! MouseScroll Pinch onpinch ishovered popup! close_popup! show_tooltip! hide_tooltip! hittest
 @use "github.com/jkroso/UI.jl/Interface/image" register_image has_image
 @use "github.com/jkroso/UI.jl/Interface/Semantic/TextInput" TextInput
+@use "github.com/jkroso/UI.jl/Interface/Semantic/TextInput" => TextInputs
 @use Colors: Colorant, RGBA, RGB, @colorant_str, red, green, blue
 @use Skia
 @use "./json" => JSON
@@ -308,9 +317,51 @@ end
 
 card!(look, v::DesignView, key) = (c = part!(Card, v, key); c.look = look; c)
 
+"""
+What makes a field to type in, when Ladder gives one: `FIELD[](v, text,
+placeholder, code)` gives a node whose text Ladder edits as it does a page's,
+and with `code`, as a file of Julia code. It has methods of `text_of`,
+`set_text!`, `select_all!`, `iscode`, `run_field!`, `wants` and `room!`.
+Without one, a field is a TextInput.
+"""
+const FIELD = Ref{Any}(nothing)
+
+"How big the text of a field is, before the theme makes it bigger or smaller"
+const FIELD_TEXT = 12px
+
+"How big the text of the field `box` is, in its theme"
+field_size(box) = FIELD_TEXT * scale(theme(box))
+
 "A field to type in, kept under `key`. `text` is what it holds when it's first shown."
-input!(v::DesignView, key; text="", placeholder="") =
-  part!(() -> TextInput(text=String(text), cursor=length(text), anchor=length(text), placeholder=placeholder, font_size=12px), v, key)
+input!(v::DesignView, key; text="", placeholder="") = part!(() -> new_field(v, text, placeholder, false), v, key)
+
+new_field(v, text, placeholder, code) =
+  FIELD[] !== nothing ? FIELD[](v, String(text), String(placeholder), code) :
+  TextInput(text=String(text), cursor=length(text), anchor=length(text), placeholder=placeholder, font_size=FIELD_TEXT)
+
+"The text that the field `box` holds"
+text_of(box::TextInput) = box.text
+
+"Make the field `box` hold `text`, with the caret after it"
+set_text!(box::TextInput, text) = (box.text = String(text); box.cursor = box.anchor = length(box.text); box)
+
+"Select all the text of the field `box`"
+select_all!(box::TextInput) = ((box.anchor, box.cursor) = (0, length(box.text)); box)
+
+"The field that `node` is part of, for a node that has the keyboard. Ladder's editor of a field's text is part of the field."
+keyed(node) = node
+
+"True when the field `box` has the keyboard of the window `w`"
+has_keys(w, box) = w !== nothing && keyed(w.focus) === box
+
+"How wide the field `box` needs to be to show its whole text, with its padding and border"
+wants(box::TextInput) = num(TextInputs.width_to(box, length(box.text))) + 2 * 8 * scale(theme(box)) + 2 + 3
+
+"Tell the field `box` how wide it is in the panel, before it's laid out"
+room!(box, wide) = box
+
+"What shows under the field `box` besides what `outcome` shows, or nothing"
+under(box) = nothing
 
 "Forget the fields to type in whose key starts with `kind`, so that they show their first text again"
 forget!(v::DesignView, kind) = filter!(p -> !(p.first isa Tuple && !isempty(p.first) && p.first[1] == kind), v.parts)
@@ -332,7 +383,8 @@ code_look(v) = CODE_LOOK[] !== nothing ? CODE_LOOK[]() : (dark(theme(v)) ? DARK_
 
 "A field of Julia code, kept under `key`, in the colours of code. `text` is what it holds when it's first shown."
 code!(v::DesignView, key; text="", placeholder="") = begin
-  box = input!(v, key; text, placeholder)
+  box = part!(() -> new_field(v, text, placeholder, true), v, key)
+  box isa TextInput || return box
   colours, family = code_look(v)
   box.colours = code -> Expressions.pieces(code, colours)
   box.font_family = family
@@ -388,11 +440,12 @@ end
 outcomes(v::DesignView) = get!(IdDict{Any,Any}, v.parts, :outcomes)
 
 "Show `words` under the field `box` in red, till its text changes"
-wrong!(v::DesignView, box, words) = (outcomes(v)[box] = (text=box.text, shown=String(words), failed=true); v)
+wrong!(v::DesignView, box, words) = (outcomes(v)[box] = (text=text_of(box), shown=String(words), failed=true); v)
 
 """
 Run the code of the field `box`, or the part of it that's selected, as
-⌘Return does in a Julia file. What it comes to shows under the field.
+⌘Return does in a Julia file. What it comes to shows under the field. A
+field that Ladder gives shows it after the code, as a Julia file does.
 """
 run_field!(v::DesignView, box::TextInput) = begin
   lo, hi = minmax(box.anchor, box.cursor)
@@ -411,7 +464,7 @@ red. It's nothing when there's none.
 """
 outcome(v::DesignView, box) = begin
   o = get(outcomes(v), box, nothing)
-  (o === nothing || o.text != box.text) && return nothing
+  (o === nothing || o.text != text_of(box)) && return nothing
   t = theme(v)
   colours, family = code_look(v)
   look = (radius(5px), border(1px, :solid, o.failed ? Ink.faded(WRONG, 0.45) : t.line), background(Ink.mixed(t.surface, colorant"black", dark(t) ? 0.2 : 0.03)))
@@ -423,7 +476,7 @@ end
 "A row of a form for a field of code: what it asks for, the field, and what ⌘Return showed under the field"
 code_row(v::DesignView, label, box) = begin
   row = labelled(v, label, box)
-  shown = outcome(v, box)
+  shown = something(outcome(v, box), Some(under(box)))
   shown === nothing && return row
   Column(width(grow=grow), child_gap=4px, Alignment.Start, row,
     Row(width(grow=grow), child_gap=8px, justify=Alignment.Start, Box(width(LABEL_W)), Row(width(grow=grow), justify=Alignment.Start, clip_x=true, shown)))
@@ -994,7 +1047,8 @@ it. When `done` gives words, they say what's wrong, and the field stays.
 ask!(v::DesignView, window, under, text, done; width=200px, code=false) = begin
   forget!(v, :ask)
   field = code ? code!(v, (:ask, time()); text) : input!(v, (:ask, time()); text)
-  field.anchor, field.cursor = 0, length(text)
+  select_all!(field)
+  room!(field, width - 12px)   # inside the popup's padding
   t = theme(v)
   asker = Asker(field=field, done=done, of=v)
   popup!(window, asker, anchor=under === nothing ? window.mouse : under, gap=4px, width=width, key=:ask, theme=t)
@@ -1010,14 +1064,14 @@ end
 end
 describe(a::Asker) = begin
   t = theme(a)
-  shown = a.of isa DesignView ? outcome(a.of, a.field) : nothing
+  shown = a.of isa DesignView ? something(outcome(a.of, a.field), Some(under(a.field))) : nothing
   Box(width(grow=grow), padding(6px), radius(8px), background(t.surface), border(1px, :solid, t.accent), shadow(0, 4, 14, RGBA(0, 0, 0, 0.3)),
       shown === nothing ? a.field : Column(width(grow=grow), child_gap=5px, Alignment.Start, a.field, shown))
 end
 onkey(a::Asker, e::KeyPress{Keys.enter}) = begin
   # ⌘Return runs the code, and the field stays
   iscode(a.field) && held_keys(e.window) == (true, false, false, false) && return (run_field!(a.of, a.field); handled)
-  text = strip(a.field.text)
+  text = strip(text_of(a.field))
   said = isempty(text) ? nothing : a.done(String(text))
   said isa String && return (wrong!(a.of, a.field, said); handled)
   close_popup!(e.window, :ask)
@@ -1331,7 +1385,7 @@ held(v::DesignView, f::Form) = begin
   for field in f.spec.fields
     (Commands.picks(field) || field.kind in (:flag, :choice)) && continue
     box = get(v.parts, (:field, f.spec.command, field.key), nothing)
-    values[field.key] = box === nothing ? field.default : box.text
+    values[field.key] = box === nothing ? field.default : text_of(box)
   end
   values
 end
@@ -1351,10 +1405,10 @@ request(v::DesignView, f::Form) = begin
     for input in f.inputs
       param = String(input["param"])
       box = get(v.parts, (:field, "step", param), nothing)
-      (box === nothing || isempty(strip(box.text)) || strip(box.text) == strip(String(get(input, "code", input["expression"])))) && continue
+      (box === nothing || isempty(strip(text_of(box))) || strip(text_of(box)) == strip(String(get(input, "code", input["expression"])))) && continue
       kind = unit_kind(get(input, "unit", ""))
-      kind == :text && (changes[param] = String(strip(box.text)); continue)
-      r = read_code(v, box.text, kind, String(get(input, "label", param)))
+      kind == :text && (changes[param] = String(strip(text_of(box))); continue)
+      r = read_code(v, text_of(box), kind, String(get(input, "label", param)))
       r isa String && return r
       changes[param] = r.sent
       readings[param] = r
@@ -1475,17 +1529,45 @@ end
 
 # --- the panel at the right ----------------------------------------------------------
 
-const SIDE_W = 272px
+const SIDE_W = 272px     # how wide the panel is, unless the text of a field in it needs more room
 const LABEL_W = 98px
 const FIELD_H = 28px
+const SIDE_PAD = 24px    # of the panel's width, what's beside its rows: their padding at the left and the right
+const LABELLED = SIDE_PAD + LABEL_W + 8px   # of the panel's width, what's beside a field in a row that `labelled` makes
 
 side(v::DesignView) = v.panel == :params ? (params_card(v),) : v.form !== nothing ? (form_card(v),) : sketch(v) !== nothing ? (sketch_card(v),) : ()
 
-"The panel at the right, as SolidCraft's forms are: a line with its name, its rows, and under them a band with its buttons"
-side_card(v::DesignView, key, icon, title, close, rows...; foot=()) = begin
+"Is `x` a field to type in?"
+isfield(x) = x isa TextInput
+
+"""
+How wide the panel at the right is, for the fields in `fields`: pairs of a
+field and how much of the panel's width is beside it. It's as wide as the
+field that needs the most room needs, but never narrower than `SIDE_W` or
+wider than half the design. Each field is told how wide it is, so a field
+whose text is longer than that goes on to another line. A field is laid out
+as soon as it's put in a row, so a panel calls this before it makes its rows,
+and again after, for the fields that it made.
+"""
+side_width!(v::DesignView, fields) = begin
+  most = max(num(SIDE_W), v.area[3] / 2)
+  # A little more, for the scrollbar of a form that's taller than its room
+  wide = clamp(maximum((wants(box) + num(beside) + 4 for (box, beside) in fields); init=0.0), num(SIDE_W), most)
+  for (box, beside) in fields
+    room!(box, px(wide - num(beside) - 4))
+  end
+  v.parts[:side_w] = wide
+  px(wide)
+end
+
+"How wide the panel at the right was when it was last shown"
+side_w(v::DesignView) = px(get(v.parts, :side_w, num(SIDE_W)))
+
+"The panel at the right, as SolidCraft's forms are: a line with its name, its rows, and under them a band with its buttons. It's `wide` across."
+side_card(v::DesignView, key, icon, title, close, rows...; foot=(), wide=SIDE_W) = begin
   t = theme(v)
   card!(v, key) do
-    Column(width(SIDE_W), panel_look(t)..., clip=true, Alignment.Start,
+    Column(width(wide), panel_look(t)..., clip=true, Alignment.Start,
       Row(width(grow=grow), height(40px), padding(0px, 6px, 0px, 12px), child_gap=8px, border(1px, :solid, Ink.faded(t.line, 0.7))[:bottom],
         Glyph(icon, size=17px), Box(words(title, 13.5px, weight="Semibold")), Box(width(grow=grow)),
         (close === nothing ? () : (icon_button(v, (key, :close), "x-lg", "Close"; act=close, size=12px),))...),
@@ -1606,6 +1688,8 @@ form_card(v::DesignView) = begin
   t = theme(v)
   f = v.form
   m = v.model
+  # Each field is laid out as it's put in its row, so it's told how wide it is first. A field that's new is told at the end.
+  side_width!(v, form_fields(v, f))
   rows = Any[]
   parts = Dict{String,Vector{Any}}()
   if f.step === nothing
@@ -1648,7 +1732,25 @@ form_card(v::DesignView) = begin
   push!(foot, Row(width(grow=grow), justify=Alignment.End, child_gap=8px,
     word_button(v, (:form, :cancel), "Cancel"; act=e -> (v.form = nothing)),
     word_button(v, (:form, :ok), "OK"; act=e -> apply!(v), strong=true, faint=!ready, tip="Return")))
-  side_card(v, :form, f.spec.icon, f.spec.title, e -> (v.form = nothing), rows...; foot)
+  side_card(v, :form, f.spec.icon, f.spec.title, e -> (v.form = nothing), rows...; foot, wide=side_width!(v, form_fields(v, f)))
+end
+
+"The fields to type in that the form `f` shows, each with how much of the panel's width is beside it"
+form_fields(v::DesignView, f::Form) = begin
+  out = Pair{Any,Any}[]
+  if f.step === nothing
+    for field in f.spec.fields
+      Commands.section(field) in f.closed && continue
+      box = get(v.parts, (:field, f.spec.command, field.key), nothing)
+      isfield(box) && push!(out, box => (field.kind == :json ? SIDE_PAD : LABELLED))
+    end
+  else
+    for input in f.inputs
+      box = get(v.parts, (:field, "step", String(input["param"])), nothing)
+      isfield(box) && push!(out, box => LABELLED)
+    end
+  end
+  out
 end
 
 "What the panel says of how far the sketch is held by its constraints, and how much of it is: from 0 to 1"
@@ -1665,17 +1767,15 @@ sketch_card(v::DesignView) = begin
   t = theme(v)
   s = sketch(v)
   says, colour, share = held_words(s)
-  wide = num(SIDE_W) - 24
-  rows = Any[
-    Column(width(grow=grow), child_gap=6px, Alignment.Start, Box(words(says, 12px)),
-      Row(width(grow=grow), height(4px), radius(2px), background(Ink.faded(t.line, 0.9)), justify=Alignment.Start, Box(width(px(max(wide * share, 4.0))), height(4px), radius(2px), background(colour))))]
   tool = v.tool
+  side_width!(v, tool_fields(v, tool))   # before the fields are laid out in their rows
+  rows = Any[]
   if tool isa Commands.Tool
     push!(rows, Box(width(grow=grow), Alignment.Start, Text(command_label(v, tool.command) * ": " * tool_hint(v, tool), size=11.5px, color=t.dim)))
     for field in tool.fields
       key = (:toolfield, tool.command, field.key)
-      push!(rows, Commands.iscode(field) ? code_row(v, field.label, code!(v, key; text=Expressions.julia_code(String(field.default)))) :
-                                          labelled(v, field.label, input!(v, key; text=String(field.default))))
+      box = Commands.iscode(field) ? code!(v, key; text=Expressions.julia_code(String(field.default))) : input!(v, key; text=String(field.default))
+      push!(rows, Commands.iscode(field) ? code_row(v, field.label, box) : labelled(v, field.label, box))
     end
   elseif tool isa Symbol
     hint = tool == :dimension ? "click what to measure, then where its length goes" : tool == :trim ? "click the piece of a line to cut away" :
@@ -1692,7 +1792,20 @@ sketch_card(v::DesignView) = begin
   push!(rows, Row(width(grow=grow), child_gap=8px,
     word_button(v, (:sketch, :look), "Look At"; act=e -> look_at!(v, s), wide=true, tip="Look straight at the sketch"),
     word_button(v, (:sketch, :slice), "Slice"; act=e -> (v.slice = !v.slice), wide=true, on=v.slice, tip="Hide the part of each body that's in front of the sketch")))
-  side_card(v, :sketch_card, "sketch", String(get(s, "name", "Sketch")), nothing, rows...)
+  # The bar under the words is as long as the panel's room, and its colour is as long as the share of the sketch that's held
+  wide = side_width!(v, tool_fields(v, tool))
+  room = num(wide - SIDE_PAD)
+  pushfirst!(rows, Column(width(grow=grow), child_gap=6px, Alignment.Start, Box(words(says, 12px)),
+    Row(width(grow=grow), height(4px), radius(2px), background(Ink.faded(t.line, 0.9)), justify=Alignment.Start,
+      Box(width(px(max(room * share, 4.0))), height(4px), radius(2px), background(colour)))))
+  side_card(v, :sketch_card, "sketch", String(get(s, "name", "Sketch")), nothing, rows...; wide)
+end
+
+"The fields of the sketch's tool `tool` that the panel has made, each with how much of the panel's width is beside it"
+tool_fields(v::DesignView, tool) = begin
+  tool isa Commands.Tool || return Pair{Any,Any}[]
+  boxes = (get(v.parts, (:toolfield, tool.command, field.key), nothing) for field in tool.fields)
+  Pair{Any,Any}[box => LABELLED for box in boxes if isfield(box)]
 end
 
 "What a tool asks for next"
@@ -1707,6 +1820,7 @@ params_card(v::DesignView) = begin
   t = theme(v)
   m = v.model
   list = sort(Designs.params(m), by=p -> get(p, "model", false) === true)
+  side_width!(v, param_fields(v, list))   # before the fields are laid out in their rows
   rows = Any[]
   for p in list
     name = String(p["name"])
@@ -1716,27 +1830,40 @@ params_card(v::DesignView) = begin
     box = plain ? input!(v, (:param, name); text) : code!(v, (:param, name); text)
     # A field that isn't being typed in follows the design
     w = part_window(v)
-    (w === nothing || w.focus !== box) && get(v.parts, (:param_at, name), "") != text &&
-      (box.text = text; box.cursor = box.anchor = length(box.text); v.parts[(:param_at, name)] = text)
+    !has_keys(w, box) && get(v.parts, (:param_at, name), "") != text && (set_text!(box, text); v.parts[(:param_at, name)] = text)
     wrong = get(p, "error", nothing) isa String
     value = p["value"] isa Number ? Sketching.fixed(p["value"]) * " " * String(get(p, "unit", "")) : ""
-    push!(rows, Row(width(grow=grow), height(28px), child_gap=6px,
+    push!(rows, Row(width(grow=grow), height(min=28px), child_gap=6px,
       Row(width(74px), justify=Alignment.Start, clip_x=true, words(name, 12px, color=get(p, "model", false) === true ? t.dim : t.text)),
       Box(width(grow=grow), box),
       Row(width(64px), justify=Alignment.End, clip_x=true, words(wrong ? "error" : value, 11px, color=wrong ? WRONG : t.dim))))
-    shown = outcome(v, box)
+    shown = something(outcome(v, box), Some(under(box)))
     shown === nothing || push!(rows, Row(width(grow=grow), padding(0px, 0px, 4px, 80px), justify=Alignment.Start, clip_x=true, shown))
   end
   added = code!(v, (:newparam, :value); placeholder="10mm")
-  below = outcome(v, added)
+  below = something(outcome(v, added), Some(under(added)))
   tall = min(max(120.0, v.area[4] - 360), length(rows) * 30.0 + 4)
-  side_card(v, :params, "params", "Parameters", e -> (v.panel = :none),
+  side_card(v, :params, "params", "Parameters", e -> (v.panel = :none), wide=side_width!(v, param_fields(v, list)),
     Scroll(width(grow=grow), height(px(tall)), key=:params, Column(width(grow=grow), child_gap=2px, Alignment.Start, rows...)),
     Row(width(grow=grow), child_gap=6px, padding(4px, 0px, 0px, 0px),
-      Box(width(86px), input!(v, (:newparam, :name); placeholder="name")),
+      Box(width(86px), room!(input!(v, (:newparam, :name); placeholder="name"), 86px)),
       Box(width(grow=grow), added),
       word_button(v, (:newparam, :add), "Add"; act=e -> add_param!(v))),
     (below === nothing ? () : (Row(width(grow=grow), padding(0px, 0px, 0px, 92px), justify=Alignment.Start, clip_x=true, below),))...)
+end
+
+const ADD_W = 52px   # how wide the Add button under the parameters is
+
+"The fields of the parameters in `list` that the panel of parameters has made, and the field of a new one's value, each with how much of the panel's width is beside it"
+param_fields(v::DesignView, list) = begin
+  out = Pair{Any,Any}[]
+  for p in list
+    box = get(v.parts, (:param, String(p["name"])), nothing)
+    isfield(box) && push!(out, box => SIDE_PAD + 74px + 64px + 12px)
+  end
+  added = get(v.parts, (:newparam, :value), nothing)
+  isfield(added) && push!(out, added => SIDE_PAD + 86px + 12px + ADD_W)
+  out
 end
 
 "The window that `v` is in, or nothing"
@@ -1745,9 +1872,9 @@ part_window(v::DesignView) = window_of(v)
 "Add the parameter that's typed under the list. Its value is Julia code, as SolidCraft keeps it best: see `agree!`."
 add_param!(v::DesignView) = begin
   name, value = v.parts[(:newparam, :name)], v.parts[(:newparam, :value)]
-  (isempty(strip(name.text)) || isempty(strip(value.text))) && return v
-  called = String(strip(name.text))
-  r = read_code(v, value.text, :number, called)
+  (isempty(strip(text_of(name))) || isempty(strip(text_of(value)))) && return v
+  called = String(strip(text_of(name)))
+  r = read_code(v, text_of(value), :number, called)
   r isa String && return wrong!(v, value, r)
   agree!(v, Dict(called => r)) do agreed
     got = given(r, called in agreed)
@@ -1755,8 +1882,8 @@ add_param!(v::DesignView) = begin
     got == r.code || (params["comment"] = Expressions.comment(r.code, got))
     Designs.change!(v.model, "parameters.add", params)
   end
-  name.text = value.text = ""
-  name.cursor = name.anchor = value.cursor = value.anchor = 0
+  set_text!(name, "")
+  set_text!(value, "")
   v
 end
 
@@ -1770,7 +1897,7 @@ commit!(v::DesignView, box) = begin
     node === box || continue
     key isa Tuple || continue
     if key[1] == :param
-      said = set_param!(v, key[2], box.text)
+      said = set_param!(v, key[2], text_of(box))
       return said isa String ? (wrong!(v, box, said); :wrong) : v
     end
     key[1] == :newparam && return add_param!(v)
@@ -2366,7 +2493,7 @@ draw_axes(ctx, v::DesignView, t) = begin
   bar = get(v.parts, :ribbon, nothing)
   r = bar === nothing ? nothing : rect(bar)
   top = r === nothing ? v.area[2] + 150 : num(r.top) + num(r.height) + 64
-  beside = isempty(side(v)) ? 0.0 : num(SIDE_W) + 8
+  beside = isempty(side(v)) ? 0.0 : num(side_w(v)) + 8
   cx, cy = v.area[1] + v.area[3] - 70 - beside, top
   reach = 34.0
   Ink.circle(ctx, (cx, cy), reach + 18, Ink.faded(t.surface, 0.35))
@@ -2589,7 +2716,7 @@ finish_tool!(v::DesignView) = begin
   end
   for field in tool.fields
     box = get(v.parts, (:toolfield, tool.command, field.key), nothing)
-    text = box === nothing ? String(field.default) : box.text
+    text = box === nothing ? String(field.default) : text_of(box)
     Commands.iscode(field) || (params[field.key] = Commands.value(text); continue)
     r = read_code(v, box === nothing ? Expressions.julia_code(text) : text, field.kind, field.label)
     r === nothing && continue
@@ -2839,10 +2966,10 @@ end
 
 onkey(v::DesignView, e::KeyPress{Keys.enter}) = begin
   v.readonly && return nothing
-  box = e.window.focus
+  box = keyed(e.window.focus)
   # ⌘Return runs the code of a field, as it does in a Julia file
   iscode(box) && held_keys(e.window) == (true, false, false, false) && return (run_field!(v, box); handled)
-  done = box isa TextInput ? commit!(v, box) : nothing
+  done = commit!(v, box)
   done === :wrong && return handled
   done === nothing || return (focus(v); handled)
   if v.tool isa Commands.Tool && v.tool.clicks == ["points"] && !isempty(v.clicks)

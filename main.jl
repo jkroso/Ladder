@@ -324,7 +324,7 @@
 @use "github.com/jkroso/UI.jl/Interface/Geometric"...
 @use "github.com/jkroso/UI.jl/Interface/Specific"...
 @use "github.com/jkroso/UI.jl/Interface/Specific" skia_cap_height
-@use "github.com/jkroso/UI.jl/Interface/abstract" tabstop tabbed!
+@use "github.com/jkroso/UI.jl/Interface/abstract" tabstop tabbed! USUAL_PX
 @use "github.com/jkroso/UI.jl/Interface/draw" scene
 @use "github.com/jkroso/UI.jl/Interface/abstract" SemanticUI GeometricUI WrapMode Theme with_theme adopt_theme! light describe describe! reuse! detach! add_child! window_of focus handled carry! inputs version
 @use "github.com/jkroso/UI.jl/Interface/draw" ui draw ishovered cursor open_url viewport show_tooltip! hide_tooltip! hittest show_menu! hide_menu! redraw_in! rect popup! close_popup! MouseScroll Pinch onpinch Changed onchanged placed! with_clip with_round_clip clipboard!
@@ -413,7 +413,7 @@ end
 @use "./folders" => Folders
 @use "./blog" => Blogs
 @use "github.com/jkroso/UI.jl/Interface/draw" Bubble
-@use "github.com/jkroso/UI.jl/Interface/draw" popups sync_mouse! popup_at
+@use "github.com/jkroso/UI.jl/Interface/draw" popups sync_mouse! popup_at tab!
 @use "github.com/jkroso/UI.jl/Interface/draw" set_tool! window_tool draw_tool draw_tool_under tool_input tool_cursor invalidate_layout!
 @use "github.com/jkroso/URI.jl/FSPath" FSPath
 @use "github.com/jkroso/URI.jl/FS" => FS FSObject AbstractDirectory
@@ -884,6 +884,8 @@ Base.@kwdef mutable struct Buffer
   # code that you change, which is one block of code. Any other file is only shown: :text shows
   # its text, :hex shows its bytes in hexadecimal, :bits shows them as bits, and :file shows a viewer of its kind.
   view::Symbol = :markdown
+  # The language of a file of code that has no file, like Julia for a field of code. "" takes it from the file's name.
+  lang::String = ""
   # True for a page that's read, and never changed or written: an email, or a file that the Mac marks as
   # read-only. The lines of an email are the email as a page, which mail.jl makes from the file: the file
   # holds the email as the server sent it.
@@ -1008,7 +1010,7 @@ file_lang(path) = (ext = lowercase(splitext(path)[2]); isempty(ext) ? lowercase(
 kinds(b::Buffer) = begin
   if b.kinds_at != b.version && b.view != :markdown
     # Each line of a file that isn't Markdown is a line of code, in the language that the file's name gives
-    lang = b.view == :hex ? HEX : b.view == :bits ? BITS : file_lang(b.path)
+    lang = b.view == :hex ? HEX : b.view == :bits ? BITS : isempty(b.lang) ? file_lang(b.path) : b.lang
     b.kinds = fill(Line(Kind.code, 0, 0, lang), length(b.lines))
     b.kinds_at = b.version
   elseif b.kinds_at != b.version
@@ -30012,6 +30014,9 @@ onkey(e::Editor, ev::KeyPress{K}) where K = begin
   hosted(e) === nothing || !part_key!(e, w, K, command, select) || return handled
   # In the text of a request in place, Return gives the request to the agent and esc takes the field away
   ask_box_of(e) === nothing || !ask_key!(e, w, K, command) || return handled
+  # In a field of a SolidCraft design, Return, Esc, Tab and the window's keys are the design's and the window's
+  field = design_field_of(e)
+  field === nothing || (done = design_key!(field, e, w, K, command); done === :text || return done)
   # While the command palette shows, every key is its own, whatever part of it has the keyboard
   e.popup == :commands && return (palette_key!(e, w, K, command); K == Keys.tab ? handled : nothing)
   kind = command === nothing ? :none : COMMANDS[command].kind
@@ -39380,7 +39385,8 @@ describe(o::Outcome) = begin
          o.low !== nothing ? value_row(o.shown, o) :
          isempty(o.full) && o.node === nothing ? Box(Icon("check", size=o.size, color=colours.dim)) :
          value_row(o.shown, o, code=isvalue(o, 1) && o.node === nothing)
-  joined = o.open && o.more
+  # The box of a field of a design is in the field, and the rest is under the field: it isn't one piece with the box
+  joined = o.open && o.more && o.across > 0px
   # An open box keeps its colour under the mouse, because the colour would fill only the box and not the rest
   fill = o.more && !joined && ishovered(o) ? colours.hover : colours.float
   box(parts...; name="") = Row(parts..., padding(7px, 0px), child_gap=4px, Alignment.Center, name=name,
@@ -47355,9 +47361,260 @@ const DesignFile = Union{FS.File{:sc},FS.File{:SC},FS.File{:solidcraft}}
 push!(BLOCK_ICONS, "arrow-counterclockwise", "arrow-clockwise", "save", "x-lg", "x", "check-lg", "chevron-down", "chevron-right", "eye", "eye-slash",
       "house", "skip-start-fill", "caret-left-fill", "caret-right-fill", "skip-end-fill")
 
-"What shows the SolidCraft design at `path` in the window of `e`. Its fields of code have the colours and the font of the page's code."
-design_part(e, path) = (Designs.CODE_LOOK[] = design_code_look; node!(() -> Designs.DesignView(path=path), e, (:design, path)))
+"What shows the SolidCraft design at `path` in the window of `e`. Its fields are Ladder's editor of text: see \"the fields of a SolidCraft design\"."
+design_part(e, path) = begin
+  Designs.CODE_LOOK[] = design_code_look
+  Designs.FIELD[] = design_field
+  node!(() -> Designs.DesignView(path=path), e, (:design, path))
+end
 design_code_look() = (colours, codefont())
+
+# --- the fields of a SolidCraft design --------------------------------------------------
+#
+# A field to type in, in the editor of a SolidCraft design, is Ladder's own
+# editor of text, as the field of a request in place is (see `ask_editor`).
+# Its text selects, and its keys work, as they do on a page.
+#
+# A field of a length, an angle or a count holds Julia code. It's a file of
+# Julia code with no file, so its code has the colours of code, and ⌘Return
+# runs it, or the part of it that's selected, as it runs code in a Julia
+# file. The code runs in the design's module, which has the units and the
+# design's parameters: see cad/expressions.jl. What it comes to shows in the
+# box that a Julia file shows, after the code, in the field. A click on a box
+# that has more opens it, and the rest shows under the field. The box goes
+# when the code changes.
+#
+# Return is the form's: it gives the form to SolidCraft, as OK does. Tab goes
+# to the next field, and ⇧Tab to the one before. Esc, ⌘S and the window's own
+# keys go to the design, then to the window. ⌘Z takes back what was typed in
+# the field, and when nothing was, the design's last change.
+#
+# A field is as wide as its text and its box need. The panel at the right is
+# as wide as its widest field needs, up to half the design: see
+# `side_width!` in cad/view.jl. Text that's longer than that goes on to the
+# next line, and the field gets taller.
+
+"A field to type in, in the editor of a SolidCraft design: see \"the fields of a SolidCraft design\""
+@def mutable struct DesignField <: SemanticUI
+  sub::Any = nothing          # the editor of its text
+  code::Bool = false          # it holds Julia code
+  placeholder::String = ""    # what it says while it has no text
+  room::Any = nothing         # how wide the panel has room for it to be, or nothing before the panel says
+  took::Bool = false          # the editor of its text took the last key, which goes no further: see `design_key!`
+end
+
+const FIELD_PAD = 9px        # between the edge of a field of a design and its text
+const FIELD_ROOM = 160px     # how wide a field of a design is before the panel says
+const FIELD_BOX_COLS = 32    # the most characters that the box of what a field's code came to shows
+
+"""
+A field of the design `v` that holds `text`, with `placeholder` while it's
+empty, and that holds Julia code when `code`. Its editor's keys that the
+field has no use for go to the design.
+"""
+design_field(v, text, placeholder, code) = begin
+  f = DesignField(code=code, placeholder=placeholder)
+  sub = Editor()
+  lines = String.(split(text, '\n'))
+  sub.buf = code ? Buffer(lines=lines, view=:code, lang="julia") : Buffer(lines=lines)
+  sub.buf.caret = sub.buf.anchor = line_end(sub.buf, length(lines))
+  sub.nodes[:input] = own!(sub, TextInput())
+  sub.nodes[:design_field] = f
+  setfield!(sub, :parent, f)
+  f.sub = sub
+  f
+end
+
+"The field of a SolidCraft design that the editor `e` is the text of, or nothing for any other editor"
+design_field_of(e) = get(e.nodes, :design_field, nothing)
+
+"""
+Give the editor of the field `f` the colours and the keys of the page that
+shows the design, and the size of a field's text. Its lines wrap at the
+field's edge, and it has no numbers of lines.
+"""
+follow_page!(f::DesignField) = begin
+  sub = f.sub
+  follow_host!(sub, editor(f.parent))
+  size = num(Designs.field_size(f.parent))
+  sub.numbers = sub.shade = false
+  sub.guide = 0
+  sub.wrap = true
+  sub.font, sub.look = SANS, :own
+  sub.zoom = f.code ? size / (num(TEXT_SIZE) * sub.code_scale) : size / num(TEXT_SIZE)
+  # Text that was laid out at another size is laid out again
+  key = (sub.zoom, sub.font)
+  get(sub.nodes, :field_style, nothing) == key || (sub.nodes[:field_style] = key; empty!(sub.flows))
+  f
+end
+
+"""
+The box of what the code of the field `f` came to when ⌘Return last ran it,
+with what it shows set for a field, or nothing when its code hasn't run or
+has changed since.
+"""
+field_outcome!(f::DesignField) = begin
+  f.code || return nothing
+  sub = f.sub
+  list = follow_outcomes!(sub)
+  isempty(list) && return nothing
+  o = last(list)
+  size = body(sub).size * 0.8   # as a page's box is beside its text
+  o.size, o.high = size, px(round(num(size * 1.7)))
+  o.low = nothing   # a field has no levels
+  o.shown = length(o.brief) > FIELD_BOX_COLS ? first(o.brief, FIELD_BOX_COLS - 1) * "…" : o.brief
+  o.rest = o.shown == o.brief ? String(chopprefix(chopprefix(o.full, o.brief), "\n")) : o.full
+  o.from = o.shown == o.brief ? 2 : 1
+  o.more = o.node !== nothing || o.subject !== nothing || o.whole !== nothing || !isempty(o.rest)
+  o.across = 0px   # the rest is under the field, and not under the box
+  o
+end
+
+"How wide the box `o` of a field is, with the gap before it, or 0px for no box"
+box_room(o) = o === nothing ? 0px : OUTCOME_GAP + outcome_wide(o, measure(outcome_face(o.size), "0"))
+
+"""
+The theme `t` at the usual size, in which a length in pixels is that many
+pixels, as it is on a page. The design's theme is smaller, and a page's text
+and the box of what code came to are laid out in pixels that aren't scaled.
+"""
+unscaled(t::Theme) = Theme(; (n => getfield(t, n) for n in fieldnames(Theme) if n != :size)..., size=px(USUAL_PX))
+
+describe(f::DesignField) = begin
+  sub = f.sub
+  follow_page!(f)
+  run_tick!(sub)   # what code that runs in a thread of its own came to
+  w = window_of(f)
+  on = w !== nothing && w.focus === sub
+  b = sub.buf
+  # The selection shows only while the field has the keyboard
+  on || (b.anchor = b.caret)
+  # The design's theme. UI.jl can describe the field in more than one theme in a frame, and each must lay it out the same.
+  t = Designs.theme(f.parent)
+  o = field_outcome!(f)
+  # A field that the panel hasn't told how wide it is is as wide as it was in the last frame
+  r = f.room === nothing ? rect(f) : nothing
+  wide = f.room !== nothing ? f.room : r !== nothing ? r.width : FIELD_ROOM
+  # The text wraps at the field's edge, before the box of what its code came to
+  room = max(wide - 2FIELD_PAD - 2px - box_room(o), 24px)
+  layout!(sub, room)
+  tall = isempty(sub.layout) ? FIELD_H : lowest(sub, sub.layout)
+  one = length(sub.layout) == 1 && sub.layout[1].content isa Flow && length(sub.layout[1].content.lines) == 1
+  # On one line, the box is just after the text, as it is after a line of a Julia file
+  across = o !== nothing && one ? min(extent(sub.layout[1].content) + 2px, room) : room
+  # The text and the box are made in the theme at its usual size, so they're as big as they were laid out
+  with_theme(unscaled(t)) do
+    doc = Row(fixed(across), height(tall), Alignment.Start, clip_x=true, node!(Document, sub, :document))
+    # With nothing typed, the field says what it's for, under where the text goes
+    empty = b.lines == [""]
+    text = empty && !isempty(f.placeholder) ?
+      Stack(fixed(across), height(tall), Alignment.Start,
+            Row(width(grow=grow), height(tall), Alignment.Center, label(f.placeholder, Designs.field_size(f.parent), color=t.dim)), doc) : doc
+    Row(width(grow=grow), height(max(FIELD_H, tall + 6px)), padding(FIELD_PAD, 0px), child_gap=OUTCOME_GAP, one ? Alignment.Center : Alignment.End,
+        Designs.field_look(t)[2:end]..., name="Field", text, (o === nothing ? () : (o,))...)
+  end
+end
+
+const FIELD_H = Designs.FIELD_H
+
+# A click on the field, past its text, puts the caret in the text. A click on the text was the text's, and comes here after.
+onkey(f::DesignField, ev::KeyPress{Keys.mouse_left}) = (hittest(ev.window) === f && press!(f.sub, ev.window.mouse); handled)
+cursor(::DesignField) = :ibeam
+
+# A key that the editor of its text took goes no further. The editor gives no `handled`, and the design would take it too, as ⌘Z.
+onkey(f::DesignField, ::KeyPress) = f.took ? (f.took = false; handled) : nothing
+
+# The keyboard goes to the editor of its text. Tab stops at the field, and selects all of its text.
+focus(f::DesignField) = focus(f.sub)
+tabstop(::DesignField) = true
+tabbed!(f::DesignField) = (Designs.select_all!(f); nothing)
+
+"""
+What a key does in a field of a SolidCraft design, before its editor does
+what it does with a key: `handled`, nothing when the key goes on to the
+design and then the window, or :text when the editor does what it does with
+the key. See "the fields of a SolidCraft design".
+"""
+design_key!(f::DesignField, e, w, K, command) = begin
+  done = field_key(f, e, w, K, command)
+  f.took = done === :text
+  done
+end
+field_key(f::DesignField, e, w, K, command) = begin
+  K in (Keys.enter, Keys.escape) && return nothing
+  if K == Keys.tab
+    # The field is the tab stop, and not its editor. A form with no other field keeps the keyboard in this one.
+    w.focus = f
+    tab!(w, only_held(w, Keys.shft) ? -1 : 1) === handled || (w.focus = e)
+    return handled
+  end
+  command === nothing && return :text
+  b = e.buf
+  # ⌘Z takes back the design's last change when the field has nothing of its own to take back
+  command == :undo && isempty(b.undo) && return nothing
+  command == :redo && isempty(b.redo) && return nothing
+  COMMANDS[command].kind == :window || command in (:commands, :find, :find_next, :find_last, :plain, :slides, :forward) ? nothing : :text
+end
+
+Designs.text_of(f::DesignField) = join(f.sub.buf.lines, '\n')
+Designs.set_text!(f::DesignField, text) = begin
+  b = f.sub.buf
+  edit!(b, (1, 0), line_end(b, length(b.lines)), String(text))
+  # The design put it there, so ⌘Z in the field doesn't take it back
+  empty!(b.undo)
+  empty!(b.redo)
+  f
+end
+Designs.select_all!(f::DesignField) = (select_all!(f.sub); f)
+Designs.keyed(e::Editor) = something(design_field_of(e), e)
+Designs.isfield(::DesignField) = true
+Designs.iscode(f::DesignField) = f.code
+Designs.room!(f::DesignField, wide) = (f.room = wide; f)
+
+"How wide the field `f` needs to be to show its whole text, and the box of what its code came to, on one line"
+Designs.wants(f::DesignField) = begin
+  follow_page!(f)
+  sub = f.sub
+  b = sub.buf
+  ks = kinds(b)
+  text = maximum(i -> measure(face(sub, ks[i]), b.lines[i]), eachindex(b.lines))
+  b.lines == [""] && (text = measure(face(sub, ks[1]), f.placeholder))
+  num(text + box_room(field_outcome!(f)) + 2FIELD_PAD + 2px + 3px)
+end
+
+"""
+Run the code of the field `f`, or the part of it that's selected, as ⌘Return
+does in a Julia file: in the design's module, with each parameter as it is
+now. What it comes to shows after the code, in the field.
+"""
+Designs.run_field!(v::Designs.DesignView, f::DesignField) = begin
+  sub = f.sub
+  sub.nodes[:workspace] = Designs.workspace!(v)
+  run_here!(sub)
+  v
+end
+
+"The rest of what the field's code came to, under the field while its box is open, or nothing"
+Designs.under(f::DesignField) = begin
+  o = field_outcome!(f)
+  (o === nothing || !(o.open && o.more)) && return nothing
+  sub = f.sub
+  o.body === nothing && (o.body = own!(sub, OutcomeBody(of=o)))
+  d = o.body
+  cell = measure(outcome_face(o.size), "0")
+  most = something(f.room, FIELD_ROOM)
+  if o.whole !== nothing
+    d.members === nothing && (d.members = member_lines(d, o.whole, 0))
+    cols = max(maximum(length, printed_rest(o), init=0), maximum(member_cols, unfolded(d.members), init=0))
+    d.wide = min(cell * cols, most - 19px)
+    d.tall = MEMBERS_H
+  end
+  across = o.subject !== nothing ? detail_wide(sub) : o.node !== nothing ? OUTCOME_NODE_W + 22px :
+           (o.whole !== nothing ? d.wide : cell * maximum(length, split(o.rest, '\n'))) + 19px
+  d.across = min(across, most)
+  d.corners = radius(OUTCOME_ROUND)
+  with_theme(() -> Box(Alignment.Start, d), unscaled(Designs.theme(f.parent)))
+end
 
 page_view(e, o::DesignFile) = design_part(e, string(o.path))
 page_fills(e, ::DesignFile) = true

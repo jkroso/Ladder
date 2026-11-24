@@ -19,6 +19,7 @@
 @use GeometryBasics: Vec2
 const px = K.px
 const V = K.Designs
+K.RUN_WAIT[] = Inf   # what ⌘Return runs in a field has come back when the key's handler ends
 
 @testset "JSON" begin
   @test JSON.parse("""{"a": [1, 2.5, null, true], "b": "x\\n\\u00e9"}""") == JSON.Object("a" => Any[1.0, 2.5, nothing, true], "b" => "x\né")
@@ -416,13 +417,13 @@ else
     V.start!(v, "sketch.dimension")
     settle(); settle()
     @test any(p -> p.key == :ask, popups(w))
-    box = w.focus
-    box.text = ""; box.cursor = box.anchor = 0
+    box = V.keyed(w.focus)
+    V.set_text!(box, "")
     foreach(c -> ontype(w, Typed(c, w)), "8")
     # The field takes Julia code: ⌘Return shows what it comes to, and the field stays
     @test V.iscode(box)
     key(Keys.enter, Keys.cmd)
-    @test any(p -> p.key == :ask, popups(w)) && V.outcomes(view())[box].shown == "8"
+    @test any(p -> p.key == :ask, popups(w)) && K.field_outcome!(box).brief == "8"
     key(Keys.enter)
     settle()
     @test isapprox(V.sketch(v)["curves"][end]["radius"], 4.0, atol=1e-6)
@@ -463,8 +464,8 @@ else
     settle()
     @test v.form !== nothing && v.form.step == 2 && length(v.form.inputs) == 1
     box = v.parts[(:field, "step", String(v.form.inputs[1]["param"]))]
-    @test box.text == "10mm"                    # SolidCraft's 10 mm, as Julia writes it
-    box.text = "14mm"
+    @test V.text_of(box) == "10mm"              # SolidCraft's 10 mm, as Julia writes it
+    V.set_text!(box, "14mm")
     click(v.parts[(:form, :ok)])
     settle()
     @test v.form === nothing && isempty(m.said)
@@ -480,31 +481,41 @@ else
     frame(w)
     click(shows((0.0, -10.0, 10.0)))
     box = v.parts[(:field, "solid.fillet", "radius")]
-    @test box.text == "2mm" && V.iscode(box)
-    # Its pieces have the colours of the page's code, in the font of code
-    box.text = "1.5mm + 2mm*0.25"
-    pieces = box.colours(box.text)
-    @test sum(first, pieces) == length(box.text) && pieces[1] == (3 => K.colours.number)
-    @test box.font_family == K.codefont()
-    # ⌘Return runs the code that's selected, and what it comes to shows under the field. The form stays.
+    @test V.text_of(box) == "2mm" && V.iscode(box)
+    # The field is Ladder's editor of a file of Julia code, with the font and the colours of code
+    @test box isa K.DesignField && K.kinds(box.sub.buf)[1].lang == "julia" && K.face(box.sub, K.kinds(box.sub.buf)[1]).family == K.codefont()
+    # A click puts the caret in it, and the keys type there
     click(box)
-    @test w.focus === box
-    box.anchor, box.cursor = 8, 16                     # 2mm*0.25
+    @test V.has_keys(w, box) && w.focus === box.sub
+    key(Keys.a, Keys.cmd)
+    foreach(c -> ontype(w, Typed(c, w)), "1.5mm + 2mm*0.25")
+    frame(w)
+    @test V.text_of(box) == "1.5mm + 2mm*0.25"
+    # ⌘Return runs the code that's selected, and what it comes to shows after the code, in the box of a Julia file. The form stays.
+    b = box.sub.buf
+    b.anchor, b.caret = (1, 8), (1, 16)                # 2mm*0.25
     key(Keys.enter, Keys.cmd)
-    @test v.form !== nothing && V.outcomes(v)[box].shown == "0.5mm" && !V.outcomes(v)[box].failed
+    o = K.field_outcome!(box)
+    @test v.form !== nothing && o.brief == "0.5mm" && !o.failed
+    @test any(n -> n === o, K.outcomes(box.sub))
     # With nothing selected, it runs all of the code
-    box.anchor = box.cursor = 0
+    b.anchor = b.caret = (1, 0)
     key(Keys.enter, Keys.cmd)
-    @test V.outcomes(v)[box].shown == "2mm" && V.outcome(v, box) !== nothing
+    @test K.field_outcome!(box).brief == "2mm"
     shot("design-7-julia.png")
-    # What went wrong shows in red
-    box.text = "1.5mm + nothing_here"
+    # What went wrong shows in red, and a click on its box shows the rest under the field
+    key(Keys.a, Keys.cmd)
+    foreach(c -> ontype(w, Typed(c, w)), "1.5mm + nothing_here")
     key(Keys.enter, Keys.cmd)
-    @test V.outcomes(v)[box].failed && occursin("nothing_here", V.outcomes(v)[box].shown)
+    o = K.field_outcome!(box)
+    @test o.failed && occursin("nothing_here", o.brief) && o.more && V.under(box) === nothing
+    click(o)
+    @test o.open && V.under(box) !== nothing
+    frame(w)
     # SolidCraft reads `1.5mm + 2mm*0.25` as Julia does, so it keeps the code itself
-    box.text = "1.5mm + 2mm*0.25"
-    @test V.outcome(v, box) === nothing                # the code has changed since it ran
-    frame(w)                                           # the box under the field has gone, so OK is higher
+    V.set_text!(box, "1.5mm + 2mm*0.25")
+    @test K.field_outcome!(box) === nothing            # the code has changed since it ran
+    frame(w)                                           # the rest under the field has gone, so OK is higher
     click(v.parts[(:form, :ok)])
     settle()
     @test v.form === nothing && isempty(m.said) && length(Models.timeline(m)) == steps + 1
@@ -516,16 +527,60 @@ else
     @test length(Models.timeline(m)) == steps
   end
 
+  @testset "the panel grows with the text of its fields, and Tab goes from field to field" begin
+    v = view()
+    V.start!(v, "solid.fillet")
+    frame(w)
+    click(shows((0.0, -10.0, 10.0)))
+    box = v.parts[(:field, "solid.fillet", "radius")]
+    @test V.side_w(v) == V.SIDE_W                       # a short text has room in the panel as it is
+    click(box)
+    key(Keys.a, Keys.cmd)
+    foreach(c -> ontype(w, Typed(c, w)), "4.5cm + 2mm * 1.3 + 0.25mm * 7 - 1mm")
+    frame(w)
+    lines(box) = length(box.sub.layout[1].content.lines)
+    # The panel is wider, and the text is on one line
+    @test V.side_w(v) > V.SIDE_W && lines(box) == 1
+    wide = V.side_w(v)
+    # It's wider again for the box of what the code came to, after the code
+    key(Keys.enter, Keys.cmd)
+    @test V.side_w(v) > wide && lines(box) == 1
+    # Text that needs more than half the design goes on to another line, and the field is taller
+    foreach(c -> ontype(w, Typed(c, w)), " + 0.1mm"^12)
+    frame(w)
+    @test K.num(V.side_w(v)) ≈ v.area[3] / 2 && lines(box) > 1 && rect(box).height > V.FIELD_H
+    # The caret is at the end of the text, on its last line
+    f = box.sub.layout[1].content
+    @test K.spot(f, length(V.text_of(box)))[1] == lines(box)
+    key(Keys.escape)
+    @test v.form === nothing
+    # Tab goes to the next field, and selects its text. ⇧Tab goes back.
+    V.start!(v, "parameters")
+    frame(w)
+    name, value = v.parts[(:newparam, :name)], v.parts[(:newparam, :value)]
+    click(name)
+    foreach(c -> ontype(w, Typed(c, w)), "deep")
+    key(Keys.tab)
+    @test V.has_keys(w, value)
+    key(Keys.tab, Keys.shft)
+    @test V.has_keys(w, name) && name.sub.buf.anchor == (1, 0) && name.sub.buf.caret == (1, 4)
+    # ⌘Z takes back what was typed in the field
+    key(Keys.z, Keys.cmd)
+    @test V.text_of(name) == ""
+    key(Keys.escape)
+    @test v.panel == :none
+  end
+
   @testset "code that SolidCraft reads in another way is kept in a comment" begin
     v = view()
     m = v.model
     open_step() = (click(v.parts[(:step, 2)]); click(v.parts[(:step, 2)]); settle())
     open_step()
     param = String(v.form.inputs[1]["param"])
-    @test v.parts[(:field, "step", param)].text == "14mm"
+    @test V.text_of(v.parts[(:field, "step", param)]) == "14mm"
     undo = Models.undos(m)
     # Julia's 2 + 1cm is 3 cm. SolidCraft reads it as 2 mm and 1 cm.
-    v.parts[(:field, "step", param)].text = "2 + 1cm"
+    V.set_text!(v.parts[(:field, "step", param)], "2 + 1cm")
     click(v.parts[(:form, :ok)])
     settle()
     @test v.form === nothing && isempty(m.said)
@@ -534,7 +589,7 @@ else
     @test p["expression"] == "30 mm" && p["comment"] == "Julia: 2 + 1cm = 30 mm"
     # The field shows the code again
     open_step()
-    @test v.parts[(:field, "step", param)].text == "2 + 1cm"
+    @test V.text_of(v.parts[(:field, "step", param)]) == "2 + 1cm"
     click(v.parts[(:form, :cancel)])
     frame(w)
     # ⌘Z takes back the change and its comment together, and ⇧⌘Z does both again
@@ -549,7 +604,7 @@ else
     @test Models.undos(m) == undo
     # Code that's wrong says so in the form, and nothing changes
     open_step()
-    v.parts[(:field, "step", param)].text = "14mm + nothing_here"
+    V.set_text!(v.parts[(:field, "step", param)], "14mm + nothing_here")
     click(v.parts[(:form, :ok)])
     settle()
     @test v.form !== nothing && occursin("nothing_here", v.form.problem) && Models.undos(m) == undo
@@ -564,25 +619,25 @@ else
     frame(w)
     @test v.panel == :params
     name, value = v.parts[(:newparam, :name)], v.parts[(:newparam, :value)]
-    name.text, value.text = "wall", "3mm"
+    V.set_text!(name, "wall"); V.set_text!(value, "3mm")
     click(v.parts[(:newparam, :add)])
     settle()
     @test any(p -> p["name"] == "wall" && p["value"] == 3.0, Models.params(m))
     # A parameter's field takes code too. Return sets it, and what SolidCraft got a number for shows as its code.
     box = v.parts[(:param, "wall")]
-    @test box.text == "3mm" && V.iscode(box)
+    @test V.text_of(box) == "3mm" && V.iscode(box)
     click(box)
-    box.text = "π*1mm"
+    V.set_text!(box, "π*1mm")
     key(Keys.enter)
     settle()
     # SolidCraft reads π as pi, so it gets that, and the comment keeps the code as it was typed
-    @test V.param_named(v, "wall")["expression"] == "pi*1mm" && V.param_note(v, "wall") == "Julia: π*1mm = pi*1mm" && box.text == "π*1mm"
+    @test V.param_named(v, "wall")["expression"] == "pi*1mm" && V.param_note(v, "wall") == "Julia: π*1mm = pi*1mm" && V.text_of(box) == "π*1mm"
     # Code that's wrong shows what's wrong under the field, which keeps the keyboard
     click(box)
-    box.text = "π*"
+    V.set_text!(box, "π*")
     key(Keys.enter)
-    @test w.focus === box && V.outcomes(v)[box].failed && V.outcome(v, box) !== nothing
-    box.text = "3mm"
+    @test V.has_keys(w, box) && V.outcomes(v)[box].failed && V.outcome(v, box) !== nothing
+    V.set_text!(box, "3mm")
     key(Keys.enter)
     settle()
     @test V.param_named(v, "wall")["expression"] == "3mm"
@@ -696,7 +751,7 @@ else
     click(v.parts[(:body, "Body1")]); click(v.parts[(:body, "Body1")])
     frame(w)
     @test any(p -> p.key == :ask, popups(w))
-    w.focus.text = "Block"
+    V.set_text!(V.keyed(w.focus), "Block")
     key(Keys.enter)
     settle()
     @test [b["name"] for b in Models.bodies(m)] == ["Block"]
@@ -926,7 +981,7 @@ else
     frame(w)
     click_edge()
     @test length(v.form.values["edges"]) == 1
-    v.parts[(:field, "solid.fillet", "radius")].text = "1mm"
+    V.set_text!(v.parts[(:field, "solid.fillet", "radius")], "1mm")
     trial = tried()
     @test trial !== nothing && isempty(trial.problem) && trial.changed == [m.shapes[1].name]
     @test length(trial.shapes[1].flat) > faces                     # the round is a face more
@@ -939,14 +994,14 @@ else
     @test count(x -> x isa V.GLs.Solid && x.bare, list) == 1 && count(x -> x isa V.GLs.Solid && !x.bare, list) == 1
     shot("design-12-preview.png")
     # Another radius is tried in its turn
-    v.parts[(:field, "solid.fillet", "radius")].text = "1.5mm"
+    V.set_text!(v.parts[(:field, "solid.fillet", "radius")], "1.5mm")
     again = tried()
     @test again !== nothing && again.key != trial.key && isempty(again.problem)
     # A radius that's too big: SolidCraft's words show in the form, and the body shows as it is
-    v.parts[(:field, "solid.fillet", "radius")].text = "500mm"
+    V.set_text!(v.parts[(:field, "solid.fillet", "radius")], "500mm")
     failed = tried()
     @test failed !== nothing && !isempty(failed.problem) && !any(x -> x isa V.GLs.Solid && x.bare, drawn())
-    v.parts[(:field, "solid.fillet", "radius")].text = "1mm"
+    V.set_text!(v.parts[(:field, "solid.fillet", "radius")], "1mm")
     @test tried() !== nothing
     # With Preview off, nothing is tried
     click(v.parts[(:form, :preview)])
@@ -966,7 +1021,7 @@ else
     V.start!(v, "solid.fillet")
     frame(w)
     click_edge()
-    v.parts[(:field, "solid.fillet", "radius")].text = "1mm"
+    V.set_text!(v.parts[(:field, "solid.fillet", "radius")], "1mm")
     @test tried() !== nothing
     click(v.parts[(:form, :ok)])
     settle()
