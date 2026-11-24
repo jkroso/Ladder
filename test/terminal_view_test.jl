@@ -83,6 +83,23 @@ end
   shot("terminal.png")
 end
 
+"The text that the window draws under `node`, each piece in the font it's drawn in"
+texts(node=rect(e), out=[]) = (node isa K.ConcreteText ? push!(out, node) : foreach(n -> texts(n, out), node.children); out)
+
+@testset "the top bar shows the program's title, each character in a font that has it" begin
+  # Claude Code starts its title with ✳, which the system font lacks. Zapf Dingbats has it.
+  ok = run("printf '\\033]0;\\342\\234\\263 Claude Code\\007'; echo titled", "\ntitled")
+  @test ok
+  ok = until(() -> e.buf.about == "✳ Claude Code")
+  @test ok
+  star = [t for t in texts() if t.from.content == "✳"]
+  @test length(star) == 1
+  f = only(star).from
+  @test f.family != K.SANS && K.has(K.Face(f.family, f.subfamily, f.size, f.color, false), '✳')
+  @test any(t -> t.from.content == " Claude Code" && t.from.family == K.SANS, texts())
+  shot("terminal-title.png")
+end
+
 @testset "the keys are the shell's" begin
   v = view()
   # Colours come as the program asks for them
