@@ -60,16 +60,37 @@ end
 # How big it is in the page, and how far the page is scrolled, before it fills the window
 const small, offset = v.box, e.scroll.offset
 
-@testset "the page shows only the drawing, and a click makes it fill the window" begin
-  @test !v.full && !tools() && K.cursor(v.parts[:area]) == :hand
+@testset "the page shows the tools over the drawing, and you draw there" begin
+  @test !v.full && tools() && K.cursor(v.parts[:area]) == :crosshair && rect(v.parts[(:button, :pen)]).top < v.box[2]
+  # Only a sketch that fills the window has the button that puts it back in the page
+  @test !haskey(v.parts, (:button, :full)) || rect(v.parts[(:button, :full)]) === nothing
   # While the mouse is over it, a button shows beside its top right corner
   at(spot(300, 100))
   @test corner() !== nothing && K.num(rect(corner()).left) > v.box[1] + v.box[3]
   shot("corner.png")
-  # A click on it makes it fill the window, with its tools at the top. The click draws nothing.
+  # A click draws nothing, and the sketch stays in the page, with the keyboard
   click(spot(300, 100))
+  @test !v.full && K.full_block(e) === nothing && w.focus === v.parts[:area] && length(shapes()) == 1 && !K.dirty(e.buf)
+  # A drag draws there
+  drag(spot(400, 50), spot(450, 80), spot(500, 120))
+  @test length(shapes()) == 2 && shapes()[2].kind == :pen && startswith(block()[2], "pen 400,50 ") && !v.full
+  # The wheel is the page's, and a pinch doesn't make the sketch fill the window
+  @test K.onscroll(v.parts[:area], K.MouseScroll(Vec2{px}(px(0), px(-2)), w, true)) === nothing
+  onpinch(w, 1.2); frames()
+  @test !v.full
+  # Esc chooses the arrow, and then gives the keyboard back to the page's text
+  key(Keys.escape)
+  @test v.tool == :select && w.focus === v.parts[:area]
+  key(Keys.escape)
+  @test w.focus === e && !v.full
+  K.undo!(e.buf); frames()
+  @test length(shapes()) == 1
+  button(:pen)
+  # The button beside its corner makes it fill the window, with the button that puts it back at its top
+  at(spot(300, 100))
+  click(middle(rect(corner())))
   @test v.full && K.full_block(e) === v && tools() && w.focus === v.parts[:area] && corner() === nothing
-  @test length(shapes()) == 1 && !K.dirty(e.buf) && v.tool == :pen
+  @test rect(v.parts[(:button, :full)]) !== nothing && length(shapes()) == 1 && v.tool == :pen
 end
 
 @testset "the tools draw shapes" begin
@@ -261,8 +282,8 @@ end
   @test v.tool == :select && v.full
   key(Keys.escape)
   @test !v.full && K.full_block(e) === nothing && e.scroll.offset == offset && w.focus === e
-  # Back in the page it shows only the drawing, which is taller now, since a shape is low in it
-  @test v.box[3] ≈ small[3] && v.box[4] > small[4] && !tools()
+  # Back in the page, its drawing is taller now, since a shape is low in it
+  @test v.box[3] ≈ small[3] && v.box[4] > small[4] && tools()
   shot("page.png")
   # The button beside its corner makes it fill the window, and the last button at its top puts it back
   at(spot(300, 100))
@@ -270,10 +291,9 @@ end
   @test v.full && v.tool == :select
   button(:full)
   @test !v.full && w.focus === e
-  # A pinch outwards on it makes it fill the window too
+  # A pinch outwards on it doesn't make it fill the window
   at(spot(300, 100)); onpinch(w, 1.2); frames()
-  @test v.full
-  button(:full)
+  @test !v.full
   # A click with ⌥ held shows its lines, and it stays in the page
   s = K.block_lines(e.buf, K.SKETCH, 1)[1]
   w.keys |= Keys.opt

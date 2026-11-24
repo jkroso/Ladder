@@ -114,13 +114,51 @@ joined(a, b) = any(j -> j[1] === card(a) && j[2] === card(b), v.data.joins)
     @test v.box[1] <= x && x + K.card_size(v, c)[1] * v.zoom <= v.box[1] + v.box[3] && v.box[2] <= y
   end
   @test any(en -> en.title == "Canvas", K.outline(e.buf)) && any(x -> x isa Tuple && x[1] == "Canvas", K.INSERTS)
-  @test K.cursor(v.parts[:area]) == :hand && !K.dirty(e.buf)
+  @test K.cursor(v.parts[:area]) == :arrow && !K.dirty(e.buf)
+  # Its tools are over it. Only a board that fills the window has the button that puts it back in the page.
+  @test rect(v.parts[(:button, :pen)]).top < v.box[2] && (!haskey(v.parts, (:button, :full)) || rect(v.parts[(:button, :full)]) === nothing)
   shot("canvas-page.png")
 end
 
-@testset "a click makes it fill the window" begin
-  click(middle(rect(v.parts[:area])))
-  @test v.full && K.full_block(e) === v && w.focus === v.parts[:area] && !K.dirty(e.buf)
+@testset "you change the board where it is in the page" begin
+  # A click selects a card, and the board stays in the page, with the keyboard
+  c = card("Kitchen")
+  click(mid(c))
+  @test v.picked === c && !v.full && K.full_block(e) === nothing && w.focus === v.parts[:area]
+  # A drag moves it. The press isn't the second of two clicks, which would type in the note.
+  from, z = c.at, v.zoom
+  v.clicked = (0.0, 0.0, 0.0)
+  drag(mid(c), mid(c) .+ (10, 5), mid(c) .+ (20, 10))
+  @test all(c.at .≈ from .+ (20, 10) ./ z) && v.zoom == z && !v.full && K.dirty(e.buf)
+  # The wheel scrolls the page past it. With ⌘ held it makes the board bigger, and so does a pinch.
+  at(mid(c))
+  @test K.onscroll(v.parts[:area], K.MouseScroll(Vec2{px}(px(0), px(2)), w, true)) === nothing && v.zoom == z
+  w.keys |= Keys.cmd
+  onscroll(w, Vec2{px}(px(0), px(2)), true)
+  w.keys ⊻= Keys.cmd
+  frames()
+  @test v.zoom ≈ z * exp(0.2) && !v.full
+  onpinch(w, 1.2); frames()
+  @test v.zoom ≈ z * exp(0.2) * 1.2 && !v.full
+  # Fit shows the whole board again
+  button(:fit)
+  @test isapprox(v.zoom, z, rtol=0.05)
+  # ⌘Z takes the move back
+  K.undo!(e.buf); frames()
+  @test card("Kitchen").at == from && block()[1] == "note 0,0 Kitchen"
+  # Esc lets go of the card, and then gives the keyboard back to the page's text
+  v.clicked = (0.0, 0.0, 0.0)
+  click(mid(card("Kitchen")))
+  key(Keys.escape)
+  @test v.picked === nothing && w.focus === v.parts[:area]
+  key(Keys.escape)
+  @test w.focus === e && !v.full
+end
+
+@testset "the button beside its corner makes it fill the window" begin
+  at(middle(rect(v.parts[:area])))
+  click(middle(rect(K.fills(e)[objectid(v)].button)))
+  @test v.full && K.full_block(e) === v && w.focus === v.parts[:area] && rect(v.parts[(:button, :full)]) !== nothing
   @test v.zoom == 1 && haskey(v.parts, (:button, :pen))   # a small board shows at its own size
 end
 

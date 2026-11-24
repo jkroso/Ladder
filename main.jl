@@ -54,12 +54,14 @@
 #     to show the next three blocks of the page side by side. You type in a
 #     column as you type anywhere. A heading takes the blocks under it into its column.
 #   - Write a code block in the language `sketch` to draw: by hand, lines,
-#     arrows, boxes, ovals and words. Click it to make it fill the window,
-#     where its tools are.
+#     arrows, boxes, ovals and words. Its tools are over it, and you draw
+#     where it is. The button beside its top right corner makes it fill the
+#     window.
 #   - Write a code block in the language `canvas` for a board of cards that
 #     you put anywhere, as in the app Muse: notes, words, pictures, pages and
 #     web pages, with lines between them. Tab adds a joined note, as in a
-#     mind map. Click it to make it fill the window.
+#     mind map. You change it where it is, or with the button beside its top
+#     right corner in the whole window.
 #   - Write a code block in the language `signature` for a place to sign:
 #     press in its box and drag to draw. The file holds each stroke.
 #   - Write a code block in the language `contact` for the card of a person
@@ -18518,13 +18520,13 @@ BLOCKS[GALLERY] = BlockKind("Gallery", "images", GalleryView, gallery_html)
 # --- a sketch ---------------------------------------------------------------------------------
 #
 # A code block in the language `sketch` is a drawing. sketch.jl says how the
-# block is written. In the page it shows only the drawing. A click on it, a
-# pinch outwards, or the button that shows beside its top right corner while
-# the mouse is over it, makes it fill the window. Only there does it have its
-# tools. The buttons at its top choose a tool: the arrow selects a shape, and
-# the others draw by hand, a line, an arrow, a box, an oval or words. The dots
-# after them choose the colour of the next shape, or of the shape that's
-# selected.
+# block is written. You draw in it where it is in the page. Only the button
+# that shows beside its top right corner while the mouse is over it makes it
+# fill the window, where it has more room. A click or a pinch never does. A
+# page that can't change shows only the drawing. The buttons at its top choose
+# a tool: the arrow selects a shape, and the others draw by hand, a line, an
+# arrow, a box, an oval or words. The dots after them choose the colour of the
+# next shape, or of the shape that's selected.
 #
 #   - Drag in the sketch to draw with the tool. For words, click where they
 #     go and type them there. Return, or a click somewhere else, adds them,
@@ -18543,9 +18545,11 @@ BLOCKS[GALLERY] = BlockKind("Gallery", "images", GalleryView, gallery_html)
 #     The buttons each side of a number change it, for the shape that's
 #     selected, or for the shapes that the tool draws next. Click a number
 #     to type another, and press Return.
-#   - The sketch gets taller when a shape is near its bottom edge.
-#   - Esc chooses the arrow tool, and Esc with that tool puts the sketch
-#     back in the page. So does the last button.
+#   - The sketch gets taller when a shape is near its bottom edge. In the
+#     page, the wheel scrolls the page past it.
+#   - Esc chooses the arrow tool. With that tool, Esc gives the keyboard back
+#     to the page's text, or puts a sketch that fills the window back in the
+#     page. So does the last button there.
 #
 # Each shape is a line of the block, so the file holds the whole drawing, and
 # ⌘Z takes back the last thing you drew.
@@ -18772,18 +18776,22 @@ narrow(v::SketchView) = sketch_room(v) < SKETCH_BAR
 describe(v::SketchView) = begin
   e = editor(v)
   with_theme(component_theme(e.zoom)) do
-    # In the page it shows only its drawing. A click on it, a pinch outwards or the button beside its top right
-    # corner makes it fill the window, where its tools are.
-    v.full || return Box(width(grow=grow), Alignment.Start, fillable(v, (:block, v), Column(block_look()..., clip=true, name="Sketch", sketch_area(v)), wide=:grow))
-    full = block_button!(v, :full, :full, icon="fullscreen-exit", tip="Back to the page  esc")
+    # In the page, a page that can't change shows only the drawing
+    v.full || !readonly(e.buf) ||
+      return Box(width(grow=grow), Alignment.Start, fillable(v, (:block, v), Column(block_look()..., clip=true, name="Sketch", sketch_area(v)), wide=:grow))
     settings = [stepper(v, name) for name in shown_settings(v)]
     beside = narrow(v) || isempty(settings) ? () : (rule(), settings...)
+    # The last button puts a sketch that fills the window back in the page. In the page, the button beside its top
+    # right corner makes it fill the window.
+    full = v.full ? (block_button!(v, :full, :full, icon="fullscreen-exit", tip="Back to the page  esc"),) : ()
     tools = ([block_button!(v, tool, (:tool, tool), icon=icon, tip=tip, on=v.tool == tool) for (tool, icon, tip) in SKETCH_TOOLS]..., rule(),
              [block_part!(() -> InkDot(of=v, colour=c), v, (:ink, c)) for c in Sketches.COLOURS]..., beside...,
              Box(width(grow=grow)),
-             (v.picked > 0 ? (block_button!(v, :delete, :delete, icon="trash", tip="Take the selected shape away  Delete"),) : ())..., full)
+             (v.picked > 0 ? (block_button!(v, :delete, :delete, icon="trash", tip="Take the selected shape away  Delete"),) : ())..., full...)
     # The second row is there all the time in a narrow sketch, so that the drawing stays where it is when a shape is selected
     bars = (block_bar(tools...), (narrow(v) ? (block_bar(settings..., Box(width(grow=grow))),) : ())...)
+    # In the page its tools are over its drawing, so that you draw where it is
+    v.full || return Box(width(grow=grow), Alignment.Start, fillable(v, (:block, v), Column(block_look()..., clip=true, name="Sketch", bars..., sketch_area(v)), wide=:grow))
     # In the window it takes all the room under the top bar. The wheel scrolls through a drawing that's taller than that.
     list = get!(() -> Scroll(width(grow=grow), height(grow=grow)), v.parts, :list)
     Column(width(grow=grow), height(grow=grow), Alignment.Start, background(takeoff_back()), name="Sketch", bars..., reuse!(list, sketch_area(v)))
@@ -18806,8 +18814,8 @@ full!(v::SketchView, on::Bool) = begin
   handled
 end
 
-# A pinch outwards on a sketch in the page makes it fill the window
-onpinch(v::SketchView, ev::Pinch) = v.full ? nothing : pinch_open(v, ev)
+# A pinch on a sketch in the page doesn't make it fill the window. Only the button beside its top right corner does.
+onpinch(::SketchView, ::Pinch) = nothing
 
 "How tall the drawing is in a sketch that fills the window, when its shapes need less: the window, under the top bar and the sketch's buttons"
 full_room(v::SketchView) = num(window_size(editor(v))[2] - TOPBAR_H - (narrow(v) ? 76px : 38px))
@@ -18938,7 +18946,7 @@ draw(ctx, size, ui::ConcreteRect, a::SketchArea) = begin
   s = sketch_scale(v)
   with_clip(ctx, ui.left, ui.top, ui.width, ui.height) do
     isempty(v.data.shapes) && v.draft === nothing && v.asking === nothing &&
-      write_ink(ctx, v.full ? "Drag here to draw" : "Click here to draw", v.box[1] + 16, v.box[2] + 28, Face(SANS, "", 13px, colours.faint, false))
+      write_ink(ctx, readonly(editor(v).buf) ? "Nothing is drawn here" : "Drag here to draw", v.box[1] + 16, v.box[2] + 28, Face(SANS, "", 13px, colours.faint, false))
     for (k, shape) in enumerate(v.data.shapes)
       k == v.editing && continue   # words that are being changed show as they're typed
       # The shape that's selected glows
@@ -19019,7 +19027,7 @@ end
 
 cursor(a::SketchArea) = begin
   v = a.of
-  v.full || return :hand   # a click makes it fill the window
+  readonly(editor(v).buf) && return :arrow
   v.tool == :select || return v.tool == :text ? :ibeam : :crosshair
   v.grab !== nothing || handle_under(v, window_of(a)) !== nothing ? :hand : :arrow
 end
@@ -19027,8 +19035,8 @@ cursor(::SketchView) = :arrow
 
 onkey(a::SketchArea, ev::KeyPress{Keys.mouse_left}) = begin
   v, w = a.of, ev.window
-  # In the page, a click makes the sketch fill the window, where its tools are. With ⌥ held, the page shows its lines.
-  v.full || return only_held(v, Keys.opt) ? nothing : full!(v, true)
+  # A click draws in the page too. With ⌥ held, the page shows the block's lines.
+  v.full || !only_held(v, Keys.opt) || return nothing
   readonly(editor(v).buf) && return handled
   p = sketch_place(v, w)
   twice = click_twice!(v, num(w.mouse[1]), num(w.mouse[2]))
@@ -19137,7 +19145,7 @@ onmouse(v::SketchView, ::MouseMove) = v.full || (held(v, Keys.mouse_left) && (v.
 onkey(v::SketchView, ::KeyPress{Keys.mouse_left}) = v.full ? (focus(sketch_area(v)); handled) : nothing
 
 # The wheel over a sketch that fills the window scrolls a drawing that's taller than the window. It never
-# scrolls the page under the sketch, which UI.jl would choose first.
+# scrolls the page under the sketch, which UI.jl would choose first. In the page, the wheel scrolls the page.
 onscroll(a::SketchArea, ev::MouseScroll) = begin
   v = a.of
   v.full || return nothing
@@ -19170,7 +19178,8 @@ block_tick!(v::SketchView) = begin
 end
 
 # Esc lets go of the shape that's selected, then chooses the arrow tool, then puts a sketch that fills the window
-# back in the page, then gives the keyboard back to the text. Delete takes the shape away.
+# back in the page, then gives the keyboard back to the text. In the page the page's text takes that Esc. Delete
+# takes the shape away.
 onkey(a::SketchArea, ev::KeyPress{Keys.escape}) = begin
   unmodified(ev) || return nothing
   v = a.of
@@ -19203,13 +19212,16 @@ BLOCKS[SKETCH] = BlockKind("Sketch", "pencil", SketchView, sketch_html)
 #
 # A code block in the language `canvas` is a board of cards that you put
 # anywhere, as in the app Muse. canvas.jl says how the block is written. In
-# the page it shows the whole board, small. A click on it, a pinch outwards,
-# or the button beside its top right corner makes it fill the window, where
-# you change it:
+# the page it shows the whole board, small, with its tools over it, and you
+# change it there. Only the button beside its top right corner makes it fill
+# the window, where it has more room. A click or a pinch never does. A page
+# that can't change shows only the board.
 #
 #   - Two fingers on the trackpad move round the board, and so does a drag
 #     on an empty place. A pinch, the mouse wheel, or two fingers with ⌘ held
 #     make it bigger or smaller round the mouse. Fit shows the whole board.
+#     In the page, the wheel and two fingers scroll the page past the board,
+#     and only with ⌘ held do they make it bigger or smaller.
 #   - Click twice on an empty place for a new note there, and type its words.
 #     Return starts a new line in it. Esc or a click elsewhere ends the
 #     typing, and a note with no words is taken away.
@@ -19234,8 +19246,9 @@ BLOCKS[SKETCH] = BlockKind("Sketch", "pencil", SketchView, sketch_html)
 #     has one. Click it twice to open the page, with its board filling the
 #     window. Back comes back here. Click a card of a web page twice to open
 #     the page in the browser.
-#   - Esc lets go of what's selected, then chooses the arrow, then puts the
-#     board back in the page.
+#   - Esc lets go of what's selected, then chooses the arrow. Then it gives
+#     the keyboard back to the page's text, or puts a board that fills the
+#     window back in the page.
 #
 # Each card is a line of the block, so ⌘Z takes back the last change.
 
@@ -19608,17 +19621,21 @@ describe(v::CanvasView) = begin
   e = editor(v)
   canvas_to_fill[] == e.buf.path && redraw_in!(v, 0.02)   # its first canvas fills the window on the next frame
   with_theme(component_theme(e.zoom)) do
-    # In the page it shows the whole board, small. A click on it, a pinch outwards or the button beside its top
-    # right corner makes it fill the window, where its tools are.
-    v.full || return Box(width(grow=grow), Alignment.Start, fillable(v, (:block, v), Column(block_look()..., clip=true, name="Canvas", canvas_area(v)), wide=:grow))
+    # In the page, a page that can't change shows only the whole board, small
+    v.full || !readonly(e.buf) ||
+      return Box(width(grow=grow), Alignment.Start, fillable(v, (:block, v), Column(block_look()..., clip=true, name="Canvas", canvas_area(v)), wide=:grow))
     tools = [block_button!(v, tool, (:tool, tool), icon=icon, tip=tip, on=v.tool == tool) for (tool, icon, tip) in CANVAS_TOOLS]
     dots = [block_part!(() -> CanvasDot(of=v, colour=c), v, (:ink, c)) for c in Canvases.COLOURS]
     picked = v.picked === nothing ? () : (block_button!(v, :delete, :delete, icon="trash", tip="Take away what's selected  Delete"),)
+    # The last button puts a board that fills the window back in the page. In the page, the button beside its top
+    # right corner makes it fill the window.
+    full = v.full ? (block_button!(v, :full, :full, icon="fullscreen-exit", tip="Back to the page  esc"),) : ()
     bar = block_bar(tools..., rule(), dots..., text_sizes_bar(v)..., rule(),
                     block_button!(v, :picture, :picture, icon="image", words="Add Picture…", tip="Put a picture from a file on the board"),
                     block_button!(v, :fit, :fit, icon="fullscreen", words="Fit", tip="Show the whole board"),
-                    Box(width(grow=grow)), picked...,
-                    block_button!(v, :full, :full, icon="fullscreen-exit", tip="Back to the page  esc"))
+                    Box(width(grow=grow)), picked..., full...)
+    # In the page its tools are over the board, so that you change it where it is
+    v.full || return Box(width(grow=grow), Alignment.Start, fillable(v, (:block, v), Column(block_look()..., clip=true, name="Canvas", bar, canvas_area(v)), wide=:grow))
     Column(width(grow=grow), height(grow=grow), Alignment.Start, background(canvas_back()), name="Canvas", bar, canvas_area(v))
   end
 end
@@ -19647,8 +19664,9 @@ full!(v::CanvasView, on::Bool) = begin
   handled
 end
 
-# A pinch outwards on a canvas in the page makes it fill the window
-onpinch(v::CanvasView, ev::Pinch) = v.full ? nothing : pinch_open(v, ev)
+# A pinch on a canvas in the page makes its board bigger or smaller there: see `onpinch(::CanvasArea, ...)`. It doesn't make
+# it fill the window. Only the button beside its top right corner does.
+onpinch(::CanvasView, ::Pinch) = nothing
 
 act!(v::CanvasView, action, w) = begin
   # A button for the size of the words changes the words that are being typed, and they stay open. Any other button keeps them.
@@ -19965,20 +19983,23 @@ end
 draw(ctx, size, ui::ConcreteRect, a::CanvasArea) = begin
   v = a.of
   e = editor(v)
+  was = v.box
   v.box = (num(ui.left), num(ui.top), num(ui.width), num(ui.height))
   (v.box[3] > 0 && v.box[4] > 0) || return
   sync_typing!(v)
-  # In the page it always shows the whole board. In the window it shows it whole when it first shows there.
-  (!v.full || v.zoom <= 0) && fit_board!(v, v.box[3], v.box[4])
+  # It shows the whole board when it first shows, and after Fit. In the page it shows it whole again when the page
+  # gets wider or narrower. Otherwise it stays as big as a pinch or the wheel made it, so a card that's dragged
+  # stays under the mouse.
+  (v.zoom <= 0 || (!v.full && was[3] != v.box[3])) && fit_board!(v, v.box[3], v.box[4])
   with_clip(ctx, ui.left, ui.top, ui.width, ui.height) do
     round_box(ctx, v.box..., 0, fill=canvas_back())
     isempty(v.data.cards) && isempty(v.data.strokes) && v.draft === nothing &&
-      write_ink(ctx, v.full ? "Click twice to write a note, or paste a picture, a link or a page" : "Click here to start a board",
+      write_ink(ctx, readonly(e.buf) ? "Nothing is on this board" : "Click twice to write a note, or paste a picture, a link or a page",
                 v.box[1] + 16, v.box[2] + 28, Face(SANS, "", 13px, colours.faint, false))
     x0, y0 = v.box[1] - v.at[1] * v.zoom, v.box[2] - v.at[2] * v.zoom
     draw_board_ink(ctx, e, v.data, docdir(e), x0, y0, v.zoom; picked=v.picked)
     v.draft === nothing || draw_shape(ctx, v.draft, x0, y0, v.zoom)
-    v.full && draw_canvas_marks(ctx, v)
+    draw_canvas_marks(ctx, v)
   end
 end
 
@@ -20249,8 +20270,9 @@ open_card!(v::CanvasView, card) = begin
   if card.kind == :link
     BROWSER[](card.content)
   elseif card.kind == :page
+    # From a board that fills the window, the page's own board fills the window too. From a board in the page, the page shows.
     g = page_glance(e, card.content)
-    g.board === nothing || (canvas_to_fill[] = g.path)
+    v.full && g.board !== nothing && (canvas_to_fill[] = g.path)
     follow_wiki!(e, card.content)
     redraw_in!(e, 0.05)
   end
@@ -20274,7 +20296,6 @@ end
 
 cursor(a::CanvasArea) = begin
   v = a.of
-  v.full || return :hand   # a click makes it fill the window
   w = window_of(a)
   (w === nothing || v.zoom <= 0) && return :arrow
   v.tool == :pen && return :crosshair
@@ -20288,8 +20309,8 @@ cursor(::CanvasView) = :arrow
 
 onkey(a::CanvasArea, ev::KeyPress{Keys.mouse_left}) = begin
   v, w = a.of, ev.window
-  # In the page, a click makes the board fill the window, where its tools are. With ⌥ held, the page shows its lines.
-  v.full || return only_held(v, Keys.opt) ? nothing : full!(v, true)
+  # A click changes the board in the page too. With ⌥ held, the page shows the block's lines.
+  v.full || !only_held(v, Keys.opt) || return nothing
   v.zoom > 0 || return handled
   x, y = num(w.mouse[1]), num(w.mouse[2])
   p = board_place(v, x, y)
@@ -20411,30 +20432,31 @@ canvas_drop!(v::CanvasView) = begin
 end
 
 # Two fingers on the trackpad move round the board. A pinch, the mouse wheel, or two fingers with ⌘ held make it
-# bigger or smaller round the mouse. In the page they scroll the page, which goes past the board.
+# bigger or smaller round the mouse. In the page the wheel and two fingers scroll the page, which goes past the
+# board. With ⌘ held they make it bigger or smaller there too, as a pinch does.
 onscroll(a::CanvasArea, ev::MouseScroll) = begin
   v, w = a.of, ev.window
-  v.full || return nothing
+  (v.full || only_held(w, Keys.cmd)) || return nothing
   v.zoom > 0 || return handled
   (only_held(w, Keys.cmd) || ev.wheel) && return zoom_board!(v, exp(num(ev.delta[2]) / 10), num(w.mouse[1]), num(w.mouse[2]))
   v.at = (v.at[1] - 30num(ev.delta[1]) / v.zoom, v.at[2] - 30num(ev.delta[2]) / v.zoom)
   handled
 end
 onscroll(v::CanvasView, ::MouseScroll) = v.full ? handled : nothing
-onpinch(a::CanvasArea, ev::Pinch) = (v = a.of; v.full ? zoom_board!(v, ev.scale, num(ev.window.mouse[1]), num(ev.window.mouse[2])) : nothing)
+onpinch(a::CanvasArea, ev::Pinch) = zoom_board!(a.of, ev.scale, num(ev.window.mouse[1]), num(ev.window.mouse[2]))
 
-# Esc lets go of what's selected, then chooses the arrow, then puts the board back in the page. Delete takes away
-# what's selected. Tab and ⇧Return add a note joined to the card that's selected. Return types in the note or the
-# text that's selected, or opens a card of a page.
+# Esc lets go of what's selected, then chooses the arrow, then puts a board that fills the window back in the page.
+# In the page the page's text takes that Esc, and gets the keyboard back. Delete takes away what's selected. Tab
+# and ⇧Return add a note joined to the card that's selected. Return types in the note or the text that's selected,
+# or opens a card of a page.
 onkey(a::CanvasArea, ev::KeyPress{K}) where K = begin
   v, w = a.of, ev.window
-  v.full || return nothing
   ro = readonly(editor(v).buf)
   p = v.picked
   if K == Keys.escape && unmodified(ev)
     p === nothing || return (v.picked = nothing; handled)
     v.tool == :select || return (v.tool = :select; handled)
-    return full!(v, false)
+    return v.full ? full!(v, false) : nothing
   elseif K in (Keys.backspace, Keys.delete) && unmodified(ev)
     return ro ? handled : delete_picked!(v)
   elseif K == Keys.tab && unmodified(ev)
