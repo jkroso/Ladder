@@ -1364,6 +1364,15 @@ end
   rect::NTuple{4,px} = (0px, 0px, 0px, 0px)
   quiet::Bool = false
 end
+"""
+The lock in the top bar of a page that you can't change: a file that's only
+shown, a page from a web server, or a file that your Mac marks as read-only.
+It's no button. While the mouse is over it, its tooltip says "Read only".
+"""
+@def mutable struct ReadOnly <: SemanticUI
+  rect::NTuple{4,px} = (0px, 0px, 0px, 0px)
+  quiet::Bool = false
+end
 "The button in the top bar that sends the page to the agent that's waiting for it"
 @def mutable struct SendButton <: SemanticUI
   rect::NTuple{4,px} = (0px, 0px, 0px, 0px)
@@ -5143,8 +5152,8 @@ end
 #
 # A click on a file in the sidebar shows the file in the page, whatever kind of
 # file it is. Ladder changes Markdown files and Julia files, so any other file
-# is only shown, and the top bar says "Read only". The button beside those
-# words opens the file in the app that the Mac uses for it.
+# is only shown, and the top bar has a lock (see `ReadOnly`). The button beside
+# the lock opens the file in the app that the Mac uses for it.
 #
 # A Julia file is one block of code, with no lines that open and close it. You
 # type in it as in a `julia` code block of a page: ⌘Return runs the expression
@@ -30393,7 +30402,7 @@ end
 # Each button in the top bar says what it does while the mouse is over it. A
 # click hides what it says until the mouse leaves the button.
 
-const Tipped = Union{ToolButton,SendButton,Mode,CheckCount}
+const Tipped = Union{ToolButton,SendButton,Mode,CheckCount,ReadOnly}
 const TIP_INK = colorant"rgb(240,240,240)"   # on the dark grey that every tooltip has
 
 "What a tooltip shows: `words`, with room around them"
@@ -30453,6 +30462,15 @@ tip(s::SendButton) = begin
   ws = agents(e)
   isempty(ws) ? "Nudged $(get(e.nodes, :agent, "the agent"))" : "Nudge $(first(ws).name) with what you changed" * hint(e, :run)
 end
+
+tip(::ReadOnly) = "Read only"
+
+const LOCK_W = 26px   # how wide the lock is in the top bar
+
+describe(::ReadOnly) = Box(width(LOCK_W), height(28px), Alignment.Center, Icon("lock", size=14px, color=colours.dim))
+
+"The lock in the top bar of `e`"
+lock_part(e) = node!(() -> ReadOnly(), e, :read_only)
 
 draw(ctx, size, ui::ConcreteRect, b::Tipped) = (b.rect = (ui.left, ui.top, ui.width, ui.height); nothing)
 
@@ -30842,7 +30860,7 @@ describe(t::TopBar) = begin
   # What a file that's only shown says of itself, like how many rows a CSV file has, can need more room than that.
   # The words move aside as the slider of the levels opens, so then they need its room too.
   grown = isempty(mode) ? 0px : slider_grown(e)
-  said = readonly(b) && !isempty(b.about) ? measure(Face(SANS, "", 12px, colours.dim, false), b.about * "  ·  Read only") + 70px + grown : 0px
+  said = readonly(b) && !isempty(b.about) ? measure(Face(SANS, "", 12px, colours.dim, false), b.about) + LOCK_W + 70px + grown : 0px
   side = max(isempty(more) && isempty(checks) ? 250px : 330px, said) + (isempty(mode) ? 0px : MODE_W)
   ended_rename!(e)
   # The two ends of the bar are as wide as each other, so the file's name is in the middle of the space beside
@@ -30884,7 +30902,7 @@ describe(t::TopBar) = begin
         buttons..., Box(width(grow=grow)), arrows...)),
     Box(width(grow=grow), height(grow=grow), clip=true, node!(Title, e, :title)),
     Row(fixed(side + beside), height(grow=grow), justify=Alignment.End, padding(0px, 10px, 0px, 0px),
-      # A file that's only shown has no words to count. The bar says that it's only shown. A file with levels
+      # A file that's only shown has no words to count. The bar has a lock, after what the file says of itself. A file with levels
       # has the snake or the ladder too. It's after the words, which are longer at one level than at another,
       # so that it stays where it is, under the mouse, when a click on its slider changes the level. The
       # slider opens out to the left, and the parts before it move aside to make room.
@@ -30895,13 +30913,14 @@ describe(t::TopBar) = begin
       # A page that has a panel at the right has the button that hides it, at the end
       (page_covered(e) || nofile(e) ? right_part(e) :
        readonly(b) && page_object(e) isa BlogFolder ? (more..., mode..., outside...) :
-       readonly(b) ? (said_part(isempty(b.about) ? "Read only" : b.about * "  ·  Read only", side - (isempty(outside) ? 0px : 40px) - (isempty(mode) ? 0px : MODE_W + grown)),
+       readonly(b) ? ((isempty(b.about) ? () : (said_part(b.about, side - LOCK_W - (isempty(outside) ? 0px : 40px) - (isempty(mode) ? 0px : MODE_W + grown)),))...,
+                      lock_part(e),
                       mode...,
                       outside...) :
                      (more..., job_part(e)..., agent_part(e)..., checks..., diff_part(e)..., commit_part(e)..., mode...,
-                      # A page that's never changed says so at the end. A page from a web server has a button after
+                      # A page that's never changed has a lock at the end. A page from a web server has a button after
                       # that, which saves a copy that you can change.
-                      (b.fixed ? (Box(height(28px), padding(8px, 0px), label("Read only", 12px, color=colours.dim)),) : ())...,
+                      (b.fixed ? (lock_part(e),) : ())...,
                       copy_part(e)...))...))
 end
 
@@ -43564,7 +43583,7 @@ add_command!(open_in_browser!, title="Show the page from the web that shows in y
 # --- a copy of a page from a web server -----------------------------------------------------
 #
 # You can't change a page from a web server, but you can change a copy of it.
-# The Save button in the top bar, after "Read only", makes one, and so does
+# The Save button in the top bar, after the lock, makes one, and so does
 # ⌘S. macOS's own panel asks where it goes: a folder that's named for the
 # site, like example.com. The page goes in that folder at its own place on
 # the site, so https://example.com/notes/plans.md is notes/plans.md in it.

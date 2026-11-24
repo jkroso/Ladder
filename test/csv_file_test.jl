@@ -55,6 +55,8 @@ colour_at((x, y)) = begin
 end
 rgb(c) = round.(Int, 255 .* Float64.((c.r, c.g, c.b)))
 near(a, b) = all(abs.(a .- b) .< 30)
+"True when the geometry `node` holds what a node of the type `T` draws"
+has_node(node, T) = (hasproperty(node, :from) && node.from isa T) || (node isa K.GeometricUI && any(n -> has_node(n, T), node.children))
 "The words of each Text in the geometry `node`"
 texts(node, out=String[]) = begin
   node isa K.Text ? push!(out, node.content) : node isa K.GeometricUI && foreach(n -> texts(n, out), node.children)
@@ -90,7 +92,10 @@ column(c) = [sheet().table.rows[r][c] for r in sheet().found]
   # It starts 12px under the top bar, nearer than the text of a page. What's said of the file is in the top bar.
   @test K.num(rect(frame_of(v)).top) ≈ K.num(K.TOPBAR_H) + 12
   bar = texts(K.describe(e.nodes[:topbar]))
-  @test any(t -> occursin("300 rows", t) && occursin("Changed", t) && endswith(t, "Read only"), bar)
+  @test any(t -> occursin("300 rows", t) && occursin("Changed", t), bar)
+  # A lock after those words says that the file is only shown. Its tooltip says so in words.
+  @test !any(t -> occursin("Read only", t), bar)
+  @test has_node(K.describe(e.nodes[:topbar]), K.ReadOnly) && K.tip(e.nodes[:read_only]) == "Read only"
   @test !any(t -> occursin("300 rows", t), texts(K.describe(v)))
   @test K.num(r.left) ≈ K.num(K.text_left(e) + K.SHEET_LINE)
   # A line with round corners goes round it. Outside the round corner is the page, not the headings.

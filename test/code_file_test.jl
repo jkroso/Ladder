@@ -334,6 +334,9 @@ end
   K.open!(e, locked); frames()
   b = e.buf
   @test b.view == :markdown && b.fixed && !K.readonly(b)   # it's a page like any other, with its heading as a heading
+  # The top bar has a lock, which says "Read only" while the mouse is over it
+  lock_in(node) = (hasproperty(node, :from) && node.from isa K.ReadOnly) || (node isa K.GeometricUI && any(lock_in, node.children))
+  @test lock_in(K.describe(e.nodes[:topbar])) && K.tip(e.nodes[:read_only]) == "Read only"
   b.caret = b.anchor = (3, 0); frames()
   typed("x")
   key(Keys.s, Keys.cmd)
