@@ -3,9 +3,14 @@
 #     DesignView(path="bracket.sc")
 #
 # It's laid out as SolidCraft's own window is. The design fills the page, in
-# 3D. Over it are a toolbar with tabs, a browser of the design's bodies and
-# sketches at the left, the history of its steps along the bottom, and at the
-# right the form of the command that's being filled in.
+# 3D. Over it are a toolbar with tabs, a browser at the left, the history of
+# the design's steps along the bottom, and at the right the form of the
+# command that's being filled in.
+#
+# The browser lists the origin, the bodies, the sketches and the construction
+# planes. The eye at the end of a line shows or hides what the line names, and
+# the eye of a folder does that for everything in it. The origin's point,
+# axes and planes are hidden in a new design, as in SolidCraft.
 #
 # The view:
 #   - Drag to turn the design. Drag with ⇧ held, or with the middle button, to
@@ -18,14 +23,18 @@
 #
 # A command, like Extrude or Fillet, opens its form. A length is typed in the
 # form. A face, an edge or a region of a sketch is clicked in the design
-# while its line of the form is lit. OK runs the command, and SolidCraft's
-# hidden program works out the new shape: see engine.jl.
+# while its line of the form is lit. As soon as the form has what the command
+# needs, the design shows what the command would make, tinted. OK runs the
+# command, and SolidCraft's hidden program works out the new shape: see
+# engine.jl.
 #
 # Two clicks on a sketch, in the browser or the history, open it. The toolbar
 # then has the sketch's tools. A tool takes clicks in the sketch, and snaps to
 # the points and curves that are near. With no tool, a drag moves a point or a
 # curve as far as its constraints allow, and two clicks on a dimension change
-# its length.
+# its length. The sketch that's open is drawn over the bodies. Slice, in the
+# panel at the right, takes away the part of each body that's in front of it.
+# A sketch that isn't open is hidden by a body in front of it.
 #
 # ⌘Z takes back the last change and ⇧⌘Z does it again. ⌘S writes the file.
 # Until then, every change is only in the hidden program.
@@ -119,7 +128,11 @@ mutable struct Form
   inputs::Vector{Any}                # for a step that's being changed: its named lengths and angles
   problem::String
   extra::JSON.Object                 # parameters that go with the form's own, like what's selected in a sketch
+  key::Any                           # what the form asks for now, as text: the design shows what a command with that key makes
+  since::Float64                     # when the form last changed
+  closed::Set{String}                # the parts of the form that are closed: Options, Advanced
 end
+Form(spec, step=nothing, inputs=Any[]) = Form(spec, Dict{String,Any}(), Dict{String,Vector{Any}}(), "", step, inputs, "", JSON.Object(), nothing, 0.0, Set(["Advanced"]))
 
 "What the page shows of a SolidCraft design"
 @def mutable struct DesignView <: SemanticUI
@@ -142,12 +155,18 @@ end
   image::Any = nothing                # the last picture, and what it's a picture of
   data::IdDict{Any,Any} = IdDict{Any,Any}()        # each body's triangles and edges, as the graphics card takes them
   regions::Dict{Int,Any} = Dict{Int,Any}()         # the closed regions of each sketch that shows
+  faces::Dict{Any,Int} = Dict{Any,Int}()           # the face of a body that a point is on, for the faces with a colour of their own
   described::Dict{String,Any} = Dict{String,Any}() # what SolidCraft says of the parameters of a command
   spots::Vector{Any} = Any[]          # where the last frame drew things to click in the picture: each a box and what it is
-  closed::Set{String} = Set{String}() # the folders of the browser that are closed
+  closed::Set{String} = Set{String}(["Document Settings", "Named Views", "Origin"]) # the folders of the browser that are closed
   clicked::Float64 = 0.0              # when the picture was last clicked, to tell two clicks
   marks::Bool = true                  # the marks of a sketch's constraints show
   sizes::Bool = true                  # and its dimensions
+  points::Bool = true                 # and its points
+  snap::Bool = true                   # a click of a sketch tool goes to the point that's near, and level or upright with the last click
+  building::Bool = false              # what a sketch tool draws is construction geometry
+  slice::Bool = false                 # while a sketch is edited, the part of each body between its plane and the eye doesn't show
+  previews::Bool = true               # the design shows what the command of the open form would make
   along::Float64 = 0.0                # how far the history has moved left
   seen::Int = -1                      # the model's version when it was last drawn
 end
@@ -205,6 +224,7 @@ leave!(v::DesignView) = begin
   empty!(v.clicks)
   v.form = nothing
   v.drag = nothing
+  v.model === nothing || Designs.forget!(v.model)
   v
 end
 
@@ -239,6 +259,8 @@ describe(v::DesignView) = begin
       Box(width(max=460px), Text(m.problem, size=13px, color=t.dim)))
   end
   Designs.tick!(m)
+  # An answer can close the design: Save in the question that a window asks before it closes
+  v.model === m || return Box(width(grow=grow), height(grow=grow))
   # While SolidCraft works, the editor looks for its answer in each frame
   Designs.busy(m) && redraw_in!(v, 0.016)
   # A design shows whole when its bodies first come
@@ -266,6 +288,7 @@ describe(v::DesignView) = begin
   end
   editing = Designs.editing(m) !== nothing
   editing ? (v.tab = "Sketch") : v.tab == "Sketch" && (v.tab = "Model"; v.tool = nothing; empty!(v.clicks))
+  preview!(v)
   scene = part!(() -> Scene(of=v), v, :scene)
   Stack(width(grow=grow), height(grow=grow), Alignment.Start,
     scene,
@@ -294,12 +317,13 @@ icon_button(v, key, icon, tip; act, on=false, size=16px, off=false) = begin
 end
 
 "A button with words"
-word_button(v, key, label; act, strong=false, tip="") = begin
+word_button(v, key, label; act, strong=false, tip="", wide=false, on=false, faint=false) = begin
   t = theme(v)
   press!(v, key; act, tip) do hovered
-    Box(height(28px), padding(14px, 0px), radius(6px),
-        background(strong ? (hovered ? Ink.mixed(t.accent, t.text, 0.12) : t.accent) : hovered ? t.select : t.hover),
-      words(label, 12px, color=strong ? t.on_accent : t.text, weight="Medium"))
+    Row((wide ? (width(grow=grow),) : ())..., height(28px), padding(14px, 0px), radius(6px), justify=Alignment.Center,
+        (strong ? () : (border(1px, :solid, on ? t.accent : Ink.faded(t.line, 0.9)),))...,
+        background(strong ? Ink.faded(hovered ? Ink.mixed(t.accent, t.text, 0.12) : t.accent, faint ? 0.4 : 1.0) : on ? Ink.faded(t.accent, 0.2) : hovered ? t.select : t.hover),
+      Box(words(label, 12px, color=strong ? Ink.faded(t.on_accent, faint ? 0.6 : 1.0) : t.text, weight="Medium")))
   end
 end
 
@@ -412,10 +436,10 @@ ribbon(v::DesignView) = begin
       Row(width(grow=grow), child_gap=2px,
         tab.(tabs)...,
         Box(width(grow=grow)),
-        (Designs.busy(m) ? (Box(padding(8px, 0px), words("Working…", 11.5px, color=t.dim)),) : ())...,
+        (Designs.busy(m) && !m.trying ? (Box(padding(8px, 0px), words("Working…", 11.5px, color=t.dim)),) : ())...,
         Box(padding(8px, 0px), words(Designs.edited(m) ? name * " — edited" : name, 12px, color=t.dim)),
         icon_button(v, :undo, "arrow-counterclockwise", "Undo (⌘Z)"; act=e -> undo!(v), off=get(doc, "undo", 0) == 0),
-        icon_button(v, :redo, "arrow-clockwise", "Redo (⇧⌘Z)"; act=e -> redo!(v), off=get(doc, "redo", 0) == 0),
+        icon_button(v, :redo, "arrow-clockwise", "Redo (⇧⌘Z)"; act=e -> redo!(v), off=Designs.redoable(m) == 0),
         icon_button(v, :save, "save", "Save (⌘S)"; act=e -> save!(v), off=!Designs.edited(m))),
       Row(width(grow=grow), Alignment.Start, child_gap=8px, clip_x=true, shown...))
   end
@@ -441,12 +465,12 @@ end
 const ROW_H = 26px
 
 "A line of the browser"
-browser_row(v::DesignView, key, depth, icon, name; on=false, dim=false, eye=nothing, act=nothing, twice=nothing, other=nothing, note="") = begin
+browser_row(v::DesignView, key, depth, icon, name; on=false, dim=false, eye=nothing, act=nothing, twice=nothing, other=nothing, note="", tint=nothing) = begin
   t = theme(v)
   press!(v, key; act, twice, other) do hovered
     Row(width(grow=grow), height(ROW_H), padding(0px, 6px, 0px, 8px + 14px * depth), radius(5px), child_gap=7px,
         background(on ? t.select : hovered ? t.hover : clear),
-      Glyph(icon, size=15px, color=dim ? Ink.faded(t.dim, 0.7) : t.dim),
+      Glyph(icon, size=15px, color=dim ? Ink.faded(t.dim, 0.7) : t.dim, accent=tint),
       Box(words(name, 12.5px, color=dim ? t.dim : t.text)),
       (isempty(note) ? () : (Box(words(note, 11.5px, color=colorant"rgb(60,180,90)")),))...,
       Box(width(grow=grow)),
@@ -454,20 +478,38 @@ browser_row(v::DesignView, key, depth, icon, name; on=false, dim=false, eye=noth
   end
 end
 
-"The eye at the end of a line of the browser, which shows and hides what the line names"
-eye(v::DesignView, key, visible, items) = begin
+"The eye at the end of a line of the browser, which shows and hides what the line names: a click calls `act`"
+eye(v::DesignView, key, visible, act) = begin
   t = theme(v)
-  press!(v, key; act=e -> Designs.change!(v.model, "browser.visibility", JSON.Object("items" => items, "visible" => !visible)),
-         tip=visible ? "Hide" : "Show") do hovered
+  press!(v, key; act=e -> act(), tip=visible ? "Hide" : "Show") do hovered
     Box(width(22px), height(22px), radius(5px), background(hovered ? t.select : clear),
       Glyph(visible ? "eye" : "eye-slash", size=14px, color=visible ? t.text : Ink.faded(t.dim, 0.7)))
   end
 end
 
-folder(v::DesignView, name, count) = begin
+"A folder of the browser, with how many things it has. `shown` and `show` give it an eye for all of them."
+folder(v::DesignView, name, count=nothing; icon=nothing, shown=nothing, show=nothing) = begin
   open = !(name in v.closed)
-  browser_row(v, (:folder, name), 0, open ? "chevron-down" : "chevron-right", "$name ($count)";
-              act=e -> (open ? push!(v.closed, name) : delete!(v.closed, name)))
+  t = theme(v)
+  press!(v, (:folder, name); act=e -> (open ? push!(v.closed, name) : delete!(v.closed, name))) do hovered
+    Row(width(grow=grow), height(ROW_H), padding(0px, 6px, 0px, 8px), radius(5px), child_gap=7px, background(hovered ? t.hover : clear),
+      Glyph(open ? "chevron-down" : "chevron-right", size=10px, color=t.dim),
+      (icon === nothing ? () : (Glyph(icon, size=15px, color=t.dim),))...,
+      Box(words(count === nothing ? name : "$name ($count)", 12.5px, color=shown === false ? t.dim : t.text)),
+      Box(width(grow=grow)),
+      (show === nothing ? () : (eye(v, (:eye, :folder, name), shown, show),))...)
+  end
+end
+
+"What the browser lists of the origin: the name that SolidCraft has for each thing, and its icon"
+const ORIGIN_ROWS = (("O", "point"), ("X", "axis"), ("Y", "axis"), ("Z", "axis"), ("XY", "plane"), ("XZ", "plane"), ("YZ", "plane"))
+
+"Show or hide one thing of the origin. While all of the origin is hidden, showing one thing shows only that one."
+show_origin!(v::DesignView, name, visible) = begin
+  m = v.model
+  (visible && m.origin_hidden) || return Designs.show!(m, visible; items=Any[name])
+  Designs.show!(m, true; folder="origin")
+  Designs.show!(m, false; items=Any[n for (n, _) in ORIGIN_ROWS if n != name])
 end
 
 browser(v::DesignView) = begin
@@ -475,32 +517,71 @@ browser(v::DesignView) = begin
   m = v.model
   active = Designs.editing(m)
   rows = Any[]
+  look(turn, tilt) = e -> (v.eye = Scenes.fit(Scenes.Eye(v.eye.target, turn, tilt, v.eye.distance, v.eye.wide), Scenes.box(showing(v)), (v.area[3], v.area[4])))
+  # The design's settings, and the views with names
+  push!(rows, folder(v, "Document Settings"; icon="feature"))
+  if !("Document Settings" in v.closed)
+    push!(rows, browser_row(v, (:setting, :units), 1, "measure", "Units: " * String(get(m.doc, "units", "mm"))))
+    push!(rows, browser_row(v, (:setting, :params), 1, "params", "Parameters ($(length(Designs.params(m))))"; on=v.panel == :params, act=e -> start!(v, "parameters")))
+  end
+  push!(rows, folder(v, "Named Views"; icon="perspective"))
+  "Named Views" in v.closed || for (name, turn, tilt) in (("Top", -90.0, 90.0), ("Front", -90.0, 0.0), ("Right", 0.0, 0.0), ("Home", -35.0, 28.0))
+    push!(rows, browser_row(v, (:named, name), 1, "orbit", name; act=look(turn, tilt)))
+  end
+  # The origin: its point, its three axes and its three planes
+  whole = any(row -> Designs.origin_shown(m, row[1]), ORIGIN_ROWS)
+  push!(rows, folder(v, "Origin"; icon="axis", shown=whole, show=() -> Designs.show!(m, !whole; folder="origin")))
+  "Origin" in v.closed || for (name, icon) in ORIGIN_ROWS
+    shown = Designs.origin_shown(m, name)
+    push!(rows, browser_row(v, (:origin, name), 1, icon, name; dim=!shown, on=any(p -> p.kind == :plane && p.of == name, v.picked),
+      eye=eye(v, (:eye, :origin, name), shown, () -> show_origin!(v, name, !shown)),
+      act=icon == "plane" ? (e -> pick!(v, (kind=:plane, of=name, n=0, at=(0.0, 0.0, 0.0)), Keys.shft in e.window.keys)) : nothing))
+  end
   bodies = Designs.bodies(m)
   if !isempty(bodies)
-    push!(rows, folder(v, "Bodies", length(bodies)))
+    any_shown = any(b -> get(b, "visible", true) === true, bodies)
+    push!(rows, folder(v, "Bodies", length(bodies); shown=any_shown, show=() -> Designs.show!(m, !any_shown; folder="bodies")))
     "Bodies" in v.closed || for b in bodies
       name = String(b["name"])
       shown = get(b, "visible", true) === true
       push!(rows, browser_row(v, (:body, name), 1, "body", name; dim=!shown, on=any(p -> p.kind == :body && p.of == name, v.picked),
-        eye=eye(v, (:eye, :body, name), shown, Any[name]),
+        tint=(own = get(m.colours, name, nothing); own === nothing ? nothing : RGB(own...)),
+        eye=eye(v, (:eye, :body, name), shown, () -> Designs.show!(m, !shown; items=Any[name])),
         act=e -> pick!(v, (kind=:body, of=name, n=0, at=(0.0, 0.0, 0.0)), Keys.shft in e.window.keys),
         twice=e -> rename!(v, e.window, (:body, name), name, new -> Designs.change!(m, "body.rename", JSON.Object("body" => name, "name" => new)))))
     end
   end
   sketches = Designs.sketch_list(m)
   if !isempty(sketches)
-    push!(rows, folder(v, "Sketches", length(sketches)))
+    any_shown = any(s -> get(s, "visible", false) === true, sketches)
+    push!(rows, folder(v, "Sketches", length(sketches); shown=any_shown, show=() -> Designs.show!(m, !any_shown; folder="sketches")))
     "Sketches" in v.closed || for s in sketches
       id, name = Int(s["id"]), String(s["name"])
       shown = get(s, "visible", false) === true
-      push!(rows, browser_row(v, (:sketch, id), 1, "sketch", name; dim=!shown && id != active, on=id == active, note=id == active ? "editing" : "",
-        eye=eye(v, (:eye, :sketch, id), shown, Any[id]),
+      push!(rows, browser_row(v, (:sketch, id), 1, "sketch", name; dim=!shown && id != active, on=id == active, note=id == active ? "(editing)" : "",
+        eye=eye(v, (:eye, :sketch, id), shown, () -> Designs.show!(m, !shown; items=Any[id])),
         act=e -> nothing, twice=e -> edit_step!(v, id, e.window)))
     end
   end
-  isempty(rows) && push!(rows, Box(padding(10px, 8px), Alignment.Start, Text("This design is empty. Start with New Sketch, or with a box from Create.", size=12px, color=t.dim)))
+  # The construction planes, axes and points
+  made = [f for f in Designs.timeline(m) if f isa AbstractDict && startswith(String(get(f, "type", "")), "Construction") && get(f, "rolled_back", false) !== true]
+  if !isempty(made)
+    any_shown = any(f -> Designs.plane_shown(m, String(f["name"])), made)
+    push!(rows, folder(v, "Construction", length(made); shown=any_shown, show=() -> Designs.show!(m, !any_shown; folder="construction")))
+    "Construction" in v.closed || for f in made
+      id, name = Int(f["id"]), String(f["name"])
+      shown = Designs.plane_shown(m, name)
+      flat = f["type"] == "ConstructionPlane"
+      push!(rows, browser_row(v, (:made, id), 1, Ink.step_icon(String(f["type"])), name; dim=!shown, on=any(p -> p.kind == :plane && p.of == name, v.picked),
+        eye=eye(v, (:eye, :made, id), shown, () -> Designs.show!(m, !shown; items=Any[name])),
+        act=flat ? (e -> pick!(v, (kind=:plane, of=name, n=0, at=(0.0, 0.0, 0.0)), Keys.shft in e.window.keys)) : nothing,
+        twice=e -> edit_step!(v, id, e.window)))
+    end
+  end
+  isempty(bodies) && isempty(sketches) &&
+    push!(rows, Box(padding(10px, 8px), Alignment.Start, Text("This design is empty. Start with New Sketch, or with a box from Create.", size=12px, color=t.dim)))
   room = max(120.0, v.area[4] - 300)
-  tall = min(room, length(rows) * num(ROW_H) + 8)
+  tall = min(room, length(rows) * num(ROW_H) + 8 + (isempty(bodies) && isempty(sketches) ? 30 : 0))
   card!(v, :browser) do
     Column(width(244px), panel_look(t)..., Alignment.Start,
       Row(width(grow=grow), height(36px), padding(12px, 0px), border(1px, :solid, Ink.faded(t.line, 0.7))[:bottom],
@@ -710,8 +791,9 @@ start!(v::DesignView, id, window=nothing) = begin
   end
   id in ("sketch.trim", "sketch.extend", "sketch.project") && return (leave!(v); empty!(v.picked); v.tool = Symbol(last(split(id, '.'))); v)
   if id == "sketch.construction"
+    # What's selected changes between normal and construction. With nothing selected, what's drawn next does.
     curves = chosen(v, (:curve,))
-    isempty(curves) ? (m.said = "Select the lines to change first.") : Designs.change!(m, id, JSON.Object("curves" => curves))
+    isempty(curves) ? (v.building = !v.building) : Designs.change!(m, id, JSON.Object("curves" => curves))
     return v
   end
   startswith(id, "sketch.constraint.") && return constrain!(v, id)
@@ -781,17 +863,18 @@ open_form!(v::DesignView, id) = begin
   keep = v.picked
   leave!(v)
   forget!(v, :field)
-  f = Form(spec, Dict{String,Any}(), Dict{String,Vector{Any}}(), "", nothing, Any[], "", JSON.Object())
+  f = Form(spec)
   for field in spec.fields
     Commands.picks(field) || (f.values[field.key] = field.default; continue)
     f.values[field.key] = field.kind == :plane ? field.default : Any[]
-    f.shows[field.key] = Any[]
+    f.shows[field.key] = field.kind == :plane && field.default isa String ? Any[(kind=:plane, of=field.default, n=0, at=(0.0, 0.0, 0.0))] : Any[]
   end
   # What's selected fills the fields that it suits
   for p in keep, field in spec.fields
-    suits = (field.kind == :edges && p.kind == :edge) || (field.kind in (:faces, :face) && p.kind == :face) || (field.kind in (:bodies, :body) && p.kind == :body)
+    suits = (field.kind == :edges && p.kind == :edge) || (field.kind in (:faces, :face) && p.kind == :face) || (field.kind in (:bodies, :body) && p.kind == :body) ||
+            (field.kind == :plane && p.kind == :plane)
     suits || continue
-    (Commands.many(field) || isempty(f.values[field.key])) && take!(f, field, p)
+    (Commands.many(field) || field.kind == :plane || isempty(f.values[field.key])) && take!(f, field, p)
     break
   end
   # In a sketch, a command like Fillet goes on what's selected there
@@ -801,7 +884,7 @@ open_form!(v::DesignView, id) = begin
     !isempty(points) ? (f.extra[length(points) == 1 ? "point" : "points"] = length(points) == 1 ? points[1] : points) :
     length(curves) >= 2 && (f.extra["a"] = curves[1]; f.extra["b"] = curves[2])
   end
-  i = findfirst(field -> Commands.picks(field) && field.kind != :plane && isempty(f.values[field.key]), spec.fields)
+  i = findfirst(field -> Commands.picks(field) && field.kind != :plane && !field.optional && isempty(f.values[field.key]), spec.fields)
   i === nothing && (i = findfirst(Commands.picks, spec.fields))
   f.active = i === nothing ? "" : spec.fields[i].key
   empty!(v.picked)
@@ -813,7 +896,7 @@ end
 sent(field::Commands.Field, p) =
   field.kind in (:bodies, :body) ? p.of :
   field.kind == :profiles ? JSON.Object("point" => Any[p.at[1], p.at[2]]) :
-  field.kind == :plane ? JSON.Object("face" => Any[p.at...]) : Any[p.at...]
+  field.kind == :plane ? (p.kind == :plane ? p.of : JSON.Object("face" => Any[p.at...])) : Any[p.at...]
 
 "Put the click on `p` in the field `field` of the form `f`. A second click on the same thing takes it out again."
 take!(f::Form, field::Commands.Field, p) = begin
@@ -846,34 +929,71 @@ held(v::DesignView, f::Form) = begin
   values
 end
 
-"Run the command of the form that's open"
-apply!(v::DesignView) = begin
-  f, m = v.form, v.model
-  f === nothing && return v
-  done(answer, problem) = problem === nothing ? (v.form === f && (v.form = nothing); empty!(v.picked)) : (f.problem = problem)
+"""
+What the form `f` asks for now: `(command, parameters)` as SolidCraft takes
+them, or words that say what's still missing, or nothing when the form of a
+step has no change.
+"""
+request(v::DesignView, f::Form) = begin
   if f.step !== nothing
     # A step that's changed gets each of its lengths and angles as it's typed now
     changes = JSON.Object()
     for input in f.inputs
       box = get(v.parts, (:field, "step", String(input["param"])), nothing)
-      box === nothing || strip(box.text) == input["expression"] || (changes[String(input["param"])] = Commands.value(box.text))
+      (box === nothing || isempty(strip(box.text)) || strip(box.text) == input["expression"]) || (changes[String(input["param"])] = Commands.value(box.text))
     end
-    isempty(changes) ? (v.form = nothing) : Designs.change!(m, "parameters.change", JSON.Object("changes" => changes); quiet=true, then=done)
-    return v
+    return isempty(changes) ? nothing : ("parameters.change", JSON.Object("changes" => changes))
   end
   params = Commands.params(f.spec, held(v, f))
-  params isa String && return (f.problem = params; v)
+  params isa String && return params
   merge!(params, f.extra)
   # SolidCraft finds each region of a sketch from a place inside it, and needs to know which sketch
   regions = get(f.shows, "profiles", Any[])
   isempty(regions) || (params["sketch"] = regions[1].n)
+  (f.spec.command, params)
+end
+
+"Run the command of the form that's open"
+apply!(v::DesignView) = begin
+  f, m = v.form, v.model
+  f === nothing && return v
+  want = request(v, f)
+  want === nothing && return (v.form = nothing; v)
+  want isa String && return (f.problem = want; v)
+  command, params = want
   # A new sketch is opened to draw in, and seen flat
-  f.spec.command == "sketch.create" && (v.parts[:eye_before] = v.eye; v.parts[:look_at] = :new)
-  Designs.change!(m, f.spec.command, params; quiet=true, then=(answer, problem) -> begin
-    problem === nothing || f.spec.command != "sketch.create" || (delete!(v.parts, :look_at); delete!(v.parts, :eye_before))
-    done(answer, problem)
+  command == "sketch.create" && (v.parts[:eye_before] = v.eye; v.parts[:look_at] = :new)
+  Designs.change!(m, command, params; quiet=true, then=(answer, problem) -> begin
+    problem === nothing || command != "sketch.create" || (delete!(v.parts, :look_at); delete!(v.parts, :eye_before))
+    problem === nothing ? (v.form === f && (v.form = nothing); empty!(v.picked)) : (f.problem = problem)
   end)
   v
+end
+
+"""
+Keep what the design shows of the open form's command up to date. When the
+form has what its command needs, and has stayed the same for a quarter of a
+second, SolidCraft's program tries the command: see `Designs.try!`. The
+picture then shows the bodies as the command would leave them.
+"""
+preview!(v::DesignView) = begin
+  f, m = v.form, v.model
+  m === nothing && return
+  (f === nothing || !v.previews) && return Designs.forget!(m)
+  want = Designs.editing(m) === nothing ? request(v, f) : nothing
+  want = want isa Tuple && Commands.tried(want[1]) ? want : nothing
+  key = want === nothing ? nothing : want[1] * " " * JSON.json(want[2])
+  key == f.key || (f.key = key; f.since = time())
+  key === nothing && return Designs.forget!(m)
+  trial = m.trial
+  trial !== nothing && trial.key == key && return
+  # A command that's tried takes away what could be redone, so none is tried while there's a step to redo
+  (m.trying || Designs.busy(m) || Designs.redoable(m) > 0) && return
+  wait = 0.25 - (time() - f.since)
+  wait > 0 && return redraw_in!(v, wait)
+  Designs.try!(m, key, want...)
+  redraw_in!(v, 0.016)
+  nothing
 end
 
 "Open the step `id` of the history to change it: a sketch to draw in, and any other step as a form of its lengths"
@@ -894,7 +1014,7 @@ edit_step!(v::DesignView, id, window=nothing) = begin
     inputs = Any[i for i in get(answer, "inputs", Any[]) if i isa AbstractDict && get(i, "param", nothing) isa String]
     forget!(v, :field)
     spec = Commands.Spec("", String(step["name"]), Ink.step_icon(String(step["type"])), Commands.Field[], "")
-    v.form = Form(spec, Dict{String,Any}(), Dict{String,Vector{Any}}(), "", id, inputs, "", JSON.Object())
+    v.form = Form(spec, id, inputs)
   end
   v
 end
@@ -918,66 +1038,86 @@ end
 
 # --- the panel at the right ----------------------------------------------------------
 
-const SIDE_W = 286px
-const LABEL_W = 112px
+const SIDE_W = 272px
+const LABEL_W = 98px
+const FIELD_H = 28px
 
 side(v::DesignView) = v.panel == :params ? (params_card(v),) : v.form !== nothing ? (form_card(v),) : sketch(v) !== nothing ? (sketch_card(v),) : ()
 
+"The panel at the right, as SolidCraft's forms are: a line with its name, its rows, and under them a band with its buttons"
 side_card(v::DesignView, key, icon, title, close, rows...; foot=()) = begin
   t = theme(v)
   card!(v, key) do
-    Column(width(SIDE_W), panel_look(t)..., Alignment.Start,
-      Row(width(grow=grow), height(38px), padding(0px, 6px, 0px, 12px), child_gap=8px, border(1px, :solid, Ink.faded(t.line, 0.7))[:bottom],
-        Glyph(icon, size=17px), Box(words(title, 13px, weight="Semibold")), Box(width(grow=grow)),
+    Column(width(SIDE_W), panel_look(t)..., clip=true, Alignment.Start,
+      Row(width(grow=grow), height(40px), padding(0px, 6px, 0px, 12px), child_gap=8px, border(1px, :solid, Ink.faded(t.line, 0.7))[:bottom],
+        Glyph(icon, size=17px), Box(words(title, 13.5px, weight="Semibold")), Box(width(grow=grow)),
         (close === nothing ? () : (icon_button(v, (key, :close), "x-lg", "Close"; act=close, size=12px),))...),
       # A form that's taller than the room under the toolbar scrolls
       Scroll(width(grow=grow), height(max=px(max(160.0, v.area[4] - 250))), key=(key, :rows),
-        Column(width(grow=grow), padding(12px, 10px), child_gap=8px, Alignment.Start, rows...)),
+        Column(width(grow=grow), padding(12px, 10px), child_gap=7px, Alignment.Start, rows...)),
       # What's under the rows stays in sight while they scroll: the buttons of a form
-      (isempty(foot) ? () : (Column(width(grow=grow), padding(12px, 0px, 10px, 12px), child_gap=8px, Alignment.Start, foot...),))...)
+      (isempty(foot) ? () : (Column(width(grow=grow), padding(12px, 10px), child_gap=8px, Alignment.Start,
+                                    background(Ink.mixed(t.surface, colorant"black", dark(t) ? 0.16 : 0.035)), border(1px, :solid, Ink.faded(t.line, 0.7))[:top], foot...),))...)
   end
 end
 
+"A row of a form: what it asks for at the left, and the field at the right"
 labelled(v, label, thing) = begin
   t = theme(v)
-  Row(width(grow=grow), child_gap=8px, Row(width(LABEL_W), justify=Alignment.Start, words(label, 12px, color=t.dim)), Box(width(grow=grow), Alignment.Start, thing))
+  Row(width(grow=grow), child_gap=8px, Row(width(LABEL_W), justify=Alignment.Start, clip_x=true, words(label, 12px)), Box(width(grow=grow), Alignment.Start, thing))
 end
 
-"The buttons of a choice, side by side, or a menu when there are many"
+"How a field of a form looks: `on` while it takes the clicks in the design"
+field_look(t, on=false, hovered=false) =
+  (height(FIELD_H), radius(5px), border(1px, :solid, on ? t.accent : hovered ? Ink.mixed(t.line, t.text, 0.25) : t.line),
+   background(on ? Ink.faded(t.accent, 0.13) : Ink.mixed(t.surface, colorant"black", dark(t) ? 0.2 : 0.03)))
+
+"A field that shows one of `options`, and lists them all in a menu when it's clicked"
 choice(v::DesignView, key, options, now, set) = begin
   t = theme(v)
-  # A few short names go side by side. More of them, or longer ones, go in a menu.
-  if length(options) <= 3 && sum(o -> length(o.second), options) <= 18
-    Row(width(grow=grow), height(26px), radius(6px), border(1px, :solid, t.line), clip=true,
-      (press!(v, (key, i); act=e -> set(value)) do hovered
-        Box(width(grow=grow), height(26px), background(value == now ? t.select : hovered ? t.hover : clear), Box(words(label, 11.5px, color=value == now ? t.text : t.dim)))
-      end for (i, (value, label)) in enumerate(options))...)
-  else
-    i = findfirst(o -> o.first == now, options)
-    press!(v, (key, :menu); act=e -> show_menu!(e.window, String[o.second for o in options], 0px, 0px, 160px; under=v.parts[(key, :menu)], gap=3px,
-                                                item_height=28px, onselect=n -> n > 0 && set(options[n].first))) do hovered
-      Row(width(grow=grow), height(26px), padding(8px, 0px), radius(6px), border(1px, :solid, t.line), background(hovered ? t.hover : clear),
-        Box(words(i === nothing ? "" : options[i].second, 12px)), Box(width(grow=grow)), Glyph("chevron-down", size=10px, color=t.dim))
-    end
+  i = findfirst(o -> o.first == now, options)
+  press!(v, (key, :menu); act=e -> show_menu!(e.window, String[o.second for o in options], 0px, 0px, 162px; under=v.parts[(key, :menu)], gap=3px,
+                                              item_height=28px, onselect=n -> n > 0 && set(options[n].first))) do hovered
+    Row(width(grow=grow), field_look(t, false, hovered)..., padding(9px, 0px),
+      Box(words(i === nothing ? "" : options[i].second, 12px)), Box(width(grow=grow)), Glyph("chevron-down", size=10px, color=t.dim))
   end
 end
 
-tick(v::DesignView, key, label, on, set) = begin
+"A box to tick. The box is at the left of its words, or at the right of the row when `right`."
+tick(v::DesignView, key, label, on, set; right=false) = begin
   t = theme(v)
   press!(v, key; act=e -> set(!on)) do hovered
-    Row(width(grow=grow), height(24px), child_gap=8px, justify=Alignment.Start,
-      Box(width(16px), height(16px), radius(4px), background(on ? t.accent : clear), border(1.5px, :solid, on ? t.accent : t.dim),
-        (on ? (Glyph("check-lg", size=11px, color=t.on_accent),) : ())...),
-      Box(words(label, 12px)))
+    box = Box(width(15px), height(15px), radius(3.5px), background(on ? t.accent : clear), border(1.5px, :solid, on ? t.accent : hovered ? t.text : t.dim),
+      (on ? (Glyph("check-lg", size=10px, color=t.on_accent),) : ())...)
+    right ? Row(width(grow=grow), height(26px), justify=Alignment.Start, Box(words(label, 12px)), Box(width(grow=grow)), box) :
+            Row(width(grow=grow), height(26px), child_gap=9px, justify=Alignment.Start, box, Box(words(label, 12px)))
+  end
+end
+
+"The line that starts a part of a form, like Options. A click closes the part, or opens it."
+section_head(v::DesignView, f::Form, name) = begin
+  t = theme(v)
+  open = !(name in f.closed)
+  press!(v, (:section, name); act=e -> (open ? push!(f.closed, name) : delete!(f.closed, name))) do hovered
+    Row(width(grow=grow), height(24px), child_gap=7px,
+      Glyph(open ? "chevron-down" : "chevron-right", size=9px, color=t.dim),
+      Box(words(uppercase(name), 10.5px, color=hovered ? t.text : t.dim, weight="Semibold")),
+      Box(width(grow=grow), height(1px), background(Ink.faded(t.line, 0.8))))
   end
 end
 
 "What a field that's clicked says of its clicks"
-count_words(field::Commands.Field, n) = begin
+count_words(field::Commands.Field, shows) = begin
+  n = length(shows)
+  n == 0 && return "Select"
+  field.kind == :plane && return shows[1].kind == :plane ? String(shows[1].of) : "1 face"
   one = field.kind in (:faces, :face) ? "face" : field.kind == :edges ? "edge" : field.kind in (:bodies, :body) ? "body" :
-        field.kind == :profiles ? "region" : field.kind == :plane ? "face" : "place"
-  n == 0 ? "Click $(one in ("edge",) ? "an" : "a") $one in the design" : n == 1 ? "1 $one" : "$n $(one == "body" ? "bodies" : one * "s")"
+        field.kind == :profiles ? "profile" : "place"
+  n == 1 ? "1 $one" : "$n $(one == "body" ? "bodies" : one * "s")"
 end
+
+"The planes that a form can name: the three of the origin, and the construction planes"
+plane_names(v::DesignView) = vcat(Commands.PLANES, Pair{Any,String}[p.name => p.name for p in v.model.planes])
 
 field_row(v::DesignView, f::Form, field::Commands.Field) = begin
   t = theme(v)
@@ -988,40 +1128,51 @@ field_row(v::DesignView, f::Form, field::Commands.Field) = begin
     return labelled(v, field.label, choice(v, key, field.options, f.values[field.key], value -> (f.values[field.key] = value)))
   elseif Commands.picks(field)
     active = f.active == field.key
-    n = length(f.shows[field.key])
+    shows = f.shows[field.key]
+    n = length(shows)
+    flat = field.kind == :plane
+    # A plane has a menu of the planes with names too. What's chosen there shows in the design as a click on it would.
+    menu = flat ? (press!(v, (key, :planes); tip="Choose a plane by its name", act=e -> begin
+      names = plane_names(v)
+      show_menu!(e.window, String[o.second for o in names], 0px, 0px, 150px; under=v.parts[key], gap=3px, item_height=28px, onselect=i -> begin
+        i > 0 || return
+        f.values[field.key] = names[i].first
+        empty!(shows)
+        push!(shows, (kind=:plane, of=String(names[i].first), n=0, at=(0.0, 0.0, 0.0)))
+        f.problem = ""
+      end)
+    end) do hovered
+      Box(width(22px), height(22px), radius(4px), background(hovered ? t.select : clear), Glyph("chevron-down", size=10px, color=t.dim))
+    end,) : ()
     clicked = press!(v, key; act=e -> (f.active = field.key)) do hovered
-      Row(width(grow=grow), height(26px), padding(0px, 4px, 0px, 8px), radius(6px), border(1px, :solid, active ? t.accent : t.line),
-          background(active ? Ink.faded(t.accent, 0.14) : hovered ? t.hover : clear),
-        Box(words(count_words(field, n), 11.5px, color=n == 0 ? t.dim : t.text)), Box(width(grow=grow)),
-        (n == 0 ? () : (icon_button(v, (key, :clear), "x", "Clear"; size=12px, act=e -> begin
-          empty!(f.shows[field.key])
-          f.values[field.key] = field.kind == :plane ? field.default : Any[]
+      Row(width(grow=grow), field_look(t, active, hovered)..., padding(0px, 3px, 0px, 9px),
+        Box(words(count_words(field, shows), 12px, color=n == 0 ? t.dim : t.text)), Box(width(grow=grow)),
+        (n == 0 || flat ? () : (icon_button(v, (key, :clear), "x", "Clear"; size=12px, act=e -> begin
+          empty!(shows)
+          f.values[field.key] = Any[]
           f.active = field.key
-        end),))...)
+        end),))...,
+        menu...)
     end
-    field.kind == :plane || return labelled(v, field.label, clicked)
-    # A plane is one of the three through the origin, or a flat face that's clicked
-    now = f.values[field.key]
-    return Column(width(grow=grow), child_gap=6px,
-      labelled(v, field.label, choice(v, (key, :plane), Commands.PLANES, now isa String ? now : nothing, value -> (f.values[field.key] = value; empty!(f.shows[field.key])))),
-      labelled(v, "or a flat face", clicked))
+    return labelled(v, field.label, clicked)
   end
   box = input!(v, key; text=field.default isa AbstractString ? field.default : "", placeholder=field.optional ? "optional" : "")
-  field.kind == :json ? Column(width(grow=grow), child_gap=4px, Alignment.Start, Box(words(field.label, 12px, color=t.dim)), Box(width(grow=grow), box)) :
-                        labelled(v, field.label, box)
+  field.kind == :json ? Column(width(grow=grow), child_gap=4px, Alignment.Start, Box(words(field.label, 12px)), Box(width(grow=grow), box)) : labelled(v, field.label, box)
 end
 
 form_card(v::DesignView) = begin
   t = theme(v)
   f = v.form
+  m = v.model
   rows = Any[]
+  parts = Dict{String,Vector{Any}}()
   if f.step === nothing
-    append!(rows, [field_row(v, f, field) for field in f.spec.fields])
-    regions = any(field -> field.kind == :profiles, f.spec.fields)
-    regions && isempty(v.model.sketches) &&
-      push!(rows, Box(width(grow=grow), Alignment.Start, Text("No sketch shows. Click the eye beside a sketch in the browser, then click a region of it.", size=11.5px, color=t.dim)))
-    isempty(f.spec.help) || isempty(f.spec.fields) || haskey(Commands.SPECS, f.spec.command) ||
-      push!(rows, Box(width(grow=grow), height(max=110px), clip=true, Alignment.Start, Text(first(f.spec.help, 420), size=10.5px, color=t.dim)))
+    for field in f.spec.fields
+      push!(get!(() -> Any[], parts, Commands.section(field)), field_row(v, f, field))
+    end
+    append!(rows, get(parts, "", Any[]))
+    any(field -> field.kind == :profiles, f.spec.fields) && isempty(m.sketches) &&
+      push!(rows, Box(width(grow=grow), Alignment.Start, Text("No sketch shows. Click the eye beside a sketch in the browser, then click a profile of it.", size=11.5px, color=t.dim)))
   else
     isempty(f.inputs) && push!(rows, Box(width(grow=grow), Alignment.Start, Text("This step has no lengths or angles to change.", size=12px, color=t.dim)))
     for input in f.inputs
@@ -1029,30 +1180,53 @@ form_card(v::DesignView) = begin
       push!(rows, labelled(v, String(get(input, "label", param)), input!(v, (:field, "step", param); text=String(input["expression"]))))
     end
   end
+  # The design shows what the command would make, unless Preview is off
+  shows = f.step === nothing ? Commands.tried(f.spec.command) : !isempty(f.inputs)
+  shows && push!(get!(() -> Any[], parts, "Options"), tick(v, (:form, :preview), "Preview", v.previews, on -> (v.previews = on)))
+  for name in ("Options", "Advanced")
+    list = get(parts, name, Any[])
+    isempty(list) && continue
+    push!(rows, section_head(v, f, name))
+    name in f.closed || append!(rows, list)
+  end
+  f.step === nothing && !isempty(f.spec.help) && !isempty(f.spec.fields) && !haskey(Commands.SPECS, f.spec.command) &&
+    push!(rows, Box(width(grow=grow), height(max=110px), clip=true, Alignment.Start, Text(first(f.spec.help, 420), size=10.5px, color=t.dim)))
   foot = Any[]
-  isempty(f.problem) || push!(foot, Box(width(grow=grow), Alignment.Start, Text(f.problem, size=11.5px, color=colorant"rgb(226,96,84)")))
+  trial = m.trial
+  if !isempty(f.problem)
+    push!(foot, Box(width(grow=grow), Alignment.Start, Text(f.problem, size=11.5px, color=colorant"rgb(226,96,84)")))
+  elseif trial !== nothing && trial.key == f.key && !isempty(trial.problem)
+    # What SolidCraft says of the command as the form has it now, before OK is clicked
+    push!(foot, Box(width(grow=grow), Alignment.Start, Text(trial.problem, size=11.5px, color=t.dim)))
+  end
+  ready = !(request(v, f) isa String)
   push!(foot, Row(width(grow=grow), justify=Alignment.End, child_gap=8px,
     word_button(v, (:form, :cancel), "Cancel"; act=e -> (v.form = nothing)),
-    word_button(v, (:form, :ok), "OK"; act=e -> apply!(v), strong=true, tip="Return")))
+    word_button(v, (:form, :ok), "OK"; act=e -> apply!(v), strong=true, faint=!ready, tip="Return")))
   side_card(v, :form, f.spec.icon, f.spec.title, e -> (v.form = nothing), rows...; foot)
 end
 
-"What the panel says of how far the sketch is held by its constraints"
+"What the panel says of how far the sketch is held by its constraints, and how much of it is: from 0 to 1"
 held_words(s) = begin
-  get(s, "status", "") in ("solved", "") || return ("The constraints can't all hold", colorant"rgb(226,96,84)")
+  get(s, "status", "") in ("solved", "") || return ("The constraints can't all hold", colorant"rgb(226,96,84)", 1.0)
   dof = Int(get(s, "dof", 0))
-  dof == 0 ? ("Fully constrained", colorant"rgb(60,160,230)") : ("$dof $(dof == 1 ? "way" : "ways") left to move", colorant"rgb(226,160,60)")
+  dof == 0 && return ("Fully constrained", colorant"rgb(60,160,230)", 1.0)
+  # Each point that isn't fixed can move two ways, and each circle or arc can grow
+  free = 2count(q -> get(q, "fixed", false) !== true, get(s, "points", Any[])) + count(c -> get(c, "type", "") in ("circle", "arc"), get(s, "curves", Any[]))
+  ("$dof $(dof == 1 ? "degree" : "degrees") of freedom left", colorant"rgb(60,160,230)", clamp(1 - dof / max(free, dof, 1), 0.0, 1.0))
 end
 
 sketch_card(v::DesignView) = begin
   t = theme(v)
   s = sketch(v)
-  says, colour = held_words(s)
+  says, colour, share = held_words(s)
+  wide = num(SIDE_W) - 24
   rows = Any[
-    Column(width(grow=grow), child_gap=5px, Alignment.Start, Box(words(says, 12px)), Box(width(grow=grow), height(4px), radius(2px), background(colour)))]
+    Column(width(grow=grow), child_gap=6px, Alignment.Start, Box(words(says, 12px)),
+      Row(width(grow=grow), height(4px), radius(2px), background(Ink.faded(t.line, 0.9)), justify=Alignment.Start, Box(width(px(max(wide * share, 4.0))), height(4px), radius(2px), background(colour))))]
   tool = v.tool
   if tool isa Commands.Tool
-    push!(rows, Box(words(command_label(v, tool.command) * ": " * tool_hint(v, tool), 11.5px, color=t.dim)))
+    push!(rows, Box(width(grow=grow), Alignment.Start, Text(command_label(v, tool.command) * ": " * tool_hint(v, tool), size=11.5px, color=t.dim)))
     for field in tool.fields
       push!(rows, labelled(v, field.label, input!(v, (:toolfield, tool.command, field.key); text=String(field.default))))
     end
@@ -1061,12 +1235,16 @@ sketch_card(v::DesignView) = begin
            tool == :extend ? "click the end of a line to make it longer" : "click an edge or a face of a body"
     push!(rows, Box(width(grow=grow), Alignment.Start, Text(uppercasefirst(String(tool)) * ": " * hint, size=11.5px, color=t.dim)))
   end
-  push!(rows, tick(v, (:show, :marks), "Constraints", v.marks, on -> (v.marks = on)))
-  push!(rows, tick(v, (:show, :sizes), "Dimensions", v.sizes, on -> (v.sizes = on)))
-  push!(rows, Row(width(grow=grow), child_gap=8px, padding(4px, 0px, 0px, 0px),
-    word_button(v, (:sketch, :look), "Look At"; act=e -> look_at!(v, s)),
-    Box(width(grow=grow)),
-    word_button(v, (:sketch, :finish), "Finish Sketch"; act=e -> start!(v, "sketch.finish"), strong=true)))
+  push!(rows, tick(v, (:show, :marks), "Constraints", v.marks, on -> (v.marks = on); right=true))
+  push!(rows, tick(v, (:show, :sizes), "Dimensions", v.sizes, on -> (v.sizes = on); right=true))
+  push!(rows, tick(v, (:show, :points), "Points", v.points, on -> (v.points = on); right=true))
+  push!(rows, tick(v, (:show, :snap), "Snap", v.snap, on -> (v.snap = on); right=true))
+  push!(rows, tick(v, (:show, :building), "Construction mode (X)", v.building, on -> (v.building = on); right=true))
+  push!(rows, Box(height(2px)))
+  push!(rows, word_button(v, (:sketch, :finish), "Finish Sketch"; act=e -> start!(v, "sketch.finish"), strong=true, wide=true))
+  push!(rows, Row(width(grow=grow), child_gap=8px,
+    word_button(v, (:sketch, :look), "Look At"; act=e -> look_at!(v, s), wide=true, tip="Look straight at the sketch"),
+    word_button(v, (:sketch, :slice), "Slice"; act=e -> (v.slice = !v.slice), wide=true, on=v.slice, tip="Hide the part of each body that's in front of the sketch")))
   side_card(v, :sketch_card, "sketch", String(get(s, "name", "Sketch")), nothing, rows...)
 end
 
@@ -1169,7 +1347,7 @@ rgba(c::Colorant, a=1.0) = (Float32(red(c)), Float32(green(c)), Float32(blue(c))
 
 "The colours of the picture, for a dark page or a light one"
 palette(t) = dark(t) ?
-  (back=(0.165f0, 0.18f0, 0.22f0), body=(0.62f0, 0.64f0, 0.67f0, 1f0), edge=(0.06f0, 0.07f0, 0.09f0, 1f0), grid=(0.62f0, 0.68f0, 0.8f0)) :
+  (back=(0.165f0, 0.18f0, 0.22f0), body=(0.72f0, 0.74f0, 0.78f0, 1f0), edge=(0.06f0, 0.07f0, 0.09f0, 1f0), grid=(0.62f0, 0.68f0, 0.8f0)) :
   (back=(0.93f0, 0.94f0, 0.955f0), body=(0.80f0, 0.82f0, 0.85f0, 1f0), edge=(0.15f0, 0.17f0, 0.21f0, 1f0), grid=(0.3f0, 0.36f0, 0.5f0))
 
 "The plane that the grid is on: the sketch's while one is edited, and the ground if not"
@@ -1205,7 +1383,142 @@ among(list, p) = any(q -> same(q, p), list)
 "What the form that's open has in the fields that were clicked"
 form_picks(v::DesignView) = v.form === nothing ? Any[] : reduce(vcat, values(v.form.shows), init=Any[])
 
-"Everything that the graphics card draws: the grid, the bodies and their edges, and what's lit"
+"The command that was tried for the form that's open, when it made bodies to show: see `preview!`"
+shown_trial(v::DesignView) = begin
+  f, trial = v.form, v.model.trial
+  # What was tried for the form as it was a moment ago shows until the new trial comes, so that the picture doesn't blink
+  (f === nothing || trial === nothing || f.key === nothing || !v.previews || !isempty(trial.problem) || isempty(trial.changed)) ? nothing : trial
+end
+
+"The edges of the body `s`, or one of them, as the numbers of lines"
+edge_lines(e::Scenes.Edge) = begin
+  data = Float32[]
+  for i in 1:length(e.points)-1
+    append!(data, e.points[i])
+    append!(data, e.points[i+1])
+  end
+  data
+end
+
+"How many mm one px is at the point `p` of the design"
+mm_per_px(v::DesignView, p) = begin
+  size = (v.area[3], v.area[4])
+  v.eye.wide > 0 || return 1 / Scenes.scale(v.eye, size)
+  depth = Scenes.at(v.eye, size, p)[3]
+  max(depth, 1e-6) * tand(v.eye.wide / 2) / (size[2] / 2)
+end
+
+"`x` with three figures, so that a number that barely changes gives the same key"
+figures(x) = x == 0 ? 0.0 : round(x, sigdigits=3)
+
+"The line from `a` to `b` as dashes: each `on` mm long with `off` mm between"
+dashes(a, b, on, off) = begin
+  data = Float32[]
+  way = b .- a
+  long = Scenes.len(way)
+  (long < 1e-9 || on <= 0) && return data
+  way = way ./ long
+  at = 0.0
+  while at < long && length(data) < 6000
+    append!(data, a .+ way .* at)
+    append!(data, a .+ way .* min(at + on, long))
+    at += on + off
+  end
+  data
+end
+
+"Two triangles for the flat piece with the corners `a`, `b`, `c` and `d`, in order round it"
+quad!(data, a, b, c, d) = (foreach(p -> append!(data, p), (a, b, c, a, c, d)); data)
+
+const ORIGIN_PLANES = (("XY", (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)), ("XZ", (1.0, 0.0, 0.0), (0.0, 0.0, 1.0)), ("YZ", (0.0, 1.0, 0.0), (0.0, 0.0, 1.0)))
+const ORIGIN_AXES = (("X", (1.0, 0.0, 0.0), (0.886f0, 0.282f0, 0.282f0)), ("Y", (0.0, 1.0, 0.0), (0.275f0, 0.69f0, 0.33f0)), ("Z", (0.0, 0.0, 1.0), (0.282f0, 0.455f0, 0.91f0)))
+const PLANE_PX = 87.0    # how wide a plane of the origin shows, whatever the zoom: as SolidCraft shows it
+const AXIS_PX = 130.0    # and how long an axis of the origin shows
+const PLANE_TINT = (0.91f0, 0.59f0, 0.28f0)
+
+"""
+The planes that show, each as a flat square: those of the origin, which go
+from the origin along two axes, and the construction planes, each round the
+point that SolidCraft gives for it. A square is as big on the screen at any
+zoom, as in SolidCraft. Each has its name, a corner, and its two sides.
+"""
+squares(v::DesignView) = begin
+  m = v.model
+  out = Any[]
+  zero = (0.0, 0.0, 0.0)
+  side = figures(PLANE_PX * mm_per_px(v, zero))
+  # While a form asks for a plane, the three of the origin show, so that one can be clicked
+  field = wanted(v)
+  asked = field !== nothing && field.kind == :plane
+  for (name, x, y) in ORIGIN_PLANES
+    (asked || Designs.origin_shown(m, name)) && push!(out, (name=name, corner=zero, x=x .* side, y=y .* side))
+  end
+  for p in m.planes
+    Designs.plane_shown(m, p.name) || continue
+    n = Scenes.unit(p.normal)
+    # Its sides run along the design's axes where they can
+    k = argmin(abs.(n))
+    x = Scenes.unit(ntuple(i -> (i == k ? 1.0 : 0.0), 3) .- n .* n[k])
+    y = Scenes.cross(n, x)
+    half = figures(PLANE_PX * mm_per_px(v, p.point))
+    push!(out, (name=p.name, corner=p.point .- x .* half .- y .* half, x=x .* 2half, y=y .* 2half))
+  end
+  out
+end
+
+"The plane that shows at the place `at` of the picture, and how far along the line of sight it is, or nothing"
+square_under(v::DesignView, at) = begin
+  o, d = Scenes.ray(v.eye, (v.area[3], v.area[4]), at)
+  best, found = Inf, nothing
+  for q in squares(v)
+    n = Scenes.cross(q.x, q.y)
+    down = Scenes.dot(d, n)
+    abs(down) < 1e-12 && continue
+    far = Scenes.dot(q.corner .- o, n) / down
+    (far > 1e-9 && far < best) || continue
+    p = o .+ d .* far .- q.corner
+    a, b = Scenes.dot(p, q.x) / Scenes.dot(q.x, q.x), Scenes.dot(p, q.y) / Scenes.dot(q.y, q.y)
+    (0 <= a <= 1 && 0 <= b <= 1) || continue
+    best, found = far, (kind=:plane, of=q.name, n=0, at=o .+ d .* far)
+  end
+  found === nothing ? nothing : (found, best)
+end
+
+"The lines of the sketch `s`, which isn't being edited, as the graphics card takes them: the whole lines, and the dashes of its construction lines"
+sketch_lines(v::DesignView, s) = begin
+  kept = get!(() -> Dict{Any,Any}(), v.parts, :sketch_lines)
+  step = figures(mm_per_px(v, Sketching.Frame(s["plane"]).origin))
+  length(kept) > 60 && empty!(kept)
+  get!(kept, (objectid(s), step)) do
+    f = Sketching.Frame(s["plane"])
+    whole, dashed = Float32[], Float32[]
+    for c in get(s, "curves", Any[])
+      line = Sketching.outline(c)
+      built = get(c, "construction", false) === true
+      for i in 1:length(line)-1
+        a, b = Sketching.world(f, line[i]), Sketching.world(f, line[i+1])
+        built ? append!(dashed, dashes(a, b, 5step, 4step)) : (append!(whole, a); append!(whole, b))
+      end
+    end
+    (whole=whole, dashed=dashed, step=step)
+  end
+end
+
+"The closed region `n` of the sketch `s` as triangles"
+region_sheet(v::DesignView, s, n) = begin
+  kept = get!(() -> Dict{Any,Any}(), v.parts, :sheets)
+  length(kept) > 300 && empty!(kept)
+  get!(kept, (objectid(s), n)) do
+    f = Sketching.Frame(s["plane"])
+    data = Float32[]
+    for (x1, x2, y1, y2) in Sketching.strips(regions(v, s), n)
+      quad!(data, Sketching.world(f, (x1, y1)), Sketching.world(f, (x2, y1)), Sketching.world(f, (x2, y2)), Sketching.world(f, (x1, y2)))
+    end
+    data
+  end
+end
+
+"Everything that the graphics card draws: the grid, the bodies and their edges, the sketches that aren't edited, the planes, and what's lit"
 things(v::DesignView, size, dense, t) = begin
   m = v.model
   c = palette(t)
@@ -1217,6 +1530,11 @@ things(v::DesignView, size, dense, t) = begin
   lit = rgba(t.accent, 0.42)
   chosen_ = rgba(t.accent, 0.78)
   marked = vcat(v.picked, form_picks(v))
+  trial = shown_trial(v)
+  # What's kept of the bodies that a change replaced is let go
+  length(v.data) > length(m.shapes) + 8 && filter!(p -> any(s -> s === p.first, m.shapes) || (trial !== nothing && any(s -> s === p.first, trial.shapes)), v.data)
+  length(v.faces) > 4000 && empty!(v.faces)
+  h = v.hover
   for s in m.shapes
     Designs.shown(m, s.name) || continue
     a = arrays(v, s)
@@ -1225,24 +1543,79 @@ things(v::DesignView, size, dense, t) = begin
     for p in marked
       p.kind == :face && p.of == s.name && push!(faces, p.n => chosen_)
     end
-    h = v.hover
     h !== nothing && h.kind == :face && h.of == s.name && !any(f -> f.first == h.n, faces) && push!(faces, h.n => lit)
     over = h !== nothing && h.kind == :body && h.of == s.name
-    body = whole ? rgba(Ink.mixed(RGB(c.body[1:3]...), t.accent, 0.45)) : over ? rgba(Ink.mixed(RGB(c.body[1:3]...), t.accent, 0.2)) : c.body
-    push!(out, GLs.Solid((:solid, objectid(s)), a.solid, body; lit=faces))
-    push!(out, GLs.Lines((:edges, objectid(s)), a.lines, c.edge, 1.5dense))
+    # A body with a colour of its own in the design shows in it. Any other is the grey that suits the page.
+    own = get(m.colours, s.name, nothing)
+    base = own === nothing ? RGB(c.body[1:3]...) : RGB(own...)
+    solid = get(m.opacity, s.name, 1.0)
+    body = rgba(whole ? Ink.mixed(base, t.accent, 0.45) : over ? Ink.mixed(base, t.accent, 0.2) : base, solid)
+    painted = Pair{Int,GLs.Colour}[]
+    for f in m.painted
+      f.body == s.name || continue
+      n = get!(() -> Scenes.face_at(s, f.point), v.faces, (objectid(s), f.point))
+      n > 0 && push!(painted, n => rgba(RGB(f.colour...), f.opacity * solid))
+    end
+    # While a command's result shows, a body that it changes shows as the command leaves it: see below.
+    # Of the body as it is now, only what's lit and what's selected shows.
+    replaced = trial !== nothing && (s.name in trial.changed || !any(b -> b.name == s.name, trial.shapes))
+    push!(out, GLs.Solid((:solid, objectid(s)), a.solid, body; painted, lit=faces, bare=replaced, through=replaced ? false : body[4] < 1))
+    replaced || push!(out, GLs.Lines((:edges, objectid(s)), a.lines, c.edge, 1.5dense; cut=true))
     edge(p, wide, hidden) = begin
       (p !== nothing && p.kind == :edge && p.of == s.name && 1 <= p.n <= length(s.edges)) || return
-      data = Float32[]
-      e = s.edges[p.n]
-      for i in 1:length(e.points)-1
-        append!(data, e.points[i])
-        append!(data, e.points[i+1])
-      end
-      push!(out, GLs.Lines((:edge, objectid(s), p.n), data, rgba(t.accent), wide * dense; hidden))
+      push!(out, GLs.Lines((:edge, objectid(s), p.n), edge_lines(s.edges[p.n]), rgba(t.accent), wide * dense; hidden))
     end
     foreach(p -> edge(p, 4.0, false), marked)
     h === nothing || among(marked, h) || edge(h, 3.5, true)
+  end
+  # What the command of the open form would make
+  if trial !== nothing
+    for s in trial.shapes
+      (s.name in trial.changed && Designs.shown(m, s.name)) || continue
+      a = arrays(v, s)
+      own = get(trial.colours, s.name, nothing)
+      base = own === nothing ? RGB(c.body[1:3]...) : RGB(own...)
+      push!(out, GLs.Solid((:solid, objectid(s)), a.solid, rgba(Ink.mixed(base, t.accent, 0.18), get(m.opacity, s.name, 1.0))))
+      push!(out, GLs.Lines((:edges, objectid(s)), a.lines, rgba(Ink.mixed(RGB(c.edge[1:3]...), t.accent, 0.55)), 1.5dense))
+    end
+  end
+  # The sketches that aren't being edited. A body in front of one hides it.
+  active = Designs.editing(m)
+  ink = dark(t) ? (0.96f0, 0.96f0, 0.97f0, 0.92f0) : (0.09f0, 0.1f0, 0.13f0, 0.92f0)
+  for (id, s) in m.sketches
+    id == active && continue
+    lines = sketch_lines(v, s)
+    push!(out, GLs.Lines((:sketch, objectid(s)), lines.whole, ink, 1.2dense))
+    push!(out, GLs.Lines((:sketch_dashes, objectid(s), lines.step), lines.dashed, ink, 1.2dense))
+  end
+  # The closed regions of sketches. They all show faintly while a sketch is edited, and while a form asks for regions.
+  field = wanted(v)
+  picks = form_picks(v)
+  asked = field !== nothing && field.kind == :profiles && active === nothing
+  for (id, s) in m.sketches
+    (asked || id == active) || any(p -> p.kind == :region && p.n == id, picks) || (h !== nothing && h.kind == :region && h.n == id) || continue
+    r = regions(v, s)
+    for n in 2:r.count+1
+      p = (kind=:region, of=n, n=id)
+      strong = among(picks, p) ? 0.5 : h !== nothing && h.kind == :region && same(h, p) ? 0.3 : asked || id == active ? 0.13 : 0.0
+      strong > 0 && push!(out, GLs.Sheet((:region, objectid(s), n), region_sheet(v, s, n), rgba(id == active && !among(picks, p) ? SKETCH_BLUE : t.accent, strong)))
+    end
+  end
+  # The origin's axes, and the planes
+  zero = (0.0, 0.0, 0.0)
+  long = figures(AXIS_PX * mm_per_px(v, zero))
+  for (name, way, colour) in ORIGIN_AXES
+    Designs.origin_shown(m, name) || continue
+    tip = way .* long
+    push!(out, GLs.Lines((:axis, name, long), Float32[zero..., tip...], (colour..., 1f0), 1.6dense))
+    # Where a body hides it, it shows as dashes
+    push!(out, GLs.Lines((:axis_dashes, name, long), dashes(zero, tip, long * 5 / AXIS_PX, long * 4 / AXIS_PX), (colour..., 0.75f0), 1.2dense; hidden=false))
+  end
+  for q in squares(v)
+    a, b, d, e = q.corner, q.corner .+ q.x, q.corner .+ q.x .+ q.y, q.corner .+ q.y
+    on = among(picks, (kind=:plane, of=q.name, n=0)) ? 0.62f0 : h !== nothing && h.kind == :plane && h.of == q.name ? 0.5f0 : 0.3f0
+    push!(out, GLs.Sheet((:plane, q.name, a, q.x, q.y), quad!(Float32[], a, b, d, e), (PLANE_TINT..., on)))
+    push!(out, GLs.Lines((:plane_edge, q.name, a, q.x, q.y), Float32[a..., b..., b..., d..., d..., e..., e..., a...], (PLANE_TINT..., 0.85f0), dense))
   end
   out
 end
@@ -1281,10 +1654,10 @@ draw(ctx, size, ui::ConcreteRect, scene::Scene) = begin
   shot = v.image === nothing ? (v.image = Shot()) : v.image
   c = palette(t)
   if v.stage !== false
-    of = (m.version, v.eye, w, h, v.hover, hash(v.picked), v.form === nothing ? UInt(0) : hash(v.form.shows), dark(t), Designs.editing(m))
+    of = (m.version, v.eye, w, h, v.hover, hash(v.picked), v.form === nothing ? UInt(0) : hash((v.form.shows, v.form.active, v.form.key)), dark(t), Designs.editing(m), v.slice)
     if shot.of != of
       list = things(v, area, dense, t)
-      pixels = GLs.picture!(v.stage, w, h, v.eye, list, c.back; reach=far(v))
+      pixels = GLs.picture!(v.stage, w, h, v.eye, list, c.back; reach=far(v), cut=cut(v))
       shot.image == C_NULL || Skia.sk_image_unref(shot.image)
       info = Ref(Skia.sk_image_info_t(C_NULL, Skia.SK_COLOR_TYPE_RGBA_8888, Skia.SK_ALPHA_TYPE_OPAQUE, w, h))
       GC.@preserve info pixels begin
@@ -1303,20 +1676,37 @@ draw(ctx, size, ui::ConcreteRect, scene::Scene) = begin
     sampling = Ref(Skia.sk_sampling_options_t(0, false, Skia.sk_cubic_resampler_t(0f0, 0f0), Skia.SK_FILTER_MODE_LINEAR, Skia.SK_MIPMAP_MODE_NONE))
     Ink.painted(p -> Skia.sk_canvas_draw_image_rect(ctx, shot.image, from, to, sampling, p, Skia.SRC_RECT_CONSTRAINT_FAST), colorant"white")
   end
+  # The sketch that's being edited is drawn over the picture, so no body hides it. The graphics card draws the others.
   active = Designs.editing(m)
-  # The regions that a form has, and the one under the mouse
-  for p in form_picks(v)
-    p.kind == :region && haskey(m.sketches, p.n) && fill_region(ctx, v, m.sketches[p.n], p.of, Ink.faded(t.accent, 0.45))
-  end
-  h = v.hover
-  h !== nothing && h.kind == :region && haskey(m.sketches, h.n) && !among(form_picks(v), h) && fill_region(ctx, v, m.sketches[h.n], h.of, Ink.faded(t.accent, 0.22))
-  for (id, s) in m.sketches
-    id == active || draw_sketch(ctx, v, s, false, t)
-  end
   active !== nothing && haskey(m.sketches, active) && draw_sketch(ctx, v, m.sketches[active], true, t)
   draw_tool(ctx, v, t)
+  draw_origin(ctx, v, t)
   draw_axes(ctx, v, t)
   nothing
+end
+
+"""
+The plane that cuts the picture, as a point on it and the way it faces, or
+nothing. While Slice is on, it's the plane of the sketch that's edited, and
+it takes away what's between that plane and the eye.
+"""
+cut(v::DesignView) = begin
+  s = sketch(v)
+  (v.slice && s !== nothing) || return nothing
+  f = Sketching.Frame(s["plane"])
+  n = Sketching.normal(f)
+  toward = Scenes.dot(Scenes.place(v.eye) .- f.origin, n) >= 0 ? n : n .* -1.0
+  # A hair nearer the eye than the plane, so that a face that's on the plane stays
+  (f.origin .+ toward .* (1e-5 * max(v.eye.distance, 1.0)), toward)
+end
+
+"The point of the origin: a ball that shows over everything, as in SolidCraft"
+draw_origin(ctx, v::DesignView, t) = begin
+  Designs.origin_shown(v.model, "O") || return
+  at = shown_at(v, (0.0, 0.0, 0.0))
+  at === nothing && return
+  Ink.circle(ctx, at, 4.5, colorant"rgb(226,228,233)")
+  Ink.circle(ctx, at, 4.5, colorant"rgb(104,108,120)", 1.2)
 end
 
 "The closed regions of the sketch `s`, worked out when the sketch changes"
@@ -1327,28 +1717,6 @@ regions(v::DesignView, s) = begin
   r = Sketching.Regions(s)
   v.regions[id] = (s, r)
   r
-end
-
-"Fill the region `n` of the sketch `s` with `colour`"
-fill_region(ctx, v::DesignView, s, n, colour) = begin
-  f = Sketching.Frame(s["plane"])
-  shape = Skia.sk_path_new()
-  for (x1, x2, y1, y2) in Sketching.strips(regions(v, s), n)
-    corners = (shown_at(v, Sketching.world(f, (x1, y1))), shown_at(v, Sketching.world(f, (x2, y1))),
-               shown_at(v, Sketching.world(f, (x2, y2))), shown_at(v, Sketching.world(f, (x1, y2))))
-    any(isnothing, corners) && continue
-    Skia.sk_path_move_to(shape, Float32(corners[1][1]), Float32(corners[1][2]))
-    for k in 2:4
-      Skia.sk_path_line_to(shape, Float32(corners[k][1]), Float32(corners[k][2]))
-    end
-    Skia.sk_path_close(shape)
-  end
-  # Strips that touch would show a faint line between them if their edges were smoothed
-  p = Ink.paint(colour)
-  Skia.sk_paint_set_antialias(p, false)
-  Skia.sk_canvas_draw_path(ctx, shape, p)
-  Skia.sk_paint_delete(p)
-  Skia.sk_path_delete(shape)
 end
 
 const MARK_ICONS = Dict("Horizontal" => "c_hv", "Vertical" => "c_hv", "Tangent" => "c_tangent", "Equal" => "c_equal", "Parallel" => "c_parallel",
@@ -1379,6 +1747,7 @@ draw_sketch(ctx, v::DesignView, s, active, t) = begin
     at === nothing && continue
     name = String(q["id"])
     on = chosen_(:point, name) || lit(:point, name)
+    v.points || on || continue
     r = on ? 4.0 : 2.6
     Ink.box(ctx, at[1] - r, at[2] - r, 2r, 2r, on ? t.accent : ink)
     Ink.box(ctx, at[1] - r, at[2] - r, 2r, 2r, dark(t) ? colorant"rgb(20,22,28)" : colorant"white"; width=1.0)
@@ -1640,6 +2009,12 @@ under(v::DesignView, at) = begin
   size = (v.area[3], v.area[4])
   shown = b -> Designs.shown(m, b.name)
   hit = Scenes.hit(m.shapes, Scenes.ray(v.eye, size, at); shown)
+  # A plane of the origin or a construction plane. A form that asks for a plane takes the nearest of it and a body's face.
+  # With no form, a body in front or behind wins, so that a plane never gets in the way of a face.
+  flat_one = square_under(v, at)
+  if flat_one !== nothing && ((kind == :plane && (hit === nothing || flat_one[2] < hit.far)) || (kind == :any && hit === nothing))
+    return flat_one[1]
+  end
   if kind in (:any, :edges)
     e = Scenes.edge_at(m.shapes, v.eye, size, at, hit; shown)
     e === nothing || return (kind=:edge, of=m.shapes[e[1]].name, n=e[2], at=e[3])
@@ -1662,6 +2037,7 @@ aim(v::DesignView, s, at) = begin
   size = (v.area[3], v.area[4])
   spot = Sketching.on_plane(f, Scenes.ray(v.eye, size, at))
   spot === nothing && return (spot=(0.0, 0.0), ref=nothing, level=false)
+  v.snap || return (spot=spot, ref=nothing, level=false)
   for q in get(s, "points", Any[])
     p = Sketching.spot(q["at"])
     x, y, depth = Scenes.at(v.eye, size, Sketching.world(f, p))
@@ -1701,6 +2077,7 @@ finish_tool!(v::DesignView) = begin
     box = get(v.parts, (:toolfield, tool.command, field.key), nothing)
     params[field.key] = Commands.value(box === nothing ? String(field.default) : box.text)
   end
+  v.building && (params["construction"] = true)
   # A line goes on from where it ended, until Return or Escape
   last = clicks[end]
   empty!(v.clicks)
@@ -1765,7 +2142,7 @@ click!(v::DesignView, what, more) = begin
   if field !== nothing && sketch(v) === nothing
     what === nothing && return v
     suits = field.kind == :edges ? what.kind == :edge : field.kind == :profiles ? what.kind == :region :
-            field.kind in (:bodies, :body) ? what.kind == :body : what.kind == :face
+            field.kind in (:bodies, :body) ? what.kind == :body : field.kind == :plane ? what.kind in (:face, :plane) : what.kind == :face
     suits && take!(v.form, field, what)
     return v
   end

@@ -57,6 +57,17 @@ end
   ex, ey, _ = Scenes.at(eye, (400, 300), (5.0, 0.0, 10.0))
   found = Scenes.edge_at(shapes, eye, (400, 300), (ex, ey + 2), hit)
   @test found !== nothing && isapprox(found[3][2], 0.0, atol=1e-6) && isapprox(found[3][3], 10.0, atol=1e-6)
+  # SolidCraft also says which face each triangle is of. Here it has the two triangles of the top as two faces, which the triangles alone don't show.
+  corners = join(("""<vertex x="$x" y="$y" z="$z"/>""" for (x, y, z) in ((0, 0, 0), (10, 0, 0), (10, 10, 0), (0, 10, 0), (0, 0, 10), (10, 0, 10), (10, 10, 10), (0, 10, 10))), "\n")
+  triangles = join(("""<triangle v1="$(a - 1)" v2="$(b - 1)" v3="$(c - 1)" ft:face="$face"/>""" for ((a, b, c), face) in
+    zip(((1, 3, 2), (1, 4, 3), (5, 6, 7), (5, 7, 8), (1, 2, 6), (1, 6, 5), (2, 3, 7), (2, 7, 6), (3, 4, 8), (3, 8, 7), (4, 1, 5), (4, 5, 8)), (0, 0, 1, 6, 2, 2, 3, 3, 4, 4, 5, 5))), "\n")
+  tagged = Scenes.tagged("<model>\n<object id=\"1\" name=\"Box\" ft:faces=\"7\">\n<mesh>\n<vertices>\n$corners\n</vertices>\n<triangles>\n$triangles\n</triangles>\n</mesh>\n</object>\n</model>")
+  @test length(tagged) == 1 && tagged[1].name == "Box" && length(tagged[1].triangles) == 12 && tagged[1].faces[4] == 6
+  split_top = Scenes.read_obj(Vector{UInt8}(replace(obj, r"^\s+"m => "")); faces=tagged)[1]
+  @test length(split_top.flat) == 7 && all(split_top.flat) && length(split_top.edges) == 13
+  # Tags of other triangles are left alone: the faces are then found in the triangles
+  other = [(name=t.name, points=[p .+ (1.0, 0.0, 0.0) for p in t.points], triangles=t.triangles, faces=t.faces) for t in tagged]
+  @test length(Scenes.read_obj(Vector{UInt8}(replace(obj, r"^\s+"m => "")); faces=other)[1].flat) == 6
 end
 
 @testset "the regions of a sketch" begin
@@ -77,13 +88,28 @@ end
   @test Sketching.nearest(sketch, (0.3, 0.2), 1.0)[1:2] == (:point, "p1")
   @test Sketching.nearest(sketch, (20.0, 0.4), 1.0)[1:2] == (:curve, "l1")
   @test Sketching.fixed(45) == "45.00" && Sketching.length_words(7.126) == "7.13 mm"
+  # A spline through points goes through each of them, and bends as SolidCraft's does: this place is from a spline that SolidCraft drew
+  points = Sketching.Spot[(0.0, 30.0), (10.0, 40.0), (25.0, 32.0), (40.0, 45.0)]
+  curve = Sketching.outline(JSON.Object("type" => "spline", "points_at" => Any[Any[p...] for p in points]))
+  @test all(p -> any(q -> hypot(q[1] - p[1], q[2] - p[2]) < 1e-9, curve), points)
+  @test Sketching.off((3.925408452, 35.862638949), curve)[1] < 0.02
+  # A spline with control points starts at the first and ends at the last, and only comes near the others
+  pulled = Sketching.outline(JSON.Object("type" => "spline", "control" => true, "points_at" => Any[Any[0, 50], Any[10, 65], Any[25, 45], Any[40, 60]]))
+  @test pulled[1] == (0.0, 50.0) && pulled[end] == (40.0, 60.0) && Sketching.off((10.0, 65.0), pulled)[1] > 3
+  @test all(isapprox.(pulled[length(pulled)÷2+1], (18.125, 55.0), atol=1e-6))
 end
 
 @testset "the parameters of a command" begin
   spec = Commands.SPECS["solid.fillet"]
   @test Commands.params(spec, Dict("edges" => Any[], "radius" => "2 mm")) == "Choose the edges in the design."
   @test Commands.params(spec, Dict("edges" => Any[Any[1, 2, 3]], "radius" => "2 mm", "tangent_chain" => true)) ==
-        JSON.Object("edges" => Any[Any[1, 2, 3]], "radius" => "2 mm", "tangent_chain" => true)
+        JSON.Object("edges" => Any[Any[1, 2, 3]], "radius" => "2 mm", "type" => "constant", "tangent_chain" => true)
+  # A form's own fields become the parameters that the command takes: Through All has no distance, and Reverse Direction turns the direction round
+  cut = Commands.params(Commands.SPECS["solid.extrude"], Dict("profiles" => Any[JSON.Object("point" => Any[1, 2])], "distance" => "10 mm", "extent" => "through_all",
+                                                              "direction" => "positive", "reverse" => true, "operation" => "cut"))
+  @test cut["through_all"] === true && !haskey(cut, "distance") && !haskey(cut, "extent") && cut["direction"] == "negative" && !haskey(cut, "reverse")
+  # Each field is in a part of the form, as in SolidCraft's forms
+  @test [Commands.section(f) for f in Commands.SPECS["solid.extrude"].fields] == ["", "", "", "", "", "", "Options", "Advanced"]
   box = Commands.params(Commands.SPECS["solid.box"], Dict("length" => "20", "width" => "w / 2", "height" => "5 mm", "center" => "0, 0, 2.5", "operation" => "new"))
   @test box["length"] == 20.0 && box["width"] == "w / 2" && box["center"] == Any[0.0, 0.0, 2.5]
   # A command with no form of its own gets one from what SolidCraft says of its parameters
@@ -242,7 +268,7 @@ else
     click(shows(Sketching.world(f, (5.0, 2.0))))
     @test length(v.form.shows["profiles"]) == 1 && v.form.shows["profiles"][1].kind == :region
     v.form.values["operation"] = "cut"
-    v.form.values["through_all"] = true
+    v.form.values["extent"] = "through_all"
     shot("design-4-extrude.png")
     key(Keys.enter)
     settle()
@@ -461,6 +487,238 @@ else
     @test Models.editing(m) === nothing
   end
 
+  @testset "the colours of bodies and faces" begin
+    v = view()
+    m = v.model
+    theme = K.component_theme()
+    solid() = only(t for t in V.things(v, (v.area[3], v.area[4]), 1.0, theme) if t isa V.GLs.Solid)
+    name = String(Models.bodies(m)[1]["name"])
+    @test isempty(m.colours) && isempty(m.painted)
+    grey = solid().colour
+    @test grey[1] ≈ grey[2] atol = 0.05                           # a body with no colour of its own is grey
+    Models.change!(m, "appearance.assign", JSON.Object("bodies" => Any[name], "color" => "#d9534a"))
+    settle()
+    @test all(isapprox.(m.colours[name], (0.851, 0.325, 0.29), atol=0.002))
+    @test all(isapprox.(solid().colour, (0.851f0, 0.325f0, 0.29f0, 1f0), atol=0.002))
+    @test !solid().through
+    # One face in another colour: it's found again from the point that SolidCraft names it by
+    Models.change!(m, "appearance.assign", JSON.Object("faces" => Any[Any[-10.0, -5.0, 14.0]], "body" => name, "color" => "#f0c83c"))
+    settle()
+    @test length(m.painted) == 1
+    top = Scenes.hit(m.shapes, ((-10.0, -5.0, 50.0), (0.0, 0.0, -1.0))).face
+    @test [p.first for p in solid().painted] == [top]
+    @test all(isapprox.(solid().painted[1].second, (0.941f0, 0.784f0, 0.235f0, 1f0), atol=0.002))
+    frame(w)
+    shot("design-10-colours.png")
+    # A body that's partly see-through is drawn after the lines, so that what's behind it shows
+    Models.change!(m, "appearance.assign", JSON.Object("bodies" => Any[name], "color" => "#4a90d9", "opacity" => 0.4))
+    settle()
+    @test m.opacity[name] == 0.4 && solid().through && solid().colour[4] ≈ 0.4f0
+    frame(w)
+    shot("design-11-see-through.png")
+    # With no colour, it's grey again
+    Models.change!(m, "appearance.assign", JSON.Object("bodies" => Any[name]))
+    settle()
+    @test !haskey(m.colours, name) && !haskey(m.opacity, name) && solid().colour == grey
+  end
+
+  "The things that the graphics card draws now"
+  drawn() = (v = view(); V.things(v, (v.area[3], v.area[4]), 1.0, V.theme(v)))
+  "Draw frames until the command of the open form has been tried, and give what it made"
+  tried() = begin
+    v = view()
+    for _ in 1:600
+      frame(w)
+      t = v.model.trial
+      v.form !== nothing && t !== nothing && !v.model.trying && t.key == v.form.key && return t
+      sleep(0.01)
+    end
+    nothing
+  end
+  home() = (v = view(); v.eye = Scenes.fit(Scenes.Eye(), Scenes.box(v.model.shapes), (v.area[3], v.area[4])); frame(w))
+  "Click an edge of the first body that shows, and that no panel is over"
+  click_edge() = begin
+    v = view()
+    for edge in v.model.shapes[1].edges
+      place = shows(Scenes.middle(edge))
+      (place === nothing || V.panel_at(v, w, Vec2{px}(px(place[1]), px(place[2]))) !== nothing) && continue
+      at(place)
+      (v.hover !== nothing && v.hover.kind == :edge) || continue
+      return click(place)
+    end
+  end
+
+  @testset "the faces of a body are SolidCraft's own" begin
+    m = view().model
+    @test !isempty(m.shapes)
+    for s in m.shapes
+      listed = Engines.ask(m.engine, "model.faces", JSON.Object("body" => s.name))["faces"]
+      @test length(s.flat) == length(listed)
+    end
+  end
+
+  @testset "the design shows what a command would make, before OK" begin
+    v = view()
+    m = v.model
+    home()
+    steps, undo, edited = length(Models.timeline(m)), m.doc["undo"], Models.edited(m)
+    faces = length(m.shapes[1].flat)
+    V.start!(v, "solid.fillet")
+    frame(w)
+    click_edge()
+    @test length(v.form.values["edges"]) == 1
+    v.parts[(:field, "solid.fillet", "radius")].text = "1 mm"
+    trial = tried()
+    @test trial !== nothing && isempty(trial.problem) && trial.changed == [m.shapes[1].name]
+    @test length(trial.shapes[1].flat) > faces                     # the round is a face more
+    settle()
+    # The design itself is as it was: no step more, nothing to undo more, and nothing to redo
+    @test length(Models.timeline(m)) == steps && length(m.shapes[1].flat) == faces
+    @test m.doc["undo"] == undo && Models.redoable(m) == 0 && Models.edited(m) == edited
+    # The picture has the body as the command leaves it, and of the body as it is only what's lit
+    list = drawn()
+    @test count(x -> x isa V.GLs.Solid && x.bare, list) == 1 && count(x -> x isa V.GLs.Solid && !x.bare, list) == 1
+    shot("design-12-preview.png")
+    # Another radius is tried in its turn
+    v.parts[(:field, "solid.fillet", "radius")].text = "1.5 mm"
+    again = tried()
+    @test again !== nothing && again.key != trial.key && isempty(again.problem)
+    # A radius that's too big: SolidCraft's words show in the form, and the body shows as it is
+    v.parts[(:field, "solid.fillet", "radius")].text = "500 mm"
+    failed = tried()
+    @test failed !== nothing && !isempty(failed.problem) && !any(x -> x isa V.GLs.Solid && x.bare, drawn())
+    v.parts[(:field, "solid.fillet", "radius")].text = "1 mm"
+    @test tried() !== nothing
+    # With Preview off, nothing is tried
+    click(v.parts[(:form, :preview)])
+    frame(w)
+    @test !v.previews && m.trial === nothing
+    click(v.parts[(:form, :preview)])
+    @test v.previews && tried() !== nothing
+    # Cancel leaves the design as it was. ⇧⌘Z has nothing to redo: a command that was tried isn't a step.
+    click(v.parts[(:form, :cancel)])
+    frame(w)
+    @test v.form === nothing && m.trial === nothing
+    settle()
+    key(Keys.z, Keys.cmd, Keys.shft)
+    settle()
+    @test length(Models.timeline(m)) == steps && Models.redoable(m) == 0 && isempty(m.said)
+    # OK after a preview runs the command once
+    V.start!(v, "solid.fillet")
+    frame(w)
+    click_edge()
+    v.parts[(:field, "solid.fillet", "radius")].text = "1 mm"
+    @test tried() !== nothing
+    click(v.parts[(:form, :ok)])
+    settle()
+    @test v.form === nothing && length(Models.timeline(m)) == steps + 1 && isempty(m.said)
+    key(Keys.z, Keys.cmd)
+    settle()
+    @test length(Models.timeline(m)) == steps
+  end
+
+  @testset "the origin and the construction planes" begin
+    v = view()
+    m = v.model
+    home()
+    @test m.origin_hidden && !Models.origin_shown(m, "XY")
+    @test !any(x -> x isa V.GLs.Sheet && x.key[1] == :plane, drawn())
+    # The eye of the Origin folder shows its point, its three axes and its three planes
+    delete!(v.closed, "Origin")
+    frame(w)
+    click(v.parts[(:eye, :folder, "Origin")])
+    settle()
+    @test all(name -> Models.origin_shown(m, name), ("O", "X", "Y", "Z", "XY", "XZ", "YZ"))
+    click(v.parts[(:eye, :origin, "XZ")])
+    settle()
+    @test !Models.origin_shown(m, "XZ") && Models.origin_shown(m, "XY")
+    list = drawn()
+    @test count(x -> x isa V.GLs.Sheet && x.key[1] == :plane, list) == 2 && count(x -> x isa V.GLs.Lines && x.key[1] == :axis, list) == 3
+    # ⌘Z shows the plane again: the editor asks SolidCraft what's hidden after an Undo
+    key(Keys.z, Keys.cmd)
+    settle()
+    @test Models.origin_shown(m, "XZ")
+    # A construction plane 25 mm over the ground shows as a square round the point that SolidCraft gives
+    Models.change!(m, "construct.plane.offset", JSON.Object("base" => "XY", "offset" => "25 mm"))
+    settle()
+    @test length(m.planes) == 1 && isapprox(m.planes[1].point[3], 25.0, atol=1e-9) && m.planes[1].normal == (0.0, 0.0, 1.0)
+    plane = m.planes[1].name
+    step = Int(Models.timeline(m)[end]["id"])
+    @test haskey(v.parts, (:made, step)) && Models.plane_shown(m, plane)
+    @test any(x -> x isa V.GLs.Sheet && x.key[1:2] == (:plane, plane), drawn())
+    shot("design-13-origin-planes.png")
+    # Create Sketch asks for a plane, and a click on the plane in the design gives its name
+    V.start!(v, "sketch.create")
+    frame(w)
+    @test v.form.active == "plane" && v.form.values["plane"] == "XY"
+    over = shows(m.planes[1].point .+ (2.0, 2.0, 0.0))
+    at(over)
+    @test v.hover !== nothing && v.hover.kind == :plane && v.hover.of == plane
+    click(over)
+    @test v.form.values["plane"] == plane
+    key(Keys.escape)
+    # Its eye in the browser hides it
+    click(v.parts[(:eye, :made, step)])
+    settle()
+    @test !Models.plane_shown(m, plane) && !any(x -> x isa V.GLs.Sheet && x.key[1:2] == (:plane, plane), drawn())
+    Models.show!(m, false; folder="origin")
+    settle()
+    @test !Models.origin_shown(m, "XY")
+  end
+
+  @testset "a sketch that isn't edited is drawn with the bodies, and the sketch panel" begin
+    v = view()
+    m = v.model
+    home()
+    sketches = Models.sketch_list(m)
+    Models.show!(m, true; items=Any[Int(sketches[1]["id"])])
+    settle()
+    # The graphics card draws it, so that a body in front of it hides it
+    lines = filter(x -> x isa V.GLs.Lines && x.key[1] == :sketch, drawn())
+    @test !isempty(lines) && all(x -> x.hidden, lines) && any(x -> !isempty(x.data), lines)
+    # While a form asks for profiles, every closed region shows faintly
+    V.start!(v, "solid.extrude")
+    frame(w)
+    @test any(x -> x isa V.GLs.Sheet && x.key[1] == :region, drawn())
+    key(Keys.escape)
+    @test !any(x -> x isa V.GLs.Sheet && x.key[1] == :region, drawn())
+    # The sketch that's edited is drawn over the picture, and its panel is laid out as SolidCraft's is
+    V.edit_step!(v, Int(sketches[1]["id"]))
+    settle()
+    @test !any(x -> x isa V.GLs.Lines && x.key[1] == :sketch, drawn())
+    @test occursin("freedom", V.held_words(V.sketch(v))[1]) || V.held_words(V.sketch(v))[1] == "Fully constrained"
+    # Slice takes away what's between the sketch and the eye
+    @test V.cut(v) === nothing
+    click(v.parts[(:sketch, :slice)])
+    frame(w)
+    @test v.slice && V.cut(v) !== nothing
+    shot("design-14-slice.png")
+    click(v.parts[(:sketch, :slice)])
+    @test !v.slice
+    # X with nothing selected: what's drawn next is construction geometry
+    f = Sketching.Frame(V.sketch(v)["plane"])
+    place(p) = shows(Sketching.world(f, p))
+    empty!(v.picked)
+    ontype(w, Typed('x', w)); frame(w)
+    @test v.building
+    V.start!(v, "sketch.line")
+    click(place((-16.0, -6.0))); click(place((-12.0, -3.0))); settle()
+    key(Keys.escape); key(Keys.escape)
+    @test V.sketch(v)["curves"][end]["construction"] == true
+    click(v.parts[(:show, :building)])
+    @test !v.building
+    # With Snap off, a click near a point doesn't go to it
+    corner = Sketching.spot(V.sketch(v)["curves"][end]["end_at"])
+    near = place(corner) .+ (3.0, 0.0)
+    @test V.aim(v, V.sketch(v), V.local_spot(v, near)).ref !== nothing
+    click(v.parts[(:show, :snap)])
+    @test !v.snap && V.aim(v, V.sketch(v), V.local_spot(v, near)).ref === nothing
+    click(v.parts[(:show, :snap)])
+    V.start!(v, "sketch.cancel")
+    settle()
+    @test Models.editing(m) === nothing
+  end
+
   @testset "the file is written with ⌘S" begin
     v = view()
     @test Models.edited(v.model)
@@ -472,7 +730,7 @@ else
     # SolidCraft opens what was written, with the hole
     let again = Engines.start(file)
       steps = Engines.ask(again, "document.inspect", JSON.Object("timeline" => "summary", "bodies" => "names"))["timeline"]
-      @test [s["name"] for s in steps][1:2] == ["Base", "Block"] && length(steps) == 4
+      @test [s["name"] for s in steps][1:2] == ["Base", "Block"] && length(steps) >= 4
       Engines.stop!(again)
     end
   end
@@ -485,6 +743,43 @@ else
     K.open!(e, note)
     frame(w)
     @test !haskey(e.nodes, (:design, file))
+    @test !isempty(engine.stopped)
+  end
+end
+
+# A window asks before it closes with a design that has changes
+if Engines.available()
+  @testset "a window asks before it closes with a design that has changes" begin
+    K.open!(e, file)
+    frame(w); settle()
+    v = view()
+    m = v.model
+    @test K.closes!(e, w)                          # with no changes, it closes
+    Models.change!(m, "solid.box", JSON.Object("length" => 5, "width" => 5, "height" => 5, "corner" => Any[40, 40, 0]))
+    settle()
+    @test Models.edited(m) && K.unsaved_designs(e) == [v]
+    @test !K.closes!(e, w)                         # with changes, it asks
+    frame(w)
+    asked = only(p for p in popups(w) if p.key == :close_ask).content
+    shot("design-15-ask-close.png")
+    # Cancel keeps the window and the changes
+    click(asked.parts[:cancel])
+    frame(w)
+    @test isempty([p for p in popups(w) if p.key == :close_ask]) && Models.edited(m) && K.designs(e) == [v]
+    # ⌘W in a window that shows no file asks too
+    engine = m.engine
+    was = mtime(file)
+    sleep(1.1)
+    @test !K.closes!(e, w)
+    frame(w)
+    asked = only(p for p in popups(w) if p.key == :close_ask).content
+    # Save writes the design, then the window closes and SolidCraft's program ends
+    click(asked.parts[:save])
+    for _ in 1:600
+      isempty(K.designs(e)) && break
+      frame(w); sleep(0.01)
+    end
+    @test mtime(file) > was && isempty(K.designs(e))
     @test !isempty(engine.stopped)
   end
 end

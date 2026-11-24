@@ -1831,7 +1831,7 @@ close_file!(e) = begin
 end
 
 "What ⌘W does: close the file that the window shows, or the window when it shows no file or a page of the settings"
-close_file_or_window!(e, w) = (nofile(e) || issettings(e)) ? close(w) : close_file!(e)
+close_file_or_window!(e, w) = (nofile(e) || issettings(e)) ? (closes!(e, w) && close(w)) : close_file!(e)
 
 # --- the files that showed before --------------------------------------------------------
 #
@@ -41570,7 +41570,7 @@ the screen. A test's window isn't, so the windows that it opens aren't either.
 """
 show_window!(w, by) = (by !== nothing && isopen(by) && open(w); w)
 
-onclose(e::Editor, ::Window) = (Base.filter!(o -> o !== e, editors); nothing)
+onclose(e::Editor, ::Window) = (Base.filter!(o -> o !== e, editors); close_designs!(e); nothing)
 
 """
 A window that shows the Markdown file or the folder at `path`, with the
@@ -41772,7 +41772,7 @@ updates!(e, on::Bool) = begin
 end
 
 "True when a page that's open in a window has changes that aren't in its file"
-unsaved() = any(o -> dirty(o.buf) || any(dirty, values(o.buffers)), editors)
+unsaved() = any(o -> dirty(o.buf) || any(dirty, values(o.buffers)) || !isempty(unsaved_designs(o)), editors)
 
 """
 What happens to the app's update in each frame. Only a window of the app looks
@@ -46831,6 +46831,11 @@ end
 # changes that aren't saved keeps its program while the window shows other
 # files, as a page keeps its changes. A design with no changes gives its
 # program up when the window leaves it.
+#
+# A window that closes ends the programs of its designs, and what they didn't
+# save is lost. So a window with a design that has changes asks before it
+# closes: Save, Don't Save or Cancel. It asks when its red button is clicked,
+# when ⌘W closes it, and when Ladder quits.
 
 const DESIGNS = (".sc", ".solidcraft")
 const DesignFile = Union{FS.File{:sc},FS.File{:SC},FS.File{:solidcraft}}
@@ -46851,6 +46856,119 @@ leave_design!(e, path) = begin
   Designs.close!(v)
   delete!(e.nodes, (:design, path))
   nothing
+end
+
+"The designs that are open in the window of `e`"
+designs(e) = Any[v for (key, v) in e.nodes if key isa Tuple && length(key) == 2 && key[1] === :design && v isa Designs.DesignView]
+
+"The designs of the window of `e` that have changes that aren't in their files"
+unsaved_designs(e) = filter(Designs.edited, designs(e))
+
+"End SolidCraft's program for every design of the window of `e`: the window has closed"
+close_designs!(e) = begin
+  for v in designs(e)
+    Designs.close!(v)
+    delete!(e.nodes, (:design, v.path))
+  end
+  nothing
+end
+
+"""
+Can the window `w` of `e` close now? It can't while a design in it has changes
+that aren't saved: this asks about them, and the window closes when the
+answer is Save or Don't Save.
+"""
+closes!(e, w) = begin
+  waiting = unsaved_designs(e)
+  (isempty(waiting) || get(e.nodes, :close_anyway, false) === true) && return true
+  ask = CloseAsk(of=e, window=w)
+  wide = 380px
+  popup!(w, ask, anchor=((w.size[1] - wide) / 2, 120px, 0px, 0px), placement=:below, width=wide, key=:close_ask, theme=component_theme(e.zoom))
+  redraw_in!(e, 0)
+  false
+end
+
+"The question that a window asks before it closes with designs that have changes"
+@def mutable struct CloseAsk <: SemanticUI
+  of::Any = nothing            # the window's editor
+  window::Any = nothing
+  parts::Dict{Symbol,Any} = Dict{Symbol,Any}()
+  saving::Vector{Any} = Any[]  # the designs that are being written, when Save was clicked
+  problem::String = ""
+end
+
+"Close the window of the question `a` with no more questions"
+close_now!(a::CloseAsk) = begin
+  close_popup!(a.window, :close_ask)
+  a.of.nodes[:close_anyway] = true
+  close(a.window)
+  nothing
+end
+
+"Write each design that has changes, then close the window. A design that can't be written keeps the window open, and the question says why."
+save_and_close!(a::CloseAsk) = begin
+  isempty(a.saving) || return
+  a.problem = ""
+  a.saving = unsaved_designs(a.of)
+  for v in a.saving
+    Designs.Designs.save!(v.model; then=problem -> begin
+      filter!(o -> o !== v, a.saving)
+      problem === nothing || (a.problem = "$(basename(v.path)) wasn't saved: $problem")
+      isempty(a.saving) && isempty(a.problem) && close_now!(a)
+    end)
+  end
+  isempty(a.saving) && close_now!(a)
+  nothing
+end
+
+describe(a::CloseAsk) = begin
+  t = component_theme(a.of.zoom)
+  waiting = unsaved_designs(a.of)
+  # A design that the window doesn't show now gets SolidCraft's answers here
+  if !isempty(a.saving)
+    foreach(v -> v.model === nothing || Designs.Designs.tick!(v.model), a.saving)
+    redraw_in!(a, 0.03)
+  end
+  names = join(("“" * basename(v.path) * "”" for v in waiting), " and ")
+  button(key, words, act; strong=false) = begin
+    b = get!(() -> (n = Designs.Press(); setfield!(n, :parent, a); n), a.parts, key)
+    b.act = e -> act()
+    b.look = hovered -> Box(height(30px), padding(14px, 0px), radius(6px),
+      (strong ? () : (border(1px, :solid, t.line),))...,
+      background(strong ? (hovered ? Designs.Ink.mixed(t.accent, t.text, 0.12) : t.accent) : hovered ? t.select : t.hover),
+      Text(words, size=12.5px, subfamily="Medium", color=strong ? t.on_accent : t.text, wrap=WrapMode.none))
+    b
+  end
+  says = isempty(waiting) ? "Nothing is left to save." :
+         "$names $(length(waiting) == 1 ? "has" : "have") changes that aren't saved. If you don't save them, Ladder loses them when this window closes."
+  Column(width(grow=GrowType.Grow), padding(18px), child_gap=14px, radius(10px), background(t.surface), border(1px, :solid, t.line),
+         shadow(0, 8, 28, RGBA(0, 0, 0, 0.3)), Alignment.Start,
+    Box(Alignment.Start, Text("Save the changes to $(length(waiting) == 1 ? "this design" : "these designs")?", size=14px, subfamily="Semibold", color=t.text)),
+    Box(width(grow=GrowType.Grow), Alignment.Start, Text(says, size=12.5px, color=t.dim)),
+    (isempty(a.problem) ? () : (Box(width(grow=GrowType.Grow), Alignment.Start, Text(a.problem, size=12px, color=colorant"rgb(226,96,84)")),))...,
+    Row(width(grow=GrowType.Grow), child_gap=8px,
+      button(:lose, "Don't Save", () -> close_now!(a)),
+      Box(width(grow=GrowType.Grow)),
+      button(:cancel, "Cancel", () -> close_popup!(a.window, :close_ask)),
+      button(:save, isempty(a.saving) ? "Save" : "Saving…", () -> save_and_close!(a); strong=true)))
+end
+# Return saves, as the strong button does. Escape closes the question, as it closes any popup.
+onkey(a::CloseAsk, e::KeyPress{Keys.enter}) = (save_and_close!(a); handled)
+onkey(::CloseAsk, ::KeyPress{Keys.mouse_left}) = handled
+
+"Have macOS ask `e` before its window `w` closes: by its red button, and when Ladder quits"
+watch_close!(e, w) = begin
+  isempty(w.glfw) && return w
+  GLFW.SetWindowCloseCallback(w.glfw[1], _ -> begin
+    stays = try
+      !Base.invokelatest(closes!, e, w)
+    catch
+      false   # a window that can't ask closes
+    end
+    stays && GLFW.SetWindowShouldClose(w.glfw[1], false)
+    nothing
+  end)
+  w
 end
 
 # --- a folder that's a desktop -------------------------------------------------------------
@@ -52322,7 +52440,7 @@ put_place!(e, p) = (e.buf.path == p.path && !isdir(p.path) && go_place!(e, p); e
 quit_editor(first) = (f = LAST_FRONT[]; f isa Editor ? f : first)
 
 # The close, minimise and zoom buttons line up with the sidebar's button, in the middle of the top bar
-onopen(e::Editor, w::Window) = (watch_front!(e, w); place_window_buttons!(hide_titlebar!(w), TOPBAR_H / 2, TOPBAR_H / 2))
+onopen(e::Editor, w::Window) = (watch_front!(e, w); watch_close!(e, w); place_window_buttons!(hide_titlebar!(w), TOPBAR_H / 2, TOPBAR_H / 2))
 
 # --- saving a page when you leave its window ------------------------------------------------
 #

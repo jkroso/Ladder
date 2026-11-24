@@ -87,7 +87,8 @@ outline(c::AbstractDict) = begin
       ((a * s[1] + b * apex[1] + d * e[1]) / (a + b + d), (a * s[2] + b * apex[2] + d * e[2]) / (a + b + d))
     end
   elseif haskey(c, "points_at") && c["points_at"] isa Vector && length(c["points_at"]) >= 2
-    smooth(Spot[spot(p) for p in c["points_at"]], get(c, "periodic", false) === true)
+    points = Spot[spot(p) for p in c["points_at"]]
+    get(c, "control", false) === true ? pulled(points) : through(points, get(c, "periodic", false) === true)
   elseif haskey(c, "start_at") && haskey(c, "end_at") && c["start_at"] !== nothing && c["end_at"] !== nothing
     Spot[spot(c["start_at"]), spot(c["end_at"])]
   else
@@ -95,19 +96,79 @@ outline(c::AbstractDict) = begin
   end
 end
 
-"A smooth line through `points`, as a spline through them goes: more places between each two"
-smooth(points::Vector{Spot}, closed) = begin
+const PIECES = 16   # how many straight parts draw a spline between two of its points
+
+"""
+The spline through `points` as SolidCraft draws it, with more places between
+each two. It's the smoothest curve of cubic pieces through them: its bend
+changes evenly along each piece, and at an open end it has no bend. How far
+along the curve a point is counts by the straight distance between the points.
+A `closed` spline comes back to its first point as smoothly.
+"""
+through(points::Vector{Spot}, closed=false) = begin
   n = length(points)
   n < 3 && return points
-  at(i) = closed ? points[mod1(i, n)] : points[clamp(i, 1, n)]
+  # A closed spline is worked out as an open one that goes round three times. Its middle round is almost the closed one.
+  lap = closed ? n : 0
+  all = closed ? vcat(points, points, points, [points[1]]) : points
+  m = length(all)
+  h = [max(hypot(all[k+1][1] - all[k][1], all[k+1][2] - all[k][2]), 1e-9) for k in 1:m-1]
+  bends = (bend(h, first.(all)), bend(h, last.(all)))
   out = Spot[]
-  for i in 1:(closed ? n : n - 1)
-    p0, p1, p2, p3 = at(i - 1), at(i), at(i + 1), at(i + 2)
-    for t in range(0, 1, length=13)[1:end-1]
-      push!(out, 0.5 .* (2 .* p1 .+ (p2 .- p0) .* t .+ (2 .* p0 .- 5 .* p1 .+ 4 .* p2 .- p3) .* t^2 .+ (3 .* p1 .- p0 .- 3 .* p2 .+ p3) .* t^3))
-    end
+  for k in (closed ? (lap+1:2lap) : (1:m-1)), i in 0:PIECES-1
+    b = i / PIECES
+    a = 1 - b
+    push!(out, ntuple(d -> a * all[k][d] + b * all[k+1][d] + ((a^3 - a) * bends[d][k] + (b^3 - b) * bends[d][k+1]) * h[k]^2 / 6, 2))
   end
-  push!(out, closed ? points[1] : points[end])
+  push!(out, closed ? out[1] : points[end])
+  out
+end
+
+"How much the smoothest curve through the numbers `y`, which are `h` apart, bends at each of them"
+bend(h, y) = begin
+  n = length(y)
+  # Three numbers in each row: the row of each point but the ends ties its bend to its neighbours'
+  low, mid, high, right = zeros(n), ones(n), zeros(n), zeros(n)
+  for k in 2:n-1
+    low[k], mid[k], high[k] = h[k-1], 2(h[k-1] + h[k]), h[k]
+    right[k] = 6((y[k+1] - y[k]) / h[k] - (y[k] - y[k-1]) / h[k-1])
+  end
+  for k in 2:n
+    w = low[k] / mid[k-1]
+    mid[k] -= w * high[k-1]
+    right[k] -= w * right[k-1]
+  end
+  out = zeros(n)
+  out[n] = right[n] / mid[n]
+  for k in n-1:-1:1
+    out[k] = (right[k] - high[k] * out[k+1]) / mid[k]
+  end
+  out
+end
+
+"""
+The spline that the control points `points` pull towards them, as SolidCraft
+draws it: a cubic B-spline that starts at the first point and ends at the last.
+"""
+pulled(points::Vector{Spot}) = begin
+  n = length(points)
+  n < 3 && return points
+  degree = min(3, n - 1)
+  # The knots: `degree + 1` at each end, and evenly between
+  spans = n - degree
+  knots = Float64[clamp(i - degree, 0, spans) for i in 0:n+degree]
+  out = Spot[]
+  for i in 0:PIECES*spans
+    t = min(i / PIECES, spans - 1e-9)
+    k = floor(Int, t) + degree + 1          # the knot span that t is in, counted from 1
+    d = [points[j+k-degree] for j in 0:degree]
+    for r in 1:degree, j in degree:-1:r
+      a = (t - knots[j+k-degree]) / (knots[j+1+k-r] - knots[j+k-degree])
+      d[j+1] = d[j] .* (1 - a) .+ d[j+1] .* a
+    end
+    push!(out, d[degree+1])
+  end
+  out[end] = points[end]
   out
 end
 

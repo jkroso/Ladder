@@ -15,6 +15,11 @@
 # So a hole's wall is one face, and the ring where it meets the top is one
 # edge. That's what the editor shows under the mouse, and what a click picks.
 #
+# Two curved faces that meet smoothly, like a rounded edge and the rounded
+# corner at its end, can't be told apart that way. SolidCraft also writes a
+# file that says which face each triangle is of: `tagged` reads it, and
+# `read_obj` takes the faces from it when its triangles are the same ones.
+#
 #     shapes = read_obj("design.obj")          # [Shape(name="Body1", ...), ...]
 #     eye = fit(Eye(), box(shapes), (800, 600))
 #     at(eye, (800, 600), (30.0, 0.0, 13.0))   # where that point of the design shows, in px
@@ -75,15 +80,19 @@ end
 # --- reading the file ----------------------------------------------------------------
 
 "The bodies in the OBJ file at `path`, as SolidCraft writes it"
-read_obj(path::AbstractString) = read_obj(read(path))
+read_obj(path::AbstractString; faces=nothing) = read_obj(read(path); faces)
 
-read_obj(data::Vector{UInt8}) = begin
+"`faces` is what `tagged` read, or nothing: the face of each triangle of each body, as SolidCraft has them"
+read_obj(data::Vector{UInt8}; faces=nothing) = begin
   points, normals = Vec3[], Vec3[]
   shapes = Shape[]
   name = ""
   tris, norms = NTuple{3,Int}[], NTuple{3,Int}[]
   done() = begin
-    isempty(tris) && isempty(name) || push!(shapes, Shape(name, points, normals, tris, norms))
+    if !(isempty(tris) && isempty(name))
+      known = faces === nothing || length(faces) <= length(shapes) ? nothing : faces[length(shapes)+1]
+      push!(shapes, Shape(name, points, normals, tris, norms; tags=same_mesh(known, points, tris) ? known.faces : nothing))
+    end
     tris, norms = NTuple{3,Int}[], NTuple{3,Int}[]
   end
   for line in eachline(IOBuffer(data))
@@ -112,11 +121,90 @@ read_obj(data::Vector{UInt8}) = begin
   shapes
 end
 
+"""
+The face of each triangle of each body, from the text of the model inside a
+3MF file that SolidCraft wrote with face tags. Each body is `(name, points,
+triangles, faces)`: its corners, its triangles as the places of their corners
+in `points`, and for each triangle the number of its face, counted from 0 as
+SolidCraft counts the faces of a body.
+"""
+tagged(text::AbstractString) = begin
+  bodies = Any[]
+  number(s) = parse(Float64, s)
+  for line in eachline(IOBuffer(text))
+    l = lstrip(line)
+    if startswith(l, "<vertex ")
+      isempty(bodies) && continue
+      q = split(l, '"')
+      length(q) >= 6 && push!(bodies[end].points, (number(q[2]), number(q[4]), number(q[6])))
+    elseif startswith(l, "<triangle ")
+      isempty(bodies) && continue
+      q = split(l, '"')
+      length(q) >= 6 || continue
+      push!(bodies[end].triangles, (parse(Int, q[2]) + 1, parse(Int, q[4]) + 1, parse(Int, q[6]) + 1))
+      i = findfirst(k -> endswith(q[k], "ft:face="), 1:length(q)-1)
+      push!(bodies[end].faces, i === nothing ? -1 : parse(Int, q[i+1]))
+    elseif startswith(l, "<object ")
+      m = match(r" name=\"([^\"]*)\"", l)
+      push!(bodies, (name=m === nothing ? "" : String(m[1]), points=Vec3[], triangles=NTuple{3,Int}[], faces=Int[]))
+    end
+  end
+  bodies
+end
+
+"Are the triangles `tris` of an OBJ file, with their corners in `points`, the triangles of the body `known` that `tagged` read, in the same order?"
+same_mesh(known, points, tris) = begin
+  known === nothing && return false
+  (length(known.triangles) == length(tris) && length(known.faces) == length(tris) && all(>=(0), known.faces)) || return false
+  for (a, b) in zip(known.triangles, tris), k in 1:3
+    (1 <= a[k] <= length(known.points) && 1 <= b[k] <= length(points)) || return false
+    p, q = known.points[a[k]], points[b[k]]
+    len(p .- q) <= 1e-6 * (1 + len(q)) || return false
+  end
+  true
+end
+
+"""
+The colour of each body of the OBJ file at `path` that has a colour of its
+own, as red, green and blue from 0 to 1. SolidCraft writes them in a second
+file beside it, which the OBJ file names. A body with no colour isn't listed.
+"""
+colours(path::AbstractString) = begin
+  found = Dict{String,Vec3}()
+  library, body = "", ""
+  uses = Dict{String,String}()
+  for line in eachline(path)
+    startswith(line, "o ") ? (body = String(strip(line[3:end]))) :
+    startswith(line, "usemtl ") ? (uses[body] = String(strip(line[8:end]))) :
+    startswith(line, "mtllib ") && (library = String(strip(line[8:end])))
+  end
+  file = joinpath(dirname(path), library)
+  (isempty(library) || !isfile(file)) && return found
+  named, name = Dict{String,Vec3}(), ""
+  for line in eachline(file)
+    if startswith(line, "newmtl ")
+      name = String(strip(line[8:end]))
+    elseif startswith(line, "Kd ")
+      p = split(line)
+      length(p) >= 4 && (named[name] = (parse(Float64, p[2]), parse(Float64, p[3]), parse(Float64, p[4])))
+    end
+  end
+  for (body, material) in uses
+    haskey(named, material) && (found[body] = named[material])
+  end
+  found
+end
+
 const SAME = 0.99999     # the cosine of the angle under which two ways of facing count as one
 const LEVEL = 1 - 1e-9   # and the cosine under which the corners of a triangle face one way, so it's flat
 
-"The body `name` from the triangles `tris` of an OBJ file, which name their corners in `points` and their ways of facing in `normals`"
-Shape(name, all_points, all_normals, tris, norms) = begin
+"""
+The body `name` from the triangles `tris` of an OBJ file, which name their
+corners in `points` and their ways of facing in `normals`. `tags` has the
+number of each triangle's face when SolidCraft said them. With none, the
+faces are found in the triangles.
+"""
+Shape(name, all_points, all_normals, tris, norms; tags=nothing) = begin
   # The corners of this body only, numbered from 1
   place = Dict{Int,Int}()
   points = Vec3[]
@@ -140,23 +228,32 @@ Shape(name, all_points, all_normals, tris, norms) = begin
   facing(i, corner) = normals[3i-3+findfirst(==(corner), own[i])]
   joined(key, x, y) = flat[x[1]] == flat[y[1]] &&
     dot(facing(x[1], key[1]), facing(y[1], key[1])) > SAME && dot(facing(x[1], key[2]), facing(y[1], key[2])) > SAME
-  # Faces: the triangles that are joined across their sides
   face = zeros(Int, length(own))
-  near = [Int[] for _ in own]
-  for (key, users) in sides
-    length(users) == 2 && joined(key, users[1], users[2]) && (push!(near[users[1][1]], users[2][1]); push!(near[users[2][1]], users[1][1]))
-  end
-  faces = 0
   flats = Bool[]
-  for i in eachindex(own)
-    face[i] == 0 || continue
-    faces += 1
-    push!(flats, flat[i])
-    face[i] = faces
-    todo = [i]
-    while !isempty(todo)
-      for j in near[pop!(todo)]
-        face[j] == 0 && (face[j] = faces; push!(todo, j))
+  if tags !== nothing
+    # SolidCraft's own faces, numbered from 1 in the order they're first met. A face is flat when each of its triangles is.
+    numbers = Dict{Int,Int}()
+    for (i, t) in enumerate(tags)
+      face[i] = get!(() -> (push!(flats, true); length(flats)), numbers, t)
+      flat[i] || (flats[face[i]] = false)
+    end
+  else
+    # Faces: the triangles that are joined across their sides
+    near = [Int[] for _ in own]
+    for (key, users) in sides
+      length(users) == 2 && joined(key, users[1], users[2]) && (push!(near[users[1][1]], users[2][1]); push!(near[users[2][1]], users[1][1]))
+    end
+    faces = 0
+    for i in eachindex(own)
+      face[i] == 0 || continue
+      faces += 1
+      push!(flats, flat[i])
+      face[i] = faces
+      todo = [i]
+      while !isempty(todo)
+        for j in near[pop!(todo)]
+          face[j] == 0 && (face[j] = faces; push!(todo, j))
+        end
       end
     end
   end
@@ -355,6 +452,32 @@ hit(shapes, (o, d); shown=s -> true) = begin
     end
   end
   best
+end
+
+"""
+The face of the body `s` that the point `p` is on. SolidCraft names a face by
+a point on it, so this finds the triangle that the point is in, or with none
+the triangle whose middle is nearest.
+"""
+face_at(s::Shape, p::Vec3) = begin
+  best, found = Inf, 0
+  near, nearest = Inf, 0
+  for (i, t) in enumerate(s.triangles)
+    a, b, c = s.points[t[1]], s.points[t[2]], s.points[t[3]]
+    d = len((a .+ b .+ c) ./ 3 .- p)
+    d < near && ((near, nearest) = (d, i))
+    n = cross(b .- a, c .- a)
+    area = dot(n, n)
+    area < 1e-18 && continue
+    # Where the point is in the triangle, as three shares that add up to 1
+    u = dot(cross(b .- p, c .- p), n) / area
+    v = dot(cross(c .- p, a .- p), n) / area
+    (u < -1e-6 || v < -1e-6 || u + v > 1 + 1e-6) && continue
+    off = abs(dot(p .- a, n)) / sqrt(area)
+    off < best && ((best, found) = (off, i))
+  end
+  i = found == 0 || best > 1e-3 * max(len(s.high .- s.low), 1e-9) ? nearest : found
+  i == 0 ? 0 : s.face[i]
 end
 
 "How far the place `px` is from the line between the places `a` and `b`, and how far along the line the nearest point is, from 0 to 1"

@@ -5,11 +5,13 @@
 # list of things to draw, and gets back the pixels:
 #
 #     stage = Stage()
-#     pixels = picture!(stage, 1600, 1000, eye, [Solid(...), Lines(...)], background)
+#     pixels = picture!(stage, 1600, 1000, eye, [Solid(...), Lines(...), Sheet(...)], background)
 #
 # A `Solid` is a body's triangles with light on them. `Lines` are the edges of
 # bodies, the grid and the axes: each line is drawn as a thin rectangle that
-# faces the eye, because OpenGL on a Mac draws no line wider than a pixel.
+# faces the eye, because OpenGL on a Mac draws no line wider than a pixel. A
+# `Sheet` is flat triangles of one colour that show what's behind them: a
+# plane, or a closed region of a sketch. A body in front hides it.
 #
 # The pixels come as red, green, blue and alpha bytes, a row at a time from the
 # top. Each thing keeps its corners on the graphics card under its `key`, so a
@@ -35,10 +37,19 @@ struct Solid
   key::Any
   data::Vector{Float32}
   colour::Colour
-  lit::Vector{Pair{Int,Colour}}   # the faces that have a colour over their own, like the face under the mouse
-  through::Bool                   # is it drawn so that what's behind it shows through?
+  painted::Vector{Pair{Int,Colour}}   # the faces that have a colour of their own in place of the body's
+  lit::Vector{Pair{Int,Colour}}       # the faces that have a colour over their own, like the face under the mouse
+  through::Bool                       # is it drawn so that what's behind it shows through?
+  bare::Bool                          # only its `lit` faces are drawn: the body itself doesn't show
 end
-Solid(key, data, colour; lit=Pair{Int,Colour}[], through=colour[4] < 1) = Solid(key, data, colour, lit, through)
+Solid(key, data, colour; painted=Pair{Int,Colour}[], lit=Pair{Int,Colour}[], through=colour[4] < 1, bare=false) = Solid(key, data, colour, painted, lit, through, bare)
+
+"Flat triangles of one colour, with no light on them. `data` has 3 numbers for each corner: where it is."
+struct Sheet
+  key::Any
+  data::Vector{Float32}
+  colour::Colour
+end
 
 "Lines. `data` has 6 numbers for each: where it starts and where it ends."
 struct Lines
@@ -48,8 +59,9 @@ struct Lines
   width::Float32                  # in pixels of the picture
   hidden::Bool                    # false: it shows through the bodies in front of it
   fade::NTuple{5,Float32}         # it fades out between two distances from a point: the point, then the distances. (0, 0, 0, 0, 0) for none.
+  cut::Bool                       # the picture's cut takes away the part of it that's on the eye's side, as it does of every solid
 end
-Lines(key, data, colour, width; hidden=true, fade=(0f0, 0f0, 0f0, 0f0, 0f0)) = Lines(key, data, colour, Float32(width), hidden, fade)
+Lines(key, data, colour, width; hidden=true, fade=(0f0, 0f0, 0f0, 0f0, 0f0), cut=false) = Lines(key, data, colour, Float32(width), hidden, fade, cut)
 
 mutable struct Kept
   vao::UInt32
@@ -82,10 +94,12 @@ layout(location = 2) in float face;
 uniform mat4 mvp;
 uniform mat3 look;
 out vec3 facing;
+out vec3 world;
 flat out float of;
 void main() {
   gl_Position = mvp * vec4(p, 1.0);
   facing = look * n;
+  world = p;
   of = face;
 }
 """
@@ -93,13 +107,17 @@ void main() {
 const SOLID_F = """
 #version 410 core
 in vec3 facing;
+in vec3 world;
 flat in float of;
 uniform vec4 tint;
 uniform float only;
 uniform float plain;
+uniform vec4 cut;
 out vec4 colour;
 void main() {
   if (only >= 0.0 && abs(of - only) > 0.5) discard;
+  // What's on the eye's side of the plane that cuts the picture doesn't show. With no cut, the plane is (0, 0, 0, -1).
+  if (dot(world, cut.xyz) + cut.w > 0.0) discard;
   vec3 n = normalize(facing);
   if (n.z < 0.0) n = -n;
   // A lamp over the eye, and a weaker one to its left, so that the top of a block is brighter than its sides and the sides differ
@@ -146,8 +164,10 @@ in vec3 world;
 uniform vec4 tint;
 uniform vec3 fade_at;
 uniform vec2 fade;
+uniform vec4 cut;
 out vec4 colour;
 void main() {
+  if (dot(world, cut.xyz) + cut.w > 0.0) discard;
   colour = tint;
   if (fade.y > 0.0) colour.a *= 1.0 - smoothstep(fade.x, fade.y, distance(world, fade_at));
 }
@@ -268,6 +288,20 @@ kept!(s::Stage, t) = begin
         glVertexAttribPointer(i - 1, n, GL_FLOAT, GL_FALSE, 28, Ptr{Cvoid}(from))
       end
       k = Kept(vao, buffer, length(t.data) ÷ 7, s.frame)
+    elseif t isa Sheet
+      # As a solid's corners are, each with a way of facing and a face that the shader makes no use of
+      n = length(t.data) ÷ 3
+      data = zeros(Float32, 7n)
+      for i in 0:n-1
+        copyto!(data, 7i + 1, t.data, 3i + 1, 3)
+        data[7i+6] = 1f0
+      end
+      glBufferData(GL_ARRAY_BUFFER, sizeof(data), data, GL_STATIC_DRAW)
+      for (i, (m, from)) in enumerate(((3, 0), (3, 12), (1, 24)))
+        glEnableVertexAttribArray(i - 1)
+        glVertexAttribPointer(i - 1, m, GL_FLOAT, GL_FALSE, 28, Ptr{Cvoid}(from))
+      end
+      k = Kept(vao, buffer, n, s.frame)
     else
       # Each line is two triangles, whose six corners each know both ends of the line
       n = length(t.data) ÷ 6
@@ -292,11 +326,14 @@ end
 
 uniform(p, name) = glGetUniformLocation(p, name)
 
-draw!(s::Stage, t::Solid, mvp, look, lift) = begin
+const NO_CUT = (0f0, 0f0, 0f0, -1f0)
+
+draw!(s::Stage, t::Solid, mvp, look, lift, cut=NO_CUT) = begin
   k = kept!(s, t)
   k.count == 0 && return
   p = s.solid
   glUseProgram(p)
+  glUniform4f(uniform(p, "cut"), cut...)
   glUniformMatrix4fv(uniform(p, "mvp"), 1, GL_FALSE, mvp)
   glUniformMatrix3fv(uniform(p, "look"), 1, GL_FALSE, look)
   glBindVertexArray(k.vao)
@@ -305,11 +342,20 @@ draw!(s::Stage, t::Solid, mvp, look, lift) = begin
   glEnable(GL_POLYGON_OFFSET_FILL)
   glPolygonOffset(1f0, 1f0)
   glDepthMask(t.through ? GL_FALSE : GL_TRUE)
-  glUniform4f(uniform(p, "tint"), t.colour...)
-  glUniform1f(uniform(p, "only"), -1f0)
   glUniform1f(uniform(p, "plain"), 0f0)
-  glDrawArrays(GL_TRIANGLES, 0, k.count)
-  # A face with a colour over its own is drawn again, just in front of itself
+  if !t.bare
+    glUniform4f(uniform(p, "tint"), t.colour...)
+    glUniform1f(uniform(p, "only"), -1f0)
+    glDrawArrays(GL_TRIANGLES, 0, k.count)
+    # A face with a colour of its own is drawn again in that colour, just in front of the body's
+    glPolygonOffset(0.5f0, 0.5f0)
+    for (face, colour) in t.painted
+      glUniform4f(uniform(p, "tint"), colour...)
+      glUniform1f(uniform(p, "only"), Float32(face))
+      glDrawArrays(GL_TRIANGLES, 0, k.count)
+    end
+  end
+  # A face with a colour over its own is drawn once more, in front of both
   glDepthMask(GL_FALSE)
   glPolygonOffset(0f0, 0f0)
   for (face, colour) in t.lit
@@ -322,11 +368,31 @@ draw!(s::Stage, t::Solid, mvp, look, lift) = begin
   glDisable(GL_POLYGON_OFFSET_FILL)
 end
 
-draw!(s::Stage, t::Lines, mvp, look, lift) = begin
+draw!(s::Stage, t::Sheet, mvp, look, lift, cut=NO_CUT) = begin
+  k = kept!(s, t)
+  k.count == 0 && return
+  p = s.solid
+  glUseProgram(p)
+  glUniform4f(uniform(p, "cut"), NO_CUT...)
+  glUniformMatrix4fv(uniform(p, "mvp"), 1, GL_FALSE, mvp)
+  glUniformMatrix3fv(uniform(p, "look"), 1, GL_FALSE, look)
+  glBindVertexArray(k.vao)
+  glEnable(GL_DEPTH_TEST)
+  glDepthFunc(GL_LEQUAL)
+  glDepthMask(GL_FALSE)
+  glUniform4f(uniform(p, "tint"), t.colour...)
+  glUniform1f(uniform(p, "only"), -1f0)
+  glUniform1f(uniform(p, "plain"), 1f0)
+  glDrawArrays(GL_TRIANGLES, 0, k.count)
+  glDepthMask(GL_TRUE)
+end
+
+draw!(s::Stage, t::Lines, mvp, look, lift, cut=NO_CUT) = begin
   k = kept!(s, t)
   k.count == 0 && return
   p = s.lines
   glUseProgram(p)
+  glUniform4f(uniform(p, "cut"), (t.cut ? cut : NO_CUT)...)
   glUniformMatrix4fv(uniform(p, "mvp"), 1, GL_FALSE, mvp)
   glUniform2f(uniform(p, "view"), Float32(s.wide), Float32(s.high))
   glUniform1f(uniform(p, "width"), t.width)
@@ -346,15 +412,17 @@ end
 Draw `things` as the eye `e` sees them, in a picture of `w` by `h` pixels on
 the colour `background`, and give its pixels: red, green, blue and alpha
 bytes, a row at a time from the top. `reach` is how far from the eye's target
-the things go.
+the things go. `cut` is a plane, as a point on it and the way it faces:
+the part of each body that's on the side that it faces doesn't show.
 """
-picture!(s::Stage, w::Int, h::Int, e::Eye, things, background; reach=1000.0) = begin
+picture!(s::Stage, w::Int, h::Int, e::Eye, things, background; reach=1000.0, cut=nothing) = begin
   was = current()
   setcurrent(s.cgl)
   try
     size!(s, w, h)
     s.frame += 1
     mvp, look, lift = matrices(e, w, h, reach)
+    plane = cut === nothing ? NO_CUT : (Float32.(cut[2])..., Float32(-dot(cut[1], cut[2])))
     glBindFramebuffer(GL_FRAMEBUFFER, s.msfbo)
     glViewport(0, 0, w, h)
     glDisable(GL_SCISSOR_TEST)
@@ -366,15 +434,21 @@ picture!(s::Stage, w::Int, h::Int, e::Eye, things, background; reach=1000.0) = b
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
     glEnable(GL_BLEND)
     glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA)
-    # What's solid first, then what shows through, then the lines over them
+    # What's solid first, then the lines over it, then what shows through: the sheets, and the bodies that do
     for t in things
-      t isa Solid && !t.through && draw!(s, t, mvp, look, lift)
+      t isa Solid && !t.through && !t.bare && draw!(s, t, mvp, look, lift, plane)
     end
     for t in things
-      t isa Lines && draw!(s, t, mvp, look, lift)
+      t isa Solid && !t.through && t.bare && draw!(s, t, mvp, look, lift, plane)
     end
     for t in things
-      t isa Solid && t.through && draw!(s, t, mvp, look, lift)
+      t isa Lines && draw!(s, t, mvp, look, lift, plane)
+    end
+    for t in things
+      t isa Sheet && draw!(s, t, mvp, look, lift, plane)
+    end
+    for t in things
+      t isa Solid && t.through && draw!(s, t, mvp, look, lift, plane)
     end
     glBindVertexArray(0)
     glBindFramebuffer(GL_READ_FRAMEBUFFER, s.msfbo)

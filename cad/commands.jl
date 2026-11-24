@@ -27,9 +27,18 @@ struct Field
   default::Any
   options::Vector{Pair{Any,String}}   # for a :choice: each value that's sent, and what the form calls it
   optional::Bool
+  section::Any                    # the part of the form that it's in, or nothing for the part that suits its kind: see `section`
 end
-Field(key, label, kind; default=kind == :flag ? false : "", options=Pair{Any,String}[], optional=false) =
-  Field(key, label, kind, default, Pair{Any,String}[o for o in options], optional)
+Field(key, label, kind; default=kind == :flag ? false : "", options=Pair{Any,String}[], optional=false, section=nothing) =
+  Field(key, label, kind, default, Pair{Any,String}[o for o in options], optional, section)
+Field(key, label, kind, default, options, optional) = Field(key, label, kind, default, options, optional, nothing)
+
+"""
+The part of a form that the field `f` is in. SolidCraft's forms have three:
+what the command needs is first, with no name. What can be ticked is under
+Options. What's seldom changed is under Advanced, which is closed at first.
+"""
+section(f::Field) = f.section !== nothing ? f.section : f.kind == :flag ? "Options" : f.optional ? "Advanced" : ""
 
 "True for a field that's filled by clicks in the design"
 picks(f::Field) = f.kind in (:faces, :face, :edges, :bodies, :body, :profiles, :plane, :spot)
@@ -43,53 +52,70 @@ struct Spec
   icon::String
   fields::Vector{Field}
   help::String
+  fix::Any                        # changes the parameters that the fields give into the ones that the command takes
 end
-Spec(command, title, icon, fields) = Spec(command, title, icon, fields, "")
+Spec(command, title, icon, fields, help="") = Spec(command, title, icon, fields, help, identity)
+Spec(command, title, icon, fields, fix::Function) = Spec(command, title, icon, fields, "", fix)
 
-const OPERATIONS = Pair{Any,String}["auto" => "Auto", "new" => "New body", "join" => "Join", "cut" => "Cut", "intersect" => "Intersect"]
-const SOLID_OPERATIONS = Pair{Any,String}["new" => "New body", "join" => "Join", "cut" => "Cut", "intersect" => "Intersect"]
+const OPERATIONS = Pair{Any,String}["auto" => "Auto", "new" => "New Body", "join" => "Join", "cut" => "Cut", "intersect" => "Intersect"]
+const SOLID_OPERATIONS = Pair{Any,String}["new" => "New Body", "join" => "Join", "cut" => "Cut", "intersect" => "Intersect"]
+const EXTENTS = Pair{Any,String}["distance" => "Distance", "through_all" => "Through All"]
+
+"Take a form's own fields out of the parameters `p`: with Through All there's no distance `far`, and Reverse Direction turns the direction round"
+through!(p, far) = begin
+  pop!(p, "extent", "distance") == "through_all" && (far == "distance" && (p["through_all"] = true); delete!(p, far))
+  pop!(p, "reverse", false) === true && get(p, "direction", "positive") == "positive" && (p["direction"] = "negative")
+  p
+end
 const WORLD_AXES = Pair{Any,String}["X" => "X", "Y" => "Y", "Z" => "Z"]
 const WAYS = Pair{Any,String}[[1, 0, 0] => "X", [0, 1, 0] => "Y", [0, 0, 1] => "Z"]
 const PLANES = Pair{Any,String}["XY" => "XY", "XZ" => "XZ", "YZ" => "YZ"]
 
 const SPECS = Dict{String,Spec}(s.command => s for s in [
-  Spec("sketch.create", "New Sketch", "sketch", [
+  Spec("sketch.create", "Create Sketch", "sketch", [
     Field("plane", "Plane", :plane, default="XY"),
     Field("offset", "Offset", :length, optional=true)]),
   Spec("solid.extrude", "Extrude", "extrude", [
     Field("profiles", "Profiles", :profiles),
+    Field("targets", "Target Bodies", :bodies, optional=true, section=""),
+    Field("direction", "Direction", :choice, default="positive", options=["positive" => "One Side", "symmetric" => "Symmetric"]),
+    Field("extent", "Extent Type", :choice, default="distance", options=EXTENTS),
     Field("distance", "Distance", :length, default="10 mm"),
-    Field("direction", "Direction", :choice, default="positive", options=["positive" => "One side", "negative" => "Other side", "symmetric" => "Symmetric"]),
     Field("operation", "Operation", :choice, default="auto", options=OPERATIONS),
-    Field("through_all", "Through all", :flag),
-    Field("taper", "Taper angle", :angle, optional=true)]),
+    Field("reverse", "Reverse Direction", :flag),
+    Field("taper", "Taper Angle", :angle, optional=true)], p -> through!(p, "distance")),
   Spec("solid.revolve", "Revolve", "revolve", [
-    Field("profiles", "Profiles", :profiles),
+    Field("profiles", "Profile", :profiles),
     Field("axis", "Axis", :choice, default="x", options=["x" => "Sketch x", "y" => "Sketch y", "X" => "X", "Y" => "Y", "Z" => "Z"]),
+    Field("direction", "Direction", :choice, default=nothing, options=[nothing => "One Side", "symmetric" => "Symmetric"]),
     Field("angle", "Angle", :angle, default="360 deg"),
     Field("operation", "Operation", :choice, default="auto", options=OPERATIONS)]),
   Spec("solid.hole", "Hole", "hole", [
-    Field("position", "Position", :spot),
+    Field("position", "Face", :spot),
+    Field("extent", "Extents", :choice, default="distance", options=EXTENTS),
+    Field("type", "Hole Type", :choice, default="simple", options=["simple" => "Simple", "counterbore" => "Counterbore", "countersink" => "Countersink"]),
+    Field("depth", "Depth", :length, default="10 mm"),
     Field("diameter", "Diameter", :length, default="5 mm"),
-    Field("depth", "Depth", :length, optional=true),
-    Field("type", "Type", :choice, default="simple", options=["simple" => "Simple", "counterbore" => "Counterbore", "countersink" => "Countersink"]),
-    Field("cb_diameter", "Counterbore diameter", :length, optional=true),
-    Field("cb_depth", "Counterbore depth", :length, optional=true),
-    Field("cs_diameter", "Countersink diameter", :length, optional=true),
-    Field("cs_angle", "Countersink angle", :angle, optional=true)]),
+    Field("tip_angle", "Tip Angle", :angle, optional=true),
+    Field("cb_diameter", "Counterbore Diameter", :length, optional=true),
+    Field("cb_depth", "Counterbore Depth", :length, optional=true),
+    Field("cs_diameter", "Countersink Diameter", :length, optional=true),
+    Field("cs_angle", "Countersink Angle", :angle, optional=true)], p -> through!(p, "depth")),
   Spec("solid.fillet", "Fillet", "fillet", [
     Field("edges", "Edges", :edges),
     Field("radius", "Radius", :length, default="2 mm"),
-    Field("tangent_chain", "Tangent chain", :flag, default=true)]),
+    Field("type", "Type", :choice, default="constant", options=["constant" => "Constant radius", "curvature" => "Curvature", "chord" => "Chord width"]),
+    Field("tangent_chain", "Tangent Chain", :flag, default=true)]),
   Spec("solid.chamfer", "Chamfer", "chamfer", [
     Field("edges", "Edges", :edges),
-    Field("distance", "Distance", :length, default="2 mm"),
-    Field("distance2", "Second distance", :length, optional=true),
-    Field("tangent_chain", "Tangent chain", :flag, default=true)]),
+    Field("distance", "Distance", :length, default="1 mm"),
+    Field("distance2", "Second Distance", :length, optional=true),
+    Field("tangent_chain", "Tangent Chain", :flag, default=true)]),
   Spec("solid.shell", "Shell", "shell", [
-    Field("faces", "Faces to remove", :faces),
+    Field("faces", "Faces/Body", :faces),
     Field("thickness", "Thickness", :length, default="2 mm"),
-    Field("direction", "Direction", :choice, default="inside", options=["inside" => "Inside", "outside" => "Outside", "both" => "Both"])]),
+    Field("direction", "Direction", :choice, default="inside", options=["inside" => "Inside", "outside" => "Outside", "both" => "Both"]),
+    Field("tangent_chain", "Tangent Chain", :flag, optional=true)]),
   Spec("solid.press_pull", "Press Pull", "presspull", [
     Field("face", "Face", :face),
     Field("distance", "Distance", :length, default="2 mm")]),
@@ -122,17 +148,17 @@ const SPECS = Dict{String,Spec}(s.command => s for s in [
     Field("axis", "Axis", :choice, default="Z", options=WORLD_AXES),
     Field("operation", "Operation", :choice, default="new", options=SOLID_OPERATIONS)]),
   Spec("solid.mirror", "Mirror", "mirror", [
-    Field("bodies", "Bodies", :bodies),
-    Field("plane", "Mirror plane", :choice, default="YZ", options=PLANES),
-    Field("combine", "Join with the original", :flag)]),
+    Field("bodies", "Objects", :bodies),
+    Field("plane", "Mirror Plane", :choice, default="YZ", options=PLANES),
+    Field("combine", "Join", :flag)]),
   Spec("solid.pattern.rectangular", "Rectangular Pattern", "pattern_rect", [
-    Field("bodies", "Bodies", :bodies),
+    Field("bodies", "Objects", :bodies),
     Field("dir1", "Direction", :choice, default=[1, 0, 0], options=WAYS),
-    Field("count1", "Count", :count, default="3"),
+    Field("count1", "Quantity", :count, default="3"),
     Field("spacing1", "Spacing", :length, default="20 mm"),
-    Field("dir2", "Second direction", :choice, default=nothing, options=vcat(Pair{Any,String}[nothing => "None"], WAYS), optional=true),
-    Field("count2", "Second count", :count, optional=true),
-    Field("spacing2", "Second spacing", :length, optional=true)]),
+    Field("dir2", "Direction 2", :choice, default=nothing, options=vcat(Pair{Any,String}[nothing => "None"], WAYS), optional=true, section=""),
+    Field("count2", "Quantity 2", :count, optional=true, section=""),
+    Field("spacing2", "Spacing 2", :length, optional=true, section="")]),
   Spec("solid.pattern.circular", "Circular Pattern", "pattern_circ", [
     Field("bodies", "Bodies", :bodies),
     Field("axis", "Axis", :choice, default="Z", options=WORLD_AXES),
@@ -144,11 +170,11 @@ const SPECS = Dict{String,Spec}(s.command => s for s in [
     Field("operation", "Operation", :choice, default="join", options=["join" => "Join", "cut" => "Cut", "intersect" => "Intersect"]),
     Field("keep_tools", "Keep the tools", :flag)]),
   Spec("solid.move", "Move / Copy", "move", [
-    Field("bodies", "Bodies", :bodies),
-    Field("translate", "Move by", :vector, default="0, 0, 0"),
-    Field("angle", "Turn by", :angle, optional=true),
-    Field("axis", "Turn about", :choice, default=[0, 0, 1], options=WAYS),
-    Field("copy", "Make a copy", :flag)]),
+    Field("bodies", "Selection", :bodies),
+    Field("translate", "Distance", :vector, default="0, 0, 0"),
+    Field("angle", "Angle", :angle, optional=true, section=""),
+    Field("axis", "About", :choice, default=[0, 0, 1], options=WAYS),
+    Field("copy", "Create Copy", :flag)]),
   Spec("solid.scale", "Scale", "scale", [
     Field("bodies", "Bodies", :bodies),
     Field("factor", "Factor", :count, default="2")]),
@@ -342,7 +368,7 @@ params(s::Spec, values::AbstractDict) = begin
   end
   # A flag that asks for everything takes the place of the distance
   get(out, "through_all", false) === true && delete!(out, "distance")
-  out
+  s.fix(out)
 end
 
 # --- the sketch tools ----------------------------------------------------------------
@@ -427,6 +453,13 @@ const TABS = [
     Group("Exit", ["sketch.finish", "sketch.cancel"], String[]),
   ],
 ]
+
+"""
+Does the design show what the command `id` makes while its form is filled in?
+It does for a command that makes or changes bodies, and for a step whose
+lengths are changed.
+"""
+tried(id) = id == "parameters.change" || any(p -> startswith(id, p), ("solid.", "surface.", "sheet.", "face."))
 
 "What the toolbar calls a command, where SolidCraft's own name for it is long"
 const SHORT = Dict("sketch.create" => "New Sketch", "solid.pattern.rectangular" => "Pattern", "solid.move" => "Move / Copy", "construct.plane.offset" => "Plane",
