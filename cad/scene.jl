@@ -1,29 +1,31 @@
 # The shapes of a design as triangles, and the eye that looks at them.
 #
-# SolidCraft's program writes the bodies of a design as an OBJ file: corners,
-# the way the surface faces at each corner, and triangles. `read_obj` reads
-# it. A solid body is more than triangles, though. It has faces, like the top
-# of a block or the wall of a hole, and edges where two faces meet. `Shape`
-# finds them again in the triangles:
+# SolidCraft's program writes the bodies of a design as a .glb file: for each
+# body its corners, the way the surface faces at each corner, and triangles.
+# `read_glb` reads it. A solid body is more than triangles, though. It has
+# faces, like the top of a block or the wall of a hole, and edges where two
+# faces meet. SolidCraft writes each face with corners of its own, so:
 #
-#   - A triangle is flat when the surface faces the same way at its three
-#     corners as the triangle does. If not, it's part of a curved face.
-#   - Two triangles that share a side are of one face when the surface faces
-#     the same way on both sides of it, and both are flat or both are curved.
+#   - A face is the triangles that share corners in the file.
+#   - The corners of two faces at one place are one point of the body.
 #   - An edge is a run of sides that have the same two faces on their two sides.
 #
 # So a hole's wall is one face, and the ring where it meets the top is one
 # edge. That's what the editor shows under the mouse, and what a click picks.
-#
 # Two curved faces that meet smoothly, like a rounded edge and the rounded
-# corner at its end, can't be told apart that way. SolidCraft also writes a
-# file that says which face each triangle is of: `tagged` reads it, and
-# `read_obj` takes the faces from it when its triangles are the same ones.
+# corner at its end, are two faces too, as SolidCraft has them.
 #
-#     shapes = read_obj("design.obj")          # [Shape(name="Body1", ...), ...]
+# SolidCraft can also write an OBJ file, and a 3MF file with the number of
+# each triangle's face. Those cut a thin flat sheet into a hundred thousand
+# triangles: a design with 24 such sheets took 84 seconds to write, where its
+# .glb file takes a third of a second.
+#
+#     shapes, colours = read_glb(read("design.glb"))   # [Shape(name="Body1", ...), ...], and each body's colour by its name
 #     eye = fit(Eye(), box(shapes), (800, 600))
 #     at(eye, (800, 600), (30.0, 0.0, 13.0))   # where that point of the design shows, in px
 #     hit(shapes, ray(eye, (800, 600), (400, 300)))   # what shows at a place of the view
+
+@use "./json" => JSON
 
 const Vec3 = NTuple{3,Float64}
 
@@ -79,187 +81,145 @@ end
 
 # --- reading the file ----------------------------------------------------------------
 
-"The bodies in the OBJ file at `path`, as SolidCraft writes it"
-read_obj(path::AbstractString; faces=nothing) = read_obj(read(path); faces)
+"The colour of a body that has none of its own, as SolidCraft writes it in a .glb file: amounts of light, not a screen's numbers"
+const PLAIN = (0.43415, 0.49102, 0.56471)
 
-"`faces` is what `tagged` read, or nothing: the face of each triangle of each body, as SolidCraft has them"
-read_obj(data::Vector{UInt8}; faces=nothing) = begin
-  points, normals = Vec3[], Vec3[]
-  shapes = Shape[]
-  name = ""
-  tris, norms = NTuple{3,Int}[], NTuple{3,Int}[]
-  done() = begin
-    if !(isempty(tris) && isempty(name))
-      known = faces === nothing || length(faces) <= length(shapes) ? nothing : faces[length(shapes)+1]
-      push!(shapes, Shape(name, points, normals, tris, norms; tags=same_mesh(known, points, tris) ? known.faces : nothing))
-    end
-    tris, norms = NTuple{3,Int}[], NTuple{3,Int}[]
+"A screen's number, from 0 to 1, for an amount of light"
+screen(x) = x <= 0.0031308 ? 12.92x : 1.055 * x^(1 / 2.4) - 0.055
+
+"`count` rows of `N` numbers of the type `T` in `data`: the first is at the byte `from`, and each row is `step` bytes after the one before"
+rows(data::Vector{UInt8}, from, step, count, ::Type{T}, ::Val{N}) where {T,N} = begin
+  from + (count - 1) * step + N * sizeof(T) - 1 <= length(data) || error("The file is cut short")
+  GC.@preserve data [ntuple(c -> ltoh(unsafe_load(Ptr{T}(pointer(data, from + (i - 1) * step + (c - 1) * sizeof(T))))), Val(N)) for i in 1:count]
+end
+
+"The corner that stands for the face of the corner `c`. `group` leads from each corner to another one of its face, or to itself."
+leader!(group::Vector{Int}, c::Int) = begin
+  while group[c] != c
+    c = group[c] = group[group[c]]
   end
-  for line in eachline(IOBuffer(data))
-    length(line) < 2 && continue
-    if startswith(line, "v ")
-      p = split(line)
-      push!(points, (parse(Float64, p[2]), parse(Float64, p[3]), parse(Float64, p[4])))
-    elseif startswith(line, "vn ")
-      p = split(line)
-      push!(normals, (parse(Float64, p[2]), parse(Float64, p[3]), parse(Float64, p[4])))
-    elseif startswith(line, "f ")
-      p = split(line)
-      corner(s) = (q = split(s, '/'); (parse(Int, q[1]), length(q) >= 3 && !isempty(q[3]) ? parse(Int, q[3]) : 0))
-      c = corner.(@view p[2:end])
-      # A face with more than three corners is a fan of triangles
-      for k in 2:length(c)-1
-        push!(tris, (c[1][1], c[k][1], c[k+1][1]))
-        push!(norms, (c[1][2], c[k][2], c[k+1][2]))
+  c
+end
+
+"""
+Add one part of a body's mesh to the body. `at` has the part's corners,
+`facing` the way the surface faces at each one, or nothing, and `corners`
+names three corners for each triangle. `faces` is how many faces the body
+has so far, and this gives how many it has now.
+
+SolidCraft writes each face with corners of its own. So a face is the
+triangles that share corners, and the corners of two faces at one place
+become one of the body's `points`.
+"""
+part!(points, places, triangles, normals, face, faces::Int, at::Vector{Vec3}, facing::Union{Nothing,Vector{Vec3}}, corners::Vector{Int}) = begin
+  group = collect(1:length(at))
+  for t in 1:3:length(corners)-2
+    a = leader!(group, corners[t])
+    group[leader!(group, corners[t+1])] = a
+    group[leader!(group, corners[t+2])] = a
+  end
+  point = [get!(() -> (push!(points, q); length(points)), places, q) for q in at]
+  numbers = Dict{Int,Int}()
+  for t in 1:3:length(corners)-2
+    a, b, c = corners[t], corners[t+1], corners[t+2]
+    push!(triangles, (point[a], point[b], point[c]))
+    flat = unit(cross(at[b] .- at[a], at[c] .- at[a]))
+    for k in (a, b, c)
+      push!(normals, facing === nothing ? flat : facing[k])
+    end
+    lead = leader!(group, a)
+    f = get(numbers, lead, 0)
+    f == 0 && (f = numbers[lead] = (faces += 1))
+    push!(face, f)
+  end
+  faces
+end
+
+"""
+The bodies in the bytes of a .glb file that SolidCraft wrote with `hierarchy:
+false`, and the colour of each body that has a colour of its own, as red,
+green and blue from 0 to 1. Such a file has every body where it is in the
+design, in mm with z up, whatever its first node says of metres and y. A file
+that can't be read has no bodies.
+"""
+read_glb(data::Vector{UInt8}) = begin
+  none = (Shape[], Dict{String,Vec3}())
+  word(at) = Int(data[at]) | Int(data[at+1]) << 8 | Int(data[at+2]) << 16 | Int(data[at+3]) << 24
+  (length(data) >= 28 && data[1:4] == b"glTF") || return none
+  text = word(13)
+  length(data) >= 28 + text || return none
+  doc = try JSON.parse(String(data[21:20+text])) catch; return none end
+  first_byte = 20 + text + 9   # of the numbers, after the text and the 8 bytes that say how long they are
+  list(key) = (l = doc isa JSON.Object ? get(doc, key, nothing) : nothing; l isa Vector ? l : Any[])
+  views, accessors, materials, meshes = list("bufferViews"), list("accessors"), list("materials"), list("meshes")
+  # The numbers of the accessor `k`: each row has `n` of them, of the type that the file says
+  column(k, n) = begin
+    a = accessors[Int(k)+1]
+    v = views[Int(a["bufferView"])+1]
+    kind = Int(a["componentType"])
+    T = kind == 5126 ? Float32 : kind == 5125 ? UInt32 : kind == 5123 ? UInt16 : UInt8
+    step = Int(get(v, "byteStride", 0))
+    rows(data, first_byte + Int(get(v, "byteOffset", 0)) + Int(get(a, "byteOffset", 0)), step == 0 ? n * sizeof(T) : step, Int(a["count"]), T, Val(n))
+  end
+  shapes, colours = Shape[], Dict{String,Vec3}()
+  try
+    for node in list("nodes")
+      (node isa JSON.Object && haskey(node, "mesh")) || continue
+      name = String(get(node, "name", ""))
+      points, places = Vec3[], Dict{Vec3,Int}()   # the body's points, and the number of the point at each place
+      triangles, normals, face = NTuple{3,Int}[], Vec3[], Int[]
+      faces = 0
+      for (n, part) in enumerate(meshes[Int(node["mesh"])+1]["primitives"])
+        given = part["attributes"]
+        at = map(q -> Float64.(q), column(given["POSITION"], 3))::Vector{Vec3}
+        facing = haskey(given, "NORMAL") ? map(q -> unit(Float64.(q)), column(given["NORMAL"], 3))::Vector{Vec3} : nothing
+        corners = haskey(part, "indices") ? map(q -> Int(q[1]) + 1, column(part["indices"], 1))::Vector{Int} : collect(1:length(at))
+        all(c -> 1 <= c <= length(at), corners) || error("A triangle names a corner that isn't there")
+        faces = part!(points, places, triangles, normals, face, faces, at, facing, corners)
+        # The body's own look is the first that the file gives it. A face that was painted comes after, with its own.
+        m = n == 1 && haskey(part, "material") ? materials[Int(part["material"])+1] : nothing
+        look = m isa JSON.Object ? get(m, "pbrMetallicRoughness", nothing) : nothing
+        colour = look isa JSON.Object ? get(look, "baseColorFactor", nothing) : nothing
+        if colour isa Vector && length(colour) >= 3
+          light = (Float64(colour[1]), Float64(colour[2]), Float64(colour[3]))
+          # A body with no colour has a look that's named after the body
+          plain = get(m, "name", "") == name && all(abs.(light .- PLAIN) .< 1e-3)
+          plain || (colours[name] = screen.(light))
+        end
       end
-    elseif startswith(line, "o ")
-      done()
-      name = String(strip(line[3:end]))
+      push!(shapes, Shape(name, points, triangles, normals, face))
     end
+  catch
+    return none
   end
-  done()
-  shapes
+  shapes, colours
 end
 
-"""
-The face of each triangle of each body, from the text of the model inside a
-3MF file that SolidCraft wrote with face tags. Each body is `(name, points,
-triangles, faces)`: its corners, its triangles as the places of their corners
-in `points`, and for each triangle the number of its face, counted from 0 as
-SolidCraft counts the faces of a body.
-"""
-tagged(text::AbstractString) = begin
-  bodies = Any[]
-  number(s) = parse(Float64, s)
-  for line in eachline(IOBuffer(text))
-    l = lstrip(line)
-    if startswith(l, "<vertex ")
-      isempty(bodies) && continue
-      q = split(l, '"')
-      length(q) >= 6 && push!(bodies[end].points, (number(q[2]), number(q[4]), number(q[6])))
-    elseif startswith(l, "<triangle ")
-      isempty(bodies) && continue
-      q = split(l, '"')
-      length(q) >= 6 || continue
-      push!(bodies[end].triangles, (parse(Int, q[2]) + 1, parse(Int, q[4]) + 1, parse(Int, q[6]) + 1))
-      i = findfirst(k -> endswith(q[k], "ft:face="), 1:length(q)-1)
-      push!(bodies[end].faces, i === nothing ? -1 : parse(Int, q[i+1]))
-    elseif startswith(l, "<object ")
-      m = match(r" name=\"([^\"]*)\"", l)
-      push!(bodies, (name=m === nothing ? "" : String(m[1]), points=Vec3[], triangles=NTuple{3,Int}[], faces=Int[]))
-    end
-  end
-  bodies
-end
-
-"Are the triangles `tris` of an OBJ file, with their corners in `points`, the triangles of the body `known` that `tagged` read, in the same order?"
-same_mesh(known, points, tris) = begin
-  known === nothing && return false
-  (length(known.triangles) == length(tris) && length(known.faces) == length(tris) && all(>=(0), known.faces)) || return false
-  for (a, b) in zip(known.triangles, tris), k in 1:3
-    (1 <= a[k] <= length(known.points) && 1 <= b[k] <= length(points)) || return false
-    p, q = known.points[a[k]], points[b[k]]
-    len(p .- q) <= 1e-6 * (1 + len(q)) || return false
-  end
-  true
-end
+const LEVEL = 1 - 1e-9   # the cosine under which two corners face one way, so a face whose corners all do is flat
 
 """
-The colour of each body of the OBJ file at `path` that has a colour of its
-own, as red, green and blue from 0 to 1. SolidCraft writes them in a second
-file beside it, which the OBJ file names. A body with no colour isn't listed.
+The body `name`. `points` has its corners, and each of `triangles` names three
+of them. `normals` has the way the surface faces at each corner of each
+triangle, three for a triangle, and `face` the number of the face that each
+triangle is part of, from 1.
 """
-colours(path::AbstractString) = begin
-  found = Dict{String,Vec3}()
-  library, body = "", ""
-  uses = Dict{String,String}()
-  for line in eachline(path)
-    startswith(line, "o ") ? (body = String(strip(line[3:end]))) :
-    startswith(line, "usemtl ") ? (uses[body] = String(strip(line[8:end]))) :
-    startswith(line, "mtllib ") && (library = String(strip(line[8:end])))
+Shape(name, points::Vector{Vec3}, triangles::Vector{NTuple{3,Int}}, normals::Vector{Vec3}, face::Vector{Int}) = begin
+  # A face is flat when the surface faces one way at every corner of it
+  first_way = Dict{Int,Vec3}()
+  flats = fill(true, maximum(face, init=0))
+  for (i, f) in enumerate(face), k in 1:3
+    n = normals[3i-3+k]
+    dot(get!(first_way, f, n), n) > LEVEL || (flats[f] = false)
   end
-  file = joinpath(dirname(path), library)
-  (isempty(library) || !isfile(file)) && return found
-  named, name = Dict{String,Vec3}(), ""
-  for line in eachline(file)
-    if startswith(line, "newmtl ")
-      name = String(strip(line[8:end]))
-    elseif startswith(line, "Kd ")
-      p = split(line)
-      length(p) >= 4 && (named[name] = (parse(Float64, p[2]), parse(Float64, p[3]), parse(Float64, p[4])))
-    end
-  end
-  for (body, material) in uses
-    haskey(named, material) && (found[body] = named[material])
-  end
-  found
-end
-
-const SAME = 0.99999     # the cosine of the angle under which two ways of facing count as one
-const LEVEL = 1 - 1e-9   # and the cosine under which the corners of a triangle face one way, so it's flat
-
-"""
-The body `name` from the triangles `tris` of an OBJ file, which name their
-corners in `points` and their ways of facing in `normals`. `tags` has the
-number of each triangle's face when SolidCraft said them. With none, the
-faces are found in the triangles.
-"""
-Shape(name, all_points, all_normals, tris, norms; tags=nothing) = begin
-  # The corners of this body only, numbered from 1
-  place = Dict{Int,Int}()
-  points = Vec3[]
-  own = NTuple{3,Int}[]
-  for t in tris
-    push!(own, ntuple(k -> get!(() -> (push!(points, all_points[t[k]]); length(points)), place, t[k]), 3))
-  end
-  across = [unit(cross(points[t[2]] .- points[t[1]], points[t[3]] .- points[t[1]])) for t in own]
-  normals = Vec3[]
-  for (i, n) in enumerate(norms), k in 1:3
-    push!(normals, n[k] == 0 ? across[i] : unit(all_normals[n[k]]))
-  end
-  # A triangle of a curved face can be so thin that it faces almost as its corners do. But only on a flat face do the three corners face one way.
-  flat = [dot(normals[3i-2], normals[3i-1]) > LEVEL && dot(normals[3i-2], normals[3i]) > LEVEL && dot(normals[3i-2], across[i]) > 0.999 for i in eachindex(own)]
   # The triangles on each side of every side of a triangle
   sides = Dict{NTuple{2,Int},Vector{NTuple{2,Int}}}()   # the two corners → (triangle, which corner the side starts at)
-  for (i, t) in enumerate(own), k in 1:3
+  for (i, t) in enumerate(triangles), k in 1:3
     a, b = t[k], t[mod1(k + 1, 3)]
     push!(get!(() -> NTuple{2,Int}[], sides, minmax(a, b)), (i, k))
   end
-  facing(i, corner) = normals[3i-3+findfirst(==(corner), own[i])]
-  joined(key, x, y) = flat[x[1]] == flat[y[1]] &&
-    dot(facing(x[1], key[1]), facing(y[1], key[1])) > SAME && dot(facing(x[1], key[2]), facing(y[1], key[2])) > SAME
-  face = zeros(Int, length(own))
-  flats = Bool[]
-  if tags !== nothing
-    # SolidCraft's own faces, numbered from 1 in the order they're first met. A face is flat when each of its triangles is.
-    numbers = Dict{Int,Int}()
-    for (i, t) in enumerate(tags)
-      face[i] = get!(() -> (push!(flats, true); length(flats)), numbers, t)
-      flat[i] || (flats[face[i]] = false)
-    end
-  else
-    # Faces: the triangles that are joined across their sides
-    near = [Int[] for _ in own]
-    for (key, users) in sides
-      length(users) == 2 && joined(key, users[1], users[2]) && (push!(near[users[1][1]], users[2][1]); push!(near[users[2][1]], users[1][1]))
-    end
-    faces = 0
-    for i in eachindex(own)
-      face[i] == 0 || continue
-      faces += 1
-      push!(flats, flat[i])
-      face[i] = faces
-      todo = [i]
-      while !isempty(todo)
-        for j in near[pop!(todo)]
-          face[j] == 0 && (face[j] = faces; push!(todo, j))
-        end
-      end
-    end
-  end
   low = isempty(points) ? (0.0, 0.0, 0.0) : reduce((a, b) -> min.(a, b), points)
   high = isempty(points) ? (0.0, 0.0, 0.0) : reduce((a, b) -> max.(a, b), points)
-  Shape(name, points, normals, own, face, flats, edges(points, sides, face), low, high)
+  Shape(name, points, normals, triangles, face, flats, edges(points, sides, face), low, high)
 end
 
 "The edges of a body: each run of sides of triangles that has the same two faces on its two sides"

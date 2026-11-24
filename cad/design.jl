@@ -27,7 +27,7 @@
 
 @use "./engine" => Engines
 @use "./json" => JSON
-@use "./scene" Shape read_obj Vec3
+@use "./scene" Shape read_glb Vec3
 @use "./scene" => Scenes
 @use "../zip" => Zips
 
@@ -235,33 +235,58 @@ end
 
 """
 Ask the program to write its bodies in files whose names start with `stem`,
-and give `then` the bodies and their colours when it has. It writes two
-files: the triangles with the way they face and the bodies' colours, and
-the same triangles with the number of each one's face.
+and give `then` the bodies and their colours when it has. It writes a .glb
+file: each body's triangles, with the way they face, the body's colour, and
+each face's triangles apart from those of the other faces.
+
+How fine SolidCraft cuts a curve is a share of the size of the whole body. That
+is too coarse for a body that's long and thin: a 30 mm tube that goes 70 m
+round a satellite comes out with three sides. So the bodies that are thin for
+their size, and have a curved face, are written a second time, finer.
 """
 export!(then, m::Model, stem) = begin
   e = m.engine
   e === nothing && return
-  rm(stem * ".obj", force=true)
-  rm(stem * ".3mf", force=true)
-  Engines.call!((_, _) -> nothing, e, "export", JSON.Object("path" => stem * ".obj"))
-  Engines.call!(e, "export", JSON.Object("path" => stem * ".3mf", "format" => "3mf-tagged")) do answer, problem
-    then(bodies_at(stem)...)
+  write!(e, stem * ".glb", "standard", nothing) do shapes, colours
+    again = [quality => String[s.name for s in shapes if finer(s) == quality] for quality in ("fine", "finest")]
+    filter!(p -> !isempty(p[2]), again)
+    # One after the other. Each answer puts its bodies in the place of the coarse ones.
+    next() = begin
+      isempty(again) && return then(shapes, colours)
+      quality, names = popfirst!(again)
+      write!(e, "$stem-$quality.glb", quality, names) do better, _
+        for b in better
+          i = findfirst(s -> s.name == b.name, shapes)
+          i === nothing || (shapes[i] = b)
+        end
+        next()
+      end
+    end
+    next()
   end
 end
 
-"The bodies that the program wrote at `stem`, and their colours. With no file, there are none."
-bodies_at(stem) = begin
-  isfile(stem * ".obj") || return (Shape[], Dict{String,Vec3}())
-  faces = try
-    file = stem * ".3mf"
-    z = Zips.contents(file)
-    i = findfirst(en -> en.name == "3D/3dmodel.model", z.entries)
-    i === nothing ? nothing : Scenes.tagged(String(Zips.bytes(file, z.entries[i])))
-  catch
-    nothing
+"Ask the program `e` to write the bodies `names`, or all of them with nothing, as the .glb file `file`, and give `then` the bodies in it and their colours"
+write!(then, e, file, quality, names) = begin
+  rm(file, force=true)
+  params = JSON.Object("path" => file, "format" => "glb", "quality" => quality, "hierarchy" => false)
+  names === nothing || (params["bodies"] = names)
+  Engines.call!(e, "execute", JSON.Object("command" => "file.export", "params" => params)) do answer, problem
+    then((isfile(file) ? read_glb(read(file)) : (Shape[], Dict{String,Vec3}()))...)
   end
-  (read_obj(stem * ".obj"; faces), Scenes.colours(stem * ".obj"))
+end
+
+"""
+The quality that SolidCraft should write the body `s` with, when "standard"
+is too coarse for it, or nothing. The three qualities let a flat piece be
+2/10,000, 5/100,000 and 1/100,000 of the body's size away from a curve. A
+piece should be within a 40th of the body's thinnest side.
+"""
+finer(s::Shape) = begin
+  all(s.flat) && return nothing
+  size, thin = Scenes.len(s.high .- s.low), minimum(s.high .- s.low)
+  size > 0 || return nothing
+  thin / 40 >= 2e-4 * size ? nothing : thin / 40 >= 5e-5 * size ? "fine" : "finest"
 end
 
 """

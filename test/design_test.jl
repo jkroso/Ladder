@@ -28,25 +28,72 @@ const V = K.Designs
   @test_throws JSON.NotJSON JSON.parse("{\"a\": }")
 end
 
+"""
+The bytes of a .glb file as SolidCraft writes one. Each of `bodies` is a name
+and its parts. A part is the name of a look, the look's colour as amounts of
+light, corners, the way the surface faces at each corner, and triangles that
+name three corners each.
+"""
+glb(bodies) = begin
+  bin = IOBuffer()
+  views, accessors, materials, meshes, nodes = Any[], Any[], Any[], Any[], Any[]
+  put(rows, T, kind, type) = begin
+    at = position(bin)
+    foreach(row -> foreach(x -> write(bin, T(x)), row), rows)
+    push!(views, JSON.Object("buffer" => 0, "byteOffset" => at, "byteLength" => position(bin) - at))
+    write(bin, zeros(UInt8, (4 - position(bin) % 4) % 4))
+    push!(accessors, JSON.Object("bufferView" => length(views) - 1, "componentType" => kind, "count" => length(rows), "type" => type))
+    length(accessors) - 1
+  end
+  for (name, parts) in bodies
+    primitives = Any[]
+    for (look, colour, points, normals, triangles) in parts
+      push!(materials, JSON.Object("name" => look, "pbrMetallicRoughness" => JSON.Object("baseColorFactor" => Any[colour..., 1.0])))
+      push!(primitives, JSON.Object("attributes" => JSON.Object("POSITION" => put(points, Float32, 5126, "VEC3"), "NORMAL" => put(normals, Float32, 5126, "VEC3")),
+                                    "indices" => put([(c - 1,) for t in triangles for c in t], UInt16, 5123, "SCALAR"), "material" => length(materials) - 1))
+    end
+    push!(meshes, JSON.Object("primitives" => primitives))
+    push!(nodes, JSON.Object("name" => name, "mesh" => length(meshes) - 1))
+  end
+  text = JSON.json(JSON.Object("asset" => JSON.Object("version" => "2.0"), "nodes" => nodes, "meshes" => meshes, "materials" => materials,
+                               "accessors" => accessors, "bufferViews" => views, "buffers" => Any[JSON.Object("byteLength" => position(bin))]))
+  text *= " "^((4 - sizeof(text) % 4) % 4)
+  numbers = take!(bin)
+  io = IOBuffer()
+  write(io, 0x46546c67, UInt32(2), UInt32(28 + sizeof(text) + length(numbers)), UInt32(sizeof(text)), 0x4e4f534a, text, UInt32(length(numbers)), 0x004e4942, numbers)
+  take!(io)
+end
+
 @testset "the faces and edges of a body" begin
-  # A box of 10 by 10 by 10 as an OBJ file: 8 corners, 6 ways of facing, 12 triangles
-  obj = """
-  o Box
-  v 0 0 0\nv 10 0 0\nv 10 10 0\nv 0 10 0\nv 0 0 10\nv 10 0 10\nv 10 10 10\nv 0 10 10
-  vn 0 0 -1\nvn 0 0 1\nvn 0 -1 0\nvn 1 0 0\nvn 0 1 0\nvn -1 0 0
-  f 1//1 3//1 2//1\nf 1//1 4//1 3//1\nf 5//2 6//2 7//2\nf 5//2 7//2 8//2
-  f 1//3 2//3 6//3\nf 1//3 6//3 5//3\nf 2//4 3//4 7//4\nf 2//4 7//4 6//4
-  f 3//5 4//5 8//5\nf 3//5 8//5 7//5\nf 4//6 1//6 5//6\nf 4//6 5//6 8//6
-  """
-  shapes = Scenes.read_obj(Vector{UInt8}(replace(obj, r"^\s+"m => "")))
+  # A box of 10 by 10 by 10 as SolidCraft writes it: each of its 6 faces has 4 corners of its own, which all face one way
+  corners = [(0, 0, 0), (10, 0, 0), (10, 10, 0), (0, 10, 0), (0, 0, 10), (10, 0, 10), (10, 10, 10), (0, 10, 10)]
+  sides = [((1, 4, 3, 2), (0, 0, -1)), ((5, 6, 7, 8), (0, 0, 1)), ((1, 2, 6, 5), (0, -1, 0)), ((2, 3, 7, 6), (1, 0, 0)), ((3, 4, 8, 7), (0, 1, 0)), ((4, 1, 5, 8), (-1, 0, 0))]
+  plain = Scenes.PLAIN
+  "The box's corners, ways of facing and triangles. With `apart`, the two triangles of the top share no corner."
+  box_part(; apart=false) = begin
+    points, normals, triangles = [], [], []
+    for (k, (around, out)) in enumerate(sides)
+      n = length(points)
+      if apart && k == 2
+        append!(points, corners[collect(around[[1, 2, 3, 1, 3, 4]])]); append!(normals, fill(out, 6)); push!(triangles, (n + 1, n + 2, n + 3), (n + 4, n + 5, n + 6))
+      else
+        append!(points, corners[collect(around)]); append!(normals, fill(out, 4)); push!(triangles, (n + 1, n + 2, n + 3), (n + 1, n + 3, n + 4))
+      end
+    end
+    points, normals, triangles
+  end
+  shapes, colours = Scenes.read_glb(glb(["Box" => [("Box", plain, box_part()...)]]))
   @test length(shapes) == 1
   box = shapes[1]
   @test box.name == "Box"
-  @test length(box.triangles) == 12
+  # The 24 corners of the file are the 8 points of the box
+  @test length(box.points) == 8 && length(box.triangles) == 12 && length(box.normals) == 36
   @test length(box.flat) == 6 && all(box.flat)       # six flat faces
   @test length(box.edges) == 12                      # and twelve edges, each between two of them
   @test all(e -> length(e.points) == 2 && !e.closed, box.edges)
   @test (box.low, box.high) == ((0.0, 0.0, 0.0), (10.0, 10.0, 10.0))
+  # A look that's named after its body, in SolidCraft's grey, is no colour of the body's own
+  @test isempty(colours)
   # The eye sees all of it, and a line of sight through its middle meets its top first when the eye is over it
   eye = Scenes.fit(Scenes.Eye((0.0, 0.0, 0.0), -90.0, 90.0, 100.0, 32.0), Scenes.box(shapes), (400, 300))
   hit = Scenes.hit(shapes, Scenes.ray(eye, (400, 300), (200, 150)))
@@ -57,17 +104,35 @@ end
   ex, ey, _ = Scenes.at(eye, (400, 300), (5.0, 0.0, 10.0))
   found = Scenes.edge_at(shapes, eye, (400, 300), (ex, ey + 2), hit)
   @test found !== nothing && isapprox(found[3][2], 0.0, atol=1e-6) && isapprox(found[3][3], 10.0, atol=1e-6)
-  # SolidCraft also says which face each triangle is of. Here it has the two triangles of the top as two faces, which the triangles alone don't show.
-  corners = join(("""<vertex x="$x" y="$y" z="$z"/>""" for (x, y, z) in ((0, 0, 0), (10, 0, 0), (10, 10, 0), (0, 10, 0), (0, 0, 10), (10, 0, 10), (10, 10, 10), (0, 10, 10))), "\n")
-  triangles = join(("""<triangle v1="$(a - 1)" v2="$(b - 1)" v3="$(c - 1)" ft:face="$face"/>""" for ((a, b, c), face) in
-    zip(((1, 3, 2), (1, 4, 3), (5, 6, 7), (5, 7, 8), (1, 2, 6), (1, 6, 5), (2, 3, 7), (2, 7, 6), (3, 4, 8), (3, 8, 7), (4, 1, 5), (4, 5, 8)), (0, 0, 1, 6, 2, 2, 3, 3, 4, 4, 5, 5))), "\n")
-  tagged = Scenes.tagged("<model>\n<object id=\"1\" name=\"Box\" ft:faces=\"7\">\n<mesh>\n<vertices>\n$corners\n</vertices>\n<triangles>\n$triangles\n</triangles>\n</mesh>\n</object>\n</model>")
-  @test length(tagged) == 1 && tagged[1].name == "Box" && length(tagged[1].triangles) == 12 && tagged[1].faces[4] == 6
-  split_top = Scenes.read_obj(Vector{UInt8}(replace(obj, r"^\s+"m => "")); faces=tagged)[1]
-  @test length(split_top.flat) == 7 && all(split_top.flat) && length(split_top.edges) == 13
-  # Tags of other triangles are left alone: the faces are then found in the triangles
-  other = [(name=t.name, points=[p .+ (1.0, 0.0, 0.0) for p in t.points], triangles=t.triangles, faces=t.faces) for t in tagged]
-  @test length(Scenes.read_obj(Vector{UInt8}(replace(obj, r"^\s+"m => "")); faces=other)[1].flat) == 6
+  # A face is the triangles that share corners in the file. Here the two triangles of the top share none, so they're two faces, with an edge between them.
+  split_top = Scenes.read_glb(glb(["Box" => [("Box", plain, box_part(apart=true)...)]]))[1][1]
+  @test length(split_top.points) == 8 && length(split_top.flat) == 7 && all(split_top.flat) && length(split_top.edges) == 13
+  # A body with a look has the look's colour, as a screen's numbers. A face that was painted is a second part of the body, and its colour isn't the body's.
+  top = (corners[[5, 6, 7, 8]], fill((0, 0, 1), 4), [(1, 2, 3), (1, 3, 4)])
+  rest = begin
+    points, normals, triangles = box_part()
+    keep = [t for t in triangles if !all(c -> 5 <= c <= 8, t)]
+    (points, normals, keep)
+  end
+  painted, colours = Scenes.read_glb(glb(["Box" => [("Custom", (0.0782, 0.2122, 0.4621), rest...), ("Custom", (0.0, 1.0, 0.0), top...)], "Bar" => [("Bar", plain, box_part()...)]]))
+  @test [s.name for s in painted] == ["Box", "Bar"] && length(painted[1].flat) == 6 && length(painted[1].edges) == 12 && length(painted[1].points) == 8
+  @test collect(keys(colours)) == ["Box"] && all(isapprox.(colours["Box"], (0.31, 0.498, 0.71), atol=0.002))
+  # A curved face: its corners face different ways
+  round_top = begin
+    points, normals, triangles = box_part()
+    normals[5:8] = [(-0.1, -0.1, 0.99), (0.1, -0.1, 0.99), (0.1, 0.1, 0.99), (-0.1, 0.1, 0.99)]
+    Scenes.read_glb(glb(["Box" => [("Box", plain, points, normals, triangles)]]))[1][1]
+  end
+  @test count(round_top.flat) == 5 && length(round_top.flat) == 6
+  # Bytes that are no .glb file, and a file that's cut short, give no bodies
+  whole = glb(["Box" => [("Box", plain, box_part()...)]])
+  @test isempty(Scenes.read_glb(UInt8[1, 2, 3])[1]) && isempty(Scenes.read_glb(whole[1:end-40])[1]) && isempty(Scenes.read_glb(Vector{UInt8}("glTF" * "x"^40))[1])
+  # The bodies that SolidCraft should write a second time, finer: thin for their size, with a curved face
+  thin(low, high, flat) = Scenes.Shape("", Scenes.Vec3[], Scenes.Vec3[], NTuple{3,Int}[], Int[], flat, Scenes.Edge[], low, high)
+  @test Models.finer(thin((0.0, 0.0, 0.0), (70000.0, 21000.0, 30.0), [false])) == "finest"     # a loop of 30 mm tube, 70 m long
+  @test Models.finer(thin((0.0, 0.0, 0.0), (1000.0, 1000.0, 5.0), [true, false])) == "fine"    # a plate with a hole
+  @test Models.finer(thin((0.0, 0.0, 0.0), (1000.0, 1000.0, 5.0), [true, true])) === nothing   # a plate with none: flat faces are exact at any quality
+  @test Models.finer(thin((0.0, 0.0, 0.0), (440.0, 440.0, 7900.0), [true, false])) === nothing # a drum
 end
 
 @testset "the regions of a sketch" begin
@@ -756,6 +821,28 @@ else
     for s in m.shapes
       listed = Engines.ask(m.engine, "model.faces", JSON.Object("body" => s.name))["faces"]
       @test length(s.flat) == length(listed)
+    end
+  end
+
+  @testset "a body that's thin for its size is cut finer" begin
+    # A design of its own: a rod 4 mm across and 4 m long, and a block. At SolidCraft's usual quality the rod would have three sides.
+    m = Models.open_design(joinpath(mktempdir(), "rod.sc"))
+    try
+      Models.change!(m, "solid.cylinder", JSON.Object("radius" => 2, "height" => 4000, "operation" => "new", "body_name" => "Rod"))
+      Models.change!(m, "solid.box", JSON.Object("length" => 20, "width" => 20, "height" => 20, "corner" => Any[50, 0, 0], "body_name" => "Block"))
+      Models.settle!(m)
+      @test [s.name for s in m.shapes] == ["Rod", "Block"]
+      rod, block = m.shapes
+      @test Models.finer(rod) == "finest" && Models.finer(block) === nothing
+      # A side of a triangle that slants along the rod's wall stays near the wall: its middle is within a 20th of the
+      # radius of it. With three or four sides round the rod, that middle would be 0.6 mm inside.
+      from_axis(p) = hypot(p[1], p[2])
+      slanting = [(rod.points[t[k]], rod.points[t[mod1(k + 1, 3)]]) for t in rod.triangles for k in 1:3 if rod.points[t[k]][3] != rod.points[t[mod1(k + 1, 3)]][3]]
+      @test !isempty(slanting) && all(((a, b),) -> from_axis((a .+ b) ./ 2) > 1.9, slanting)
+      @test length(rod.flat) == 3 && count(rod.flat) == 2 && length(rod.edges) == 2 && all(e -> e.closed, rod.edges)
+      @test length(block.triangles) == 12 && length(block.flat) == 6 && length(block.edges) == 12
+    finally
+      Models.close!(m)
     end
   end
 

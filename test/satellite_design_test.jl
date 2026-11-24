@@ -103,6 +103,11 @@ if Engines.available()
       # No two bays of cells are quite the same blue
       cells = [s for (name, shapes) in parts if name == "Right wing" for (m, s) in shapes if m == :cells]
       @test length(cells) == 12 && length(unique(s.tint[1] for s in cells)) == 12
+      # The size of flat piece that each body got is kept. A loop of tube needed larger pieces than the first size
+      # that was tried, and the next reading asks for those at once: one request for each body.
+      @test length(D.READ_WITH) == 81 && D.READ_WITH["Top loop"][1] > 0.4 && D.READ_WITH["Top cord, left"][1] < 0.2
+      asked = p.asked
+      @test box(D.parts(p)) == (lo, hi) && p.asked - asked == 81 + 2
       # With no panel, the radiator is only its bars
       bare = D.parts(p, panel=false)
       @test !any(m == :white_paint for (_, shapes) in bare for (m, _) in shapes)

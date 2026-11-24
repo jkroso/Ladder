@@ -299,16 +299,34 @@ triangles(p::Program, name, off) = begin
   end
 end
 
+"The size of flat piece that each body's triangles were last read with, in mm, and how thin the body was then, in mm, by the body's name"
+const READ_WITH = Dict{String,NTuple{2,Float64}}()
+
 """
-The body `name` as triangles. A round bar 8 mm across needs smaller flat
-pieces than a drum, so the first answer says how thin the body is, and a thin
-body is asked for again.
+The body `name` as triangles, and two opposite corners of the box round it. A
+round bar 8 mm across needs smaller flat pieces than a drum, so the first
+answer says how thin the body is, and a thin body is asked for again.
+
+The size of piece that a body got is kept for the next time. SolidCraft works
+all of a body's triangles out before it refuses to give too many, so a
+refusal costs as much as an answer. The two loops were refused twice each,
+and that was more than half of the time that the triangles took.
 """
 triangles(p::Program, name) = begin
+  box(at) = (reduce((a, b) -> min.(a, b), at), reduce((a, b) -> max.(a, b), at))
+  thin(lo, hi) = 1000 * minimum(hi .- lo)
+  before = get(READ_WITH, name, nothing)
+  if before !== nothing
+    at, corners, off = triangles(p, name, before[1])
+    lo, hi = box(at)
+    # A body that's about as thin as it was has pieces of the right size
+    off == before[1] && isapprox(thin(lo, hi), before[2], rtol=0.2) && return at, corners, lo, hi
+  end
   at, corners, off = triangles(p, name, 0.4)
-  lo, hi = reduce((a, b) -> min.(a, b), at), reduce((a, b) -> max.(a, b), at)
-  fine = clamp(1000 * minimum(hi .- lo) / 80, 0.05, 0.4)
-  off == 0.4 && fine < 0.39 && ((at, corners, _) = triangles(p, name, fine))
+  lo, hi = box(at)
+  fine = clamp(thin(lo, hi) / 80, 0.05, 0.4)
+  off == 0.4 && fine < 0.39 && ((at, corners, off) = triangles(p, name, fine))
+  READ_WITH[name] = (off, thin(lo, hi))
   at, corners, lo, hi
 end
 
