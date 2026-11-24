@@ -580,23 +580,29 @@ pie(d::Data, wide::Real, tall::Real, measure) = begin
   row = 24.0
   shares = ["$(amount(d, v))  ·  $(percent(v, total))" for v in values]
   total_words = d.apart === nothing ? "" : amount(d, d.apart[2])
-  # The shares are in a column of their own, after the longest name. The total sits under them.
-  room = max(wide - x - 16 - maximum(s -> measure(s, 12.0), [shares; total_words]) - 40, 30.0)
-  names = [fit(l, room, measure, 12.0) for l in d.labels]
-  named = d.apart === nothing ? names : [names; fit(d.apart[1], room, measure, 12.0)]
-  right = min(wide - 16, x + 16 + maximum(n -> measure(n, 12.0), named) + 40 + maximum(s -> measure(s, 12.0), [shares; total_words]))
-  y = cy - row * (length(values) + (d.apart === nothing ? 0 : 1)) / 2
+  labels = d.apart === nothing ? d.labels : [d.labels; d.apart[1]]
+  longest = maximum(l -> measure(l, 12.0), labels)
+  widest = maximum(s -> measure(s, 12.0), [shares; total_words])
+  # A name starts 16 after its swatch, and stops 16 before the edge. The shares are
+  # in a column of their own after the longest name, with the total under them,
+  # but only where every name fits whole beside them. The names come first: the
+  # mouse on a slice says its share.
+  room = max(wide - x - 32, 30.0)
+  sharing = room - 40 - widest >= longest
+  named = [fit(l, room, measure, 12.0) for l in labels]
+  right = sharing ? x + 16 + longest + 40 + widest : x + 16 + maximum(n -> measure(n, 12.0), named)
+  y = cy - row * length(labels) / 2
   for i in eachindex(values)
     push!(marks, Mark(:swatch, (x, y + 7, 10, 10), colour=i))
-    push!(marks, Mark(:words, (x + 16, y + 16, 0, 0), text=names[i], style=:start, tone=:ink, size=12.0))
-    wide - x > 200 && push!(marks, Mark(:words, (right, y + 16, 0, 0), text=shares[i], style=:end, size=12.0))
+    push!(marks, Mark(:words, (x + 16, y + 16, 0, 0), text=named[i], style=:start, tone=:ink, size=12.0))
+    sharing && push!(marks, Mark(:words, (right, y + 16, 0, 0), text=shares[i], style=:end, size=12.0))
     y += row
   end
   if d.apart !== nothing
     y += 4
     push!(marks, Mark(:rule, (x, y, right, y)))
     push!(marks, Mark(:words, (x, y + 18, 0, 0), text=named[end], style=:start, tone=:ink, size=12.0))
-    wide - x > 200 && push!(marks, Mark(:words, (right, y + 18, 0, 0), text=total_words, style=:end, size=12.0))
+    sharing && push!(marks, Mark(:words, (right, y + 18, 0, 0), text=total_words, style=:end, size=12.0))
   end
   marks
 end

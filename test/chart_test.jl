@@ -149,6 +149,13 @@ end
   @test C.hit(marks, cx + r / 2, cy) === slices[1] && C.hit(marks, cx - r / 2, cy - r / 2) === slices[2] && C.hit(marks, cx + 2r, cy) === nothing
   @test C.said(pie, slices[1]) == "Lounge:  30 m²  ·  75%"
   @test "30 m²  ·  75%" in [m.text for m in marks if m.kind == :words]
+  # A narrow pie has no room for the shares too, so its names get all the room
+  parts = C.data(C.chart(["pie"]), [["Part", "Cost"], ["Converters", "74,996.25 USD"], ["Attitude control", "54,750 USD"],
+                                    ["What holds the cells out", "5,109.62 USD"]], headed=true)
+  texts = [m.text for m in C.plot(parts, :pie, 420, 204, measure) if m.kind == :words]
+  @test texts == ["Converters", "Attitude control", "What holds the cells out"]
+  texts = [m.text for m in C.plot(parts, :pie, 900, 204, measure) if m.kind == :words]
+  @test "What holds the cells out" in texts && any(t -> endswith(t, "%"), texts)
   # The total is not a slice. A million stays a million, and a billion stays a billion.
   costs = [["Part", "Cost"], ["The satellites", "22.4 billion USD"], ["The launches", "1.65 billion USD"],
            ["The design", "100 million USD"], ["Deorbit", "21 million USD"], ["In all", "24.2 billion USD"]]
