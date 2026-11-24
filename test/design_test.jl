@@ -787,7 +787,7 @@ else
     seen(id, was)
   end
 
-  @testset "the view turns, moves and comes nearer" begin
+  @testset "the view turns, moves and comes nearer as in Fusion 360" begin
     v = view()
     V.fit!(v); frame(w)
     was = v.eye
@@ -795,15 +795,54 @@ else
     @test V.panel_at(v, w, Vec2{px}(px(empty[1]), px(empty[2]))) === nothing
     press(empty); at((380.0, 660.0)); release()                   # a drag turns it
     @test v.eye.turn != was.turn && v.eye.tilt != was.tilt && isempty(v.picked)
+    # A drag of the middle button from `from` to `to`
+    middle(from, to) = (at(from); w.keys |= Keys.mouse_middle; onkey(w, KeyPress{Keys.mouse_middle}(0, w)); at(to);
+                        w.keys ⊻= Keys.mouse_middle; onkey(w, KeyRelease{Keys.mouse_middle}(0, w)); frame(w))
+    # The middle button moves it
     was = v.eye
+    middle(empty, (380.0, 660.0))
+    @test v.eye.target != was.target && (v.eye.turn, v.eye.tilt, v.eye.distance) == (was.turn, was.tilt, was.distance)
+    # With ⇧ held it turns it
+    was = v.eye
+    holding(() -> middle(empty, (380.0, 660.0)), Keys.shft)
+    @test v.eye.turn != was.turn && v.eye.tilt != was.tilt && v.drag === nothing
+    # With ⌃⇧ held, a drag up brings it nearer
+    was = v.eye
+    holding(() -> middle(empty, (330.0, 600.0)), Keys.ctrl, Keys.shft)
+    @test v.eye.distance < was.distance && (v.eye.turn, v.eye.tilt) == (was.turn, was.tilt)
+    # The wheel brings it nearer, and two fingers on the trackpad do too
     at(empty)
-    onscroll(w, Vec2{px}(px(0), px(30)), false); frame(w)                  # two fingers move it
-    @test v.eye.target != was.target && v.eye.distance == was.distance
     was = v.eye
-    holding(Keys.cmd) do
-      onscroll(w, Vec2{px}(px(0), px(30)), false); frame(w)                # and with ⌘ bring it nearer
-    end
+    onscroll(w, Vec2{px}(px(0), px(3)), true); frame(w)
+    @test v.eye.distance < was.distance && (v.eye.turn, v.eye.tilt) == (was.turn, was.tilt)
+    was = v.eye
+    onscroll(w, Vec2{px}(px(0), px(30)), false); frame(w)
     @test v.eye.distance < was.distance
+    # With ⇧ held the wheel turns it
+    was = v.eye
+    holding(() -> (onscroll(w, Vec2{px}(px(30), px(0)), false); frame(w)), Keys.shft)
+    @test v.eye.turn != was.turn && v.eye.distance == was.distance
+    # ⇧ and a click of the middle button on a body put the point that a turn goes round there
+    V.fit!(v); frame(w)
+    mid = (v.area[3] / 2, v.area[4] / 2)
+    hit = V.Scenes.hit(v.model.shapes, V.Scenes.ray(v.eye, (v.area[3], v.area[4]), mid); shown=V.Designs.shows(v.model))
+    @test hit !== nothing
+    spot = (v.area[1] + mid[1], v.area[2] + mid[2])
+    holding(() -> middle(spot, spot), Keys.shft)
+    @test v.parts[:pivot] == hit.point
+    # A turn from anywhere then goes round it, so it stays where it shows
+    was = v.eye
+    shown = V.shown_at(v, hit.point)
+    press(empty); at((380.0, 660.0))
+    @test v.drag.pivot == hit.point
+    release()
+    @test all(isapprox.(V.shown_at(v, hit.point), shown, atol=0.5)) && v.eye.turn != was.turn
+    # Two clicks of the middle button show all of it, as it's turned, and a turn goes round the point under the mouse again
+    holding(() -> middle(empty, (330.0, 600.0)), Keys.ctrl, Keys.shft)
+    fitted = V.Scenes.fit(v.eye, V.Scenes.box(V.showing(v)), (v.area[3], v.area[4]))
+    @test v.eye != fitted
+    middle(empty, empty); middle(empty, empty)
+    @test v.eye == fitted && !haskey(v.parts, :pivot)
     # A click on the ball of the z axis looks straight down
     ball = v.spots[findfirst(s -> s.what.kind == :look && s.what.of == 3 && s.what.n == 1, v.spots)]
     click((v.area[1] + ball.box[1] + 10, v.area[2] + ball.box[2] + 10))

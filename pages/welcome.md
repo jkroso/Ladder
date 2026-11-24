@@ -641,7 +641,7 @@ aspect: 16:9
 
 This block shows the design in the file `bracket.sc`, which is beside this page. Here the design is only shown, and nothing that you do changes the file:
 
-- Drag to turn the design. Drag with ⇧ held to move it.
+- Drag to turn the design. Drag with ⇧ held, or with the middle button, to move it. Drag with ⇧ and the middle button to turn it.
 - Pinch, or scroll with ⌘ held, to bring it nearer.
 - Click twice to see all of it again.
 
@@ -651,7 +651,7 @@ To change the design, move the mouse over the block and click the second button 
 
 In the editor, the design fills the window. A toolbar is at the top, a browser is at the left, and the history of the design's steps is along the bottom.
 
-- **The view.** Drag to turn the design. Drag with ⇧ held, or with the middle button, to move it. Two fingers on the trackpad move it too. The wheel, a pinch, or two fingers with ⌘ held bring it nearer. The three balls at the top right show the design's axes. Click one to look along that axis.
+- **The view.** The mouse works as it does in Fusion 360. Drag with the middle button to move the design, and hold ⇧ too to turn it. Roll the wheel, or pinch, to bring it nearer, towards the mouse. Hold ⇧ and roll the wheel to turn it. Hold ⇧ and click the middle button on the design, and a turn goes round that point until you click the middle button twice. Two clicks of the middle button show all of the design. On a trackpad, two fingers bring the design nearer, as the wheel does, and turn it with ⇧ held. A drag with the left button still turns the design, and with ⇧ held moves it. The three balls at the top right show the design's axes. Click one to look along that axis.
 - **Selecting.** The mouse lights the face or the edge that it's over. Click to select it, and hold ⇧ to select one more.
 - **Commands.** The toolbar has SolidCraft's commands, like Extrude, Fillet and Hole. A command opens a form at the right. You type its lengths there, and click the faces, the edges or the regions of a sketch that it takes. When the form has what the command needs, the design shows what the command would make. What it adds is in the accent colour. What it takes away is red, inside a body that shows faintly. Ladder works this out itself, so it changes as you type. It's the piece alone, not yet joined to the body or cut out of it. For a command that Ladder can't work out, SolidCraft's program tries the command, and the design shows the result in a tint a moment later. OK runs the command. The letters E, F and H start Extrude, Fillet and Hole.
 - **Lengths are Julia code.** A length, an angle or a count is Julia code, like `4.5cm + 2mm*1.5`, in the colours of a code block. Units like mm, cm, inch, deg and ° are there, and so is each parameter of the design by its name, like `d1`. Press ⌘Return in a field to see what its code comes to, under the field. Select part of the code first to run only that part. When SolidCraft reads the code as Julia does, the file keeps the code, and the step follows the parameters that it names. When SolidCraft reads it in another way, the file gets the number, and the parameter's comment keeps the code. The field then shows the code again.

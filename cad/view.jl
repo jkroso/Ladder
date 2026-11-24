@@ -12,10 +12,17 @@
 # the eye of a folder does that for everything in it. The origin's point,
 # axes and planes are hidden in a new design, as in SolidCraft.
 #
-# The view:
-#   - Drag to turn the design. Drag with ⇧ held, or with the middle button, to
-#     move it. Two fingers on the trackpad move it too. The wheel, a pinch, or
-#     two fingers with ⌘ held bring it nearer.
+# The view takes Fusion 360's mouse:
+#   - Drag with the middle button to move the design, and with ⇧ held too to
+#     turn it. ⌃⇧ and a drag of the middle button up brings it nearer.
+#   - The wheel brings the design nearer, towards the mouse. So does a pinch.
+#     ⇧ and the wheel, or ⇧ and two fingers on the trackpad, turn it.
+#   - ⇧ and a click of the middle button put the point that a turn goes round
+#     where the click was. A click on nothing takes the point away, and a
+#     turn then goes round the point that the mouse is over as it starts.
+#   - Two clicks of the middle button show all of the design.
+#   - Ladder's own ways work too: drag to turn the design, with ⇧ held to
+#     move it, and drag with the right button to turn it.
 #   - The mouse lights the face or the edge that it's over. A click selects
 #     it, and ⇧ with a click selects one more.
 #   - The three balls at the top right show the design's axes. A click on one
@@ -59,8 +66,9 @@
 #     DesignView(path="bracket.sc", readonly=true, fill=false, height=260px)
 #
 # That one is the picture alone, with no panels, and nothing changes the
-# design. A drag turns it, and with ⇧ held moves it. A pinch, or two fingers
-# with ⌘ held, bring it nearer, and two clicks show all of it again. The
+# design. A drag turns it, and with ⇧ held moves it. The middle button works
+# as it does in the editor. A pinch, or two fingers with ⌘ held, bring it
+# nearer, and two clicks show all of it again. The
 # hidden program ends as soon as it has given the bodies. When the file
 # changes, the design is read again.
 
@@ -783,7 +791,7 @@ shown_only(v::DesignView) = begin
 end
 
 "Show all of the design, turned as it is when it's first shown. No panels lie over it, so it has little room round it."
-home!(v::DesignView) = (v.eye = Scenes.fit(Scenes.Eye(), Scenes.box(v.model.shapes), (max(v.area[3], 100.0), max(v.area[4], 100.0)); room=1.05); v)
+home!(v::DesignView) = (delete!(v.parts, :pivot); v.eye = Scenes.fit(Scenes.Eye(), Scenes.box(v.model.shapes), (max(v.area[3], 100.0), max(v.area[4], 100.0)); room=1.05); v)
 
 describe(v::DesignView) = begin
   v.readonly && return shown_only(v)
@@ -1502,8 +1510,9 @@ end
 "The bodies that show"
 showing(v::DesignView) = filter(Designs.shows(v.model), v.model.shapes)
 
-"Show all of the design, as it's turned now"
+"Show all of the design, as it's turned now. A turn goes round the point under the mouse again."
 fit!(v::DesignView) = begin
+  delete!(v.parts, :pivot)
   s = sketch(v)
   if s !== nothing && isempty(showing(v))
     b = Sketching.bounds(s)
@@ -2653,8 +2662,9 @@ draw(ctx, size, ui::ConcreteRect, scene::Scene) = begin
     direct && Skia.sk_image_unref(image)
   end
   if v.readonly
-    # Only the origin's point is drawn over the picture of a design that's only shown
+    # Only the origin's point is drawn over the picture of a design that's only shown, and the point that a turn goes round
     draw_origin(ctx, v, t)
+    draw_pivot(ctx, v)
     framed && (Skia.sk_canvas_restore(ctx); Skia.sk_path_delete(clip))
     return nothing
   end
@@ -2663,6 +2673,7 @@ draw(ctx, size, ui::ConcreteRect, scene::Scene) = begin
   active !== nothing && haskey(m.sketches, active) && draw_sketch(ctx, v, m.sketches[active], true, t)
   draw_tool(ctx, v, t)
   draw_origin(ctx, v, t)
+  draw_pivot(ctx, v)
   draw_axes(ctx, v, t)
   nothing
 end
@@ -2733,6 +2744,16 @@ cut(v::DesignView) = begin
   toward = Scenes.dot(Scenes.place(v.eye) .- f.origin, n) >= 0 ? n : n .* -1.0
   # A hair nearer the eye than the plane, so that a face that's on the plane stays
   (f.origin .+ toward .* (1e-5 * max(v.eye.distance, 1.0)), toward)
+end
+
+"The point that the design goes round while it turns: a green dot, as in Fusion 360"
+draw_pivot(ctx, v::DesignView) = begin
+  d = v.drag
+  d isa Drag && d.kind == :turn || return
+  at = shown_at(v, d.pivot)
+  at === nothing && return
+  Ink.circle(ctx, at, 5.0, colorant"rgb(64,170,90)")
+  Ink.circle(ctx, at, 5.0, colorant"white", 1.5)
 end
 
 "The point of the origin: a ball that shows over everything, as in SolidCraft"
@@ -2946,9 +2967,9 @@ end
 
 "What a held button is doing"
 mutable struct Drag
-  kind::Symbol          # :press until the mouse moves, then :turn, :move or :pull
+  kind::Symbol          # :press or :middle until the mouse moves, then :turn, :move, :zoom or :pull
   at::Spot              # where the mouse was on the last move
-  what::Any             # what was pressed
+  what::Any             # what was pressed. For :middle, what the drag does once the mouse moves.
   more::Bool            # ⇧ was held
   pivot::Scenes.Vec3    # the point of the design that a turn goes round
   from::Spot            # for a pull: the place of the sketch that's held
@@ -3278,11 +3299,69 @@ onkey(v::DesignView, e::KeyRelease{Keys.mouse_left}) = begin
   handled
 end
 
-# The right button turns the design, and the middle one moves it
-onkey(v::DesignView, e::KeyPress{Keys.mouse_right}) = (at = local_spot(v, e.window.mouse); focus(v); v.drag = Drag(:turn, at, nothing, false, point_at(v, at), (0.0, 0.0), false); handled)
-onkey(v::DesignView, e::KeyPress{Keys.mouse_middle}) = (at = local_spot(v, e.window.mouse); focus(v); v.drag = Drag(:move, at, nothing, false, point_at(v, at), (0.0, 0.0), false); handled)
+"The point that a turn goes round: the one that ⇧ and a click of the middle button put, or else `p`"
+turns_round(v::DesignView, p) = get(v.parts, :pivot, p)
+
+"""
+⇧ and a click of the middle button at `at`, as in Fusion 360: a turn goes round
+the point of the design that was clicked from now on. A click on nothing takes
+that point away.
+"""
+place_pivot!(v::DesignView, at) = begin
+  line = Scenes.ray(v.eye, (v.area[3], v.area[4]), at)
+  hit = Scenes.hit(v.model.shapes, line; shown=Designs.shows(v.model))
+  s = sketch(v)
+  spot = hit === nothing && s !== nothing ? Sketching.on_plane(Sketching.Frame(s["plane"]), line) : nothing
+  if hit !== nothing
+    v.parts[:pivot] = hit.point
+  elseif spot !== nothing
+    v.parts[:pivot] = Sketching.world(Sketching.Frame(s["plane"]), spot)
+  else
+    delete!(v.parts, :pivot)
+  end
+  v
+end
+
+# The right button turns the design
+onkey(v::DesignView, e::KeyPress{Keys.mouse_right}) = begin
+  v.model === nothing && return
+  at = local_spot(v, e.window.mouse)
+  focus(v)
+  v.drag = Drag(:turn, at, nothing, false, turns_round(v, point_at(v, at)), (0.0, 0.0), false)
+  handled
+end
 onkey(v::DesignView, ::KeyRelease{Keys.mouse_right}) = (v.drag = nothing; handled)
-onkey(v::DesignView, ::KeyRelease{Keys.mouse_middle}) = (v.drag = nothing; handled)
+
+# The middle button is Fusion 360's: a drag moves the design, with ⇧ it turns it, and with ⌃⇧ it brings it nearer.
+# Two clicks show all of it, and ⇧ with a click puts the point that a turn goes round.
+onkey(v::DesignView, e::KeyPress{Keys.mouse_middle}) = begin
+  v.model === nothing && return
+  focus(v)
+  hide_tooltip!(e.window)
+  at = local_spot(v, e.window.mouse)
+  v.mouse = at
+  # The second click is a press soon after a click at the same place
+  last = get(v.parts, :middle_at, (-99.0, -99.0))
+  twice = time() - get(v.parts, :middle_clicked, 0.0) < 0.4 && hypot(at[1] - last[1], at[2] - last[2]) < 5
+  twice && (delete!(v.parts, :middle_clicked); v.drag = nothing; fit!(v); return handled)
+  _, shift, _, ctrl = held_keys(e.window)
+  does = shift && ctrl ? :zoom : shift ? :turn : :move
+  about = point_at(v, at)
+  v.drag = Drag(:middle, at, does, false, does == :turn ? turns_round(v, about) : about, (0.0, 0.0), false)
+  handled
+end
+
+onkey(v::DesignView, ::KeyRelease{Keys.mouse_middle}) = begin
+  d = v.drag
+  v.drag = nothing
+  # A click: the mouse didn't move while the button was down
+  if d isa Drag && d.kind == :middle
+    d.what == :turn && place_pivot!(v, d.at)
+    v.parts[:middle_clicked] = time()
+    v.parts[:middle_at] = d.at
+  end
+  handled
+end
 
 "Move what's held in the sketch towards the place `at` of the picture, as far as its constraints let it go"
 pull!(v::DesignView, d::Drag, at) = begin
@@ -3315,7 +3394,11 @@ onmouse(v::DesignView, e::MouseMove) = begin
     return handled
   end
   by = (at[1] - d.at[1], at[2] - d.at[2])
-  if d.kind == :press
+  if d.kind == :middle
+    hypot(by...) < 4 && return handled
+    d.kind = d.what
+    v.hover = nothing
+  elseif d.kind == :press
     hypot(by...) < 4 && return handled
     s = v.readonly ? nothing : sketch(v)
     if s !== nothing && d.what !== nothing && d.what.kind in (:point, :curve)
@@ -3325,18 +3408,22 @@ onmouse(v::DesignView, e::MouseMove) = begin
     else
       # In a sketch a drag moves the view, since it's seen flat. Out of one it turns the design, and ⇧ moves it.
       d.kind = d.more || s !== nothing ? :move : :turn
+      d.kind == :turn && (d.pivot = turns_round(v, d.pivot))
     end
     v.hover = nothing
   end
   d.kind == :turn && (v.eye = Scenes.turned(v.eye, size, -0.4by[1], 0.4by[2], d.pivot))
   d.kind == :move && (v.eye = Scenes.moved(v.eye, size, by, d.pivot))
+  # Up brings the design nearer
+  d.kind == :zoom && (v.eye = Scenes.nearer(v.eye, size, exp(-by[2] / 100), d.pivot))
   d.kind == :pull && pull!(v, d, at)
   d.at = at
   v.mouse = at
   handled
 end
 
-# Two fingers on the trackpad move the design, and with ⇧ turn it. The wheel of a mouse, and two fingers with ⌘, bring it nearer.
+# The wheel brings the design nearer, as in Fusion 360, and with ⇧ held turns it. Two fingers on the trackpad do the same:
+# Ladder can't tell them from the wheel of a mouse that scrolls smoothly.
 onscroll(v::DesignView, e::MouseScroll) = begin
   v.model === nothing && return
   # In a page, the wheel and two fingers scroll the page, unless ⌘ is held
@@ -3351,12 +3438,10 @@ onscroll(v::DesignView, e::MouseScroll) = begin
   at = local_spot(v, e.window.mouse)
   size = (v.area[3], v.area[4])
   about = point_at(v, at)
-  if e.wheel || Keys.cmd in e.window.keys || Keys.ctrl in e.window.keys
-    v.eye = Scenes.nearer(v.eye, size, exp(dy / (e.wheel ? 6 : 60)), about)
-  elseif Keys.shft in e.window.keys
-    v.eye = Scenes.turned(v.eye, size, -0.4dx, 0.4dy, about)
+  if Keys.shft in e.window.keys
+    v.eye = Scenes.turned(v.eye, size, -0.4dx, 0.4dy, turns_round(v, about))
   else
-    v.eye = Scenes.moved(v.eye, size, (dx, dy), about)
+    v.eye = Scenes.nearer(v.eye, size, exp(dy / (e.wheel ? 6 : 60)), about)
   end
   handled
 end
