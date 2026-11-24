@@ -397,6 +397,7 @@ end
 @use "./web" => Web
 @use "./web/browser" => Browsers
 @use "./web/files" => Webfiles
+@use "./remote" => Remote
 @use "./slides" => Slides
 @use "./desktop" => Desks
 @use "./git" => Git
@@ -898,6 +899,16 @@ that it keeps, and a mark that you put on a page of your own counts the same.
 """
 protected(path) = Eml.isemail(path) || (isfile(path) && !iswritable(path))
 
+"True when `path` is the address of a page on a web server, like https://example.com/notes.md, and not a file on the Mac. See \"a page from a web server\"."
+isremote(path::AbstractString) = Remote.isaddress(path)
+
+"""
+True when somebody else wrote the page at `path`: it's a page from a web
+server, or an email. Ladder runs no code of such a page. A block that would
+run code, like a `ui` block or a sum in a line of text, shows as its code.
+"""
+foreign(path::AbstractString) = isremote(path) || Eml.isemail(path)
+
 "True when the page shows no caret and no key changes it: after Escape, and all the time in a page that's never changed"
 caretless(b::Buffer) = b.reading || b.fixed
 
@@ -996,6 +1007,8 @@ kinds(b::Buffer) = begin
     b.kinds_at = b.version
   elseif b.kinds_at != b.version
     b.kinds = classify(b.lines)
+    # A page from a web server, and an email, show the code of a block that would run code or read the Mac's files
+    foreign(b.path) && shown_only!(b.kinds)
     b.kinds_at = b.version
   end
   b.kinds
@@ -1073,7 +1086,7 @@ string_open(b::Buffer, i::Int, text::AbstractString) =
   1 <= i <= length(b.lines) && same_text(b.lines[i], String(text)) ? string_opens(b)[i] : '\0'
 
 dirty(b::Buffer) = b.version != b.saved
-name(b::Buffer) = isempty(b.path) ? "Untitled" : basename(b.path)
+name(b::Buffer) = isempty(b.path) ? "Untitled" : isremote(b.path) ? Remote.label(b.path) : basename(b.path)
 selecting(b::Buffer) = b.caret != b.anchor
 """
 The two ends of the selection, first end first. A selection that covers several
@@ -1463,6 +1476,10 @@ end
 
 "Open the editor on a file, or on the first Markdown file in a folder"
 build_editor(path) = begin
+  # An address on the web is asked for once the window is on the screen: see "a page from a web server".
+  # A name like `my.notes/new.md` is a file when the folder `my.notes` is there.
+  Remote.typed(path) === nothing || ispath(expanduser(path)) || isdir(dirname(abspath(expanduser(path)))) ||
+    return open_address!(blank_editor(), path)
   path = abspath(expanduser(path))
   e = blank_editor()
   isdir(path) ? open_on_folder!(e, path) : open!(e, path)
@@ -1728,11 +1745,14 @@ then lists the folder that it's in, as it does for a file.
 open!(e, path; record=true) = begin
   # A link in a part of another page opens its page in the window, not in the part
   hosted(e) === nothing || return open!(top_editor(e), path; record)
+  # A page from a web server that isn't here yet is asked for, and shows when it has come
+  isremote(path) && !haskey(e.buffers, path) && return get_page!(e, path; record)
   leave_page!(e, path; record)
   e.buf = get!(e.buffers, path) do
     isfile(path) ? load(path) : isdir(path) ? Buffer(path=path, view=:file) : Buffer(path=path)
   end
-  if e.folder != dirname(path)
+  # The sidebar goes on listing the folder that it lists while a page from a web server shows
+  if e.folder != dirname(path) && !isremote(path)
     e.folder = dirname(path)
     list_files!(e)
   end
@@ -2267,7 +2287,7 @@ pieces(e, text::String, line::Line, raw::Bool, i::Int=0; open=nothing) = begin
       continue
     end
     # Line -1 isn't one of the document's lines: it's a line of a file under a path. Its inline code shows as code.
-    s.live && !shown && i >= 0 ? push!(out, inline(e, i, s, base)) : symbols!(out, s.text, s.col, face(base, s), s.link)
+    s.live && !shown && i >= 0 && !foreign(e.buf.path) ? push!(out, inline(e, i, s, base)) : symbols!(out, s.text, s.col, face(base, s), s.link)
   end
   out
 end
@@ -2388,6 +2408,7 @@ when the code made a node. For any other value it's the value as text, and
 true if that text says what went wrong.
 """
 made(e, code::String, n::Int) = begin
+  foreign(e.buf.path) && return (code, false)   # a page from a web server runs no code, and nor does an email, so the code itself shows
   key = (:inline, e.buf.path, code, n)
   get!(e.nodes, key) do
     sums_run[] += 1
@@ -3118,7 +3139,7 @@ cellpieces(e, i::Int, text::String, lo::Int, hi::Int, base::Face, raw::Bool; ope
     shown = raw || markup_shows(open, s.col, s.col + length(s.text))
     (s.markup || s.comment) && !shown && continue
     s.math && !shown && Maths.available() ? push!(out, equation(e, s, base)) :
-    s.live && !shown ? push!(out, inline(e, i, s, base)) : symbols!(out, s.text, s.col, face(base, s), s.link)
+    s.live && !shown && !foreign(e.buf.path) ? push!(out, inline(e, i, s, base)) : symbols!(out, s.text, s.col, face(base, s), s.link)
   end
   out
 end
@@ -23116,6 +23137,7 @@ wiki link to a page that isn't made yet.
 """
 linked_page(e, url::AbstractString) = begin
   startswith(url, '^') && return nothing   # a footnote
+  isremote(e.buf.path) && return nothing   # a page from a web server links to no page of the Mac
   target = wikitarget(url)
   name, heading = if target !== nothing
     occursin('#', target) ? String.(split(target, '#', limit=2)) : (String(target), "")
@@ -24200,7 +24222,7 @@ repository_file(source::AbstractString) = begin
 end
 
 "Where the function of the block that opens on line `s` of `b` comes from, or nothing when no file defines its language"
-block_source(b::Buffer, s::Int) = block_source(b.lines[s], kinds(b)[s].lang, isempty(b.path) ? "" : dirname(b.path))
+block_source(b::Buffer, s::Int) = foreign(b.path) ? nothing : block_source(b.lines[s], kinds(b)[s].lang, isempty(b.path) ? "" : dirname(b.path))
 
 "The `user/repo` of a source that's a GitHub repository, or nothing for a file on this Mac"
 repository(source::AbstractString) = (m = match(r"^github\.com/([\w\-.]+)/([\w\-.]+)", source); m === nothing ? nothing : "$(m[1])/$(m[2])")
@@ -24595,6 +24617,7 @@ cover_key(e, rows) = begin
   k === nothing && return nothing
   src = String(strip(rows[k][3], ['"', '\'', ' ']))
   isempty(src) && return nothing
+  isremote(e.buf.path) && (src = something(remote_src(e, src), ""); isempty(src) && return nothing)
   path = startswith(src, r"https?://") ? fetched(e, src) : abspath(docdir(e), expanduser(src))
   path === nothing ? nothing : picture_key(path)
 end
@@ -26358,7 +26381,7 @@ end
 const TRANSCLUSION = r"^\s*!\[\[([^\]|]+)(?:\|[^\]]*)?\]\]\s*$"
 
 "True when line `i` holds only a link that shows a part of another page"
-transcludes(b::Buffer, i::Int) = (line = b.lines[i]; occursin("![[", line) && occursin(TRANSCLUSION, line))
+transcludes(b::Buffer, i::Int) = (line = b.lines[i]; occursin("![[", line) && occursin(TRANSCLUSION, line) && !isremote(b.path))
 
 "How many parts of other pages can show inside each other: a part of a page that shows a part of a page that…"
 const DEEPEST_PART = 3
@@ -26964,11 +26987,14 @@ sidebar lists it. Anything else opens in the app that the Mac uses for it. A pat
 """
 follow!(e, url) = begin
   startswith(url, '^') && return follow_note!(e, url[2:end])
+  isremote(e.buf.path) && return follow_remote!(e, url)   # a link of a page from a web server is from the page's address
   target = wikitarget(url)
   target === nothing || return follow_wiki!(e, target)   # a wiki link, like [[Ideas]]
   occursin('#', url) && follow_heading!(e, url) && return e   # a heading of a page, like welcome.md#tables
   path = abspath(docdir(e), expanduser(unescaped(url)))
-  ispath(path) ? show_path!(e, path) : open_url(url)
+  ispath(path) && return show_path!(e, path)
+  # The address of a page of Markdown on a web server shows in the window: see "a page from a web server"
+  reads_here(e, url) ? get_page!(e, url, else_browser=true) : open_url(url)
 end
 
 """
@@ -30730,7 +30756,7 @@ title_parts(parts) =
 
 onkey(t::Title, ::KeyPress{Keys.mouse_right}) = begin
   e = editor(t)
-  isempty(e.buf.path) || file_menu!(e, window_of(t), e.buf.path; at=:title)
+  isempty(e.buf.path) || isremote(e.buf.path) || file_menu!(e, window_of(t), e.buf.path; at=:title)
   handled
 end
 
@@ -33318,7 +33344,7 @@ end
 # in the same box as the field, so the two are as wide as each other.
 
 "Open the file finder"
-open_finder!(e) = (list_files!(e); open_picker!(e, :finder, "Find a file"))
+open_finder!(e) = (list_files!(e); open_picker!(e, :finder, "Find a file, or type a web address"))
 
 "Open the project picker. A search for the projects starts on a second thread."
 open_projects!(e) = (project_list(e); open_picker!(e, :projects, "Find a project"))
@@ -33402,6 +33428,9 @@ finder_key!(e, K) = begin
     e.popup = :none
     focus(e)
   elseif K == Keys.enter
+    # An address on the web that's typed in the file finder is asked for: see "a page from a web server"
+    address = finder_address(e)
+    address !== nothing ? (e.popup = :none; focus(e); get_page!(e, address)) :
     isempty(found) ? (e.popup = :none; focus(e)) : picker_open!(e, found[clamp(e.picked, 1, length(found))])
   elseif K == Keys.down
     e.picked = min(e.picked + 1, max(1, length(found)))
@@ -33427,8 +33456,12 @@ describe(f::FinderInput) = Row(width(grow=grow), height(grow=grow), padding(0px,
 onkey(f::FinderInput, ::KeyPress{Keys.mouse_left}) = focus(input(editor(f)))
 cursor(::FinderInput) = :ibeam
 
+"The web address that's typed in the file finder, or nothing when what's typed isn't one. No file's name has a / in it, so an address fits no file."
+finder_address(e) = e.popup == :finder ? Remote.typed(input(e).text) : nothing
+
 "What the list says when it has no row"
 picker_none(e) =
+  finder_address(e) !== nothing ? "Press Return to open $(Remote.label(finder_address(e)))" :
   e.popup == :finder ? "No file has that name" :
   Folders.searching() !== nothing && isempty(project_list(e)) ? "Looking for projects…" :
   isempty(strip(input(e).text)) ? "Your home folder has no git repository" : "No project has that name"
@@ -35662,11 +35695,16 @@ picture_item(e, i) = begin
   m = match(PICTURE_LINE, e.buf.lines[i])
   m === nothing && return nothing
   src = unescaped(String(m[2]))
+  # A page from a web server names its pictures from its own address, and shows no file of the Mac
+  far = isremote(e.buf.path)
+  far && (src = something(remote_src(e, String(m[2])), ""); isempty(src) && return nothing)
   (note = media_note(e, i, src)) === nothing || return note   # a video or a sound that's on its way from the web
-  (made = table_item(e, i)) === nothing || return made        # a CSV file shows as a table
-  # A sound file shows a player, and so does a video file
-  sound = sound_file(docdir(e), e.buf.lines[i])
-  sound === nothing || return sound_item(e, sound)
+  if !far
+    (made = table_item(e, i)) === nothing || return made        # a CSV file shows as a table
+    # A sound file shows a player, and so does a video file
+    sound = sound_file(docdir(e), e.buf.lines[i])
+    sound === nothing || return sound_item(e, sound)
+  end
   video = video_item(e, src)
   video === nothing || return video
   # The address of a web page shows a card
@@ -37586,6 +37624,7 @@ in it now. A name of the module that acts on a window acts on `e` while the
 code runs, and after that until another window runs code in the module.
 """
 running_code(f, e) = begin
+  foreign(e.buf.path) && error(isremote(e.buf.path) ? "A page from a web server runs no code." : "An email runs no code.")
   m = workspace(e)
   isempty(e.buf.path) || (PAGE_WINDOWS[page_key(e.buf.path)] = e)
   was = RUNNING_WINDOW[]
@@ -40824,6 +40863,7 @@ describe_window(e::Editor) = begin
   end
   receive!(e)
   await_default!(e)
+  remote_tick!(e)
   moved = refresh!(e.buf)
   moved === nothing || (stay!(e, moved); fresh!(e, moved))
   # The bars beside the lines that just changed fade, so the window is drawn again while they show
@@ -41981,6 +42021,258 @@ end
 works_here(e, ::Val{:word_count}) = e.buf.view in (:markdown, :code)
 add_command!(word_count, title="Say how many words the page has, how many characters, and how long it takes to read", kind=:look)
 add_command!(copy_link_to_block!, title="Copy a link that shows the block at the caret in another page, like ![[Ideas#^prices]]", kind=:edit)
+
+# --- a page from a web server ----------------------------------------------------------------
+#
+# Ladder shows a page of Markdown that a web server sends, as a browser shows
+# a page of HTML. The page's path is its address, like
+# https://example.com/notes.md. There are four ways to ask for one:
+#
+#   - Press ⌘O, type or paste the address, and press Return.
+#   - Take Open Address in the command palette.
+#   - Click a link to it in a page.
+#   - Name it when you start Ladder from its code, as in
+#     `julia main.jl example.com/notes.md`. The `ladder` command of the
+#     terminal takes no address yet.
+#
+# Ladder tells the server that it wants Markdown, so a server that keeps a
+# page as Markdown and as HTML sends the Markdown. What comes is a page of
+# Markdown when the server says so, or when the server doesn't say what it is
+# and the address ends as a Markdown file's name does, like `.md`. See
+# remote.jl. Anything else isn't a page for Ladder, and your browser opens it.
+#
+# The window goes on showing the page that it has while the new one comes,
+# and words under the top bar say that Ladder is getting it. If the server
+# doesn't answer, or has no such page, the words say that.
+#
+# The page is read, and not changed. It has no caret, as an email has none.
+# The top bar shows its address without the https://. ⌘⌥← goes back to the
+# page before it, and shows that page as it was, without asking again. Reload
+# Page, in the command palette, asks the server for the page again.
+#
+# A link of the page is from the page's own address: `../prices.md` is in the
+# folder over the page's, on the same server. A click on a link asks for what
+# it names. Markdown shows in the window, and anything else opens in your
+# browser. A link to a heading of the page, like `#prices`, goes there. A
+# picture is from the page's address too.
+#
+# In a page of your own, a click on a link to an address that ends as a
+# Markdown file's name does asks the server too. Any other address opens in
+# your browser, as it always has, without Ladder asking for it first.
+#
+# Somebody else wrote the page, so three rules keep it from the Mac:
+#
+#   - It runs no code. A `ui` block, a sum in a line of text and a `check`
+#     block show as their code. ⌘Return runs nothing.
+#   - It shows no file of the Mac: no part of another page, no picture from
+#     a path on the Mac, and no block that reads a file or a folder. Such a
+#     block shows as its code. A wiki link, like [[Ideas]], goes nowhere.
+#   - A block that asks a server for something, or sends it something, shows
+#     as its code: `load`, `save`, `web` and the like.
+#
+# What still shows as more than its text: tables, diagrams, formulas, the
+# card of the front matter, callouts, footnotes and pictures.
+#
+# The first rule holds for an email too, since somebody else wrote it: an
+# email runs no code, and a block that Ladder would do more with shows as its
+# code. See `foreign`.
+#
+# A window that isn't on the screen, like one a test makes, asks the web for
+# nothing, unless a test put its own function in `PAGE_GETTER`.
+
+"What gets a page from a web server: `Remote.curl`. A test puts its own function here, so that it uses no network."
+const PAGE_GETTER = Ref{Function}(Remote.curl)
+
+"True when the window of `e` may ask a web server for a page: it's on the screen, or a test stands in for `curl`"
+page_online(e) = PAGE_GETTER[] !== Remote.curl || on_screen(e)
+
+"The languages of the code blocks that a page from a web server shows as more than their code. They run no code, read nothing of the Mac and ask no server."
+const SHOWN_BLOCKS = (MATTER, TOML_MATTER, DIAGRAM, MATH, COMMENT)
+
+"""
+Make each code block of a page that somebody else wrote one that only shows
+its code, where Ladder would do more with it: run it, as it does a `ui`
+block, or read a file for it, or ask a server. `ks` are the kinds of the
+page's lines. A block of Julia code keeps its colours. A block in a language
+that Ladder does nothing with, like `python`, stays as it is. See `foreign`.
+"""
+shown_only!(ks::Vector{Line}) = begin
+  for (i, l) in enumerate(ks)
+    (l.kind in (Kind.fence, Kind.code) && !isempty(l.lang) && !(l.lang in SHOWN_BLOCKS) && known_lang(l.lang)) || continue
+    ks[i] = Line(l.kind, l.level, l.prefix, l.lang in (LIVE, CHECK, "julia") ? "julia" : "")
+  end
+  ks
+end
+
+"A page that the window of `e` has asked a web server for"
+mutable struct PageAsked
+  address::String      # as it was asked for, with what follows a #
+  coming::Any          # the Remote.Coming, or nothing until the window may ask the web
+  record::Bool         # the page that leaves goes on the list that `go_back!` reads
+  else_browser::Bool   # what isn't Markdown opens in the browser, and Ladder says nothing of it
+  again::Bool          # the page was here already, and this asks for it again
+  since::Float64       # when it was asked for
+end
+
+"""
+Ask the server for the page at `address`, and show it in the window of `e`
+when it has come. The window shows what it has until then. With
+`else_browser`, what turns out not to be Markdown opens in your browser with
+no words about it, as a link does. A page that's asked for while another is
+on its way takes its place.
+"""
+get_page!(e, address; record=true, else_browser=false, again=false) = begin
+  hosted(e) === nothing || return get_page!(top_editor(e), address; record, else_browser, again)   # a link in a part of another page
+  e.nodes[:page_asked] = PageAsked(String(strip(address)), nothing, record, else_browser, again, time())
+  redraw_in!(e, 0)
+  e
+end
+
+"How long a page can take to come before words under the top bar say that Ladder is getting it, in seconds"
+const PAGE_WAIT = 0.4
+
+"Look whether the page that the window of `e` asked a web server for has come, and show it when it has. Each frame calls this."
+remote_tick!(e) = begin
+  a = get(e.nodes, :page_asked, nothing)
+  a isa PageAsked || return nothing
+  if a.coming === nothing
+    page_online(e) || return nothing   # a window that isn't on the screen yet asks once it is
+    a.coming = Remote.ask(a.address, getter=(args...) -> PAGE_GETTER[](args...))
+  end
+  got = Remote.landed(a.coming)
+  if got === nothing
+    # A page that comes at once shows with no words before it. The words stay for as long as the page takes.
+    said = get(e.nodes, :result, ("", 0.0))
+    words = "Getting $(Remote.label(a.address))…"
+    time() - a.since > PAGE_WAIT && (said[1] != words || time() - said[2] > 2) && (e.nodes[:result] = (words, time()))
+    redraw_in!(e, 0.05)
+    return nothing
+  end
+  delete!(e.nodes, :page_asked)
+  land_page!(e, a, got)
+  redraw_in!(e, 0)
+  nothing
+end
+
+"Take away the words under the top bar that say that Ladder is getting a page"
+unsay_getting!(e) = begin
+  said = get(e.nodes, :result, nothing)
+  (said !== nothing && startswith(said[1], "Getting ")) || return nothing
+  delete!(e.nodes, :result)
+  w = window_of(e)
+  w === nothing || close_popup!(w, :result)
+  nothing
+end
+
+"""
+Do what `got`, the server's answer for the page `a`, calls for. A page of
+Markdown shows in the window. Anything else that the server sent opens in
+your browser. When the server sent nothing, or said that it has no such
+page, words under the top bar say so.
+"""
+land_page!(e, a::PageAsked, got) = begin
+  unsay_getting!(e)
+  if Remote.ismarkdown(got)
+    b = remote_buffer(got)
+    was = get(e.buffers, b.path, nothing)
+    e.buffers[b.path] = b
+    if was !== nothing && e.buf === was
+      # The page that shows was asked for again: the new text shows from where the old was scrolled to
+      b.offset = e.scroll.offset
+      e.buf = b
+    elseif !a.again
+      open!(e, b.path; record=a.record)
+    end
+    heading = Remote.place(a.address)
+    isempty(heading) || e.buf !== b || go_heading!(e, b.path, heading)
+  elseif got.status == 0 || (!Remote.ok(got) && !a.else_browser)
+    say_result!(e, Remote.problem(got))
+  else
+    # A page of HTML, a picture, or what a server says to a link that it has nothing for: a browser shows those
+    BROWSER[](a.address)
+    a.else_browser || say_result!(e, "$(Remote.host(a.address)) sent no Markdown, so your browser has the page.")
+  end
+  e
+end
+
+"""
+The page that the server's answer `got` holds, as a page that's read and not
+changed. Its path is the address that the answer came from, which the page's
+links and pictures are from. The caret's place is after any front matter, as
+it is in a file, so the front matter shows as a card.
+"""
+remote_buffer(got) = begin
+  lines = Remote.lines(got)
+  b = Buffer(path=got.address, lines=lines, disk=copy(lines), told=copy(lines), fixed=true)
+  b.sent = b.told
+  # No page that was at the address before has this version, so nothing that was laid out for one is used for this
+  b.version = b.saved = (stamp[] += 1)
+  t = front_matter(b.lines)
+  if t > 0
+    i = something(findnext(l -> !isempty(strip(l)), b.lines, t + 1), min(t + 1, length(b.lines)))
+    b.caret = b.anchor = (i, 0)
+  end
+  b
+end
+
+"""
+The whole web address that `src` means in the page from a web server that
+`e` shows, or nothing when it names no place on the web, as a path of the
+Mac written `file:` doesn't. A picture of the page is from the page's address.
+"""
+remote_src(e, src::AbstractString) = begin
+  to = Remote.against(e.buf.path, strip(src))
+  Remote.isaddress(to) ? replace(to, ' ' => "%20") : nothing
+end
+
+"""
+Follow the link `url` of the page from a web server that `e` shows. The link
+is from the page's address. A link to a heading of the page goes there. An
+address on the web is asked for: Markdown shows in the window, and anything
+else opens in your browser. `mailto:` opens the app for email. A wiki link
+and a link to a file of the Mac go nowhere.
+"""
+follow_remote!(e, url) = begin
+  wikitarget(url) === nothing || return e
+  page = e.buf.path
+  to = Remote.against(page, url)
+  occursin(r"^mailto:"i, to) && return (BROWSER[](to); e)
+  Remote.isaddress(to) || return e
+  if Remote.bare(to) == Remote.bare(page)
+    heading = Remote.place(to)
+    isempty(heading) || go_heading!(e, page, heading)
+    return e
+  end
+  get_page!(e, to, else_browser=true)
+end
+
+"""
+True when a click on the link `url`, in a page of your own, asks the server
+for it: it's a web address that ends as a Markdown file's name does, and the
+window may ask the web. Any other address opens in your browser unasked.
+"""
+reads_here(e, url) = Remote.isaddress(url) && Remote.named_markdown(url) && page_online(e)
+
+"""
+Open Address: show the page of Markdown at a web address, like example.com/notes.md
+"""
+open_address!(e, address::String) = begin
+  to = Remote.typed(address)
+  to === nothing && return (say_result!(e, "“$(strip(address))” isn't a web address. Write one like example.com/notes.md."); e)
+  get_page!(e, to)
+end
+
+"Reload Page: ask the server again for the page from the web that shows"
+reload_page!(e) = isremote(e.buf.path) ? get_page!(e, e.buf.path, record=false, again=true) : e
+
+"Open In Browser: show the page from the web that shows in your browser"
+open_in_browser!(e) = (isremote(e.buf.path) && BROWSER[](e.buf.path); e)
+
+works_here(e, ::Union{Val{:reload_page},Val{:open_in_browser}}) = isremote(e.buf.path)
+
+add_command!(open_address!, title="Show the page of Markdown at a web address, like example.com/notes.md", kind=:look)
+add_command!(reload_page!, title="Ask the server again for the page from the web that shows", kind=:look)
+add_command!(open_in_browser!, title="Show the page from the web that shows in your browser", kind=:look)
 
 # --- the commands of a file and of a folder ---
 #

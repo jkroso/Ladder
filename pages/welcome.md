@@ -526,6 +526,16 @@ Hold ⌘ and click the card to open the page in your browser. To change the addr
 
 An address that ends as a picture's does, like `![Julia](https://julialang.org/logo.png)`, shows the picture. So does an address that turns out to be a picture when Ladder gets it. A web address by itself, like https://julialang.org, is text.
 
+## Pages from a web server
+
+Ladder shows a page of Markdown that a web server sends, as a browser shows a page of HTML. Press ⌘O, type or paste the page's address, like `example.com/notes.md`, and press Return. The command Open Address does the same. Ladder tells the server that it wants Markdown. So a server that keeps each page as both Markdown and HTML sends Ladder the Markdown, from the same address that gives a browser the HTML.
+
+The top bar shows the page's address, and says "Read only", because you can't change the page. The page's links and pictures are from its own address. Click a link, and Ladder asks the server for it. Markdown shows in the window, and anything else opens in your browser. ⌘⌥← goes back to the page before. The command Reload Page asks the server for the page again.
+
+Somebody else wrote the page, so Ladder runs none of its code, and the page can show no file of your Mac. A live block or a sum in it shows as its code. An email follows the same rule.
+
+In a page of your own, a click on a link to an address that ends in `.md` shows that page in Ladder. Any other web address opens in your browser.
+
 ## Pages of the web
 
 A code block in the language `web` shows a page of the web. Write the page's address in it, like `https://julialang.org`, or the name of a file of HTML beside the document. Ladder draws the page itself and runs its scripts. Click the block and it fills the window. There you scroll the page, follow its links and type in its fields, and the bar over it goes back, forward and to another address. Esc puts the block back in the page.

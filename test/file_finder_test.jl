@@ -162,7 +162,7 @@ end
     @test e.popup == :none && e.folder == new
     # ⌘O still finds a page of the folder
     press(w, Keys.o, Keys.cmd)
-    @test e.popup == :finder && K.input(e).placeholder == "Find a file"
+    @test e.popup == :finder && K.input(e).placeholder == "Find a file, or type a web address"
     press(w, Keys.escape)
   finally
     K.HOME[] = ""

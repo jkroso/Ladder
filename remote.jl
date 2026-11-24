@@ -1,0 +1,192 @@
+# Gets a page of Markdown from a web server, for a window to show. See "a page
+# from a web server" in main.jl.
+#
+#     c = ask("https://example.com/notes.md")   # start to get it: nothing here waits
+#     a = landed(c)                              # nothing while it's on its way, then an Answer
+#     a.status                                   # what the server said, like 200 or 404, or 0 when it said nothing
+#     ismarkdown(a)                              # true when the server sent a page of Markdown
+#     lines(a)                                   # the lines of that page
+#     problem(a)                                 # why there's no page to show, in words, or "" when there is one
+#
+# Ladder tells the server that it wants Markdown, with the header `Accept:
+# text/markdown`. A server that keeps each page as both Markdown and HTML sends
+# the Markdown to Ladder, and the HTML to a browser, from the same address.
+#
+# A server says what it sent with `Content-Type`. `text/markdown` is Markdown.
+# Many servers send a file whose name ends in `.md` as plain text, or don't say
+# what it is. That's Markdown too. Anything else isn't, so `ismarkdown` is
+# false for a page of HTML.
+#
+# `curl` gets the page, in a process of its own. It follows the page to where
+# it has moved: `a.address` is where it ended up, which the links and the
+# pictures of the page are from. Nothing is sent that says who you are: no
+# cookie and no password.
+#
+#     typed("example.com/notes.md")              # "https://example.com/notes.md": what typed words mean, or nothing
+#     against("https://example.com/a/b.md", "../c.md#top")   # "https://example.com/c.md#top"
+#     label("https://example.com/a/b.md")        # "example.com/a/b.md", for the top bar
+
+@use "./web/files" => Webfiles
+@use "./web/css" resolve
+
+"What Ladder says it wants from a server: Markdown first, then plain text, then anything"
+const ACCEPT = "text/markdown, text/x-markdown;q=0.9, text/plain;q=0.8, text/html;q=0.7, */*;q=0.5"
+const SECONDS = 30               # how long a page can take to come
+const BIGGEST = 16 * 1024 * 1024 # bytes: a page bigger than this isn't got
+
+"The kinds of file that are Markdown, as a server names them"
+const MARKDOWN_TYPES = ("text/markdown", "text/x-markdown")
+"The kinds that a server gives a file when it doesn't know what the file is. The end of the file's name says then."
+const VAGUE_TYPES = ("", "text/plain", "application/octet-stream", "binary/octet-stream")
+"How the name of a file of Markdown ends"
+const MARKDOWN_ENDS = (".md", ".markdown", ".mdown", ".mkd")
+
+"True when `text` is an address on the web: it starts with http:// or https://"
+isaddress(text::AbstractString) = occursin(r"^https?://[^/\s]"i, text)
+
+"The address without what follows a #, which names a place in the page and isn't sent to the server"
+bare(address::AbstractString) = String(first(split(strip(address), '#', limit=2)))
+
+"What follows the # of the address: the name of a heading of the page, or \"\""
+place(address::AbstractString) = (parts = split(strip(address), '#', limit=2); length(parts) == 2 ? unescaped(parts[2]) : "")
+
+"`text` with each %20 and the like as the character that it stands for"
+unescaped(text::AbstractString) = begin
+  from = codeunits(String(text))
+  bytes = UInt8[]
+  i = 1
+  while i <= length(from)
+    n = from[i] == UInt8('%') && i + 2 <= length(from) ? tryparse(UInt8, String(from[i+1:i+2]), base=16) : nothing
+    n === nothing ? (push!(bytes, from[i]); i += 1) : (push!(bytes, n); i += 3)
+  end
+  out = String(bytes)
+  isvalid(out) ? out : String(text)
+end
+
+"The path of the address: what follows the name of its computer, without what follows a ? or a #"
+path(address::AbstractString) = (m = match(r"^https?://[^/?#]*([^?#]*)"i, address); m === nothing ? "" : String(m[1]))
+
+"True when the name of the file at `address` ends as a file of Markdown's does"
+named_markdown(address::AbstractString) = lowercase(splitext(path(address))[2]) in MARKDOWN_ENDS
+
+"""
+The address that `text` means when someone types it, or nothing when it isn't
+an address. An address can start with https:// or http://. Without that, it
+needs the name of a computer and a /, like `example.com/notes.md`, so that
+the name of a file, like `notes.md`, isn't one. A computer that's this Mac,
+like `localhost:8000/`, is asked with http. What follows the computer's name
+can have spaces, as in `example.com/my notes.md`.
+"""
+typed(text::AbstractString) = begin
+  t = String(strip(text))
+  isempty(t) && return nothing
+  if !occursin(r"^https?://"i, t)
+    occursin(r"^(localhost|\[::1\]|[\w-]+(\.[\w-]+)+)(:\d+)?/"i, t) || return nothing
+    t = (occursin(r"^(localhost|127\.|\[::1\])"i, t) ? "http://" : "https://") * t
+  end
+  # The name of the computer has no space in it. A space in what follows is written %20, as a browser writes it.
+  occursin(r"^https?://[^/?#\s]+([/?#]|$)"i, t) || return nothing
+  t = replace(t, r"\s" => "%20")
+  # The first page of a site is at /
+  occursin(r"^https?://[^/?#]+$"i, t) ? t * "/" : t
+end
+
+"""
+The whole address that the link `link` means in the page at `page`: `../c.md`
+is from the page's folder, and `/c.md` from the top of its site. A link that
+has its own start, like `mailto:` or `https:`, is itself. A space in the link
+is written %20, as a browser writes it.
+"""
+against(page::AbstractString, link::AbstractString) = replace(resolve(bare(page), String(strip(link))), ' ' => "%20")
+
+"What the top bar calls the page at `address`: the address without its https:// and without what follows a ? or a #"
+label(address::AbstractString) = begin
+  m = match(r"^https?://([^/?#]*)([^?#]*)"i, address)
+  m === nothing && return String(address)
+  String(m[1]) * (m[2] == "/" ? "" : unescaped(m[2]))
+end
+
+"The name of the computer that `address` is on, like example.com"
+host(address::AbstractString) = (m = match(r"^https?://([^/?#]*)"i, address); m === nothing ? String(address) : String(m[1]))
+
+"""
+Start to get what's at the web address `address` into `file`. `about` is a
+file for three lines: the address that it ended up at, the kind of file that
+the server says it is, and the number that the server answered with, like 200.
+It gives a function that's true once that has ended. A server's page that
+says what went wrong, like one for 404, is got too: the number says so.
+"""
+curl(address, file, about) = begin
+  ask = `curl --silent --location --max-redirs 8 --proto =http,https --proto-redir =http,https --compressed
+              --connect-timeout 10 --max-time $SECONDS --max-filesize $BIGGEST --user-agent $(Webfiles.AGENT)
+              --header $("Accept: " * ACCEPT) --output $file --write-out "%{url_effective}\n%{content_type}\n%{http_code}\n" -- $address`
+  job = run(pipeline(ask, stdout=about, stderr=devnull), wait=false)
+  () -> process_exited(job)
+end
+
+"A page that's on its way from a server"
+mutable struct Coming
+  address::String        # as it was asked for, without what follows a #
+  done::Any              # true once `curl` has ended, or nothing when it couldn't start
+  file::String           # where the page is while it comes
+  answer::Any            # the Answer, once it's here
+end
+
+"What a server sent for an address"
+struct Answer
+  asked::String          # the address that was asked for
+  address::String        # the address that it ended up at
+  type::String           # the kind of file that the server says it is, in lower case, without what follows a ;
+  charset::String        # the characters that the server says it's written in, in lower case, or ""
+  status::Int            # the number that the server answered with, or 0 when it didn't answer
+  bytes::Vector{UInt8}
+end
+
+"""
+Start to get the page at `address`. `getter` is what gets it: `curl`, or a
+function of a test's that takes the same three things.
+"""
+ask(address::AbstractString; getter=curl) = begin
+  address = bare(address)
+  file = joinpath(mktempdir(), "page")
+  done = try getter(address, file, file * ".about") catch; nothing end
+  Coming(address, done, file, nothing)
+end
+
+"What came for `c`, or nothing while it's on its way. A page that couldn't be had is an Answer with the status 0."
+landed(c::Coming) = begin
+  c.answer === nothing || return c.answer
+  c.done === nothing || (try c.done() catch; true end) || return nothing
+  said = isfile(c.file * ".about") ? readlines(c.file * ".about") : String[]
+  ended = length(said) >= 1 && isaddress(strip(said[1])) ? bare(said[1]) : c.address
+  kind = length(said) >= 2 ? lowercase(strip(said[2])) : ""
+  m = match(r"charset\s*=\s*\"?([\w-]+)", kind)
+  status = length(said) >= 3 ? something(tryparse(Int, strip(said[3])), 0) : 0
+  bytes = try isfile(c.file) ? read(c.file) : UInt8[] catch; UInt8[] end
+  rm(dirname(c.file), force=true, recursive=true)
+  c.answer = Answer(c.address, ended, String(strip(first(split(kind, ';')))), m === nothing ? "" : String(m[1]), status, bytes)
+end
+
+"True when the server answered with a page, and not with why it has none"
+ok(a::Answer) = 200 <= a.status < 300
+
+"True when what the server sent is a page of Markdown: the server says so, or it doesn't say and the file's name ends as Markdown's does"
+ismarkdown(a::Answer) = ok(a) && ismarkdown(a.type, a.address)
+ismarkdown(type::AbstractString, address::AbstractString) =
+  type in MARKDOWN_TYPES || (type in VAGUE_TYPES && named_markdown(address))
+
+"The lines of the page that the server sent"
+lines(a::Answer) = begin
+  text = Webfiles.text(a.bytes, a.charset)
+  text = replace(lstrip(text, '﻿'), "\r\n" => "\n", '\r' => '\n')
+  String.(split(text, '\n'))
+end
+
+"Why there's no page to show for `a`, in words, or \"\" when the server sent one"
+problem(a::Answer) = begin
+  name = host(a.asked)
+  a.status == 0 && return "$name didn't answer."
+  a.status in (404, 410) && return "$name has no page at that address."
+  a.status in (401, 403) && return "$name doesn't let Ladder read that page."
+  ok(a) ? "" : "$name answered with the error $(a.status)."
+end
