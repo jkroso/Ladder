@@ -530,9 +530,11 @@ An address that ends as a picture's does, like `![Julia](https://julialang.org/l
 
 Ladder shows a page of Markdown that a web server sends, as a browser shows a page of HTML. Press ⌘L, type or paste the page's address, like `example.com/notes.md`, and press Return. ⌘L is the key of the command Navigate. You can also type the address straight after ⌘⇧P, where Navigate is first in the list while you type an address, or after ⌘O. Ladder tells the server that it wants Markdown. So a server that keeps each page as both Markdown and HTML sends Ladder the Markdown, from the same address that gives a browser the HTML.
 
-The top bar shows the page's address, and says "Read only", because you can't change the page. The page's links and pictures are from its own address. Click a link, and Ladder asks the server for it. Markdown shows in the window, and anything else opens in your browser. ⌘⌥← goes back to the page before. The command Reload Page asks the server for the page again.
+A server that has no Markdown sends HTML, and Ladder shows the page that the HTML makes, with its own engine, as it shows an HTML file. Its scripts run, and you scroll it, click it and type in it. Press ⌘E to see the HTML that the server sent, and ⌘E again for the page.
 
-Somebody else wrote the page, so Ladder runs none of its code, and the page can show no file of your Mac. A live block or a sum in it shows as its code. An email follows the same rule.
+The top bar shows the page's address, and says "Read only", because you can't change the page. The page's links and pictures are from its own address. Click a link, and Ladder asks the server for it. Markdown and HTML show in the window, and anything else, like a PDF file, opens in your browser. ⌘⌥← goes back to the page before. The command Reload Page asks the server for the page again.
+
+Somebody else wrote the page, so Ladder runs none of its code, and the page can show no file of your Mac. A live block or a sum in it shows as its code. An email follows the same rule. The scripts of a page of HTML run, as a browser runs them, and they get no file of your Mac either.
 
 To change the page, save a copy of it on your Mac. Click the Save button after "Read only" in the top bar, or press ⌘S, and choose where the copy goes. Ladder makes a folder named for the site, like `example.com`, and puts the page in it at its place on the site. It also saves each page and file that the page links to, and what those link to, when they're on the same site and in the page's own folder or a folder in it. So the first page of a site, like `example.com/`, brings the whole site. Each picture of those pages comes too. When the copy is made, the window shows it, and you can change it.
 
@@ -569,7 +571,7 @@ costs.csv
 
 A `view` block shows a page of the web too. Write the page's address in it, like `https://julialang.org`, or the name of an HTML file beside your page. Ladder draws the page itself and runs its scripts. You use the page where it is: click its links and buttons, drag in it, and type in its fields. Esc gives the keyboard back to your page. The wheel scrolls your page past it. Scroll with ⌘ held to scroll the web page. A pinch goes to the web page too, so a map or a model in it can zoom.
 
-When a link takes the block to another page, the block's line changes to that page's address. ⌘Z takes it back, and the page with it. The button beside the block's top right corner goes to the page that shows. A page of Markdown on a web server shows in the window, and any other page of the web opens in your browser. An HTML file shows its page in the window.
+When a link takes the block to another page, the block's line changes to that page's address. ⌘Z takes it back, and the page with it. The button beside the block's top right corner goes to the page that shows. A page of Markdown or of HTML on a web server shows in the window, and anything else opens in your browser. An HTML file shows its page in the window.
 
 A block that starts with a tag holds the page itself, like this one:
 

@@ -5,6 +5,7 @@
 #     a = landed(c)                              # nothing while it's on its way, then an Answer
 #     a.status                                   # what the server said, like 200 or 404, or 0 when it said nothing
 #     ismarkdown(a)                              # true when the server sent a page of Markdown
+#     ishtml(a)                                  # true when it sent a page of HTML
 #     lines(a)                                   # the lines of that page
 #     problem(a)                                 # why there's no page to show, in words, or "" when there is one
 #
@@ -15,7 +16,9 @@
 # A server says what it sent with `Content-Type`. `text/markdown` is Markdown.
 # Many servers send a file whose name ends in `.md` as plain text, or don't say
 # what it is. That's Markdown too. Anything else isn't, so `ismarkdown` is
-# false for a page of HTML.
+# false for a page of HTML. A server that has no Markdown for an address
+# sends its HTML, which `ishtml` says: `text/html`, or a page that the server
+# doesn't name whose name ends in `.html` or whose text starts as HTML's does.
 #
 # `curl` gets the page, in a process of its own. It follows the page to where
 # it has moved: `a.address` is where it ended up, which the links and the
@@ -40,6 +43,10 @@ const MARKDOWN_TYPES = ("text/markdown", "text/x-markdown")
 const VAGUE_TYPES = ("", "text/plain", "application/octet-stream", "binary/octet-stream")
 "How the name of a file of Markdown ends"
 const MARKDOWN_ENDS = (".md", ".markdown", ".mdown", ".mkd")
+"The kinds of file that are a page of HTML, as a server names them"
+const HTML_TYPES = ("text/html", "application/xhtml+xml")
+"How the name of a page of HTML ends"
+const HTML_ENDS = (".html", ".htm", ".xhtml")
 
 "True when `text` is an address on the web: it starts with http:// or https://"
 isaddress(text::AbstractString) = occursin(r"^https?://[^/\s]"i, text)
@@ -196,6 +203,18 @@ ok(a::Answer) = 200 <= a.status < 300
 ismarkdown(a::Answer) = ok(a) && ismarkdown(a.type, a.address)
 ismarkdown(type::AbstractString, address::AbstractString) =
   type in MARKDOWN_TYPES || (type in VAGUE_TYPES && named_markdown(address))
+
+"""
+True when what the server sent is a page of HTML: the server says so, or it
+doesn't say and the file's name ends as HTML's does, or its text starts as
+HTML's does. A page that says why the server has nothing at the address
+counts too.
+"""
+ishtml(a::Answer) = a.type in HTML_TYPES || a.type in VAGUE_TYPES &&
+  (lowercase(splitext(path(a.address))[2]) in HTML_ENDS || occursin(r"^\s*<(!doctype\s+html|html)\b"i, ascii_start(a.bytes)))
+
+"The first bytes of `bytes` as text, with a space for each byte that isn't a character of ASCII, so that part of a character can't stop a search"
+ascii_start(bytes) = String(map(c -> c < 0x80 ? c : UInt8(' '), bytes[1:min(end, 512)]))
 
 "The lines of the page that the server sent"
 lines(a::Answer) = begin

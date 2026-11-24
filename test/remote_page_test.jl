@@ -64,6 +64,16 @@ page!("https://example.com/top.md", "# Top\n\n" * "Words.\n\n"^60 * "## Second\n
 page!("https://example.com/docs/", "# Docs\n\nA page that the server keeps as Markdown and as HTML.\n")
 page!("https://example.com/old.md", "# New home\n", moved="https://example.com/new/home.md")
 page!("https://julialang.org/", "<!DOCTYPE html><title>Julia</title>", type="text/html; charset=utf-8")
+page!("https://example.com/site/", """
+  <!DOCTYPE html><title>A site</title>
+  <body style="margin:0;font:16px/20px Helvetica">
+  <a href="../prices.md" style="display:block;height:40px">Prices</a>
+  <a href="more.html" style="display:block;height:40px">More</a>
+  <p style="margin:0">$("x" ^ 3000)</p>
+  <a id=low>Lower</a></body>""", type="text/html; charset=utf-8")
+page!("https://example.com/site/more.html", "<p>More of the site</p>", type="")
+page!("https://example.com/site/gone.html", "<h1>Not here</h1>", type="text/html", status=404)
+page!("https://example.com/site/report.pdf", "%PDF-1.4", type="application/pdf")
 page!("https://example.com/plain.txt", "Only text.\n", type="text/plain")
 page!("https://example.com/secret.md", "No", type="text/html", status=403)
 page!("https://down.example.com/a.md", "", status=0)
@@ -151,6 +161,11 @@ said() = get(e.nodes, :result, ("", 0.0))[1]
   @test Remote.ismarkdown("text/plain", "https://example.com/a.md") && Remote.ismarkdown("", "https://example.com/a.MD?x=1")
   @test !Remote.ismarkdown("text/plain", "https://example.com/a.txt") && !Remote.ismarkdown("text/html", "https://example.com/a.md")
   @test K.isremote("https://example.com/a.md") && !K.isremote("/Users/sam/a.md") && !K.isremote("")
+  # What a server sends is a page of HTML when it says so, or when it doesn't say and the name or the text says HTML
+  answer(type, address, text="") = Remote.Answer(address, address, type, "", 200, Vector{UInt8}(text))
+  @test Remote.ishtml(answer("text/html", "https://example.com/")) && Remote.ishtml(answer("", "https://example.com/a.html"))
+  @test Remote.ishtml(answer("", "https://example.com/", "  <!doctype HTML><p>é")) && Remote.ishtml(answer("application/octet-stream", "https://example.com/", "<html>"))
+  @test !Remote.ishtml(answer("text/plain", "https://example.com/a.txt", "words")) && !Remote.ishtml(answer("application/pdf", "https://example.com/a.html"))
 end
 
 @testset "a page of Markdown from a server shows in the window" begin
@@ -194,10 +209,12 @@ end
   K.follow!(e, "#lower")
   frames()
   @test e.buf.path == "https://example.com/notes.md" && length(asked) == n
-  # A page of HTML opens in the browser, and the window keeps its page
+  # A page of HTML shows the page that it makes, in the window, and ⌘⌥← comes back
   K.follow!(e, "https://julialang.org/")
   frames()
-  @test browsed == ["https://julialang.org/"] && e.buf.path == "https://example.com/notes.md" && said() == ""
+  @test isempty(browsed) && e.buf.path == "https://julialang.org/" && K.html_shown(e) && said() == ""
+  K.go_back!(e); frames()
+  @test e.buf.path == "https://example.com/notes.md"
   # An address for email goes to the app for email
   K.follow!(e, "mailto:sam@example.com")
   @test browsed[end] == "mailto:sam@example.com"
@@ -241,6 +258,69 @@ end
   K.go_back!(e); frames()
 end
 
+@testset "a page of HTML shows the page that it makes" begin
+  empty!(browsed)
+  K.navigate!(e, "example.com/site/")
+  frames()
+  b = e.buf
+  @test b.path == "https://example.com/site/" && K.html_shown(e) && b.fixed && K.readonly(b) && K.name(b) == "example.com/site/"
+  # Ladder's own engine shows it, from the HTML that came, with no second request
+  v = e.nodes[(:html, b.path)]
+  @test v.browser.html == SITE["https://example.com/site/"].text && v.browser.base == b.path && asked[end] == b.path
+  @test K.Browsers.title_of(v.browser.html) == "A site"
+  # It has two levels: the HTML that the server sent, and the page. ⌘E goes between them.
+  @test K.levels(e) == K.SERVED_LEVELS && K.level(e) == 2
+  press(Keys.e, Keys.cmd)
+  @test b.view == :text && K.level(e) == 1 && b.lines[1] == "<!DOCTYPE html><title>A site</title>" && !K.html_shown(e)
+  # A very long line of the HTML stops with an … at that level, and the page has all of it
+  i = findfirst(l -> startswith(l, "<p "), b.lines)
+  @test endswith(b.lines[i], "…") && length(b.lines[i]) == K.MOST_LINE + 1
+  press(Keys.e, Keys.cmd)
+  @test b.view == :file && K.html_shown(e)
+  # A click on a link of the page goes where Ladder goes: a page of Markdown shows, and ⌘⌥← comes back
+  frames(); v = e.nodes[(:html, b.path)]
+  r = rect(v.browser)
+  x, y = K.num(r.left) + 20, K.num(r.top) + 20
+  w.mouse = typeof(w.mouse)(px(x), px(y))
+  onmouse(w, MouseMove(Vec2{px}(px(x), px(y)), w)); frames(1)
+  w.keys |= Keys.mouse_left; onkey(w, KeyPress{Keys.mouse_left}(0, w))
+  w.keys ⊻= Keys.mouse_left; onkey(w, KeyRelease{Keys.mouse_left}(0, w))
+  frames()
+  @test e.buf.path == "https://example.com/prices.md" && e.back[end] == "https://example.com/site/"
+  @test K.go_back!(e) && e.buf.path == "https://example.com/site/" && K.html_shown(e)
+  frames()
+  # A page that the server doesn't name, whose name says HTML, shows too
+  K.Browsers.follow!(e.nodes[(:html, e.buf.path)].browser, "https://example.com/site/more.html")
+  frames()
+  @test e.buf.path == "https://example.com/site/more.html" && K.html_shown(e)
+  # A link to a place of the page scrolls there, and asks for nothing
+  K.go_back!(e); frames()
+  n = length(asked)
+  K.Browsers.follow!(e.nodes[(:html, e.buf.path)].browser, "https://example.com/site/#low")
+  frames()
+  @test e.buf.path == "https://example.com/site/" && length(asked) == n
+  # What the server says of a link that it has nothing for shows, as a browser shows it
+  K.Browsers.follow!(e.nodes[(:html, e.buf.path)].browser, "https://example.com/site/gone.html")
+  frames()
+  @test e.buf.path == "https://example.com/site/gone.html" && K.html_shown(e) && isempty(browsed)
+  # A typed address that the server has nothing for says so, and the window keeps its page
+  K.navigate!(e, "example.com/site/gone.html"); frames()
+  @test said() == "example.com has no page at that address."
+  # A PDF file opens in the browser, and the window keeps its page
+  K.go_back!(e); frames()
+  K.Browsers.follow!(e.nodes[(:html, e.buf.path)].browser, "https://example.com/site/report.pdf")
+  frames()
+  @test browsed == ["https://example.com/site/report.pdf"] && e.buf.path == "https://example.com/site/"
+  empty!(browsed)
+  # Reload Page asks again, and the page shows what came, at the level that showed
+  press(Keys.e, Keys.cmd)
+  page!("https://example.com/site/", "<!DOCTYPE html><title>Again</title><p>New words</p>", type="text/html")
+  K.reload_page!(e); frames()
+  @test e.buf.view == :text && e.buf.lines[1] == "<!DOCTYPE html><title>Again</title><p>New words</p>"
+  press(Keys.e, Keys.cmd)
+  @test K.html_shown(e) && e.nodes[(:html, e.buf.path)].browser.html == "<!DOCTYPE html><title>Again</title><p>New words</p>"
+end
+
 @testset "what a server can answer" begin
   # A server that keeps a page as Markdown and as HTML sends the Markdown, whatever the address ends in
   K.navigate!(e, "https://example.com/docs/")
@@ -255,7 +335,7 @@ end
   empty!(browsed)
   K.navigate!(e, "example.com/plain.txt")
   frames()
-  @test e.buf.path == at && browsed == ["https://example.com/plain.txt"] && occursin("sent no Markdown", said())
+  @test e.buf.path == at && browsed == ["https://example.com/plain.txt"] && occursin("sent no page that Ladder shows", said())
   # No such page, a page that Ladder may not read, and a server that doesn't answer
   empty!(browsed)
   K.navigate!(e, "example.com/none.md"); frames()

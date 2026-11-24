@@ -5238,6 +5238,7 @@ table of the other. So has an HTML file: the page that its HTML makes.
 """
 file_views(b::Buffer) = begin
   (b.view in FILE_VIEWS && !isdir(b.path)) || return ()   # a folder that shows in the page has one way to show
+  served_html(b) && return SERVED_VIEWS   # a page of HTML from a web server has no file of bits and bytes
   (json_page(b) || html_page(b)) && return FILE_VIEWS
   ext = lowercase(splitext(b.path)[2])
   ext in TABLES ? (text_file(b.path) ? FILE_VIEWS : ()) :
@@ -5761,6 +5762,8 @@ end
 "Show the file of the page at the level `view`: :bits, :hex, :text, or :file for the tree of a JSON file and the table of a CSV file"
 file_level!(e, view::Symbol) = begin
   b = e.buf
+  # A page of HTML from a web server has its HTML already, at each of its levels
+  served_html(b) && return (b.view = view; b.caret = b.anchor = (1, 0); b.saved = b.version += 1; e.scroll.offset = 0px; focus(e); e)
   at = place_in_file(e)
   shown = look(b.path, view)
   b.lines, b.about, b.view = shown.lines, shown.about, shown.view
@@ -22751,8 +22754,12 @@ end
 
 const HTMLS = (".html", ".htm")
 
-"True when the page shows an HTML file at one of its levels: as its page, its text, its bytes in hexadecimal or its bits"
-html_page(b::Buffer) = b.view in FILE_VIEWS && lowercase(splitext(b.path)[2]) in HTMLS && isfile(b.path) && text_file(b.path)
+"""
+True when the page shows an HTML file at one of its levels: as its page, its
+text, its bytes in hexadecimal or its bits. A page of HTML from a web server
+counts too: see "a page from a web server".
+"""
+html_page(b::Buffer) = b.view in FILE_VIEWS && (served_html(b) || lowercase(splitext(b.path)[2]) in HTMLS && isfile(b.path) && text_file(b.path))
 
 "True when the page shows an HTML file as the page that its HTML makes"
 html_shown(e) = e.buf.view == :file && html_page(e.buf)
@@ -22767,11 +22774,17 @@ end
 "The HTMLPage of the HTML file that the page shows. A file that another file takes the window from loses its page, and its scripts end."
 html_part(e) = node!(() -> HTMLPage(path=e.buf.path), e, (:html, e.buf.path))
 
-"The Browser of `v`, which gets the file and the files that it names, and shows the page"
+"""
+The Browser of `v`, which gets the file and the files that it names, and shows
+the page. A page from a web server came already: the Browser gets the files
+that it names, and a link of the page goes where Ladder goes, so ⌘⌥← comes back.
+"""
 html_browser(v::HTMLPage) = begin
   v.browser === nothing || return v.browser
   e = editor(v)
   files = Webfiles.Files(getter=(a...) -> WEB_GETTER[](a...), online=() -> web_online(e))
+  isremote(v.path) && return v.browser = own!(v, Browsers.Browser(html=get(SERVED_HTML, v.path, ""), base=v.path, files=files,
+                                                                  open=url -> BROWSER[](url), leads=url -> follow_remote!(e, url)))
   v.read = mtime(v.path)
   v.browser = own!(v, Browsers.Browser(address=v.path, files=files, open=url -> BROWSER[](url)))
 end
@@ -22780,7 +22793,7 @@ describe(v::HTMLPage) = begin
   e = editor(v)
   b = html_browser(v)
   # A file that changed on the disk shows afresh, as after a browser's reload
-  at = mtime(v.path)
+  at = isremote(v.path) ? v.read : mtime(v.path)
   at == v.read || (v.read = at; Browsers.reload!(b))
   carry_sums!(v, b)
   b.zoom = round(Float64(e.zoom), digits=2)
@@ -23065,8 +23078,8 @@ go_view!(v::ViewBlock) = begin
   e = top_editor(editor(v))
   to = v.target
   isempty(to) && return handled
-  # A page of Markdown on a web server shows in the window, and any other page in your browser
-  has_scheme(to) && return (reads_here(e, to) ? get_page!(e, to, else_browser=true) : BROWSER[](to); handled)
+  # A page of Markdown or of HTML on a web server shows in the window, and anything else in your browser
+  has_scheme(to) && return (Remote.isaddress(to) && page_online(e) ? get_page!(e, to, else_browser=true) : BROWSER[](to); handled)
   ispath(to) || return handled
   sent = v.sent
   show_path!(e, to)
@@ -31008,6 +31021,7 @@ mode_part(e) = e.buf.view == :markdown || !isempty(file_views(e.buf)) || julia_f
 const FILE_VIEWS = (:bits, :hex, :text, :file)   # the ways that a file with levels shows, from the lowest level
 const FILE_LEVELS = ("the file's bits", "the file's bytes in hexadecimal", "the file's text")   # and the tree or the table over them
 const PAGE_LEVELS = ("the symbols of the part with the caret", "the graphics that the symbols make")
+const SERVED_LEVELS = ("the HTML that the server sent", "the page that the HTML makes")   # of a page of HTML from a web server
 const BLOCK_LEVELS = ("the symbols that make this", "the graphics that the symbols make")
 const LEVELS_KEY = :levels
 const STOP_W = 24px      # the room of the dot of a level between the two ends, with the line that goes through it
@@ -31053,6 +31067,7 @@ levels(d::Document) = begin
   b = e.buf
   views = file_views(b)
   isempty(views) && return full_block(e) === nothing ? PAGE_LEVELS : BLOCK_LEVELS
+  served_html(b) && return SERVED_LEVELS
   length(views) == 3 ? FILE_LEVELS : (FILE_LEVELS..., json_page(b) ? "the tree of the file's values" : html_page(b) ? "the page that the HTML makes" : "the file's table")
 end
 
@@ -43220,7 +43235,16 @@ add_command!(copy_link_to_block!, title="Copy a link that shows the block at the
 # page as Markdown and as HTML sends the Markdown. What comes is a page of
 # Markdown when the server says so, or when the server doesn't say what it is
 # and the address ends as a Markdown file's name does, like `.md`. See
-# remote.jl. Anything else isn't a page for Ladder, and your browser opens it.
+# remote.jl.
+#
+# A server that has no Markdown at the address sends a page of HTML. Ladder
+# shows the page that the HTML makes, with its own engine, as it shows an
+# HTML file: see "an HTML file as its page". The page covers the window
+# under the top bar, and it's yours to use: its scripts run, the wheel
+# scrolls it, and you type in its fields. ⌘E shows the HTML that the server
+# sent, and ⌘E again the page. A click on a link of the page goes where a
+# link of a page of Markdown goes, so ⌘⌥← comes back. Anything else that a
+# server sends, like a PDF file or a picture, opens in your browser.
 #
 # The window goes on showing the page that it has while the new one comes,
 # and words under the top bar say that Ladder is getting it. If the server
@@ -43234,15 +43258,18 @@ add_command!(copy_link_to_block!, title="Copy a link that shows the block at the
 #
 # A link of the page is from the page's own address: `../prices.md` is in the
 # folder over the page's, on the same server. A click on a link asks for what
-# it names. Markdown shows in the window, and anything else opens in your
-# browser. A link to a heading of the page, like `#prices`, goes there. A
-# picture is from the page's address too.
+# it names. Markdown and HTML show in the window, and anything else opens in
+# your browser. What the server says of an address that it has nothing for
+# shows too, as a browser shows it. A link to a heading of the page, like
+# `#prices`, goes there. A picture is from the page's address too.
 #
 # In a page of your own, a click on a link to an address that ends as a
 # Markdown file's name does asks the server too. Any other address opens in
 # your browser, as it always has, without Ladder asking for it first.
 #
-# Somebody else wrote the page, so three rules keep it from the Mac:
+# Somebody else wrote a page of Markdown, so three rules keep it from the
+# Mac. A page of HTML is kept from the Mac as a `view` block keeps one: see
+# "a page of the web".
 #
 #   - It runs no code. A `ui` block, a sum in a line of text and a `check`
 #     block show as their code. ⌘Return runs nothing.
@@ -43348,33 +43375,50 @@ end
 
 """
 Do what `got`, the server's answer for the page `a`, calls for. A page of
-Markdown shows in the window. Anything else that the server sent opens in
-your browser. When the server sent nothing, or said that it has no such
-page, words under the top bar say so.
+Markdown shows in the window, and so does the page that a page of HTML
+makes. Anything else that the server sent, like a PDF file, opens in your
+browser. When the server sent nothing, or said that it has no such page,
+words under the top bar say so. A link to a page that the server has
+nothing for shows what the server says of it, as a browser does.
 """
 land_page!(e, a::PageAsked, got) = begin
   unsay_getting!(e)
   if Remote.ismarkdown(got)
-    b = remote_buffer(got)
-    was = get(e.buffers, b.path, nothing)
-    e.buffers[b.path] = b
-    if was !== nothing && e.buf === was
-      # The page that shows was asked for again: the new text shows from where the old was scrolled to
-      b.offset = e.scroll.offset
-      e.buf = b
-    elseif !a.again
-      open!(e, b.path; record=a.record)
-    end
+    b = place_page!(e, a, remote_buffer(got))
     heading = Remote.place(a.address)
     isempty(heading) || e.buf !== b || go_heading!(e, b.path, heading)
+  elseif Remote.ishtml(got) && (Remote.ok(got) || a.else_browser)
+    place_page!(e, a, served_buffer(got))
   elseif got.status == 0 || (!Remote.ok(got) && !a.else_browser)
     say_result!(e, Remote.problem(got))
   else
-    # A page of HTML, a picture, or what a server says to a link that it has nothing for: a browser shows those
+    # A picture, a PDF file, or a page that's neither Markdown nor HTML: a browser shows those
     BROWSER[](a.address)
-    a.else_browser || say_result!(e, "$(Remote.host(a.address)) sent no Markdown, so your browser has the page.")
+    a.else_browser || say_result!(e, "$(Remote.host(a.address)) sent no page that Ladder shows, so your browser has it.")
   end
   e
+end
+
+"""
+Show `b`, the page that came for `a`, in the window of `e`, and keep it among
+the window's pages. A page that was asked for again takes the place of the
+one that showed, from where that was scrolled to, and at the same level.
+"""
+place_page!(e, a::PageAsked, b::Buffer) = begin
+  was = get(e.buffers, b.path, nothing)
+  e.buffers[b.path] = b
+  delete!(e.nodes, (:html, b.path))   # a page of HTML that showed at the address makes its page afresh
+  if was !== nothing && served_html(was) && served_html(b)
+    b.view = was.view
+  end
+  if was !== nothing && e.buf === was
+    # The page that shows was asked for again: the new text shows from where the old was scrolled to
+    b.offset = e.scroll.offset
+    e.buf = b
+  elseif !a.again
+    open!(e, b.path; record=a.record)
+  end
+  b
 end
 
 """
@@ -43396,6 +43440,32 @@ remote_buffer(got) = begin
   end
   b
 end
+
+"The HTML of each page of HTML from a web server that a window has: see `served_buffer`"
+const SERVED_HTML = Dict{String,String}()
+
+"""
+The page of HTML that the server's answer `got` holds, as a page that's read
+and not changed. It shows the page that its HTML makes, as an HTML file does,
+and the level under that shows its HTML. Its path is the address that the
+answer came from, which the page's links and pictures are from. A very long
+line of the HTML stops with an … at that level: the page has all of it.
+"""
+served_buffer(got) = begin
+  html = join(Remote.lines(got), "\n")
+  SERVED_HTML[got.address] = html
+  lines = map(shown_line, split(html, '\n'))
+  b = Buffer(path=got.address, view=:file, lang="html", lines=lines, disk=copy(lines), told=copy(lines), fixed=true)
+  b.sent = b.told
+  b.version = b.saved = (stamp[] += 1)
+  b
+end
+
+"True when `b` is a page of HTML from a web server, at either of its levels: the page that its HTML makes, or its HTML"
+served_html(b::Buffer) = b.view in SERVED_VIEWS && isremote(b.path)
+
+"The levels of a page of HTML from a web server, from the lowest"
+const SERVED_VIEWS = (:text, :file)
 
 """
 The whole web address that `src` means in the page from a web server that

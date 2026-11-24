@@ -29,7 +29,8 @@
 #     and down arrows, Home and End.
 #   - A click on a link goes to its page. A link to the place of a name in the
 #     same page scrolls there. An address that's no page of the web, like
-#     `mailto:`, is given to `open`.
+#     `mailto:`, is given to `open`. With `leads`, the owner of the view goes
+#     to a link's page itself: the view gives it the address.
 #   - A click on a field for text gives it the keyboard. You type in it, move
 #     the caret with the arrows, select with Shift, and ⌘A, ⌘C, ⌘X and ⌘V do
 #     what they do in any field. Return sends the field's form, and Tab goes
@@ -132,6 +133,7 @@ end
   takes::Any = ev -> true   # true when the page gets a click, a turn of the wheel or a pinch. One that it doesn't get goes to the nodes above.
   scripts::Bool = true      # run the page's scripts
   open::Any = open_url      # opens an address that's no page of the web, like `mailto:`
+  leads::Any = nothing      # goes where a link, a sent form or a script leads, for an owner that shows that page itself. With nothing, the view goes there.
   say::Any = (level, text) -> nothing   # called with each line that a script prints
   files::Files = Files()
   view::View = View()       # the page, laid out
@@ -245,7 +247,8 @@ end
 Go where the page asks to: a link that was clicked, a form that was sent, or
 a script that set `location.href`. A page from the web doesn't lead to a file
 of this computer, and `javascript:` leads nowhere. A link to a place in the
-page that shows scrolls there.
+page that shows scrolls there. Any other address goes to `b.leads`, when the
+view has one, and the view shows nothing new itself.
 """
 follow!(b::Browser, address::AbstractString) = begin
   to = String(strip(address))
@@ -258,7 +261,7 @@ follow!(b::Browser, address::AbstractString) = begin
     scroll!(b, e === nothing ? 0.0 : place(b, e)[2])
     return b
   end
-  go!(b, to)
+  b.leads === nothing ? go!(b, to) : (b.leads(to); b)
 end
 
 escaped(s) = replace(s, '&' => "&amp;", '<' => "&lt;", '>' => "&gt;", '"' => "&quot;")
