@@ -40438,8 +40438,8 @@ bind!(r::Scan, n, span, words="", call=false; name=String(Syntax.sourcetext(n)))
   nothing
 end
 
-"The code of a type, as the list shows it"
-type_text(n) = (text = Syntax.sourcetext(n); occursin('\n', text) ? "" : clip_note(bare_names(text)))
+"The code of a type, as the list shows it. Not `type_text`, which gives the text of a type that's a value."
+type_code(n) = (text = Syntax.sourcetext(n); occursin('\n', text) ? "" : clip_note(bare_names(text)))
 
 "The name in the first line of a type: Room in `Room{T} <: Shape`"
 type_name(n) = iskind(n, Syntax.K"<:", Syntax.K"curly") && !isempty(kids(n)) ? type_name(kids(n)[1]) : n
@@ -40471,7 +40471,7 @@ target!(r::Scan, n, span, top, words="") = begin
   if iskind(n, Syntax.K"Identifier")
     bind!(r, n, span, words)
   elseif iskind(n, Syntax.K"::")
-    length(c) == 2 && target!(r, c[1], span, top, type_text(c[2]))
+    length(c) == 2 && target!(r, c[1], span, top, type_code(c[2]))
   elseif iskind(n, Syntax.K"=", Syntax.K"in") && length(c) == 2
     target!(r, c[1], span, top)
     scan!(r, c[2], span, top)
