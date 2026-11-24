@@ -1,6 +1,5 @@
 # One satellite of the fleet on the page "Data centres in space", as a 3D model
-# with materials. Its sizes come from the page's sums, as those of the model in
-# satellite.html do.
+# with materials. Its sizes come from the page's sums.
 #
 # In Ladder, a `view` block that names this file shows the model:
 #
@@ -16,10 +15,9 @@
 # writes pages/satellite.glb, the same model at the page's first numbers. A
 # .glb file is fixed, so that one follows nothing.
 #
-# The satellite is the one that pages/satellite.html draws, with more of its
-# parts worked out: seams and tape on the foil, wings in bays, yokes for the
-# drums, sleeves where the loops of tube pass the tips, the coolant's pipes,
-# baffles on the star trackers.
+# The model shows small parts too: seams and tape on the foil, wings in bays,
+# yokes for the drums, sleeves where the loops of tube pass the tips, the
+# coolant's pipes, baffles on the star trackers.
 #
 # The model also has what's round the satellite: the Sun as a light, and a
 # picture of the whole sky with the Earth in it, 1000 km below. Ladder's viewer

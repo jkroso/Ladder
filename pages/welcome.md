@@ -598,8 +598,6 @@ The scripts of the page can read the document's sums. `ladder.sums` has the valu
 </body>
 ```
 
-The page [space-data-centres.md](space-data-centres.md) draws one of its satellites in 3D this way, with three.js, from the file `satellite.html` beside it. When you go to that file from its block, the satellite there keeps your page's sums.
-
 A block in the language `web` is a `view` block too: `web` is the name that it had before.
 
 ## A view that code makes

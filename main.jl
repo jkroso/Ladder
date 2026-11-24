@@ -22377,7 +22377,7 @@ keyboard_part(v::HTMLPage) = html_browser(v)
 # the file is. Its line names the file:
 #
 #     ```view
-#     satellite.html
+#     plan.pdf
 #     ```
 #
 # The name can be of a file or a folder beside the document, a path like
