@@ -120,7 +120,9 @@ On a page with a `schedule` block, an item that repeats has a bar for each time 
 | ⌘⇧E | Saves the page as a page of HTML, for a website |
 | ⌘Return | Sends the page to an agent that waits for it |
 | ⌘, | Opens the settings in a window of their own. Press it again to close that window. |
-| ⌘W | Closes the file and shows its folder. On a folder, it closes the folder. In a window with no file, it closes the window. |
+| ⌘T | Opens a new tab and the file finder. The file that you choose shows in the new tab. |
+| ⌘1 to ⌘9 | Show the first tab to the ninth tab in the sidebar |
+| ⌘W | Closes the file's tab and shows the tab under it. On the last tab, it shows the file's folder. On a folder, it shows the tab that showed last, or with no tabs it closes the folder. In a window with no file, it closes the window. |
 | ⌘\ | Shows and hides the list of files |
 | ⌘⇧\ | Gives the list of files the keyboard. Press esc to go back to the text. |
 | ⌘⇧. | Shows the hidden files in the list of files, or leaves them out again |
@@ -1187,7 +1189,9 @@ The command Show As App opens the page in a window that has only the page: no si
 
 ## Files, menus and settings
 
-The button at the top left shows the files in this folder. Under the file that shows, the list has the file's headings and its components, such as a slider, a sheet or a spreadsheet. When another file shows, the list closes the old file and opens the new one. Click the icon beside a file to open or close it. Click a heading or a component to go to it. Press ⌘⇧\ to use the list with the keyboard: ↑ and ↓ move through it, → and ← show and hide what's under an item, and Return opens a file or goes to a heading.
+The button at the top left shows the sidebar. At its top are the files that are open, as tabs. Each file that you open gets a tab at the bottom of them, and it stays there until you close it with ⌘W. Click a tab to show its file again, or press ⌘1 for the first tab, ⌘2 for the second, and so on. Press ⌘T for a new tab: the file finder opens, and the file that you choose shows in that tab. Hold the mouse over a tab, and click the × at its right to close it, or click it with the middle button of the mouse. A tab with changes that aren't saved has a dot. A tab shows git's letter for its file too, as the list of files does, like M for a file with changes. A terminal's tab has a ring that turns while a command runs in it. Right-click a tab for its file's menu. When two tabs have the same name, each shows the name of its folder after it.
+
+Under the tabs, the sidebar shows the files in this folder. Under the file that shows, the list has the file's headings and its components, such as a slider, a sheet or a spreadsheet. When another file shows, the list closes the old file and opens the new one. Click the icon beside a file to open or close it. Click a heading or a component to go to it. Press ⌘⇧\ to use the list with the keyboard: ↑ and ↓ move through it, → and ← show and hide what's under an item, and Return opens a file or goes to a heading.
 
 A file that isn't text shows as what it is, and it has the whole window under the top bar. A picture and a page of a PDF file fit the window. Pinch, or hold ⌘ and scroll, to make one bigger, and drag to move it. ← and → turn the pages of a PDF file. Put the mouse at the foot of the window for buttons that do the same. A video has black round its picture, and its controls lie over the foot of the picture while the mouse moves. F makes it fill the screen. A 3D model turns as you drag it.
 
@@ -1267,4 +1271,4 @@ Press ⌘, to open [the settings](settings/settings.md) in a window of their own
 
 The Ladder app updates itself. It gets a newer version while you work, and the new version takes the place of this one when you quit. A box at the end of the settings turns that off.
 
-When you open Ladder again, it opens where you were when you quit: the file or the folder that the front window showed, with the caret and the scroll where they were. If you closed the file and its folder with ⌘W, it opens that folder. The first time, it opens your [startup page](settings/startup.md). It opens that page too if the file or the folder is gone, or if Ladder stopped before you quit it.
+When you open Ladder again, it opens where you were when you quit: the file or the folder that the front window showed, with the caret and the scroll where they were, and with the tabs that it had open. If you closed the file and its folder with ⌘W, it opens that folder. The first time, it opens your [startup page](settings/startup.md). It opens that page too if the file or the folder is gone, or if Ladder stopped before you quit it.

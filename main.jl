@@ -1779,7 +1779,8 @@ end
 Show the file at `path`. A file that's already open keeps its changes. The
 file that leaves goes on the list that `go_back!` reads, unless `record` is false.
 A folder shows too, when its kind has a method of `page_view`. The sidebar
-then lists the folder that it's in, as it does for a file.
+then lists the folder that it's in, as it does for a file. A file that shows
+gets a tab in the sidebar, if it hasn't one: see "the files that are open, as tabs".
 """
 open!(e, path; record=true) = begin
   # A link in a part of another page opens its page in the window, not in the part
@@ -1790,6 +1791,8 @@ open!(e, path; record=true) = begin
   e.buf = get!(e.buffers, path) do
     isfile(path) ? load(path) : isdir(path) ? Buffer(path=path, view=:file) : Buffer(path=path)
   end
+  add_tab!(e)   # the file stays open as a tab in the sidebar until ⌘W closes it
+  delete!(e.nodes, :new_tab)   # a file that shows in a new tab takes the tab's place
   # The sidebar goes on listing the folder that it lists while a page from a web server shows
   if e.folder != dirname(path) && !isremote(path)
     e.folder = dirname(path)
@@ -1824,14 +1827,16 @@ end
 
 # --- closing a file ----------------------------------------------------------------------
 #
-# ⌘W closes the file that the window shows, and the window shows the folder
-# that the file is in, as a click on that folder in the sidebar's trail does.
-# ⌘W on a folder's page closes it, and the window stays open with no file in
-# it. ⌘W in a window that shows no file closes the window, and Ladder quits
-# when its last window closes. So three presses of ⌘W close a file's window:
-# the file, its folder, then the window. The settings window closes at once
-# while it shows a page of the settings. A file that closes keeps its changes,
-# and ⌘⌥← shows it again.
+# ⌘W closes the file that the window shows, and its tab in the sidebar. The
+# tab under it shows, or the one above when it was the last tab. ⌘W on the
+# last tab shows the folder that its file is in, as a click on that folder in
+# the sidebar's trail does. ⌘W on a folder's page shows the tab that showed
+# last, and with no tabs open it closes the folder, and the window stays open
+# with no file in it. ⌘W in a window that shows no file closes the window, and
+# Ladder quits when its last window closes. So three presses of ⌘W close the
+# window of a file that's the only tab: the file, its folder, then the window.
+# The settings window closes at once while it shows a page of the settings. A
+# file that closes keeps its changes, and ⌘⌥← shows it again, in a new tab.
 
 "True when the window shows no file, because ⌘W closed the page that it showed"
 nofile(e) = isempty(e.buf.path) && e.buf.fixed
@@ -1849,23 +1854,35 @@ closes_to(e) = begin
 end
 
 """
-Close the file that the window shows, and show the folder that it's in. A
-page with no such folder closes to no file. The page keeps its changes, and
-goes on the list that `go_back!` reads.
+Close the file that the window shows, and its tab, and show the tab under it.
+With no other tab open, show the folder that the file is in. A page with no
+such folder closes to no file. The page keeps its changes, and goes on the
+list that `go_back!` reads.
 """
 close_file!(e) = begin
+  delete!(e.nodes, :new_tab)   # a new tab closes too
+  next = tab_after_close!(e)
+  next === nothing || return open!(e, next)
   folder = closes_to(e)
   folder === nothing || return open_folder!(e, folder)
+  show_no_file!(e)
+end
+
+"Show no file in the window: an empty page that nothing can be typed in"
+show_no_file!(e) = begin
   leave_page!(e, "")
-  e.buf = Buffer(fixed=true)   # an empty page that nothing can be typed in
+  e.buf = Buffer(fixed=true)
   e.scroll.offset = 0px
   e.popup = :none
   e.goal = nothing
   e
 end
 
-"What ⌘W does: close the file that the window shows, or the window when it shows no file or a page of the settings"
-close_file_or_window!(e, w) = (nofile(e) || issettings(e)) ? (closes!(e, w) && close(w)) : close_file!(e)
+"""
+What ⌘W does: close the file that the window shows, or the window when it
+shows a page of the settings, or no file and no tab is open.
+"""
+close_file_or_window!(e, w) = (issettings(e) || (nofile(e) && isempty(tabs(e)) && !new_tab(e))) ? (closes!(e, w) && close(w)) : close_file!(e)
 
 # --- the files that showed before --------------------------------------------------------
 #
@@ -27005,14 +27022,14 @@ describe(p::Page) = begin
   reuse!(e.scroll, guide_under(e, page))
 end
 
-"What the page shows in a window with no file: the keys that open a file and that close the window"
+"What the page shows in a window with no file: the keys that open a file and that close the window, or the tab while a tab is open"
 nofile_view(e) = begin
   open_keys, close_keys = strip(hint(e, :open)), strip(hint(e, :close))
   Box(width(grow=grow), height(grow=grow),
     Column(child_gap=8px,
       Box(label("No file is open", 15px, color=colours.dim)),
       (isempty(open_keys) ? () : (Box(label("$open_keys finds a file", 13px, color=colours.faint)),))...,
-      (isempty(close_keys) ? () : (Box(label("$close_keys closes the window", 13px, color=colours.faint)),))...))
+      (isempty(close_keys) ? () : (Box(label("$close_keys closes the $(new_tab(e) || !isempty(tabs(e)) ? "tab" : "window")", 13px, color=colours.faint)),))...))
 end
 
 """
@@ -34083,11 +34100,14 @@ show_in_finder(path) = (Sys.isapple() && ispath(path) && run(pipeline(`open -R $
 
 """
 Show the menu of the file or the folder in the sidebar that the mouse is over,
-if it's over one. Under the files, it's the menu of the sidebar's own folder,
-unless a kind of folder lists what it holds its own way.
+if it's over one, or of the file of a tab. Under the files, it's the menu of
+the sidebar's own folder, unless a kind of folder lists what it holds its own way.
 """
 file_menu!(e, w) = begin
   e.panel || return
+  # The mouse finds the item of the row that it's over, in either tree
+  tab = Tree.item_under(tab_tree(e), w)
+  tab !== nothing && tab.parent === tab_tree(e) && return tab_menu!(e, w, tab.firstchild.path)
   tree = file_tree(e)
   item = Tree.item_under(tree, w)
   if item === nothing
@@ -34286,9 +34306,10 @@ move!(e, old, new; links=true) = begin
     b = e.buffers[to(p)] = pop!(e.buffers, p)
     b.path = to(p)
   end
-  # Going back to the file still finds it
+  # Going back to the file still finds it, and its tab stays open
   map!(to, e.back, e.back)
   map!(to, e.ahead, e.ahead)
+  map!(to, tabs(e), tabs(e))
   foreach(p -> READ[to(p)] = pop!(READ, p), paths_inside(READ, old))
   foreach(k -> e.nodes[(k[1], to(k[2]))] = pop!(e.nodes, k), nodes_inside(e, old, kinds=(:read, :outline)))
   for item in items(file_tree(e), hidden=true)
@@ -34614,14 +34635,19 @@ const trasher = Ref{Function}(trash)
 """
 Move the file or the folder at `path` to the Trash and take it out of the
 sidebar. A folder goes with everything in it. Changes that aren't saved are
-written to their files first, so they are in the Trash too. If the file that
-was showing went, the next file in the sidebar shows.
+written to their files first, so they are in the Trash too. Their tabs close.
+If the file that was showing went, the tab under its tab shows, or with no
+other tab open, the next file in the sidebar.
 """
 trash!(e, path) = begin
   gone = paths_inside(e.buffers, path)
   foreach(p -> dirty(e.buffers[p]) && save!(e.buffers[p]), gone)
   ispath(path) && !trasher[](path) && return
   at = something(findfirst(==(path), e.files), 1)
+  ts = tabs(e)
+  # The tabs over the one of the file that shows, that stay open
+  over = count(p -> !inside_path(p, path), ts[1:something(findfirst(==(e.buf.path), ts), length(ts) + 1)-1])
+  filter!(p -> !inside_path(p, path), ts)
   foreach(p -> delete!(e.buffers, p), gone)
   foreach(p -> delete!(READ, p), paths_inside(READ, path))
   foreach(k -> delete!(e.nodes, k), nodes_inside(e, path))
@@ -34629,11 +34655,265 @@ trash!(e, path) = begin
   inside_path(e.folder, path) && (e.folder = dirname(path))
   list_files!(e)
   if inside_path(e.buf.path, path)
-    open!(e, isempty(e.files) ? joinpath(e.folder, "Untitled.md") : e.files[min(at, end)])
+    open!(e, !isempty(ts) ? ts[min(over + 1, end)] : isempty(e.files) ? joinpath(e.folder, "Untitled.md") : e.files[min(at, end)])
   else
     focus(e)
   end
   e
+end
+
+# --- the files that are open, as tabs -------------------------------------------------------
+#
+# Each file that shows in the window stays open as a tab at the top of the
+# sidebar, over the folder, until ⌘W closes it. The tabs are in the order that
+# their files opened, so a new one goes at the bottom. A click on a tab shows
+# its file again, from where it was scrolled to, and the tab of the file that
+# shows is shaded. While the mouse is over a tab, an × at its right end closes
+# it, and so does a click with the middle button. A tab whose file has changes
+# that aren't saved has a dot where the × shows. A tab shows what the tree
+# shows of its file too: git's letter, like M for a file with changes, and a
+# dot when an agent waits for the page. A terminal's tab has a ring that
+# turns while its shell runs a command. A right-click shows the file's menu. A folder that shows in the page has no tab, and nor have the
+# pages of the settings. When two tabs have the same name, each shows the name
+# of its folder after it. When the tabs need more room than a third of the
+# window, they scroll, and the tab of the file that shows stays in sight.
+#
+# ⌘W closes the tab of the file that shows: see "closing a file". ⌘T opens a
+# new tab: the window shows no file, a tab called New Tab is at the bottom of
+# the tabs, and the file finder opens. The file that you choose shows in that
+# tab. ⌘W on it closes it, and the tab that showed last shows again. ⌘1 shows
+# the first tab, ⌘2 the second, and so on to ⌘9. A file that gets a new name
+# keeps its tab, and the tab of a file that goes to the Trash closes. Ladder
+# keeps the front window's tabs when it quits, and opens with them the next
+# time: see "where Ladder opens".
+
+"The files that are open in the window of `e`, as tabs at the top of the sidebar, in the order that they opened"
+tabs(e) = get!(() -> String[], e.nodes, :tabs)::Vector{String}
+
+"True when the page at `path` can have a tab: a file, a new page that has no file yet, or a page from a web server. A folder can't."
+tabbable(path) = !isempty(path) && (isremote(path) || !isdir(path))
+
+"Give the file that the window of `e` shows a tab at the bottom of the tabs, unless it has one. A page of the settings gets none."
+add_tab!(e) = begin
+  path = e.buf.path
+  tabbable(path) && !issettings(e) && !(path in tabs(e)) && push!(tabs(e), path)
+  e
+end
+
+"Close the tabs of files that have gone from the Mac and that the window has no page of, as when another app deleted one"
+drop_gone_tabs!(e) = filter!(p -> p == e.buf.path || isremote(p) || showable(e, p), tabs(e))
+
+"""
+Take the tab of the file that shows out of the tabs, and give the tab that
+shows in its place: the one that was under it, or the one above when it was
+the last. On a page that has no tab, like a folder's, it's the tab that showed
+last. It's nothing when no other tab is open.
+"""
+tab_after_close!(e) = begin
+  drop_gone_tabs!(e)
+  ts = tabs(e)
+  i = findfirst(==(e.buf.path), ts)
+  if i === nothing
+    isempty(ts) && return nothing
+    j = findlast(in(ts), e.back)
+    return j === nothing ? ts[end] : e.back[j]
+  end
+  deleteat!(ts, i)
+  isempty(ts) ? nothing : ts[min(i, end)]
+end
+
+"""
+Close the tab of the file at `path`. When its file is the one that shows, the
+file closes as ⌘W closes it, and the tab under it shows.
+"""
+close_tab!(e, path) = begin
+  path == e.buf.path && return (close_file!(e); nothing)
+  filter!(!=(path), tabs(e))
+  nothing
+end
+
+"True while the window shows the new tab that ⌘T opened, with no file in it yet"
+new_tab(e) = get(e.nodes, :new_tab, false) && nofile(e)
+
+"""
+Open a new tab, at the bottom of the tabs, and the file finder, to find the
+file to show in it. A new tab that shows already stays. The settings window
+has no tabs.
+"""
+new_tab!(e) = begin
+  e = top_editor(e)
+  issettings(e) && return e
+  nofile(e) || show_no_file!(e)
+  e.nodes[:new_tab] = true
+  open_finder!(e)
+  e
+end
+
+"Show the `n`th tab, from the top. Nothing happens when there are fewer tabs."
+show_tab!(e, n) = begin
+  e = top_editor(e)
+  drop_gone_tabs!(e)
+  n <= length(tabs(e)) && choose_tab!(e, tabs(e)[n])
+  nothing
+end
+
+"The tabs' rows, by the path of each one's file: the tabs, and \"\" for a new tab that shows"
+tab_rows(e) = new_tab(e) ? [tabs(e); ""] : tabs(e)
+
+"Show the file of the tab at `path`, and give the text the keyboard. A tab whose file has gone closes."
+choose_tab!(e, path) = begin
+  drop_gone_tabs!(e)
+  path in tabs(e) && path != e.buf.path && open!(e, path)
+  focus(e)
+  nothing
+end
+
+"A file that's open, as a tab at the top of the sidebar"
+@def mutable struct TabLabel <: SemanticUI
+  path::String = ""
+  close::Any = nothing   # its ×, made the first time the mouse is over the tab
+end
+
+"The × at the right end of a tab, while the mouse is over the tab. A click on it closes the tab."
+@def mutable struct TabClose <: SemanticUI
+  path::String = ""
+end
+
+"The tabs' list. It's a tree with no groups, so its rows look as the rows of the sidebar's tree of files do."
+tab_tree(e) = node!(() -> Tree.ListTree(guides=true, frame=false, arrows=false, onchoose=item -> choose_tab!(e, item.firstchild.path)), e, :tab_tree)
+
+"The name of the tab of `path`: the file's name, or the last name of the address of a page from a web server. A new tab has no file."
+tab_name(path) = isempty(path) ? "New Tab" : isremote(path) ? Remote.trail(path)[end][1] : basename(path)
+
+"""
+The name of the folder that the file of a tab is in, when another tab has the
+same name, or nothing. It tells the two apart. `fill_tabs!` finds the names
+that two tabs have.
+"""
+tab_folder(e, path) = !isempty(path) && !isremote(path) && tab_name(path) in get(e.nodes, :tab_twins, ()) ? basename(dirname(path)) : nothing
+
+describe(l::TabLabel) = begin
+  e = editor(l)
+  shows = l.path == e.buf.path
+  changed = haskey(e.buffers, l.path) && dirty(e.buffers[l.path])
+  over = Tree.hovered(l.parent)
+  over && l.close === nothing && (l.close = own!(l, TabClose()))
+  over && (l.close.path = l.path)
+  folder = tab_folder(e, l.path)
+  Row(width(grow=grow), height(grow=grow), padding(0px, 8px, 0px, 0px), child_gap=4px, clip=true, name="Tab",
+    mark(l, isempty(l.path) ? "plus-lg" : isremote(l.path) ? "globe" : file_icon(l.path)),
+    # The name loses its end, and not the × after it, when it's too long for the sidebar
+    Box(width(grow=grow), Alignment.Start, clip_x=true,
+      Row(Alignment.Center, child_gap=6px,
+        Box(label(tab_name(l.path), color=colours.ink, weight=shows ? "Semibold" : "")),
+        (folder === nothing ? () : (Box(label(folder, 11px, color=colours.faint)),))...)),
+    tab_marks(e, l.path)...,
+    # The × takes the place of the dot of changes that aren't saved, as the mouse comes over the tab
+    (over ? (l.close,) : changed ? (Box(fixed(18px), Alignment.Center, Box(width(6px), height(6px), radius(3px), background(colours.dim))),) : ())...)
+end
+
+"""
+What the tab of the file at `path` shows of the file's state, after its name,
+as the sidebar's tree shows it: git's letter for a file with changes, like M
+or U, and a dot for a page that an agent waits for. A terminal's tab has a
+ring that turns while its shell runs a command, and none while the shell
+waits for one.
+"""
+tab_marks(e, path) = begin
+  (isempty(path) || isremote(path)) && return ()
+  o = object(e, path)
+  awaited = ismarkdown(path) && !isempty(agents(e, path))
+  v = get(e.nodes, (:term, path), nothing)
+  working = v !== nothing && Terms.busy(v)
+  working && redraw_in!(e, SPIN_FRAME)   # the ring turns
+  ((o isa FSObject ? entry_marks(e, o) : ())...,
+   (awaited ? (Box(width(6px), height(6px), radius(3px), background(colours.accent)),) : ())...,
+   (working ? (Box(fixed(18px), height(18px), Alignment.Center, justify=Alignment.Center, Spinner(size=11px)),) : ())...)
+end
+
+# A click with the middle button closes a tab, as it does in a web browser
+onkey(l::TabLabel, ::KeyPress{Keys.mouse_middle}) = (close_tab!(editor(l), l.path); handled)
+
+describe(c::TabClose) =
+  Box(fixed(18px), height(18px), radius(4px), Alignment.Center, justify=Alignment.Center, name="Close",
+      background(ishovered(c) ? colours.active : clear),
+    Icon("x-lg", size=10px, color=ishovered(c) ? colours.ink : colours.dim))
+
+cursor(::TabClose) = :hand
+onkey(c::TabClose, ::KeyPress{Keys.mouse_left}) = (close_tab!(editor(c), c.path); handled)
+
+"""
+The file's menu, for a right-click on its tab. It has no Rename, since the
+name of the file that's renamed is a text field in the sidebar's tree, and
+the file may not be in the folder that the tree lists. A page from a web server has no menu.
+"""
+tab_menu!(e, w, path) = begin
+  (isremote(path) || !ispath(path)) && return nothing
+  file_menu!(e, w, path, items=filter(!=("Rename"), file_menu(path)))
+end
+
+"""
+Make the tabs' list hold a row for each tab, and shade the tab of the file
+that shows. Tabs whose files have gone close, once a second.
+"""
+fill_tabs!(e, tree) = begin
+  t = get(e.nodes, :tabs_checked, 0.0)
+  time() - t > 1 && (drop_gone_tabs!(e); e.nodes[:tabs_checked] = time())
+  ts = tabs(e)
+  rows = tab_rows(e)
+  if [item.firstchild.path for item in tree.children] != rows
+    kept = Dict(item.firstchild.path => item for item in tree.children)
+    foreach(detach!, collect(tree.children))
+    foreach(p -> add_child!(tree, get(() -> Tree.Item(TabLabel(path=p)), kept, p)), rows)
+  end
+  listed = collect(tree.children)
+  i = findfirst(item -> item.firstchild.path == e.buf.path, listed)
+  tree.focused = i === nothing ? nothing : listed[i]
+  seen = Set{String}()
+  e.nodes[:tab_twins] = Set(n for n in map(tab_name, ts) if n in seen || (push!(seen, n); false))
+  tree
+end
+
+"""
+Give the Scroll `s` a place of its own. A Scroll with none takes the place that
+its node keeps for the Scroll that it made at that point in the frame, so the
+tabs' scroll, which shows only while there are many tabs, would take the
+place of the folder's files.
+"""
+own_scroll!(s) = (getfield(s, :state) === nothing && (s.offset = 0px); s)
+
+"The most of the sidebar's height that the tabs take, as a part of the window's height. More tabs scroll."
+const TABS_MOST = 1/3
+
+"""
+The tabs at the top of the sidebar, with a line under them, or nothing when no
+tab is open. When they need more room than `TABS_MOST` of the window, they
+scroll, and the tab of the file that shows comes into sight when another file
+shows.
+"""
+tab_list(e) = begin
+  rows = tab_rows(e)
+  isempty(rows) && return ()
+  tree = fill_tabs!(e, tab_tree(e))
+  high = Tree.ROW_HEIGHT   # the height of a row while the theme's text has its usual size, as the sidebar's has
+  pad = 6px
+  needs = high * length(rows) + 2pad
+  room = max(high + 2pad, (window_size(e)[2] - TOPBAR_H) * TABS_MOST)
+  scroll = node!(() -> own_scroll!(Scroll(width(grow=grow), height(grow=grow))), e, :tabs_scroll)
+  at = findfirst(==(e.buf.path), rows)
+  if needs > room && at !== nothing && get(e.nodes, :tab_shown, "") != e.buf.path
+    # The scroll knows how tall it is once it has been laid out, so a scroll that's new waits a frame
+    if scroll.viewport > 0px
+      scroll_into_view!(scroll, high * (at - 1), high * at + 2pad)   # with the room above the tab and under it
+      e.nodes[:tab_shown] = e.buf.path
+    else
+      redraw_in!(e, 0)
+    end
+  end
+  list = Column(width(grow=grow), Alignment.Start, padding(pad, 8px, pad, 8px),
+                with_theme(() -> describe!(tree), panel_theme()))
+  (Box(width(grow=grow), height(min(needs, room)), Alignment.Start, name="Tabs", border(1px, :solid, colours.line)[:bottom],
+       needs > room ? reuse!(scroll, list) : list),)
 end
 
 "Show the sidebar, if it's hidden, and give it the keyboard"
@@ -34644,9 +34924,9 @@ end
 
 """
 The sidebar keeps its width as it slides in and out from the left edge of the
-window, so only its right part shows while it's partly out. It lists the
-folder's files, and under each file that's open in the list, that file's
-headings and components.
+window, so only its right part shows while it's partly out. At its top are the
+tabs of the files that are open. Under them, it lists the folder's files, and
+under each file that's open in the list, that file's headings and components.
 """
 describe(s::Sidebar) = begin
   e = editor(s)
@@ -34656,10 +34936,12 @@ describe(s::Sidebar) = begin
   own = folder_view(e, directory(e))
   list = own.list === nothing ? Column(width(grow=grow), Alignment.Start, padding(0px, 8px, 12px, 8px),
                                        with_theme(() -> describe!(fill_tree!(e, file_tree(e))), panel_theme())) : own.list
+  own_scroll!(e.files_scroll)   # the tabs' scroll comes and goes over it
   Row(fixed(shows), height(grow=grow), Alignment.Start, clip=true,
     Column(fixed(wide), height(grow=grow), Alignment.Start, background(colours.panel), name="Files",
            border(1px, :solid, colours.line)[:right], offset_x=shows - wide,
       Box(width(grow=grow), height(TOPBAR_H)),   # under the top bar
+      tab_list(e)...,                            # the files that are open, over the folder
       Row(width(grow=grow), height(30px), padding(16px, 0px), Alignment.Center, clip=true, name="Folder",
         folder_trail(e, wide - 32px)...),
       (own.bar === nothing ? () : (own.bar,))...,
@@ -43060,6 +43342,7 @@ toggle_settings!(e) = begin
   s === nothing || return (front!(window_of(s)); e)
   s = build_editor(settings_page())
   s.settings = true
+  empty!(tabs(s))   # the settings window has no tabs, and its first page got one before it was the settings window
   foreach(name -> setfield!(s, name, getfield(e, name)), SHARED)
   s.remember = e.remember
   s.panel = false
@@ -43398,6 +43681,18 @@ add_commands!("The text", [Command(:paste_copy, "Paste a block from another page
 
 # ⌘⌥M puts a comment on the words that are selected: see "comments in the margin"
 add_commands!("The text", [Command(:add_comment, "Put a comment on the words that are selected", :edit, "cmd+opt+m", (e, w, _) -> add_comment!(e))])
+
+# ⌘T opens a new tab, and ⌘1 to ⌘9 show the tabs: see "the files that are open, as tabs"
+const TAB_ORDINALS = ("first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth")
+add_commands!("Files and windows", [
+  Command(:new_tab, "Open a new tab, and find a file to show in it", :window, "cmd+t", (e, w, _) -> new_tab!(e)),
+  (Command(Symbol(:tab_, n), "Show the $(TAB_ORDINALS[n]) tab", :window, "cmd+$n", (e, w, _) -> show_tab!(e, n)) for n in 1:9)...])
+
+"The commands that show a tab, from ⌘1 to ⌘9"
+const TabCommand = Union{(Val{Symbol(:tab_, n)} for n in 1:9)...}
+"The palette lists the command that shows a tab only while the window has that tab"
+works_here(e, ::V) where V<:TabCommand = length(tabs(top_editor(e))) >= parse(Int, String(V.parameters[1])[5:end])
+works_here(e, ::Val{:new_tab}) = !issettings(top_editor(e))
 
 # --- commands that are functions ----------------------------------------------------------
 #
@@ -55346,8 +55641,9 @@ end
 #
 # Ladder opens where you were when you last quit it: the file or the folder
 # that the front window showed, with the caret and the scroll where they were.
-# The sidebar lists the folder that it listed then, and it stays closed until
-# you open it. A window whose file and folder ⌘W closed was at the folder that
+# The tabs of the files that were open in it are open again, but for those
+# whose files have gone. The sidebar lists the folder that it listed then, and
+# it stays closed until you open it. A window whose file and folder ⌘W closed was at the folder that
 # its sidebar listed. The settings window doesn't count: Ladder opens where
 # the last window in front of the others was.
 #
@@ -55369,14 +55665,14 @@ const LAST_FRONT = Ref{Any}(nothing)
 """
 Where the window of `e` is, for the next time Ladder opens: the file or the
 folder that its page shows, the folder that its sidebar lists, its caret, its
-anchor and how far it's scrolled. A window that shows no file is at the folder
+anchor, how far it's scrolled and the files of its tabs. A window that shows no file is at the folder
 that its sidebar lists. It's nothing when that's nowhere on the Mac.
 """
 quit_place(e) = begin
   p = place_now(e)
   path = isempty(p.path) ? e.folder : p.path
   ispath(path) || return nothing
-  (; p..., path, folder=e.folder)
+  (; p..., path, folder=e.folder, tabs=filter(ispath, tabs(e)))
 end
 
 "Write where the window of `e` is into the place file, for the next time Ladder opens. A place that's nowhere leaves the file as it was."
@@ -55385,7 +55681,8 @@ keep_place!(e) = begin
   p === nothing && return nothing
   try
     mkpath(dirname(PLACE_FILE[]))
-    write(PLACE_FILE[], "path=$(p.path)\nfolder=$(p.folder)\ncaret=$(p.caret[1]),$(p.caret[2])\nanchor=$(p.anchor[1]),$(p.anchor[2])\noffset=$(p.offset.value)\n")
+    write(PLACE_FILE[], "path=$(p.path)\nfolder=$(p.folder)\ncaret=$(p.caret[1]),$(p.caret[2])\nanchor=$(p.anchor[1]),$(p.anchor[2])\noffset=$(p.offset.value)\n" *
+                        join("tab=$t\n" for t in p.tabs))
   catch
     # A file that can't be written only means that Ladder opens on the startup page
   end
@@ -55401,9 +55698,11 @@ take_place!() = begin
   file = PLACE_FILE[]
   isfile(file) || return nothing
   kept = Dict{String,String}()
+  tabbed = String[]   # a line for each tab
   for line in eachline(file)
     i = findfirst('=', line)
-    i === nothing || (kept[line[1:i-1]] = line[i+1:end])
+    i === nothing && continue
+    line[1:i-1] == "tab" ? push!(tabbed, line[i+1:end]) : (kept[line[1:i-1]] = line[i+1:end])
   end
   rm(file, force=true)
   path = get(kept, "path", "")
@@ -55411,12 +55710,13 @@ take_place!() = begin
   (ispath(path) && !(isdir(path) && ispackage(path))) || return nothing
   pair(s) = (m = match(r"^(\d+),(\d+)$", s); m === nothing ? (1, 0) : (parse(Int, m[1]), parse(Int, m[2])))
   (path=path, folder=get(kept, "folder", ""), caret=pair(get(kept, "caret", "")), anchor=pair(get(kept, "anchor", "")),
-   offset=px(something(tryparse(Float64, get(kept, "offset", "")), 0.0)))
+   offset=px(something(tryparse(Float64, get(kept, "offset", "")), 0.0)), tabs=filter(isfile, tabbed))
 end
 
-"An editor at the place `p` that `take_place!` gave: its file, or its folder in the page, and the folder that its sidebar listed"
+"An editor at the place `p` that `take_place!` gave: its file, or its folder in the page, its tabs, and the folder that its sidebar listed"
 place_editor(p) = begin
   e = blank_editor()
+  append!(tabs(e), p.tabs)   # the file of the place has a tab among them, or gets one at the bottom
   isdir(p.path) ? open_folder!(e, p.path) : open!(e, p.path)
   isdir(p.folder) && e.folder != p.folder && go_folder!(e, p.folder)
   e

@@ -187,6 +187,9 @@ end
 
 running(v::TerminalView) = v.shell !== nothing
 
+"True while the view's shell runs a command: see `Ptys.busy`"
+busy(v::TerminalView) = running(v) && Ptys.busy(v.shell)
+
 "Start the view's program: the person's shell, in the folder that the file is in"
 start!(v::TerminalView) = begin
   (running(v) || v.shown) && return v

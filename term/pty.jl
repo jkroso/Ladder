@@ -176,6 +176,13 @@ end
 "True while the program runs"
 alive(s::Shell) = process_running(s.process)
 
+"""
+True while a program that the shell started runs in the terminal, like `sleep`
+or an editor, and false while the shell waits for a command. The program that
+has the terminal's foreground is another than the shell then.
+"""
+busy(s::Shell) = !s.ended && alive(s) && (group = ccall(:tcgetpgrp, Cint, (Cint,), s.fd); group > 0 && group != getpid(s.process))
+
 "True when the program has ended and all that it wrote has been taken"
 done(s::Shell) = !alive(s) && @lock(s.lock, isempty(s.got))
 

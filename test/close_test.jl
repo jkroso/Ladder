@@ -91,6 +91,7 @@ end
   mkdir(app)
   write(joinpath(app, "read me.md"), "# Read me\n")
   K.open!(e, joinpath(app, "read me.md")); frames(w)
+  K.close_tab!(e, joinpath(folder, "a.md"))   # with another tab open, ⌘W would show it
   @test K.closes_to(e) === nothing
   press(w, Keys.w, cmd)
   @test K.nofile(e) && e in K.editors
