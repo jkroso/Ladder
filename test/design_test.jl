@@ -395,15 +395,40 @@ else
     click(v.parts[:last])
     settle()
     @test Models.marker(m) == length(Models.timeline(m))
-    # A right click on a step shows its menu
+    # A right click on a step shows its menu over the step. It looks as the menu of a table's column does.
     step = rect_middle(v.parts[(:step, 2)])
-    at(step); w.keys |= Keys.mouse_right; onkey(w, KeyPress{Keys.mouse_right}(0, w)); w.keys ⊻= Keys.mouse_right
-    onkey(w, KeyRelease{Keys.mouse_right}(0, w)); frame(w)
-    @test any(p -> p.key == :menu, popups(w))
+    right_click() = (at(step); w.keys |= Keys.mouse_right; onkey(w, KeyPress{Keys.mouse_right}(0, w)); w.keys ⊻= Keys.mouse_right;
+                     onkey(w, KeyRelease{Keys.mouse_right}(0, w)); frame(w))
+    menu() = only(p for p in popups(w) if p.key == V.MENU_KEY)
+    right_click()
+    @test menu().content isa V.Menu
+    @test menu().content.title == uppercase(Models.timeline(m)[2]["name"])
+    @test [it isa Pair ? it.second : it for it in menu().content.items] == ["Edit", "Rename", "Suppress", "Roll the history to here", "-", "Delete"]
+    @test K.num(menu().scene.top + menu().scene.height) < step[2]
+    # The arrows light a line, past the rule, and Return picks it
+    key(Keys.up); key(Keys.up)
+    @test menu().content.active == 4
+    key(Keys.down); key(Keys.down)
+    @test menu().content.active == 1
+    key(Keys.down); key(Keys.down)
+    @test menu().content.active == 3
+    key(Keys.enter)
+    settle()
+    @test !any(p -> p.key == V.MENU_KEY, popups(w))
+    @test get(Models.timeline(m)[2], "suppressed", false) === true
+    # A click on a line picks it too. The step is suppressed now, so its menu has Unsuppress.
+    right_click()
+    @test menu().content.items[3] == ("eye" => "Unsuppress")
+    click(menu().content.lines[3])
+    settle()
+    @test !any(p -> p.key == V.MENU_KEY, popups(w))
+    @test get(Models.timeline(m)[2], "suppressed", false) !== true
+    right_click()
     key(Keys.escape)
-    # The menu of a group lists the commands that have no button
+    @test !any(p -> p.key == V.MENU_KEY, popups(w))
+    # The menu of a group lists the commands that have no button, each with its icon
     click(v.parts[(:group, "Model", "Create")]); frame(w)
-    @test any(p -> p.key == :menu, popups(w))
+    @test menu().content isa V.Menu && all(it -> it isa Pair && !isempty(it.first), menu().content.items)
     key(Keys.escape)
   end
 

@@ -45,7 +45,7 @@
 @use "github.com/jkroso/UI.jl/Interface/Geometric"...
 @use "github.com/jkroso/UI.jl/Interface/Specific"...
 @use "github.com/jkroso/UI.jl/Interface/abstract" SemanticUI WrapMode describe focus theme handled window_of
-@use "github.com/jkroso/UI.jl/Interface/draw" draw cursor rect redraw_in! MouseScroll Pinch onpinch ishovered popup! close_popup! show_menu! show_tooltip! hide_tooltip! hittest
+@use "github.com/jkroso/UI.jl/Interface/draw" draw cursor rect redraw_in! MouseScroll Pinch onpinch ishovered popup! close_popup! show_tooltip! hide_tooltip! hittest
 @use "github.com/jkroso/UI.jl/Interface/image" register_image has_image
 @use "github.com/jkroso/UI.jl/Interface/Semantic/TextInput" TextInput
 @use Colors: Colorant, RGBA, RGB, @colorant_str, red, green, blue
@@ -111,6 +111,103 @@ onkey(::Card, ::KeyPress{Keys.mouse_left}) = handled
 onkey(::Card, ::KeyPress{Keys.mouse_right}) = handled
 onkey(::Card, ::KeyRelease{Keys.mouse_left}) = handled
 onmouse(::Card, ::MouseMove) = handled
+
+# --- menus ---------------------------------------------------------------------------
+
+# A menu of the editor looks as the menu of a column's heading in a page's
+# table does (SheetMenu and found_colours in main.jl): a cream card with round
+# corners, a line for each item that lights under the mouse, and small
+# capitals over the lines. In a dark page it has the page's own colours.
+
+"The colours of a menu: those of the menu of a table's column"
+menu_colours(t) = dark(t) ?
+  (frame=t.surface, pick=t.select, ink=t.text, dim=t.dim, line=colorant"rgb(86,86,94)", rule=t.line) :
+  (frame=colorant"rgb(233,224,202)", pick=colorant"rgb(224,212,185)", ink=colorant"rgb(27,23,16)", dim=colorant"rgb(110,104,88)",
+   line=colorant"rgb(176,164,136)", rule=colorant"rgb(221,212,192)")
+
+"""
+A menu that floats over the editor. Each of `items` is a line, `icon => words`
+with "" for no icon, or "-" for a rule between two groups. `title` goes over
+the lines in small capitals, and the line of `now` shows as chosen. A click on
+a line gives its number to `pick` and closes the menu. The up and down arrows
+light a line, and Return picks it.
+"""
+@def mutable struct Menu <: SemanticUI
+  items::Vector{Any} = Any[]
+  title::String = ""
+  now::Int = 0
+  pick::Any = nothing
+  active::Int = 0          # the line that the arrows lit, or 0
+  lines::Vector{Any} = Any[]
+end
+
+"A line of a `Menu`"
+@def mutable struct MenuLine <: SemanticUI
+  of::Any = nothing
+  i::Int = 0
+end
+
+const MENU_KEY = :design_menu
+
+"""
+Show a menu of `items` beside `anchor`, a node or a place in the window. It
+hangs under the anchor, or with `placement=:top` goes over it. See `Menu`.
+"""
+menu!(window, items, pick; anchor=window.mouse, placement=:below, gap=4px, width=210px, title="", now=0, t=theme()) = begin
+  m = Menu(items=collect(Any, items), pick=pick, title=title, now=now)
+  m.lines = Any[it isa Pair ? MenuLine(of=m, i=i) : nothing for (i, it) in enumerate(m.items)]
+  hide_tooltip!(window)
+  popup!(window, m; anchor, placement, gap, width, key=MENU_KEY, theme=t)
+  nothing
+end
+
+"How wide `node` is on the screen, and at least `least`: a menu under a field is as wide as the field"
+menu_width(node, least) = (r = rect(node); r === nothing ? least : max(least, r.width))
+
+describe(m::Menu) = begin
+  c = menu_colours(theme(m))
+  title = isempty(m.title) ? () :
+    (Row(width(grow=grow), height(22px), padding(8px, 0px), Alignment.Center, Box(words(m.title, 10px, color=c.dim, weight="Semibold"))),)
+  # A new box for each rule: one box in two places of a layout never finishes its layout
+  rule() = Box(width(grow=grow), height(13px), Alignment.Center, Box(width(grow=grow), height(1px), background(c.rule)))
+  Box(width(grow=grow), padding(6px), radius(8px), background(c.frame), border(1px, :solid, c.line),
+      shadow(0, 6, 16, RGBA(60 / 255, 45 / 255, 20 / 255, 0.2)),
+    Column(width(grow=grow), Alignment.Start, title..., (l === nothing ? rule() : l for l in m.lines)...))
+end
+
+describe(l::MenuLine) = begin
+  m = l.of
+  c = menu_colours(theme(m))
+  icon, text = m.items[l.i]
+  on = l.i == m.now
+  Row(width(grow=grow), height(28px), padding(8px, 0px), radius(6px), child_gap=8px, Alignment.Center,
+      background(on || l.i == m.active || ishovered(l) ? c.pick : c.frame),
+    (isempty(icon) ? () : (Glyph(icon, size=13px, color=on ? c.ink : c.dim, accent=c.dim),))...,
+    Box(width(grow=grow), Alignment.Start, clip_x=true, words(text, 13px, color=c.ink, weight=on ? "Semibold" : "")))
+end
+
+cursor(::MenuLine) = :hand
+onmouse(l::MenuLine, ::MouseMove) = (l.of.active = 0; handled)
+onkey(l::MenuLine, e::KeyPress{Keys.mouse_left}) = (choose!(l.of, l.i, e.window); handled)
+onkey(::MenuLine, ::KeyPress{Keys.mouse_right}) = handled
+
+"Close the menu, then tell it which item was picked"
+choose!(m::Menu, i, window) = (close_popup!(window, MENU_KEY); m.pick(i); nothing)
+
+"True when no key of ⌃, ⌘, ⌥ and ⇧ is down"
+plain(e) = !any(k -> k in e.window.keys, (Keys.ctrl, Keys.cmd, Keys.opt, Keys.shft))
+
+"Light the next line of `m` that isn't a rule, `by` one down or up, round from the last to the first"
+step!(m::Menu, by) = begin
+  lines = findall(l -> l !== nothing, m.lines)
+  isempty(lines) && return handled
+  at = findfirst(==(m.active), lines)
+  m.active = lines[at === nothing ? (by > 0 ? 1 : length(lines)) : mod1(at + by, length(lines))]
+  handled
+end
+onkey(m::Menu, e::KeyPress{Keys.down}) = plain(e) ? step!(m, 1) : handled
+onkey(m::Menu, e::KeyPress{Keys.up}) = plain(e) ? step!(m, -1) : handled
+onkey(m::Menu, e::KeyPress{Keys.enter}) = (plain(e) && m.active > 0 && choose!(m, m.active, e.window); handled)
 
 "The picture of the design, which fills the editor under its panels"
 @def mutable struct Scene <: SemanticUI
@@ -404,8 +501,8 @@ end
 "The menu of the commands of a group that have no button"
 more_menu(v::DesignView, g::Commands.Group, more, window) = begin
   under = get(v.parts, (:group, v.tab, g.name), nothing)
-  show_menu!(window, String[command_label(v, id) for id in more], 0px, 0px, 230px; under, gap=4px, item_height=28px,
-             onselect=i -> i > 0 && start!(v, more[i], window))
+  menu!(window, [command_icon(v, id) => command_label(v, id) for id in more], i -> start!(v, more[i], window);
+        anchor=something(under, window.mouse), width=230px, t=theme(v))
 end
 
 ribbon(v::DesignView) = begin
@@ -638,14 +735,17 @@ step_menu(v::DesignView, f, window) = begin
   m = v.model
   id, name = Int(f["id"]), String(f["name"])
   off = get(f, "suppressed", false) === true
-  items = ["Edit", "Rename", off ? "Unsuppress" : "Suppress", "Roll the history to here", "Delete"]
-  show_menu!(window, items, window.mouse[1], window.mouse[2], 200px; item_height=28px, onselect=i -> begin
+  items = ["pencil" => "Edit", "cursor-text" => "Rename", off ? "eye" => "Unsuppress" : "eye-slash" => "Suppress",
+           "skip-backward" => "Roll the history to here", "-", "trash3" => "Delete"]
+  # The history is at the foot of the editor, so the menu goes over the step
+  step = get(v.parts, (:step, id), nothing)
+  menu!(window, items, i -> begin
     i == 1 ? edit_step!(v, id, window) :
     i == 2 ? rename!(v, window, (:step, id), name, new -> Designs.change!(m, "timeline.rename", JSON.Object("feature" => id, "name" => new))) :
     i == 3 ? Designs.change!(m, "timeline.suppress", JSON.Object("feature" => id)) :
     i == 4 ? Designs.change!(m, "timeline.roll_to", JSON.Object("feature" => id)) :
-    i == 5 ? Designs.change!(m, "timeline.delete", JSON.Object("feature" => id)) : nothing
-  end)
+    i == 6 ? Designs.change!(m, "timeline.delete", JSON.Object("feature" => id)) : nothing
+  end; anchor=something(step, window.mouse), placement=:top, gap=6px, width=220px, title=uppercase(name), t=theme(v))
 end
 
 history(v::DesignView) = begin
@@ -1076,8 +1176,8 @@ field_look(t, on=false, hovered=false) =
 choice(v::DesignView, key, options, now, set) = begin
   t = theme(v)
   i = findfirst(o -> o.first == now, options)
-  press!(v, (key, :menu); act=e -> show_menu!(e.window, String[o.second for o in options], 0px, 0px, 162px; under=v.parts[(key, :menu)], gap=3px,
-                                              item_height=28px, onselect=n -> n > 0 && set(options[n].first))) do hovered
+  press!(v, (key, :menu); act=e -> menu!(e.window, ["" => o.second for o in options], n -> set(options[n].first);
+                                         anchor=v.parts[(key, :menu)], width=menu_width(v.parts[(key, :menu)], 120px), now=something(i, 0), t)) do hovered
     Row(width(grow=grow), field_look(t, false, hovered)..., padding(9px, 0px),
       Box(words(i === nothing ? "" : options[i].second, 12px)), Box(width(grow=grow)), Glyph("chevron-down", size=10px, color=t.dim))
   end
@@ -1134,13 +1234,13 @@ field_row(v::DesignView, f::Form, field::Commands.Field) = begin
     # A plane has a menu of the planes with names too. What's chosen there shows in the design as a click on it would.
     menu = flat ? (press!(v, (key, :planes); tip="Choose a plane by its name", act=e -> begin
       names = plane_names(v)
-      show_menu!(e.window, String[o.second for o in names], 0px, 0px, 150px; under=v.parts[key], gap=3px, item_height=28px, onselect=i -> begin
-        i > 0 || return
+      now = something(findfirst(o -> o.first == f.values[field.key], names), 0)
+      menu!(e.window, ["" => o.second for o in names], i -> begin
         f.values[field.key] = names[i].first
         empty!(shows)
         push!(shows, (kind=:plane, of=String(names[i].first), n=0, at=(0.0, 0.0, 0.0)))
         f.problem = ""
-      end)
+      end; anchor=v.parts[key], width=menu_width(v.parts[key], 120px), now, t)
     end) do hovered
       Box(width(22px), height(22px), radius(4px), background(hovered ? t.select : clear), Glyph("chevron-down", size=10px, color=t.dim))
     end,) : ()
