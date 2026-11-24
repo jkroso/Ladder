@@ -11073,6 +11073,48 @@ video_of(f::Fillable) = f.what !== nothing && f.what[1] == :node && f.what[2] is
 "How tall the buttons beside `f` are: a video has the button that shows what was said in it under the first"
 buttons_tall(f::Fillable) = video_of(f) === nothing && f.also === nothing ? FILL_SIDE : 2FILL_SIDE + FILL_GAP
 
+# The buttons beside a picture are put in place before the frame's layout, so
+# `rect` gives where the last frame put the picture. A scroll of the page since
+# then moves the picture as far, so the buttons move with it in the same frame.
+# Anything else that moved the picture, like a block above it that grew, puts
+# the buttons right on the next frame, which comes at once.
+
+"The scroll of the page that the last layout used, which the draw of the page keeps"
+draw(ctx, size, ui::ConcreteRect, p::Page) = begin
+  e = editor(p)
+  e.nodes[:laid_scroll] = e.scroll.offset
+  nothing
+end
+
+"True when `node` is a part of the page of `e`, so it moves when the page scrolls"
+scrolls_with_page(e, node) = begin
+  doc = get(e.nodes, :document, nothing)
+  while node isa SemanticUI && !(node isa Editor)
+    node === doc && return true
+    node = getfield(node, :parent)
+  end
+  false
+end
+
+"Where `f` is in the window in this frame: where the last layout put it, moved as far as the page has scrolled since"
+fill_rect(e, f::Fillable) = begin
+  r = rect(f)
+  r === nothing && return nothing
+  moved = get(e.nodes, :laid_scroll, e.scroll.offset) - e.scroll.offset
+  (moved == 0px || !scrolls_with_page(e, f)) && return r
+  (left=r.left, top=r.top + moved, width=r.width, height=r.height)
+end
+
+"The picture that has the buttons beside it draws again at once when it isn't where they were put for it"
+draw(ctx, size, ui::ConcreteRect, f::Fillable) = begin
+  at = get(editor(f).nodes, :fill_at, nothing)
+  (at === nothing || at[1] !== f) && return
+  r = at[2]
+  abs(num(ui.left - r.left)) + abs(num(ui.top - r.top)) + abs(num(ui.width - r.width)) + abs(num(ui.height - r.height)) > 0.5 &&
+    redraw_in!(f, 0)
+  nothing
+end
+
 """
 The button that makes the picture under the mouse fill the window, beside it.
 A video has a button under that one, which shows what was said in the video.
@@ -11080,25 +11122,27 @@ They show while the mouse is over the picture or the buttons, or between them,
 and while the drop-down of what was said is open.
 """
 fill_over(e) = begin
+  e.nodes[:fill_at] = nothing
   (zooming(e) === nothing && full_block(e) === nothing && e.popup == :none) || return ()
   win = window_of(e)
   win === nothing && return ()
   x, y = num(win.mouse[1]), num(win.mouse[2])
   # A picture under a path is in a live block that can fill the window too, so the smallest one under the mouse has the button
-  best, spot, least = nothing, nothing, Inf
+  best, spot, least, at = nothing, nothing, Inf, nothing
   for f in values(fills(e))
-    r = rect(f)
+    r = fill_rect(e, f)
     (r === nothing || button_above(f)) && continue
     s = fill_spot(e, r)
     if f.transcript !== nothing && f.transcript.open
-      best, spot = f, s
+      best, spot, at = f, s, r
       break
     end
     num(min(r.left, s[1])) <= x < num(max(r.left + r.width, s[1] + FILL_SIDE)) || continue
     num(min(r.top, s[2])) <= y < num(max(r.top + r.height, s[2] + buttons_tall(f))) || continue
     area = num(r.width) * num(r.height)
-    area < least && ((best, spot, least) = (f, s, area))
+    area < least && ((best, spot, least, at) = (f, s, area, r))
   end
+  e.nodes[:fill_at] = best === nothing ? nothing : (best, at)
   best === nothing && return ()
   b = best.button === nothing ? (best.button = own!(best, FillButton())) : best.button
   buttons = Any[b]
