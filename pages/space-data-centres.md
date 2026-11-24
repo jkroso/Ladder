@@ -38,7 +38,7 @@ show: Power of the cells
 
 ### The chips
 
-Chips break too, and nobody can swap them. Once the early failures are past, data centres replace about !`fail = 0.6Percent/yr` of their GPUs, each year.[^2] It's hard to find info on how that failure rate changes over time, but lets say it increases by !`ageing = 2Percent` each year. The share of the chips that still work after $t$ years is then
+Chips break too, and nobody can swap them. Once the early failures are past, data centres replace about !`fail = 0.6Percent/yr` of their GPUs, each year.[^2] It's hard to find info on how that failure rate changes over time, but lets say it increases by !`ageing = 3Percent` each year. The share of the chips that still work after $t$ years is then
 
 $$
 \text{working}(t) = \exp\!\left(-\frac{a}{b}\left(e^{b t} - 1\right)\right)
@@ -117,21 +117,15 @@ The separate radiator needs pipes over a small area, not over the back of every 
 
 The fleet is many copies of one satellite. Each copy is built for !`sat = 150kW` of computers. The fleet needs !`nsat = ceil(Int, compute / sat)` copies. Each copy runs !`one = compute / nsat` of the computers.
 
-The fleet's panels cover !`array_area = round(panels / (sunlight * float(eff)) / 1m^2)` square metres. Each copy has a body, wings of cells, and a radiator. The cells on one copy cover !`round(Int, array_area / nsat)` square metres. The radiator's area is worked out with the pipes, below.
+The fleet's panels cover !`array_area = round(panels / (sunlight * float(eff)) / m^2)` square metres. Each copy has a body, wings of cells, and a radiator. The cells on one copy cover !`round(Int, array_area / nsat)` square metres. The radiator's area is worked out with the pipes, below.
 
 Starmind AI1 is a satellite of about this power. Its wings span 70 metres, and it has 110 square metres of radiators for 150 kilowatts.[^4]
 
-Here is one copy, drawn from the sums on this page. It changes as you drag them: the span of the wings, the pipes, the radiator, the height. Drag it to turn it. Pinch it, or scroll with ⌘ held, to come nearer. The first button beside its top right corner makes it fill the window. The second goes to its file, satellite.html, where the model keeps these sums.
-
-```view
-satellite.html
-```
-
-Here is the same copy as a model in Ladder's own viewer. The file satellite.jl, beside this page, is Julia code that makes the model from the same sums. So this one changes as you drag them too, and it stays turned as you left it. Around it are the Sun and the Earth, from the height of the orbit. The first button beside it makes it fill the window.
+Here is a model, drawn from the parameters on this page. It changes as you change them: the span of the wings, the pipes, the radiator, the height. Drag it to turn it. Pinch it, or scroll with ⌘ held, to come nearer.
 
 ```view
 satellite.jl
-aspect: 2:1
+aspect: 16:9
 ```
 
 ```mermaid
