@@ -31194,7 +31194,10 @@ ring_part(ctx, e, ui) = begin
   it = item(e, run[1])
   it.first <= run[1] <= it.last || return
   across, wide = item_room(e, it)   # a part in a column of the page is as wide as the column
-  round_box(ctx, num(ui.left + across) - RING_OUT, num(ui.top + it.top) + 1, num(wide) + 2RING_OUT, max(4.0, num(it.tall) - 2), 8.0,
+  top, high = num(ui.top + it.top) + 1, max(4.0, num(it.tall) - 2)
+  # What a live block shows is LIVE_GAP under the top of its room, so the line is as far from it there as at the sides
+  it.content isa Live && ((top, high) = (num(ui.top + it.top + LIVE_GAP) - RING_OUT, num(it.tall - 2LIVE_GAP) + 2RING_OUT))
+  round_box(ctx, num(ui.left + across) - RING_OUT, top, num(wide) + 2RING_OUT, high, 8.0,
             fill=tint(colours.accent, 0.06), line=tint(colours.accent, 0.75), wide=1.5)
 end
 
