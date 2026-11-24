@@ -7,8 +7,9 @@
 @use Test: @test, @testset, @test_throws
 @use "../main" => K
 @use "../remote" => Remote
-@use "github.com/jkroso/MiniFB.jl" Window KeyPress Keys onkey Typed ontype
-@use "github.com/jkroso/UI.jl/Interface/draw" frame
+@use "github.com/jkroso/MiniFB.jl" Window KeyPress KeyRelease MouseMove Keys onkey onmouse Typed ontype
+@use "github.com/jkroso/UI.jl/Interface/draw" frame rect popups
+@use GeometryBasics: Vec2
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
 const px = K.px
 
@@ -384,6 +385,44 @@ end
   # The command is there for a page that only shows a file or a folder, too
   K.open!(e, dir); frames()
   @test e.buf.view == :file && any(c -> c.name == :navigate, K.palette_commands(e))
+end
+
+@testset "the path in the top bar starts at the server's name" begin
+  page!("https://example.com/docs/my%20guide/start.md", "# Start\n\nWords.\n")
+  @test Remote.trail("https://example.com/docs/my%20guide/start.md") ==
+        [("example.com", "https://example.com/"), ("docs", "https://example.com/docs/"),
+         ("my guide", "https://example.com/docs/my%20guide/"), ("start.md", "https://example.com/docs/my%20guide/start.md")]
+  @test Remote.trail("https://example.com/docs/") == [("example.com", "https://example.com/"), ("docs", "https://example.com/docs/")]
+  @test Remote.trail("https://example.com/") == [("example.com", "https://example.com/")]
+  @test Remote.trail("https://example.com") == [("example.com", "https://example.com")]
+  K.navigate!(e, "example.com/docs/my guide/start.md"); frames()
+  @test e.buf.path == "https://example.com/docs/my%20guide/start.md"
+  # The bar shows the page's own name, as it shows a file's name, and the path has the rest
+  @test K.bar_name(e) == "start.md"
+  at((x, y)) = (w.mouse = typeof(w.mouse)(px(x), px(y)); onmouse(w, MouseMove(Vec2{px}(px(x), px(y)), w)); frames(1))
+  middle(node) = (r = rect(node); (K.num(r.left) + K.num(r.width) / 2, K.num(r.top) + K.num(r.height) / 2))
+  showing() = any(p -> p.key == :title_trail, popups(w))
+  at(middle(e.nodes[:title])); sleep(K.TT_WAIT + 0.05); frames()
+  @test showing()
+  v = e.nodes[:title_trail]
+  @test v.steps == [("example.com", "https://example.com/"), ("docs", "https://example.com/docs/"),
+                    ("my guide", "https://example.com/docs/my%20guide/"), ("start.md", "https://example.com/docs/my%20guide/start.md")]
+  # A server doesn't say what's in a folder, so a › there lists nothing
+  @test isempty(v.arrows)
+  shot("remote_path.png")
+  # A right-click on a folder shows no file menu
+  c = v.crumbs["https://example.com/docs/"]
+  at(middle(c))
+  onkey(w, KeyPress{Keys.mouse_right}(0, w)); frames()
+  @test !any(p -> p.key == :menu, popups(w))
+  # A click on a folder asks the server for its page
+  n = length(asked)
+  w.keys |= Keys.mouse_left; onkey(w, KeyPress{Keys.mouse_left}(0, w)); frames(1)
+  w.keys ⊻= Keys.mouse_left; onkey(w, KeyRelease{Keys.mouse_left}(0, w)); frames(3)
+  @test asked[n+1:end] == ["https://example.com/docs/"]
+  @test e.buf.path == "https://example.com/docs/" && K.bar_name(e) == "docs"
+  @test e.back[end] == "https://example.com/docs/my%20guide/start.md"
+  at((5, 400))
 end
 
 @testset "a link in a page of your own" begin

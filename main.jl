@@ -31821,7 +31821,7 @@ describe(t::Title) = begin
   edited = dirty(b) || any(dirty, shown_buffers(e))
   # A name that's too long for its room in the bar ends in …, so that its start still shows
   room = get(e.nodes, :title_room, 10_000px) - (edited ? 70px : 16px)
-  named = something(page_title(e), name(b))
+  named = bar_name(e)
   # The headings over the caret and the component that it's on follow the name, as the path does. The name
   # stays in the middle while they change, so as much room as they take is empty before it. When there's
   # too little room, the biggest headings go first.
@@ -31855,6 +31855,13 @@ title_parts(parts) =
         (Icon(x.icon, size=11px, color=colours.faint), Box(width(4px)), label(elide(x.title, 13px, TT_PART), 13px, color=colours.dim)))...,
        Box(width(TT_PAD)))
      for x in parts)...)
+
+"""
+The name that the top bar shows: the page's title, or the name of its file.
+A page from a web server has the last name of its address, like `City` or
+`notes.md`, as the path shows it, and the path starts with the server's name.
+"""
+bar_name(e) = something(page_title(e), isremote(e.buf.path) ? Remote.trail(e.buf.path)[end][1] : name(e.buf))
 
 onkey(t::Title, ::KeyPress{Keys.mouse_right}) = begin
   e = editor(t)
@@ -32088,7 +32095,9 @@ title_trail!(e, t) = begin
   listing = searching || any(p -> p.content isa FolderList, popups(w))
   # A pinned path shows while the bar shows the file's name, with the mouse anywhere
   pinned = trail_pinned(e) && slideshow(e) === nothing && !as_app(e) && !screening(e)
-  if !((ishovered(t) || listing || pinned) && !nofile(e) && isabspath(path) && isdir(dirname(path)) && renaming(e, :title) != path && e.popup == :none)
+  # A page from a web server has a path too, from the server's name
+  if !((ishovered(t) || listing || pinned) && !nofile(e) && (isremote(path) || (isabspath(path) && isdir(dirname(path)))) &&
+       renaming(e, :title) != path && e.popup == :none)
     delete!(e.nodes, :title_hover)
     listing && (close_folder_lists!(e, w); close_title_search!(e, w))
     open && close_popup!(w, :title_trail)
@@ -32121,8 +32130,8 @@ show_title_trail!(e, t, w, path) = begin
   wide = window_size(e)[1]
   # The Mac draws its close, minimise and zoom buttons over the window, so the path starts after them
   start = mac_buttons_room(e) + 4px
-  all = steps(path, home_folder())
-  all[end] = (something(page_title(e), name(e.buf)), path)   # the file's name as the bar shows it
+  all = isremote(path) ? Remote.trail(path) : steps(path, home_folder())
+  all[end] = (bar_name(e), path)   # the file's name as the bar shows it
   parts = focus_parts(e)
   shown = title_steps(all, wide - 8px - start - trail_parts_wide(e, parts))
   v = get!(() -> own!(t, TitleTrail()), e.nodes, :title_trail)
@@ -32152,9 +32161,10 @@ describe(v::TitleTrail) = begin
   n = length(v.steps)
   for (i, (name, path)) in enumerate(v.steps)
     if i > 1
-      # The › after a folder lists what's in it. The one after an … stands for folders that aren't shown.
+      # The › after a folder lists what's in it. The one after an … stands for folders that aren't shown, and one
+      # after a folder of a web server only stands between two names, since a server doesn't say what's in a folder.
       before = v.steps[i-1][2]
-      push!(parts, isempty(before) ? arrow() : get!(() -> own!(v, TitleArrow(path=before)), v.arrows, before))
+      push!(parts, isempty(before) || isremote(before) ? arrow() : get!(() -> own!(v, TitleArrow(path=before)), v.arrows, before))
     end
     if isempty(path)
       push!(parts, Box(height(grow=grow), padding(TT_PAD, 0px), Alignment.Center, justify=Alignment.Center, label(name, 13px, color=colours.faint)))
@@ -32263,12 +32273,17 @@ onkey(a::TitleArrow, ev::KeyPress{Keys.mouse_left}) = (open_folder_list!(editor(
 # A right-click on a name shows the menu of its folder or file, as in the sidebar. Only the file's own name can be renamed in the bar.
 onkey(c::TitleCrumb, ev::KeyPress{Keys.mouse_right}) = begin
   e = editor(c)
+  isremote(c.path) && return handled   # a page or a folder of a web server has no file menu
   c.last ? file_menu!(e, ev.window, c.path; at=:title) : file_menu!(e, ev.window, c.path; items=filter(!=("Rename"), file_menu(c.path)))
   handled
 end
 
-"Do what a choice of the folder or the file at `path` in the top bar does: a file shows, and a folder opens in the page"
-title_go!(e, w, path) = (close_folder_lists!(e, w); close_popup!(w, :title_trail); open_folder!(e, path); nothing)
+"""
+Do what a choice of the folder or the file at `path` in the top bar does: a
+file shows, and a folder opens in the page. A folder of a web server is asked
+for, as a link to it is: its page shows when it has one in Markdown.
+"""
+title_go!(e, w, path) = (close_folder_lists!(e, w); close_popup!(w, :title_trail); isremote(path) ? get_page!(e, path) : open_folder!(e, path); nothing)
 
 "What's in the folder `dir`, by name, its folders first, or nothing when it can't be read. Hidden ones show while the sidebar shows them."
 title_listing(e, dir) = begin

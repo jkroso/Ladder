@@ -110,6 +110,28 @@ end
 host(address::AbstractString) = (m = match(r"^https?://([^/?#]*)"i, address); m === nothing ? String(address) : String(m[1]))
 
 """
+The name and the address of each step on the way to the page at `address`,
+as the path in the top bar shows them: the name of the computer, each folder
+of the address, and the page. A folder's address ends in /. The page's step
+has `address` itself.
+
+    trail("https://example.com/a/my%20b.md")   # [("example.com", "https://example.com/"), ("a", "https://example.com/a/"), ("my b.md", "https://example.com/a/my%20b.md")]
+    trail("https://example.com/a/")            # [("example.com", "https://example.com/"), ("a", "https://example.com/a/")]
+"""
+trail(address::AbstractString) = begin
+  m = match(r"^(https?://[^/?#]*)([^?#]*)"i, address)
+  m === nothing && return [(String(address), String(address))]
+  at = String(m[1])
+  out = [(host(address), at * "/")]
+  for name in filter(!isempty, split(m[2], '/'))
+    at *= "/" * name
+    push!(out, (unescaped(name), at * "/"))
+  end
+  out[end] = (out[end][1], String(address))
+  out
+end
+
+"""
 Start to get what's at the web address `address` into `file`. `about` is a
 file for three lines: the address that it ended up at, the kind of file that
 the server says it is, and the number that the server answered with, like 200.
