@@ -24,7 +24,7 @@ const UV = NTuple{2,Float64}
 # --- the sizes -----------------------------------------------------------------
 
 const span, array_area, nsat = 70.0, 3406586.0, 6667     # m across the wings, m² of cells in the fleet, satellites
-const rad_use, loop_d, loop_out = 14.0, 0.03, 0.3        # % of the cells' area that the radiator has, m across a loop's tube, how far a loop bows out for each metre of its length
+const rad_use, loop_d, loop_out = 14.0, 0.03, 0.3       # % of the cells' area that the radiator has, m across a loop's tube, how far a loop passes in front of the middle for each metre of half the span
 const sat_kg, lens = 2180.0, 0.02                        # kg of one satellite, m across the laser's lens
 
 const area = array_area / nsat                           # m² of cells on one satellite
@@ -32,9 +32,11 @@ const body = clamp(cbrt(sat_kg / 450), 0.8, 4)           # m, a side of the body
 const reach = max(1, (span - body) / 2 - 0.6)            # m, how far each wing reaches past its drum
 const chord = area / 2reach                              # m, how tall each wing is
 const loop_r = loop_d / 2                                # m, the radius of a loop's tube
+const tip = body / 2 + 0.6 + reach                       # m from the middle to the tip of each wing
+const deep = max(loop_out * tip, body / 2 + 1.4)         # m from the middle to the front of each loop, and to its back
 const rad_area = array_area * rad_use / 100 / nsat       # m² of the radiator
-const rad_high = chord                                   # m: the radiator stands up behind the body, as tall as the cells
-const rad_long = rad_area / rad_high
+const rad_long = deep - body / 2 - 0.4                   # m: the radiator stands up behind the body, and reaches back to the loops
+const rad_high = rad_area / rad_long
 const CELL = 0.125                                       # m, one cell
 
 # In a dawn-dusk orbit the Sun is off to one side, and up to about 25° above level. The orbit runs along the
@@ -197,15 +199,11 @@ hoop(points, r; n=8) = begin
 end
 
 """
-A loop of tube in a level plane at the height `y`. It runs from `from` to `to`
-along the line of a wing (:x) or of the radiator (:z), and bows `wide` out to
-each side of that line. It's widest nearer its far end, as an egg is.
+A loop of tube in a level plane at the height `y`, right round the satellite.
+It's an oval. It passes `wide` to each side of the middle, along x, and `deep`
+in front of the middle and behind it, along z.
 """
-loop(from, to, y, wide, r, along=:x) = hoop(map(0:95) do i
-  a = π - 2π * i / 96
-  u, v = (from + to) / 2 + (to - from) / 2 * cos(a), wide * sin(a) * (0.72 + 0.28cos(a))
-  along == :x ? (u, y, v) : (v, y, u)
-end, r)
+loop(wide, deep, y, r) = hoop([(wide * cos(2π * i / 192), y, deep * sin(2π * i / 192)) for i in 0:191], r)
 
 "`s` with each triangle's corners in the order that makes it face the way its corners say"
 outward(s::Shape) = begin
@@ -315,7 +313,7 @@ const foil_surface = png(N) do x, y
   button(x, y) ? (0, 140, 80) : (0, 44 + 30 * hills(x / 32, y / 32, 16) + 80t, 255 - 90t)
 end
 
-# The radiator's white paint, with a tube under it every 10 cm. The tubes run up it, from one loop to the other.
+# The radiator's white paint, with a tube under it every 10 cm. The tubes run up it, from its bottom edge to its top.
 const tubes = bumps((x, y) -> (d = abs(mod(x, 64) - 32); d < 6 ? 0.35 * sqrt(1 - (d / 6)^2) : 0.0), 64, 4.0)
 
 # --- the sky -------------------------------------------------------------------
@@ -469,42 +467,51 @@ for (side, name) in ((-1, "Left wing"), (1, "Right wing"))
   end
   # Amber film is behind the cells
   push!(shapes, :amber_film => moved(turned(plate(reach, chord), :y, 180), (x(reach / 2), 0, -0.003)))
-  # Two wide loops of tube hold the tip out, one level with each edge of the cells. Each leaves the drum on the
-  # sunny side, sweeps out to the tip, and comes back on the shaded side. The pressure in it pushes the tip
-  # out, as a bow does. A sleeve joins it to the drum, and another to the bar at the tip.
-  for y in (-chord / 2, chord / 2)
-    push!(shapes, :pale_paint => loop(x(0), x(reach), y, loop_out * reach, loop_r))
-    for (far, long) in ((0, 0.32), (reach, 0.14))
-      push!(shapes, :dark_metal => rod((x(far), y, -long), (x(far), y, long), 2.2loop_r, n=12))
-    end
-  end
-  # The bar at the tip, where the loops meet the cells
+  # The bar at the tip holds the end of the fabric. A loop of tube passes through a sleeve at each end of it.
   push!(shapes, :bright_metal => moved(tube(0.06, chord + 0.1), (x(reach), 0, 0)))
+  for y in (-chord / 2, chord / 2)
+    push!(shapes, :dark_metal => rod((x(reach), y, -0.14), (x(reach), y, 0.14), 2.2loop_r, n=12))
+  end
   part!(name, shapes...)
 end
 
-# The radiator stands up behind the body, edge-on to the Sun, as tall as the cells. Two loops of tube hold it
-# out, as they hold the wings.
-let root = back - 0.4, far = back - 0.4 - rad_long
+# The radiator stands up behind the body, edge-on to the Sun. It reaches back to the loops, which pass through
+# sleeves on the bar at its tip.
+let root = back - 0.4, far = -deep
   panel = tiled(block(0.02, rad_high, rad_long, bevel=0.003), rad_long / 0.1, 1)
   shapes = Pair{Symbol,Shape}[
     :dark_metal => moved(block(0.12, 0.12, 0.4, bevel=0.01), (0, 0, back - 0.2)),
     :white_paint => moved(panel, (0, 0, (root + far) / 2))]
-  for y in (-rad_high / 2, rad_high / 2)
-    push!(shapes, :pale_paint => loop(root, far, y, loop_out * rad_long, loop_r, :z))
-    for z in (root, far)
-      push!(shapes, :dark_metal => rod((-0.12, y, z), (0.12, y, z), 2.2loop_r, n=12))
-    end
+  for y in (-chord / 2, chord / 2)
+    push!(shapes, :dark_metal => rod((-0.14, y, far), (0.14, y, far), 2.2loop_r, n=12))
   end
-  # A bar at each end, where the loops meet the panel
-  for z in (root, far)
-    push!(shapes, :bright_metal => moved(tube(0.04, rad_high + 0.06), (0, 0, z)))
+  # A bar at each end of the panel. The one at the tip is tall enough to reach both loops.
+  for (z, high) in ((root, rad_high), (far, max(rad_high, chord)))
+    push!(shapes, :bright_metal => moved(tube(0.04, high + 0.06), (0, 0, z)))
   end
   # The coolant comes from the body to the near bar in one pipe, and goes back in another
   for side in (-1, 1)
     push!(shapes, :bright_metal => rod((side * 0.11, 0.0, back), (side * 0.11, 0.0, root + 0.02), 0.02, n=10))
   end
   part!("Radiator", shapes...)
+end
+
+# Two loops of tube hold the wings and the radiator out, one level with each edge of the cells. Each goes right
+# round the satellite: through the tip of one wing, behind the body through the tip of the radiator, through
+# the tip of the other wing, and back in front of the body. The three tips can't move apart, so no wing can
+# swing about its drum. The pressure in a loop pushes it towards a circle. The radiator pulls its back in, and
+# two cords from the drums pull its front in. So it pushes the wings' tips apart, as a wheel's rim does on its
+# spokes.
+let shapes = Pair{Symbol,Shape}[]
+  for y in (-chord / 2, chord / 2)
+    push!(shapes, :pale_paint => loop(tip, deep, y, loop_r))
+    # A sleeve at the front, where the two cords meet the loop. The cords are pale too, so they show against the sky.
+    push!(shapes, :dark_metal => rod((-0.14, y, deep), (0.14, y, deep), 2.2loop_r, n=12))
+    for side in (-1, 1)
+      push!(shapes, :pale_paint => rod((side * (body / 2 + 0.6), y, 0.2), (side * 0.1, y, deep), 0.004, n=6))
+    end
+  end
+  part!("Loops", shapes...)
 end
 
 # The laser to the next satellite, which looks along the orbit. It turns on a fork.
