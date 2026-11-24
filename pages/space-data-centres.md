@@ -311,21 +311,23 @@ One reading of his gap does not fit the surveys. From about $55 a watt down to a
 
 ## Side by side
 
-The two don't do the same work. The fleet does !`energy` of work before it's gone. On the ground the computers stop when the station stops, !`100Percent - uptime` of the time, for repairs and upkeep. Over its !`round(Int, ground_life / 1yr)` years the station gives them !`energy_ground = convert(TWh, compute * ground_life * uptime)`. So the fair yardstick is what each megawatt-hour costs, for the electricity that reaches the computers.
+The two don't do the same work. The fleet does !`energy` of work before it's gone. On the ground the computers stop when the station stops, !`100Percent - uptime` of the time, for repairs and upkeep. Over its !`round(Int, ground_life / 1yr)` years the station gives them !`energy_ground = convert(TWh, compute * ground_life * uptime)`. It's interesting to convert that to $/token though there is no standard energy to token conversion rate. Here we use !`joules = 1J` for each token.
 
-| | What it costs | The work it does | Each megawatt-hour |
+These figures are the chip, not the whole building.[^20] An 8-billion-parameter chat used about 0.05 joules a token, and a 405-billion-parameter model about 2. The same 32-billion-parameter model used 0.15 joules for a chat and 0.31 for a problem. A mixture-of-experts model of that size used about 28% as much on the problem.
+
+| | What it costs | The work it does | Each billion tokens |
 |---|---|---|---|
-| In orbit | !`orbit` | !`energy` | $!`per_orbit = round(Int, orbit / energy / (1USD/MWh))` |
-| On the ground | !`ground` | !`energy_ground` | $!`per_ground = round(Int, ground / energy_ground / (1USD/MWh))` |
+| In orbit | !`orbit` | !`energy` | $!`per_orbit = round(float(orbit / energy / (1USD/MWh)) * float(joules / 1J) / 3.6e9 * 1e9, sigdigits=3)` |
+| On the ground | !`ground` | !`energy_ground` | $!`per_ground = round(float(ground / energy_ground / (1USD/MWh)) * float(joules / 1J) / 3.6e9 * 1e9, sigdigits=3)` |
 
 ```chart
 kind: bars
-title: What each megawatt-hour costs
-show: Each megawatt-hour
+title: What each billion tokens costs
+show: Each billion tokens
 from: Side by side
 ```
 
-In orbit, each megawatt-hour costs !`round(per_orbit / per_ground, digits=1)` times as much as on the ground. !`per_orbit > per_ground ? "The ground wins." : "Orbit wins."`
+In orbit, a billion tokens costs !`round(per_orbit / per_ground, digits=1)` times as much as on the ground. !`per_orbit > per_ground ? "The ground wins." : "Orbit wins."`
 
 ## Why the same chips do more work
 
@@ -373,6 +375,8 @@ The panels are already big enough to run every computer on the first day. The ex
 [^16]: US Energy Information Administration, assumptions for the Annual Energy Outlook 2026. A combined-cycle plant of 1,227 megawatts costs $1,032 a kilowatt in 2025 dollars, and it burns 6,226 BTU for each kilowatt-hour. An aeroderivative simple-cycle plant costs $2,275 a kilowatt and burns 9,447 BTU. The Sargent & Lundy study behind the 2025 outlook, in 2023 dollars, put a large combined-cycle plant at $868 a kilowatt. [GridLab's September 2025 review](https://gridlab.org/gas-turbine-cost-report/) of utility filings finds new combined-cycle plants at $2,000 a kilowatt and up. The page's $1,800 sits between the official combined-cycle figure and the price utilities are paying.
 
 [^17]: The March 2026 air permit for MZX Tech, a SpaceX company, at Southaven, Mississippi. It allows 17 Solar Titan 130 turbines at 16.48 megawatts, 16 Solar Titan 350 turbines at 35 megawatts, and 8 ProEnergy 6000PE turbines at 50 megawatts. The 6000PE is a jet engine rebuilt as a generator. The permit board upheld the permit on 10 November 2026. An agreed order says the temporary turbines come out by July 2027. The plant is simple cycle. It has no steam turbine behind the gas turbine, which is why the heat rate is the higher one.
+
+[^20]: The joules in that paragraph are the GPU's, not the building's. [Lead Green](https://leadgreen.ai/compare/) lines up the ML.ENERGY Leaderboard v3.0 for text chats, at each model's lowest measured energy, as of 19 October 2026. Llama 3.1 8B on one B200 used 13.0 watt-hours for a million tokens, about 0.05 joules a token. Llama 3.1 405B in FP8 on eight H100s used 572.9 watt-hours for a million tokens, about 2 joules a token. [ML.ENERGY](https://ml.energy/blog/measurement/energy/diagnosing-inference-energy-consumption-with-the-mlenergy-leaderboard-v30/) measured Qwen 3 32B on one B200: 0.151 joules a token for a chat at the largest batch, and 0.312 for a problem. On that problem, their 30-billion-parameter mixture-of-experts model used 3.56 times less energy for each token than the dense 32-billion-parameter model, which is about 28%.
 
 [^19]: One token of text is about 2 bytes, which is 16 bits. A busy H100 uses about 1 to 2 joules to write a token once the building's power is counted, and a well-packed run can be near 0.2 joules. SemiAnalysis, as collected by [SAVRN](https://savrn.com/blog/tokens-per-watt-per-dollar): about 540,000 tokens a second for each megawatt is 1.85 joules a token. [ML.ENERGY](https://ml.energy/blog/measurement/energy/diagnosing-inference-energy-consumption-with-the-mlenergy-leaderboard-v30/) measured 0.15 to 0.3 joules a token for one 32-billion-parameter model at a large batch. Sixteen bits in one joule is 16 bits each second for each watt.
 
