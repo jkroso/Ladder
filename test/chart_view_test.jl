@@ -114,18 +114,61 @@ show_chart(n) = (K.show_line!(e, K.block_lines(e.buf, K.CHART, n)[2] + 1); frame
   shot("bars.png")
 end
 
-@testset "the buttons choose the kind of chart" begin
+@testset "the drop-down chooses the kind of chart" begin
   v = chart(1)
-  click(middle(rect(v.parts[(:button, :lines)])))
-  @test v.spec.kind == :lines && block(1) == ["kind: lines", "title: Sales and costs"]
+  b = v.parts[:kind]
+  # The button shows only the icon of the chart's kind, so it's narrow
+  @test K.CHART_KINDS[K.chart_kind_place(v)][3] == "Bars" && rect(b).width < 50px
+  # A click opens the list of kinds under the button, with the chart's own kind picked
+  click(middle(rect(b)))
+  m = v.parts[(:menu, :kind)]
+  @test b.open && m.pick == 1 && rect(m.rows[2]) !== nothing
+  @test rect(m.rows[1]).top > rect(b).top + rect(b).height
+  shot("kinds.png")
+  click(middle(rect(m.rows[2])))
+  @test v.spec.kind == :lines && block(1) == ["kind: lines", "title: Sales and costs"] && !b.open
   @test count(m -> m.kind == :line, v.marks) == 2 && K.dirty(e.buf)
-  click(middle(rect(v.parts[(:button, :pie)])))
-  @test block(1)[1] == "kind: pie" && count(m -> m.kind == :slice, v.marks) == 3
+  # The arrows pick a kind, and Return takes it
+  click(middle(rect(b)))
+  @test v.parts[(:menu, :kind)].pick == 2
+  onkey(w, KeyPress{Keys.down}(0, w)); onkey(w, KeyPress{Keys.enter}(0, w)); frames()
+  @test block(1)[1] == "kind: pie" && count(m -> m.kind == :slice, v.marks) == 3 && !b.open
+  # Esc closes the list and changes nothing
+  click(middle(rect(b)))
+  onkey(w, KeyPress{Keys.up}(0, w)); onkey(w, KeyPress{Keys.escape}(0, w)); frames()
+  @test !b.open && block(1)[1] == "kind: pie"
   # ⌘Z takes the change back
   K.undo!(e.buf); frames()
   @test block(1)[1] == "kind: lines" && chart(1).spec.kind == :lines
   K.undo!(e.buf); frames()
   @test block(1) == ["title: Sales and costs"] && chart(1).spec.kind == :bars
+end
+
+@testset "the list of columns ticks the columns that the chart draws" begin
+  v = chart(1)
+  b = v.parts[:columns]
+  @test rect(b).width < 50px
+  click(middle(rect(b)))
+  m = v.parts[(:menu, :columns)]
+  @test b.open && m.names == ["Sales", "Costs"] && all(n -> K.column_shown(v, n), m.names)
+  shot("columns.png")
+  # A click unticks Costs, and the list stays open for the next column
+  click(middle(rect(m.rows[2])))
+  @test "show: Sales" in block(1) && b.open
+  @test [s.name for s in K.shown!(chart(1)).series] == ["Sales"]
+  # The last column that's ticked stays ticked
+  click(middle(rect(m.rows[1])))
+  @test "show: Sales" in block(1) && m.pick == 1
+  # Return ticks the picked column. Every column is ticked again, so the show line goes.
+  onkey(w, KeyPress{Keys.down}(0, w)); onkey(w, KeyPress{Keys.enter}(0, w)); frames()
+  @test block(1) == ["kind: bars", "title: Sales and costs"] && b.open
+  @test [s.name for s in K.shown!(chart(1)).series] == ["Sales", "Costs"]
+  onkey(w, KeyPress{Keys.escape}(0, w)); frames()
+  @test !b.open
+  K.undo!(e.buf); frames()
+  @test "show: Sales" in block(1)
+  K.undo!(e.buf); frames()
+  @test block(1) == ["title: Sales and costs"]
 end
 
 @testset "the mouse over a bar says its number" begin
@@ -190,4 +233,12 @@ end
   # A plain click picks one table and closes the list
   click(middle(rect(row("The table above"))))
   @test !any(l -> startswith(l, "from:"), block(1)) && c.asking === nothing
+end
+
+@testset "a chart's list of columns has those of its table" begin
+  v = show_chart(2)   # the pie of the spreadsheet's Area
+  @test K.chart_columns(v) == ["Long", "Wide", "Area"]
+  @test [K.column_shown(v, n) for n in K.chart_columns(v)] == [false, false, true]
+  # A chart of two sheets lists the columns of both
+  @test K.chart_columns(show_chart(6)) == ["Power", "Working"]
 end

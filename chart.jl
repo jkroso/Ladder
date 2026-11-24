@@ -262,8 +262,10 @@ With `part`, the table is one of several that the chart draws. A column that
 problem, and a pie's slices are made when the tables are together.
 `values` holds the amount of each cell, in the same place as `rows`. A cell
 whose amount has a unit is read from that unit. The text is used when it has none.
+`most` is how many columns of numbers it keeps: as many as a chart has colours,
+unless something else, like a list of the columns, wants them all.
 """
-data(c::Chart, rows::Vector{Vector{String}}; headed::Bool=false, by_first::Bool=false, part::Bool=false, values=nothing) = begin
+data(c::Chart, rows::Vector{Vector{String}}; headed::Bool=false, by_first::Bool=false, part::Bool=false, values=nothing, most::Int=MOST) = begin
   if values !== nothing && length(values) == length(rows)
     kept = [i for (i, row) in enumerate(rows) if any(!isempty, row)]
     rows, values = rows[kept], values[kept]
@@ -309,7 +311,7 @@ data(c::Chart, rows::Vector{Vector{String}}; headed::Bool=false, by_first::Bool=
   before, after = marks(2), marks(3)
   series = [Series(isempty(head[k]) ? (length(shown) == 1 ? "" : "Column $k") : head[k],
                    Union{Nothing,Float64}[n === nothing ? nothing : n[1] for n in found[:, j]]) for (j, k) in enumerate(shown)]
-  d = Data(labels, first(series, MOST), length(before) == 1 ? before[1] : "", length(after) == 1 ? after[1] : "", "", max(length(series) - MOST, 0))
+  d = Data(labels, first(series, most), length(before) == 1 ? before[1] : "", length(after) == 1 ? after[1] : "", "", max(length(series) - most, 0))
   d = part ? d : without_total(d)
   c.kind == :pie && !part ? slices(d) : d
 end
@@ -340,9 +342,9 @@ the name that the chart calls it by in `names`. Each table's columns are drawn
 over the same names, like the years of two sheets over the same range. A name
 that only some tables have is a gap in the lines of the others. When every
 name is a number, they go in the order of their numbers. Two columns with the
-same name get the names of their tables after them.
+same name get the names of their tables after them. `most` is as `data` has it.
 """
-joined(c::Chart, ds::Vector{Data}, names::Vector{String}) = begin
+joined(c::Chart, ds::Vector{Data}, names::Vector{String}; most::Int=MOST) = begin
   for (d, name) in zip(ds, names)
     isempty(d.problem) && continue
     return nothing_to_draw(replace(d.problem, r"^(The|This) table " => "The table “$(name)” ", "The column “" => "The column of “$(name)” called “"))
@@ -363,8 +365,8 @@ joined(c::Chart, ds::Vector{Data}, names::Vector{String}) = begin
   end
   isempty(series) && return nothing_to_draw("These tables have no column of numbers.")
   agreed(f) = (marks = unique(f(d) for d in ds if !isempty(d.series)); length(marks) == 1 ? marks[1] : "")
-  d = Data(labels, first(series, MOST), agreed(d -> d.before), agreed(d -> d.after), "",
-           sum(d -> d.more, ds) + max(length(series) - MOST, 0))
+  d = Data(labels, first(series, most), agreed(d -> d.before), agreed(d -> d.after), "",
+           sum(d -> d.more, ds) + max(length(series) - most, 0))
   c.kind == :pie ? slices(d) : d
 end
 

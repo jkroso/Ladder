@@ -9193,11 +9193,13 @@ end
 """
 A row of such a list. `picked` is the row that Return takes, and `on` is the
 one that's chosen now, which is in bold. `short` is a word at its right.
+`icon` goes at its left, in the colour `tint` when it has one.
 """
-float_row(name, short=""; picked=false, on=false) = begin
+float_row(name, short=""; picked=false, on=false, icon="", tint=nothing) = begin
   c = found_colours()
   Row(width(grow=grow), height(FLOAT_ROW), padding(8px, 0px), radius(6px), child_gap=8px, Alignment.Center,
       background(picked ? c.pick : c.frame),
+    (isempty(icon) ? () : (Icon(icon, size=14px, color=something(tint, on ? c.ink : c.dim)),))...,
     Row(width(grow=grow), height(grow=grow), Alignment.Center, clip=true, label(name, 13px, color=c.ink, weight=on ? "Semibold" : "")),
     (isempty(short) ? () : (Box(label(short, 12px, color=c.dim)),))...)
 end
@@ -12064,8 +12066,9 @@ css_colour(c) = (c = RGBA(c); "#" * join(string(round(Int, 255x), base=16, pad=2
 #
 # A code block in the language `chart` draws the numbers of a table of the
 # page as bars, as lines or as a pie. chart.jl says how the block is written,
-# and works out where each bar goes. The three buttons at the top of the chart
-# choose its kind. The mouse over a bar, a dot or a slice says its number.
+# and works out where each bar goes. A drop-down at the top of the chart
+# chooses its kind, and another ticks the columns that it draws. The mouse
+# over a bar, a dot or a slice says its number.
 
 const CHART = Charts.CHART
 const PLOT_H = 260px   # how tall bars and lines are
@@ -12192,19 +12195,19 @@ end
 The rows that a chart draws: its own, or those of a table of the page. With
 `from`, that's the first table under the heading that `from` names, or the
 tables that it names with commas between them. Without it, it's the table
-that's nearest above the chart, or the first one under it.
+that's nearest above the chart, or the first one under it. `c` is what the
+block says, or other settings to try, and `most` is as Charts.data has it.
 """
-chart_data(e, v::ChartView) = begin
-  c = v.spec
-  isempty(c.rows) || return Charts.data(c, c.rows)
-  drawn = chart_file(e, c)   # `from` can name a CSV file
+chart_data(e, v::ChartView, c::Charts.Chart=v.spec; most=Charts.MOST) = begin
+  isempty(c.rows) || return Charts.data(c, c.rows; most)
+  drawn = chart_file(e, c; most)   # `from` can name a CSV file
   drawn === nothing || return drawn
   tables = page_tables(e)
   k = isempty(c.from) ? something(findlast(t -> t.last < v.first, tables), findfirst(t -> t.first > v.last, tables), 0) :
                         something(named_table(e, tables, c.from), 0)
-  k == 0 || return Charts.data(c, tables[k].rows, headed=tables[k].headed, by_first=tables[k].ranged, values=table_amounts(e, tables[k]))
+  k == 0 || return Charts.data(c, tables[k].rows, headed=tables[k].headed, by_first=tables[k].ranged, values=table_amounts(e, tables[k]), most=most)
   names = chart_sources(c)
-  length(names) > 1 && return Charts.joined(c, [chart_part(e, c, tables, name) for name in names], names)
+  length(names) > 1 && return Charts.joined(c, [chart_part(e, c, tables, name; most) for name in names], names; most)
   Charts.nothing_to_draw(isempty(c.from) ?
     "This page has no table yet. Put a table, a spreadsheet or a sheet over this chart, and the chart draws its numbers." :
     "This page has no table called “$(c.from)”. A table is called by the heading over it, with a number after it for the second table under that heading.")
@@ -12214,14 +12217,14 @@ end
 chart_sources(c::Charts.Chart) = Charts.listed(c.from)
 
 "What the chart `c` draws of `name`, one of the several tables that it draws: the table under a heading of the page, or a CSV file"
-chart_part(e, c::Charts.Chart, tables, name) = begin
+chart_part(e, c::Charts.Chart, tables, name; most=Charts.MOST) = begin
   if istable(name)
     t = file_table(abspath(docdir(e), expanduser(name)))
-    return isempty(t.problem) ? Charts.data(c, t.rows, headed=true, part=true) : Charts.nothing_to_draw(t.problem)
+    return isempty(t.problem) ? Charts.data(c, t.rows, headed=true, part=true, most=most) : Charts.nothing_to_draw(t.problem)
   end
   k = named_table(e, tables, name)
   k === nothing && return Charts.nothing_to_draw("This page has no table called “$(name)”. A table is called by the heading over it.")
-  Charts.data(c, tables[k].rows, headed=tables[k].headed, by_first=tables[k].ranged, part=true, values=table_amounts(e, tables[k]))
+  Charts.data(c, tables[k].rows, headed=tables[k].headed, by_first=tables[k].ranged, part=true, values=table_amounts(e, tables[k]), most=most)
 end
 
 "The amount of each cell of a Markdown table, where the cell is one sum and the amount has a unit. Any other cell is nothing, and so is a table that isn't rows of the page."
@@ -12261,16 +12264,166 @@ end
 "How wide `text` is in the font of a chart's words, at the size `size`"
 chart_measure(text, size) = num(measure(Face(SANS, "", px(size), colours.ink, false), text))
 
-"The three kinds of chart: the icon of each one's button, and what the button's tooltip says"
-const CHART_KINDS = ((:bars, "bar-chart", "Bars"), (:lines, "graph-up", "Lines"), (:pie, "pie-chart", "A pie"))
+"The three kinds of chart: the icon of each one, and its name in the list of kinds"
+const CHART_KINDS = ((:bars, "bar-chart", "Bars"), (:lines, "graph-up", "Lines"), (:pie, "pie-chart", "Pie"))
+const CHART_MENU = :chart_menu   # the key of the list that a button at the top of a chart opens
+push!(BLOCK_ICONS, "list-check", "square", "check2-square", "chevron-down")
+
+"""
+A button at the top of a chart that opens a list under it. One is for the
+kind of chart, and shows the icon of the kind that it is now. Its list makes
+the chart bars, lines or a pie. The other is for the columns of numbers. Its
+list has a tick box for each column of the table, and the chart draws the
+columns that are ticked. Each button is only an icon, so the title has room.
+"""
+@def mutable struct ChartMenuButton <: SemanticUI
+  of::Any = nothing     # the chart
+  what::Symbol = :kind  # :kind or :columns
+  open::Bool = false    # its list shows
+end
+"""
+The list that floats under such a button. The arrows pick a row, and Return or
+a click takes it. A kind closes the list. A column is ticked or unticked, and
+the list stays for the next one. Esc, or a click somewhere else, closes it.
+"""
+@def mutable struct ChartMenu <: SemanticUI
+  button::Any = nothing
+  side::Symbol = :bottom               # the side of the button that it's on
+  pick::Int = 1                        # the row that Return takes
+  seen::Int = 0                        # the row that was picked when it was last drawn. A row that the keys pick is brought in sight.
+  names::Vector{String} = String[]     # the columns of a list of columns, in the order of their table
+  rows::Vector{Any} = Any[]            # its rows, kept between frames
+  scroll::Any = nothing                # what scrolls a long list
+end
+"A row of that list: a kind of chart, or a column"
+@def mutable struct ChartMenuRow <: SemanticUI
+  menu::Any = nothing
+  k::Int = 0
+end
+
+"The place in CHART_KINDS of the kind of the chart `v`"
+chart_kind_place(v::ChartView) = something(findfirst(k -> k[1] == v.spec.kind, CHART_KINDS), 1)
+
+"The button of the chart `v` that opens the list of `what`: :kind or :columns"
+chart_menu_button(v::ChartView, what::Symbol) = block_part!(() -> ChartMenuButton(of=v, what=what), v, what)
+
+"""
+The columns of numbers that the chart `v` can draw, in the order of their
+table. They're the columns that a `show` line can name, so a column with no
+heading isn't one of them.
+"""
+chart_columns(v::ChartView) = begin
+  e, c = editor(v), v.spec
+  showing(names) = Charts.Chart(:bars, "", c.by, names, c.from, c.rows, String[])
+  several = several_sources(e, c)
+  every = isempty(several) ? [chart_data(e, v, showing(String[]), most=typemax(Int))] :
+                             [chart_part(e, showing(String[]), page_tables(e), name, most=typemax(Int)) for name in several]
+  found = unique(s.name for d in every for s in d.series if !isempty(s.name))
+  filter(name -> isempty(chart_data(e, v, showing([name])).problem), found)
+end
+
+"True when the chart `v` draws the column `name`: its `show` line names it, or it has no `show` line"
+column_shown(v::ChartView, name) = isempty(v.spec.show) || any(n -> Charts.same(n, name), v.spec.show)
+
+"""
+Tick or untick the column `name` of the list `m`, so that the chart draws it
+or stops drawing it. The `show` line names the columns that are ticked, and
+it goes when every column is. The last column that's ticked stays ticked,
+because a chart draws one column at least.
+"""
+toggle_column!(m::ChartMenu, name) = begin
+  v = m.button.of
+  on = filter(n -> column_shown(v, n), m.names)
+  if column_shown(v, name)
+    length(on) == 1 && return handled
+    filter!(n -> !Charts.same(n, name), on)
+  else
+    on = filter(n -> n in on || Charts.same(n, name), m.names)
+  end
+  c = deepcopy(v.spec)
+  c.show = length(on) == length(m.names) ? String[] : on
+  write_block!(v, CHART, Charts.written(c))
+  handled
+end
+
+"How many rows the list `m` has"
+row_count(m::ChartMenu) = m.button.what == :kind ? length(CHART_KINDS) : length(m.names)
+
+"Take row `k` of the list `m`: make the chart that kind and close the list, or tick that column"
+take_chart_row!(m::ChartMenu, k, w) = begin
+  b = m.button
+  k in 1:row_count(m) || return handled
+  b.what == :columns && return toggle_column!(m, m.names[k])
+  b.open = false
+  close_popup!(w, CHART_MENU)
+  act!(b.of, (:kind, CHART_KINDS[k][1]), w)
+end
+
+describe(b::ChartMenuButton) = begin
+  icon = b.what == :kind ? CHART_KINDS[chart_kind_place(b.of)][2] : "list-check"
+  Row(height(26px), padding(7px, 0px), child_gap=4px, radius(6px), Alignment.Center, name=b.what == :kind ? "Kind" : "Columns",
+      border(1px, :solid, b.open ? colours.accent : colours.line), background(ishovered(b) ? colours.hover : colours.bg),
+    Icon(icon, size=14px, color=colours.dim), Icon("chevron-down", size=9px, color=colours.dim))
+end
+
+cursor(::ChartMenuButton) = :hand
+# The button shows what's on now, so its tooltip says what a click does
+onmouse(b::ChartMenuButton, ev::MouseMove) = b.open ? nothing :
+  show_tooltip!(ev.window, tip_label(b.what == :kind ? "Choose bars, lines or a pie" : "Choose the columns that the chart draws"), b,
+                placement=:bottom, gap=6px)
+onkey(b::ChartMenuButton, ev::KeyPress{Keys.mouse_left}) = begin
+  v = b.of
+  hide_tooltip!(ev.window)
+  names = b.what == :columns ? chart_columns(v) : String[]
+  pick = b.what == :kind ? chart_kind_place(v) : 1
+  b.open = true
+  menu = v.parts[(:menu, b.what)] = ChartMenu(button=b, pick=pick, names=names)
+  popup!(ev.window, menu, anchor=b, placement=:bottom, gap=9px, width=b.what == :kind ? 150px : 220px, key=CHART_MENU,
+         onclose=() -> (b.open = false), theme=component_theme(editor(v).zoom))
+  handled
+end
+
+describe(m::ChartMenu) = begin
+  n = row_count(m)
+  length(m.rows) == n || (m.rows = Any[ChartMenuRow(menu=m, k=k) for k in 1:n])
+  n == 0 && return float_list(nothing, float_none("The table has no column of numbers"), name="Columns")
+  m.scroll === nothing && (m.scroll = Scroll(width(grow=grow)))
+  # Half a row at the bottom says that the list goes on
+  m.scroll.height = height(n <= MOST_CHOICES ? n * FLOAT_ROW : MOST_CHOICES * FLOAT_ROW - FLOAT_ROW / 2)
+  m.seen == m.pick || (m.seen = m.pick; scroll_into_view!(m.scroll, FLOAT_ROW * (m.pick - 1), FLOAT_ROW * m.pick))
+  float_list(nothing, reuse!(m.scroll, Column(width(grow=grow), Alignment.Start, m.rows...)), name=m.button.what == :kind ? "Kinds" : "Columns")
+end
+
+placed!(m::ChartMenu, side) = (m.side = side; nothing)
+draw(ctx, size, ui::ConcreteRect, m::ChartMenu) = caret(ctx, ui, m.side, rect(m.button))
+
+onkey(m::ChartMenu, ev::KeyPress{Keys.down}) = unmodified(ev) ? (m.pick = min(m.pick + 1, max(1, row_count(m))); handled) : nothing
+onkey(m::ChartMenu, ev::KeyPress{Keys.up}) = unmodified(ev) ? (m.pick = max(m.pick - 1, 1); handled) : nothing
+onkey(m::ChartMenu, ev::KeyPress{Keys.enter}) = unmodified(ev) ? take_chart_row!(m, m.pick, ev.window) : nothing
+
+describe(r::ChartMenuRow) = begin
+  m = r.menu
+  v = m.button.of
+  r.k <= row_count(m) || return Box(height(0px))
+  if m.button.what == :kind
+    _, icon, name = CHART_KINDS[r.k]
+    return float_row(name, picked=m.pick == r.k, on=chart_kind_place(v) == r.k, icon=icon)
+  end
+  name = m.names[r.k]
+  on = column_shown(v, name)
+  float_row(name, picked=m.pick == r.k, icon=on ? "check2-square" : "square", tint=on ? colours.accent : nothing)
+end
+
+cursor(::ChartMenuRow) = :hand
+onkey(r::ChartMenuRow, ev::KeyPress{Keys.mouse_left}) = take_chart_row!(r.menu, r.k, ev.window)
+# The mouse picks the row that it's over, as the arrow keys do. It's in sight already, so the list doesn't scroll to it.
+onmouse(r::ChartMenuRow, ::MouseMove) = (m = r.menu; m.pick = m.seen = r.k; handled)
 
 describe(v::ChartView) = begin
   e = editor(v)
   d = shown!(v)
   with_theme(component_theme(e.zoom)) do
-    bar = block_bar(
-      [block_button!(v, k, (:kind, k), icon=icon, tip=tip, on=v.spec.kind == k) for (k, icon, tip) in CHART_KINDS]...,
-      rule(), source_button(v),
+    bar = block_bar(chart_menu_button(v, :kind), Box(width(4px)), source_button(v), Box(width(4px)), chart_menu_button(v, :columns),
       # The title's row is as tall as the bar, so what it clips is only a title too long for it. A row as tall as the text
       # would clip the tails of letters like p and y, which hang under the text's box.
       (isempty(v.spec.title) ? () : (rule(), Row(width(grow=grow), height(grow=grow), padding(6px, 0px), Alignment.Center, clip=true,
@@ -37668,11 +37821,11 @@ chart_files(e, c::Charts.Chart) = begin
 end
 
 "What the chart `c` draws when its `from` names a CSV file: the file's numbers, or why it has none. It's nothing when `from` names a heading."
-chart_file(e, c::Charts.Chart) = begin
+chart_file(e, c::Charts.Chart; most=Charts.MOST) = begin
   path = chart_path(e, c)
   path === nothing && return nothing
   t = file_table(path)
-  isempty(t.problem) ? Charts.data(c, t.rows, headed=true) : Charts.nothing_to_draw(t.problem)
+  isempty(t.problem) ? Charts.data(c, t.rows, headed=true, most=most) : Charts.nothing_to_draw(t.problem)
 end
 
 # A chart whose `from` names a CSV file looks at the file in each frame, so it draws the new numbers when the file changes
