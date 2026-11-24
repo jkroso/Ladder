@@ -181,6 +181,22 @@ else
     shot("design-1-open.png")
   end
 
+  @testset "the editor has the page's colours" begin
+    was = e.theme
+    for name in (:sepia, :paper, :night)
+      e.theme = name
+      K.restyle!(e)
+      settle()
+      t = V.theme(view())
+      @test t.surface == K.colours.float && t.text == K.colours.ink && t.accent == K.colours.accent
+      # Behind the design is a little darker than the panels, as in SolidCraft. In the night theme too.
+      @test all(V.palette(t).back .< V.rgba(t.surface)[1:3])
+    end
+    e.theme = was
+    K.restyle!(e)
+    settle()
+  end
+
   @testset "the mouse lights what it's over, and a click selects it" begin
     v = view()
     top = shows((0.0, 0.0, 10.0))

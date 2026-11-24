@@ -1445,10 +1445,18 @@ end
 
 rgba(c::Colorant, a=1.0) = (Float32(red(c)), Float32(green(c)), Float32(blue(c)), Float32(a))
 
-"The colours of the picture, for a dark page or a light one"
-palette(t) = dark(t) ?
-  (back=(0.165f0, 0.18f0, 0.22f0), body=(0.72f0, 0.74f0, 0.78f0, 1f0), edge=(0.06f0, 0.07f0, 0.09f0, 1f0), grid=(0.62f0, 0.68f0, 0.8f0)) :
-  (back=(0.93f0, 0.94f0, 0.955f0), body=(0.80f0, 0.82f0, 0.85f0, 1f0), edge=(0.15f0, 0.17f0, 0.21f0, 1f0), grid=(0.3f0, 0.36f0, 0.5f0))
+"""
+The colours of the picture, from the theme. Behind the design is the colour of
+the panels, a little darker, so the panels show over it as SolidCraft's do. The
+grid is in the colour of text. A body with no colour of its own is grey: on a
+dark page, a lighter grey with darker edges.
+"""
+palette(t) = begin
+  back = rgba(Ink.mixed(t.surface, colorant"black", dark(t) ? 0.3 : 0.035))[1:3]
+  grid = rgba(t.text)[1:3]
+  dark(t) ? (; back, body=(0.72f0, 0.74f0, 0.78f0, 1f0), edge=(0.06f0, 0.07f0, 0.09f0, 1f0), grid) :
+            (; back, body=(0.80f0, 0.82f0, 0.85f0, 1f0), edge=(0.15f0, 0.17f0, 0.21f0, 1f0), grid)
+end
 
 "The plane that the grid is on: the sketch's while one is edited, and the ground if not"
 ground(v::DesignView) = (s = sketch(v); s === nothing ? Sketching.Frame((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)) : Sketching.Frame(s["plane"]))
@@ -1754,7 +1762,7 @@ draw(ctx, size, ui::ConcreteRect, scene::Scene) = begin
   shot = v.image === nothing ? (v.image = Shot()) : v.image
   c = palette(t)
   if v.stage !== false
-    of = (m.version, v.eye, w, h, v.hover, hash(v.picked), v.form === nothing ? UInt(0) : hash((v.form.shows, v.form.active, v.form.key)), dark(t), Designs.editing(m), v.slice)
+    of = (m.version, v.eye, w, h, v.hover, hash(v.picked), v.form === nothing ? UInt(0) : hash((v.form.shows, v.form.active, v.form.key)), c, t.accent, Designs.editing(m), v.slice)
     if shot.of != of
       list = things(v, area, dense, t)
       pixels = GLs.picture!(v.stage, w, h, v.eye, list, c.back; reach=far(v), cut=cut(v))
@@ -1805,8 +1813,8 @@ draw_origin(ctx, v::DesignView, t) = begin
   Designs.origin_shown(v.model, "O") || return
   at = shown_at(v, (0.0, 0.0, 0.0))
   at === nothing && return
-  Ink.circle(ctx, at, 4.5, colorant"rgb(226,228,233)")
-  Ink.circle(ctx, at, 4.5, colorant"rgb(104,108,120)", 1.2)
+  Ink.circle(ctx, at, 4.5, t.surface)
+  Ink.circle(ctx, at, 4.5, t.dim, 1.2)
 end
 
 "The closed regions of the sketch `s`, worked out when the sketch changes"

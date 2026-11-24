@@ -1730,8 +1730,12 @@ page_covered(e) = (o = page_object(e); o !== nothing && page_covers(e, o))
 page_cover(e) = begin
   o = page_object(e)
   (o !== nothing && page_covers(e, o)) || return nothing
-  own = with_theme(() -> page_view(e, o), component_theme(e.zoom))
-  own === nothing ? nothing : Box(width(grow=grow), height(grow=grow), Alignment.Start, own)
+  # The Box is made inside the theme too. A node that `page_view` gives, like a SolidCraft design's
+  # editor, is described when it's put in the Box, and it takes the theme of that moment.
+  with_theme(component_theme(e.zoom)) do
+    own = page_view(e, o)
+    own === nothing ? nothing : Box(width(grow=grow), height(grow=grow), Alignment.Start, own)
+  end
 end
 
 "How wide and how tall the page's space in the window is: beside the sidebar, and under the top bar"

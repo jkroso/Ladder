@@ -33,8 +33,15 @@ f(x) = Float32(x)
 "`colour` with `a` times its own opacity"
 faded(colour::Colorant, a) = RGBA(red(colour), green(colour), blue(colour), alpha(colour) * a)
 
-"A colour between `a` and `b`: `t` of the way to `b`"
-mixed(a::Colorant, b::Colorant, t) = RGBA(red(a) + (red(b) - red(a)) * t, green(a) + (green(b) - green(a)) * t, blue(a) + (blue(b) - blue(a)) * t, 1.0)
+"""
+A colour between `a` and `b`: `t` of the way to `b`. It works in Float64,
+because a colour from `colorant"…"`, as Ladder's themes are, has 8-bit parts,
+and with those 0 - 0.97 wraps round to 0.03.
+"""
+mixed(a::Colorant, b::Colorant, t) = begin
+  a, b = RGB{Float64}(a), RGB{Float64}(b)
+  RGBA(red(a) + (red(b) - red(a)) * t, green(a) + (green(b) - green(a)) * t, blue(a) + (blue(b) - blue(a)) * t, 1.0)
+end
 
 "How bright a colour is, from 0 to 1"
 bright(c::Colorant) = 0.299red(c) + 0.587green(c) + 0.114blue(c)
