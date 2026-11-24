@@ -9,6 +9,7 @@
 @use "github.com/jkroso/MiniFB.jl" Window KeyPress KeyRelease MouseMove Keys onkey onmouse
 @use "github.com/jkroso/UI.jl/Interface/draw" frame rect
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
+@use "github.com/jkroso/UI.jl/Interface/testing" pixels
 @use GeometryBasics: Vec2
 const px = K.px
 
@@ -118,6 +119,24 @@ live(b, code) = K.Browsers.Live.evaluate(b.view.live, code)
   @test K.known_lang(K.VIEW_BLOCK)
   @test !K.dirty(e.buf)
   shot("view-block.png")
+end
+
+@testset "a CSV file's rows reach both sides of its view, with their words in the middle of each row" begin
+  file = joinpath(dir, "window.png")
+  save_png(file, w)
+  ps = pixels(file)
+  k = size(ps, 2) / K.num(K.window_size(e)[1])   # the picture's pixels to a px of the window
+  rgb(x, y) = (p = ps[round(Int, y * k), round(Int, x * k)]; (Int(p >> 16 & 0xff), Int(p >> 8 & 0xff), Int(p & 0xff)))
+  near(a, b) = all(abs.(a .- b) .<= 3)
+  head = round.(Int, 255 .* Float64.((K.colours.head.r, K.colours.head.g, K.colours.head.b)))
+  r = rect(view(3))
+  left, right, top = K.num(r.left), K.num(r.left + r.width), K.num(r.top)
+  # The row of names has the heading's colour near the right side of the view, past the last column's words
+  band = [y for y in top:0.5:top+60 if near(rgb(right - 24, y), head)]
+  @test length(band) >= 2(K.num(K.ROW_H) - 2)
+  # Its word, "Part", is as far from the top of the row as from the bottom
+  ink = [y for y in first(band):0.5:last(band) if any(x -> sum(rgb(x, y)) < 450, left+20:0.5:left+60)]
+  @test !isempty(ink) && abs((first(ink) - first(band)) - (last(band) - last(ink))) <= 1.5
 end
 
 @testset "the button beside a view goes to its file" begin

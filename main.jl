@@ -4875,12 +4875,20 @@ end
 "The rows of a CSV file as a table. Its first row is its headings."
 tableview(t::FileTable) = scrolled(r -> tablerow(t, r), t.scroll, length(t.rows), ROW_H)
 
-"Row `r` of a CSV file's table"
-tablerow(t::FileTable, r) =
-  Row(height(ROW_H), Alignment.Start, radius(3px), background(r == 1 ? colours.head : iseven(r) ? clear : colours.stripe),
-    [Box(fixed(w), height(ROW_H), padding(10px, 0px), Alignment.Start, clip=true,
+"""
+Row `r` of a CSV file's table. It's as wide as the box that the table is in,
+so its stripe reaches both sides. Each column takes a share of that width as
+big as its share of the widths that its text needs, and never less than those,
+as the table of a CSV file that fills the window does. The text of a cell is
+in the middle of the row's height.
+"""
+tablerow(t::FileTable, r) = begin
+  total = num(sum(t.widths))
+  Row(width(grow=grow), height(ROW_H), radius(3px), background(r == 1 ? colours.head : iseven(r) ? clear : colours.stripe),
+    [Row(width(percent=num(w) / total, min=w), height(ROW_H), padding(10px, 0px), Alignment.Center, clip=true,
          label(c <= length(t.rows[r]) ? t.rows[r][c] : "", 12px, weight=r == 1 ? "Semibold" : ""))
      for (c, w) in enumerate(t.widths)]...)
+end
 
 # --- a Markdown file as it reads ---------------------------------------------------------------
 
