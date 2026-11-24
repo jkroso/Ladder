@@ -398,3 +398,25 @@ end
   @test isempty(spinners(e, "Terminal.vt"))
   close(w)
 end
+
+@testset "while ⌘ is held, each tab shows its keys" begin
+  e, w, f = window("a.md", "b.md", "c.md")
+  show!(e, w, f, "b.md", "c.md")
+  said(name) = texts(tab(e, name).firstchild)
+  hold!(held) = (w.keys |= held; onkey(w, KeyPress{Keys.cmd}(0, w)); frames(w))
+  hold!(cmd)
+  # A quick shortcut doesn't flash them
+  @test !("⌘1" in said("a.md"))
+  sleep(K.TAB_KEYS_WAIT + 0.05); frames(w)
+  @test "⌘1" in said("a.md") && "⌘2" in said("b.md") && "⌘3" in said("c.md")
+  shot(w, "tab-keys.png")
+  # They go when ⌘ comes up
+  w.keys ⊻= cmd; frames(w)
+  @test !any(n -> any(startswith("⌘"), said(n)), ("a.md", "b.md", "c.md"))
+  # ⌘ with another key held shows none
+  hold!(cmd | Keys.shft)
+  sleep(K.TAB_KEYS_WAIT + 0.05); frames(w)
+  @test !("⌘1" in said("a.md"))
+  w.keys ⊻= cmd | Keys.shft; frames(w)
+  close(w)
+end

@@ -34682,10 +34682,12 @@ end
 # new tab: the window shows no file, a tab called New Tab is at the bottom of
 # the tabs, and the file finder opens. The file that you choose shows in that
 # tab. ⌘W on it closes it, and the tab that showed last shows again. ⌘1 shows
-# the first tab, ⌘2 the second, and so on to ⌘9. A file that gets a new name
-# keeps its tab, and the tab of a file that goes to the Trash closes. Ladder
-# keeps the front window's tabs when it quits, and opens with them the next
-# time: see "where Ladder opens".
+# the first tab, ⌘2 the second, and so on to ⌘9. While ⌘ is held by itself,
+# each of the first nine tabs shows its keys at its right end, like ⌘1. They
+# show after `TAB_KEYS_WAIT`, so a quick ⌘S doesn't flash them. A file that
+# gets a new name keeps its tab, and the tab of a file that goes to the Trash
+# closes. Ladder keeps the front window's tabs when it quits, and opens with
+# them the next time: see "where Ladder opens".
 
 "The files that are open in the window of `e`, as tabs at the top of the sidebar, in the order that they opened"
 tabs(e) = get!(() -> String[], e.nodes, :tabs)::Vector{String}
@@ -34794,6 +34796,7 @@ tab_folder(e, path) = !isempty(path) && !isremote(path) && tab_name(path) in get
 
 describe(l::TabLabel) = begin
   e = editor(l)
+  shortcut = tab_keys(e, l.path)
   shows = l.path == e.buf.path
   changed = haskey(e.buffers, l.path) && dirty(e.buffers[l.path])
   over = Tree.hovered(l.parent)
@@ -34808,8 +34811,33 @@ describe(l::TabLabel) = begin
         Box(label(tab_name(l.path), color=colours.ink, weight=shows ? "Semibold" : "")),
         (folder === nothing ? () : (Box(label(folder, 11px, color=colours.faint)),))...)),
     tab_marks(e, l.path)...,
-    # The × takes the place of the dot of changes that aren't saved, as the mouse comes over the tab
-    (over ? (l.close,) : changed ? (Box(fixed(18px), Alignment.Center, Box(width(6px), height(6px), radius(3px), background(colours.dim))),) : ())...)
+    # While ⌘ is held, the keys that show the tab take the place of the × and the dot
+    (!isempty(shortcut) ? (Box(label(shortcut, 12px, color=colours.dim)),) :
+     # The × takes the place of the dot of changes that aren't saved, as the mouse comes over the tab
+     over ? (l.close,) : changed ? (Box(fixed(18px), Alignment.Center, Box(width(6px), height(6px), radius(3px), background(colours.dim))),) : ())...)
+end
+
+"How long ⌘ is held by itself before the tabs show their keys, in seconds. A shortcut like ⌘S is quicker, so it doesn't flash them."
+const TAB_KEYS_WAIT = 0.4
+
+"""
+True when the tabs show the keys that show them: ⌘ has been held by itself for
+`TAB_KEYS_WAIT`. Until then, the window draws again when that time comes.
+"""
+tab_keys_shown!(e) = begin
+  w = window_of(e)
+  (w !== nothing && only_held(w, Keys.cmd)) || return (delete!(e.nodes, :tab_keys_since); false)
+  since = get!(e.nodes, :tab_keys_since, time())
+  left = TAB_KEYS_WAIT - (time() - since)
+  left > 0 && (redraw_in!(e, left); return false)
+  true
+end
+
+"The keys that show the tab of the file at `path`, like ⌘1, while the tabs show their keys, or \"\""
+tab_keys(e, path) = begin
+  get(e.nodes, :tab_keys_shown, false) || return ""
+  n = findfirst(==(path), tabs(e))
+  (n === nothing || n > 9) ? "" : String(strip(hint(e, Symbol(:tab_, n))))
 end
 
 """
@@ -34894,6 +34922,7 @@ shows.
 tab_list(e) = begin
   rows = tab_rows(e)
   isempty(rows) && return ()
+  e.nodes[:tab_keys_shown] = tab_keys_shown!(e)
   tree = fill_tabs!(e, tab_tree(e))
   high = Tree.ROW_HEIGHT   # the height of a row while the theme's text has its usual size, as the sidebar's has
   pad = 6px
