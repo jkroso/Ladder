@@ -558,6 +558,22 @@ A block that starts with a tag holds the page itself, like this one:
 </body>
 ```
 
+The scripts of the page can read the document's sums. `ladder.sums` has the value of each sum in a line of text that gives a name, as a number in SI units: metres, kilograms, seconds and watts. A percentage is a share, so 98% is 0.98, and money is a number of its currency. `ladder.shown` has the text that the document shows for each sum. The page hears the event `sums` each time they change, so it draws again while you drag a number. This block follows the wall in "Sums in a line of text":
+
+```web
+<body style="margin:16px; font:15px/22px system-ui">
+<p id="wall" style="margin:0">The wall's sums haven't come yet.</p>
+<script>
+  addEventListener('sums', () => {
+    const area = ladder.sums.wall_area
+    document.getElementById('wall').textContent = 'The wall is ' + ladder.shown.wall_area + '. That is ' + Math.round(area / 0.09) + ' tiles of 30 cm by 30 cm.'
+  })
+</script>
+</body>
+```
+
+The page [space-data-centres.md](space-data-centres.md) draws one of its satellites in 3D this way, with three.js, from the file `satellite.html` beside it.
+
 ## Takeoffs
 
 A code block in the language `takeoff` shows a plan that you measure from: a page of a PDF file, or a picture. Drop the file on the block, or click the block to choose it. This one has the plan of a small house, with its power points and lights counted, a run of cable measured and the kitchen floor measured.

@@ -121,6 +121,12 @@ The fleet's panels cover !`array_area = round(panels / (sunlight * float(eff)) /
 
 Starmind AI1 is a satellite of about this power. Its wings span 70 metres, and it has 110 square metres of radiators for 150 kilowatts.[^4]
 
+Here is one copy, drawn from the sums on this page. It changes as you drag them: the span of the wings, the pipes, the radiator, the height. Click it to fill the window, then drag to turn it and scroll to come nearer.
+
+```web
+satellite.html
+```
+
 ```mermaid
 flowchart LR
   Cells -->|electricity| Converters

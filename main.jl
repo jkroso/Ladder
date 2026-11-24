@@ -361,6 +361,7 @@ end
 @use "./highlight" tokens left_open
 @use "./sheet" SHEET Result Given sheetcells parts uses tally known units shown number_at nudged name_values ident cases folded
 @use "github.com/jkroso/Units.jl" => Units
+@use "github.com/jkroso/Units.jl/Money" => Cash
 @use "./spreadsheet" SPREADSHEET Value spreadcells spreadtexts isformula letters answers moved
 @use "./merge" changes combine follow
 @use "./agent" => Agent
@@ -21963,6 +21964,7 @@ const WEB_GETTER = Ref{Function}(Webfiles.curl)
   full::Bool = false                       # it fills the window, over the page
   tall::px = 0px                           # how tall it was in the page when it was last laid out there
   pinned::px = 0px                         # how far the page was scrolled when it filled the window
+  sent::Any = nothing                      # the page of the web that was last given the sums, and what it was given
 end
 
 "True when a `web` block of `e` may ask the web: the page isn't an email, and its window is on the screen or a test stands in for `curl`"
@@ -22047,9 +22049,99 @@ end
 "The address that the top of the web view `v` shows: of the page that's on its way, or of the page that shows"
 web_address(v::WebView) = (b = web_browser(v); Browsers.loading(b) ? b.coming.address : b.shown)
 
+# The scripts of the page in a `web` block can read the sums of the document. `ladder.sums` has the value of each sum
+# in a line of text that gives a name, like !`span = 70m`, and `ladder.shown` has the text that the document shows for
+# it. The page hears the event `sums` when it's given them, and again each time they change, as while a number is
+# dragged. A page whose scripts wait for a module can find them already there, so it reads them at its start too.
+
+"The units that a page's script gets amounts in: SI units, with the kilogram for mass"
+const SI_UNITS = ((Units.Length, Units.m), (Units.Mass, Units.kg), (Units.Time, Units.s), (Units.Current, Units.A),
+                  (Units.Temperature, Units.K))
+
+"""
+What a script of a web page gets for the value `x` of a sum: a number, true
+or false, or words. An amount is a number in SI units: 70m is 70, 150kW is
+150000, 500g is 0.5 and 98% is 0.98. Money is a number of its currency, so
+25USD/W is 25. A value that is none of these is nothing.
+"""
+script_value(x::Bool) = x
+script_value(x::AbstractString) = String(x)
+script_value(x::Real) = Float64(x)
+script_value(x::Units.Unit) = try
+  # Units.jl has no rates between currencies, so the currency comes out first
+  bits, _ = Units.flatten_units(typeof(x))
+  i = findfirst(u -> Units.unwrap(u) <: Cash.Money, bits)
+  i === nothing || (x = x / Units.unwrap(bits[i])(1))
+  x isa Units.Unit || return Float64(x)
+  # Units.jl's own base for mass is the gram, so the amount is converted to SI units by name
+  si = nothing
+  for d in Units.dimensions(typeof(x))
+    D = Units.unwrap(d)
+    D <: Units.NullDimension && continue
+    j = findfirst(((kind, _),) -> D <: kind, SI_UNITS)
+    j === nothing && return nothing
+    u = SI_UNITS[j][2]^Units.power(d)
+    si = si === nothing ? u : si * u
+  end
+  si === nothing ? convert(Float64, x) : Float64(convert(si, x).value)
+catch
+  nothing
+end
+script_value(x) = nothing
+
+"""
+The sums of the document of `e` that give a name, for the scripts of a web
+page: what each name came to as `script_value` gives it, and the text that
+the document shows for it. A sum that went wrong, or that hasn't run, is
+left out. When two sums give one name, the lower one counts.
+"""
+script_sums(e) = begin
+  b = e.buf
+  sums, shown = Dict{String,Any}(), Dict{String,Any}()
+  values = get(e.nodes, (:sum_values, b.path), nothing)
+  values === nothing && return sums, shown
+  for (_, code, n) in given_and_sums(e, typemax(Int), true)[2]
+    haskey(values, (code, n)) || continue
+    out = get(e.nodes, (:inline, b.path, code, n), nothing)
+    (out isa Tuple && !out[2]) || continue
+    x = script_value(values[(code, n)])
+    x === nothing && continue
+    name = String(sum_name(code))
+    sums[name], shown[name] = x, out[1]
+  end
+  sums, shown
+end
+
+"""
+Give the scripts of the page in the web view `v` the sums of the document, if
+they've changed since it was last given them, and tell the page with the
+event `sums`.
+"""
+send_sums!(v::WebView) = begin
+  b = web_browser(v)
+  l = Browsers.live(b)
+  # The page starts as the browser draws, which doesn't lay the block out again. So the block looks again soon.
+  (l === nothing || Browsers.loading(b)) && (isempty(b.address) && isempty(b.html) || redraw_in!(v, 0.25))
+  l === nothing && return v
+  e = editor(v)
+  # The sums run as their lines are laid out, so `sums_run` says when they may have changed
+  (v.sent !== nothing && v.sent[1] === l && v.sent[2] == sums_run[]) && return v
+  sums, shown = script_sums(e)
+  if v.sent === nothing || v.sent[1] !== l || v.sent[3] != sums || v.sent[4] != shown
+    l.scripts.js["ladder"] = Dict{String,Any}("sums" => sums, "shown" => shown)
+    # A script that draws runs as the page's scripts do, so the window gets its own drawing back after it
+    Browsers.Live.fire!(l, "sums")
+    # The sums under the block run after it's laid out, so another frame gives the page those too
+    redraw_in!(v, 0)
+  end
+  v.sent = (l, sums_run[], sums, shown)
+  v
+end
+
 describe(v::WebView) = begin
   e = editor(v)
   b = web_browser(v)
+  send_sums!(v)
   with_theme(component_theme(e.zoom)) do
     b.zoom = round(Float64(e.zoom), digits=2)
     if !v.full
