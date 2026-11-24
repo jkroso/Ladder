@@ -609,7 +609,7 @@ The sums come as they do to a web page's scripts. Each sum that gives a name is 
 
 ```view
 wall.jl
-aspect: 16:9
+aspect: 5:2
 ```
 
 The first button beside the block makes the model fill the window, where any scroll brings it nearer. The second goes to [wall.jl](wall.jl), which is about 60 lines of code. When you save a change to the file, the block shows what the new code makes. A slow function doesn't hold the window up: the block shows what the function made last until the new one comes.
