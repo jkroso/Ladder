@@ -651,6 +651,10 @@ else
     rows = V.param_rows(v)
     @test V.sheet_rows(s) == (isempty(rows) ? [("", "")] : rows)
     @test s.sub.layout[1].content isa K.Sheet && !result(1).failed
+    # A click on the sheet gives it the keyboard. The design behind it doesn't take the keyboard back.
+    @test !V.has_keys(w, s)
+    click(s)
+    @test V.has_keys(w, s) && w.focus === s.sub
     # A new row is a new parameter. Return at the end of the last row starts one, and Tab goes from its name to its code.
     # A design with no parameters has one empty row, which is the new one.
     K.focus(s)

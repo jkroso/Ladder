@@ -49305,6 +49305,11 @@ describe(s::DesignSheet) = begin
   end
 end
 
+# A click on the sheet gives it the keyboard, and goes no further: the design would take the keyboard back. A click on
+# the text was the text's, and comes here after. One past the text puts the caret in the nearest row.
+onkey(s::DesignSheet, ev::KeyPress{Keys.mouse_left}) = (hittest(ev.window) === s && press!(s.sub, ev.window.mouse); mend!(s); handled)
+cursor(::DesignSheet) = :ibeam
+
 # A key that the editor took goes no further. The design would take it too, as ⌘Z.
 onkey(s::DesignSheet, ::KeyPress) = s.took ? (s.took = false; mend!(s); handled) : nothing
 focus(s::DesignSheet) = focus(s.sub)
