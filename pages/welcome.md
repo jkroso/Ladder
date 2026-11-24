@@ -1097,6 +1097,8 @@ A line that holds only a sound file shows a player for it. The line is written a
 
 An agent like Claude Code can write a page and show it to you here: a plan with a diagram, a table of options, a list of boxes to tick. While the agent waits for you, its logo shows at the top right: Claude's for Claude Code, and Grok's for Grok. An agent that Ladder has no logo of shows as a bell. It's a button called "Nudge Claude". Change the page any way you like: tick a box, change a number, type a question on a new line. Then click the button, or press ⌘Return. Ladder saves the page and gives the agent the lines that you changed.
 
+To start an agent on the file that the window shows, press ⌘⇧P and run Collaborate. A terminal opens, with the agent that Settings chose in it. The agent reads the file and waits for it. When its logo shows at the top right, change the page and click the logo, as above. You can talk to the agent in the terminal too. The terminal is Kero when Kero is open. Without Kero, it's the Mac's app for `.command` files, which is Terminal unless you chose another.
+
 To ask an agent about one part of the window, no agent has to wait. Run Ask For Change or Ask About, and Ladder starts Claude Code with that part and your words. [Ask an agent about one thing](#ask-an-agent-about-one-thing) says how.
 
 When an agent works on the page with you, Ask For Change and Ask Agent ask that agent, not a new one, because it knows what the page is for. It answers a question in its own window, not in a card. It gets your words, the part that you marked and the lines that you changed. If it's still working on what you sent before, it gets them when it waits for the page again. Until then, click the label to change your words or take them back.

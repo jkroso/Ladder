@@ -45885,6 +45885,135 @@ kind_command(k::AgentKind, options) = begin
   addenv(Cmd([found; options]), "PATH" => path)
 end
 
+# --- an agent's session in a terminal ---
+#
+# The command Collaborate starts an agent that works on the window's file
+# with you. It's the agent that Settings chose. It runs in a terminal, as it
+# does when you start it yourself, so you can talk to it there too. Ladder
+# gives it its first words: read the file, and wait for it with `ladder wait`
+# (see agent.jl). When it waits, its logo shows in the top bar. Then the
+# logo sends it what you changed, and Ask Agent asks it for a change.
+#
+# The session starts in Kero when Kero is open, as a new session in the
+# file's folder. Without Kero, Ladder opens a script, and the Mac runs it in
+# its app for `.command` files. That's Terminal, unless you chose another,
+# like iTerm.
+#
+# The session starts in the top folder of the file's repository, when git
+# keeps the file, so that the agent finds what it knows of the project. The
+# agent can change the file and run `ladder wait` without asking, when it has
+# a way to be told so. It asks for anything else as it always does.
+
+"What opens a terminal for a session: a function that takes the script and the folder, and gives the terminal's name. Nothing means `open_session!`. A test puts a function of its own here, so that no terminal opens."
+const SESSION_OPENER = Ref{Any}(nothing)
+
+"The folders that can hold the `ladder` command: the one beside this code, and the one that the installed app writes it to"
+ladder_bins() = filter(isdir, [joinpath(@__DIR__, "plugin", "bin"), joinpath(homedir(), "Library", "Application Support", "Ladder", "bin")])
+
+"""
+The first words that an agent gets when Collaborate starts it on the file at
+`path`. They say all that the agent must do, for an agent that has no skill
+for Ladder's pages.
+"""
+collaborate_words(path) = """
+Work on the file $path with me. It's open in Ladder, the app that shows it as a page. I change it there, and you change the file.
+
+1. Read the file.
+2. Run `ladder wait $(Base.shell_escape_posixly(path))` in the background. Then tell me in a sentence that you're ready. Don't run `ladder show`, because the file is open already.
+3. When that command ends, it prints the lines that I changed, or a change or a question that I asked for in Ladder. Do what it says by changing the file. Ladder shows your change in less than a second.
+4. Then run the same command in the background again. Do that each time, until I say that we're done.
+
+If you have a skill for Ladder's pages, it says more about what the command prints and about what a page can show."""
+
+"""
+What goes after the command of the agent `k` to start a session on the file
+at `path`: the first words, and the options that let the agent run
+`ladder wait`, and change the file, without asking. A rule for a file can't
+hold some characters, so a file with one of them in its path gets no rule,
+and the agent asks before its first change.
+"""
+session_words(k::AgentKind, path) = begin
+  words = collaborate_words(path)
+  # The words go before --allowedTools, which takes all that comes after it as its list. A rule with // names a file from the top of the disk.
+  k.name == "Claude" && return [words, "--allowedTools", "Bash(ladder wait *)", (occursin(r"^[\w \-./@+~]+$", path) ? ["Edit(/$path)"] : String[])...]
+  k.name == "Grok" && return ["--allow", "Bash(ladder wait*)", words]
+  k.name == "Gemini" && return ["-i", words]
+  [words]
+end
+
+"""
+The script that starts a session of the agent `k` on the file at `path`, in
+the folder `dir`. The agent's own folder, the folders of the `ladder` command
+and Homebrew's go after the terminal's PATH, for a terminal that hasn't got
+them. The agent's name is there for `ladder wait`, so that the top bar shows
+its logo.
+"""
+session_script(k::AgentKind, path, dir) = begin
+  found = agent_path(k)
+  quoted = Base.shell_escape_posixly
+  folders = join(unique([ladder_bins(); dirname(found); "/opt/homebrew/bin"; "/usr/local/bin"]), ':')
+  """
+  #!/bin/zsh
+  # Ladder wrote this file. It starts $(k.name) on a file that you and it change together: see Ladder's command Collaborate.
+  export PATH="\$PATH":$(quoted(folders))
+  export LADDER_AGENT=$(quoted(k.name))
+  cd $(quoted(dir)) || exit 1
+  exec $(join(quoted.([found; session_words(k, path)]), ' '))
+  """
+end
+
+"Kero's command, when Kero is open, or nothing"
+kero_command() = begin
+  success(pipeline(`pgrep -xq Kero`, stderr=devnull)) || return nothing
+  found = Sys.which("kero")
+  found === nothing || return found
+  file = joinpath(homedir(), "Library", "Application Support", "kero", "bin", "kero")
+  isfile(file) ? file : nothing
+end
+
+"""
+Open a terminal that runs the script at `script`, in the folder `dir`, in
+front of the other windows. It gives the terminal's name: Kero when Kero is
+open, and else the Mac's app for a `.command` file.
+"""
+open_session!(script, dir) = begin
+  kero = kero_command()
+  if kero !== nothing && success(pipeline(`$kero new --dir $dir --focus -- $script`, stdout=devnull, stderr=devnull))
+    run(pipeline(`open -a Kero`, stderr=devnull), wait=false)
+    return "Kero"
+  end
+  run(pipeline(`open $script`, stderr=devnull))
+  "a terminal"
+end
+
+"""
+Start a session of the agent that Settings chose, in a terminal, to work on
+the window's file with you. The file is saved first, so that the agent reads
+what the window shows.
+"""
+collaborate!(e) = begin
+  b = e.buf
+  (writes(b) && !isremote(b.path)) || error("Collaborate needs a file on this Mac that Ladder can change.")
+  ws = agents(e)
+  isempty(ws) || error("$(uppercasefirst(first(ws).name)) works on this file with you already. Click its logo at the top right to send it what you changed.")
+  (dirty(b) || !isfile(b.path)) && save!(b)
+  k = agent_kind(e.ai)
+  path = truepath(b.path)
+  top = repo_of(e)
+  dir = isempty(top) ? dirname(path) : top
+  # A script of an earlier day is of no use: its session has started
+  folder = joinpath(tempdir(), "ladder-sessions")
+  mkpath(folder)
+  foreach(f -> time() - mtime(f) > 86400 && rm(f, force=true), readdir(folder, join=true))
+  script = joinpath(folder, "$(splitext(basename(path))[1])-$(round(Int, time() * 1000)).command")
+  write(script, session_script(k, path, dir))
+  chmod(script, 0o755)
+  terminal = something(SESSION_OPENER[], open_session!)(script, dir)
+  say_result!(e, "Started $(k.name) in $terminal. Its logo shows at the top right when it's ready.")
+end
+works_here(e, ::Val{:collaborate}) = writes(e.buf) && !isremote(e.buf.path)
+add_command!(collaborate!, title="Start an agent in a terminal that works on the file with you: it reads what you change here, and you see what it changes")
+
 """
 Start an agent with the command `command` and the words `prompt`, in the
 folder `dir`. It gives the agent's process, and a task that reads what the
