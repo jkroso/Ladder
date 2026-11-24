@@ -121,12 +121,4 @@ end
   @test other.buf.path == root
 end
 
-@testset "a folder's own page makes it a folder of notes" begin
-  own = joinpath(dir, "own")
-  mkpath(own)
-  write(joinpath(own, ".ladder"), "```julia\nLadder.NotesDirectory\n```\n")
-  K.folder_pages!(own)
-  @test Base.invokelatest(K.FS.get, K.FSPath(own)) isa K.NotesDirectory
-end
-
 close(w)

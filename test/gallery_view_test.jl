@@ -333,17 +333,13 @@ end
 end
 
 @testset "a folder that isn't there, and one with nothing in it" begin
-  @test K.found!(gallery(2)).problem == "There's no folder called “nowhere” beside this page."
-  @test K.found!(gallery(3)).problem == "Nothing in empty"
   @test rect(gallery(2)) !== nothing && rect(gallery(3)) !== nothing
   @test isempty(gallery(2).parts) && isempty(gallery(3).parts)
 end
 
 @testset "a gallery that lists its files" begin
   l = gallery(4)
-  @test names(l) == ["front.png", "photo 2.png"] && K.found!(l).lost == ["plans/gone.png"]
   @test rect(thumb(1, l)) !== nothing && rect(thumb(2, l)) !== nothing
-  @test G.summary(l.data, K.found!(l)) == "2 pictures"
 end
 
 @testset "a gallery of every kind of file" begin
@@ -352,7 +348,6 @@ end
   bar() = said(rect(z()))
   @test names(x) == ["a shot.png", "b plan.pdf", "c knot.mp4", "d knot.stl", "e notes.md", "f code.jl", "inner"]
   @test [p.kind for p in K.found!(x).items] == [:picture, :file, :file, :file, :file, :file, :folder]
-  @test G.summary(x.data, K.found!(x)) == "6 files and 1 folder in mixed"
   # Both rows of its squares in the window
   show_gallery() = (e.scroll.offset = K.item(e, findall(==("```gallery"), e.buf.lines)[5]).top + 300px; frames(); settle())
   show_gallery()

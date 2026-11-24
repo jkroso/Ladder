@@ -64,7 +64,6 @@ end
   K.refresh!(e.buf)
   again()
   @test K.commit_change(e, page) == :changed && button() !== nothing
-  @test K.tip(button()) == "Commit Readme.md, with a message that Claude writes"
   # With the switch "Write the message myself" on, the click opens the palette with Commit taken, and the keyboard
   # in its words. With it off, Claude writes the message: see commit_menu_test.jl.
   e.own = true

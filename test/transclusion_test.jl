@@ -319,7 +319,6 @@ end
   select!((i, 0), K.line_end(e.buf, i))
   copy!()
   @test clipboard(w) == "Sand the walls before the paint goes on."
-  @test K.COPIED_BLOCK[] !== nothing
   j = paste_in_plan!()
   @test e.buf.lines[j] == "![[jobs#^sand-the-walls]]"
   @test part(j) !== nothing && isempty(part(j).note)

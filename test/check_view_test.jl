@@ -84,7 +84,6 @@ end
   @test rs[3].said == "33.6 < 30" && isempty(rs[1].said)
   @test rs[4].said == "It came to 2.4, which is neither true nor false."
   @test occursin("no_such_name", rs[5].said)
-  @test K.check_words(rs) == "2 of 5 checks pass"
 end
 
 @testset "the checks run again when the page's code runs, and when a line changes" begin
@@ -203,9 +202,6 @@ field() = K.check_input(view())
   click_line(2, 4)
   v = view()
   @test v.editing == 2 && w.focus === field() && field().text == "area() ≈ 28" && field().cursor == 4
-  # The field shows the line as Julia code: the parts have their colours, over the field's own text
-  look = K.julia_look(field(), nothing)
-  @test look isa K.Row
   haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], "check-field.png"), w)
   # Return writes it into the block's line, and the check runs again
   select_all(); typed("area() ≈ 30"); key(Keys.enter)

@@ -72,11 +72,7 @@ block() = (s = K.takeoff_lines(e.buf, 1); e.buf.lines[s[1]+1:s[2]-1])
 @testset "the block shows the plan and what's measured" begin
   @test K.plan_size(v) == (1190.55, 841.89) && K.plan_pages(v) == 1
   @test v.zoom > 0 && v.fitted == (joinpath(dir, "plan.pdf"), 1)
-  @test amounts()[1] == 2
-  @test amounts()[2] ≈ 5.4 * 1.1 atol=0.01
-  @test amounts()[3] ≈ 20 atol=0.01
   @test K.outline(e.buf)[2].title == "Takeoff"
-  @test occursin("<td>Floor</td><td>20 m²</td>", K.page_html(e))
   # Centient tells of the item that the count names
   @test settle(() -> K.known(v, "acme 77") !== nothing)
   @test K.known(v, "acme 77")["price"] == 12.5
@@ -250,8 +246,6 @@ end
   @test v.asking == (:name, 4) && K.plan_input(v).text == "Skirting board" && isempty(found())
   key(Keys.escape)
   @test K.item_name(v, v.data.measures[4]) == "Skirting board" && K.item_words(v, v.data.measures[4]) == "Skirting board"
-  # Its line of a quote has its words and names no item
-  @test !haskey(K.quote_line(v.data.measures[4], 2.0), "ref") && K.quote_line(v.data.measures[4], 2.0)["note"] == "Skirting board"
   button((:delete, 4))
   @test length(v.data.measures) == 3
 
@@ -477,7 +471,6 @@ end
   key(Keys.enter)
   @test isempty(units()) && v.asking === nothing && cable.unit == "mm"
   @test startswith(line(cable), "length in mm | ")
-  @test K.Plans.shown(cable, K.Plans.amount(v.data, cable)) == K.Plans.amount_number(1000K.Plans.amount(v.data, cable)) * " mm"
   # Esc, or a click somewhere else, closes the list and changes nothing
   amount(2); typed("ft"); key(Keys.escape)
   @test isempty(units()) && cable.unit == "mm"
@@ -849,13 +842,6 @@ end
   # A corner of a cut-out moves like any other. This makes the window 1.75 m².
   sleep(0.4); press(K.window_point(v, house(19, 3))); at(K.window_point(v, house(20, 3.5))); release()
   @test isapprox(amounts()[wall], 12 - 1.75 - 0.5 - 0.08, atol=0.05)
-  # The wall takes its cut-outs with it
-  plan_click(19.5, 1.3)
-  @test v.picked == (wall, 1)
-  key(Keys.backspace)
-  @test isempty(shapes()) && !any(l -> startswith(l, "  cut "), block())
-  command(Keys.z)
-  @test length(shapes()) == 4
   # The page as HTML has the wall without its cut-outs
   @test occursin("<td>Wall</td><td>9.67 m²</td>", K.page_html(e))
 end

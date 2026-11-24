@@ -88,7 +88,6 @@ end
   fresh!(4, 3)
   run!()
   o = outcome(4)
-  @test o !== nothing
   @test o.brief == "3" && !o.failed && !o.more
   @test b.caret == (4, 3)   # the caret stays
   @test b.lines[4] == "x = 1 + 2"   # and the text doesn't change
@@ -104,7 +103,6 @@ end
   fresh!(4)
   run!()
   r = rect(outcome(4))
-  @test r !== nothing
   it = K.item(e, 4)
   f = it.content
   line_end = K.num(e.origin[1]) + K.num(K.xcol(f.lines[1], f.lines[1].to))
@@ -140,7 +138,6 @@ end
   click(middle(rect(o)))
   @test o.open
   @test o.rest == " 1  2\n 3  4"
-  @test rect(o.body) !== nothing
   @test K.num(rect(o.body).top) > K.num(rect(o).top)
   @test b.caret == (12, 0)   # the click didn't move the caret
   shot("open")

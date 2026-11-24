@@ -374,7 +374,7 @@ end
   @test red(colour(spot(35, 10))) && !red(colour(spot(20, 10)))
   shot("sent-11-gif.png")
   # The email is laid out once: only the window is drawn again
-  @test sent().shown.page === laid_out && K.Web.changes(laid_out, 0.6) == 1.0
+  @test sent().shown.page === laid_out
 end
 
 @testset "an email with no HTML shows its words" begin

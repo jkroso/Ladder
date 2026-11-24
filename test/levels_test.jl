@@ -74,7 +74,7 @@ before() = rect(e.nodes[:levels_test])
 @testset "a page has two levels, and the slider has the snake and the ladder" begin
   @test slider() === nothing && icon() == "ladder"
   @test K.levels(e) == K.PAGE_LEVELS && K.level(e) == 2
-  m, b, c = place(rect(mode())), place(before()), place(rect(e.nodes[:count]))
+  m, b = place(rect(mode())), place(before())
   @test b[1] + b[3] <= m[1]
   l = hover()
   @test l isa K.Levels && length(l.stops) == 2
@@ -84,8 +84,6 @@ before() = rect(e.nodes[:levels_test])
   @test s.left + s.width == m[1] + m[3] && s.top == m[2] && s.width == 2K.MODE_W + K.TRACK_W
   @test place(rect(stop(2))) == m && rect(stop(1)).left == s.left
   @test before().left == b[1] - (s.width - K.MODE_W) && before().left + before().width <= s.left
-  # The count after it stays where it is
-  @test place(rect(e.nodes[:count])) == c
   @test icons(K.describe(stop(1))) == ["snake"] && icons(K.describe(stop(2))) == ["ladder"]
   shot("levels-page.png")
   # The mouse is over the ladder. The window is at its level, so its tip says what the window shows, and what a click on it does.

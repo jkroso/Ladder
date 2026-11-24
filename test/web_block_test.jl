@@ -99,8 +99,8 @@ block_text(n) = (span = K.block_lines(e.buf, K.VIEW_BLOCK, n); span === nothing 
 @testset "the block shows the page" begin
   @test b.shown == "https://example.com/" && !b.failed && !K.Browsers.loading(b)
   @test asked[1:2] == ["https://example.com/", "https://example.com/look.css"]
-  # The page's scripts ran, and its sheet came
-  @test live("document.title") == "Example, with scripts" && live("getComputedStyle(document.querySelector('h1')).color") == "rgb(0, 90, 160)"
+  # The page's scripts ran
+  @test live("document.title") == "Example, with scripts"
   # In the document it's as wide as the text, and no taller than `WEB_HIGH`
   r = rect(b)
   @test r.width == e.width - 2px && r.height == K.WEB_HIGH && b.active

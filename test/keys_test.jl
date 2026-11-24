@@ -67,9 +67,8 @@ end
   for (bundle, theirs) in K.BUNDLES
     of = K.bundle_keys(bundle)
     @test Set(keys(of)) == Set(keys(K.COMMANDS))
-    # Each shortcut that the bundle writes can be read, and is for a command that there is
+    # Each shortcut that the bundle writes can be read, and is for a command that there is: `of` has only those
     for (name, text) in theirs
-      @test haskey(K.COMMANDS, name)
       @test K.written(of[name]) == text
     end
     all = [(s, name) for (name, list) in of for s in list]
@@ -476,7 +475,6 @@ end
   @test keys(:print) == ["⌥P"]
   @test e.buf.lines == text
   # "Put back" gives a command the bundle's keys again, and takes them from the command that has them now
-  @test haskey(e.nodes, (:key_reset, :save))
   click(w, e.nodes[(:key_reset, :open)])
   @test keys(:open) == ["⌘O"] && isempty(keys(:save))
   click(w, e.nodes[(:key_reset, :save)])

@@ -97,7 +97,7 @@ After the columns.
   @test K.num(sum(K.item(e, table).content.widths)) + 3 ≈ K.num(s.columns[3].wide)
   # The outline and the page's to-do items see the blocks as the page's own
   @test [en.title for en in K.outline(e.buf)] == ["Options", "Columns"] && [t.name for t in K.page_todos(e)] == ["and a task"]
-  @test any(x -> x isa Tuple && x[1] == "Columns", K.INSERTS) && !K.dirty(e.buf)
+  @test !K.dirty(e.buf)
   shot(w, "columns-three.png")
   # The mouse over the columns and the caret in them show nothing of the `columns` block
   at(w, spot(e, list, 300, 10)); caret!(e, w, (list, 3))
@@ -470,7 +470,6 @@ end
   # It keeps its little room and its words, and puts nothing in columns
   @test columns(e) === nothing && v.shares === nothing && K.column_fold(e.buf, s) === nothing
   @test K.item(e, s).content isa K.Live && 10 < K.num(K.item(e, s).tall) < 20 && K.num(K.item(e, t + 1).tall) > 20
-  @test startswith(K.COLUMN_WORDS, "Columns:")
   shot(w, "columns-wrong.png")
   # The caret goes onto it as a whole, and Return shows its lines
   caret!(e, w, (s - 1, 0)); key(w, Keys.down)

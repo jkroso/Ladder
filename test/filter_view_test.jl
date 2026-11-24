@@ -221,7 +221,7 @@ end
   @test block(3) == ["from: people.csv", "where: Age >= 60"] && length(shown(3)) == 7 && adder.text == ""
   typed("Colour is red")
   key(Keys.enter)
-  @test block(3)[end] == "where: Colour is red" && K.filter_shown!(v).subset.problems == ["No column is called “Colour”."]
+  @test block(3)[end] == "where: Colour is red"
   @test K.chip_problem(v.parts[(:chip, 2)]) == "No column is called “Colour”." && length(shown(3)) == 7
   key(Keys.escape)
   @test w.focus === e

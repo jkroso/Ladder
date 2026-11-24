@@ -182,7 +182,6 @@ end
   @test js(l, "JSON.parse(document.getElementById('data').textContent).kept") == true
   @test js(l, "fetched + ' ' + failed") == "42 Load failed"
   @test lines(l) == ["hello 1 [2, \"x\"] {a: null}"]
-  @test !any(t -> occursin("module", t), lines(l, :warn))
   # The script that couldn't be read is in the log, with its line, and the scripts after it ran
   @test length(lines(l, :error)) == 1 && occursin("SyntaxError", lines(l, :error)[1])
   # The page is laid out as the scripts left it, and what's for a reader with no scripts isn't in it

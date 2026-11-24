@@ -189,7 +189,6 @@ end
   click(v, middle(rect(line(o, "door"))))
   click(v, middle(rect(line(o, "long"))))
   @test names(o) == ["walls", "door", "long", "name"]
-  @test v.e.buf.caret[1] != 12 + v.from - 1 || true   # the clicks are not clicks on the text under the list
   close(v.w)
 end
 

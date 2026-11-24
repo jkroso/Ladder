@@ -51,9 +51,6 @@ forget!() = empty!(K.editors)
 
 @testset "⌘N on a file opens a new window that shows the file's folder" begin
   e, w = window(joinpath(sub, "plan.md"))
-  w.keys |= cmd
-  @test K.command_of(e, w, Keys.n) == :new_window
-  w.keys ⊻= cmd
   n = new_window(w)
   @test n !== e
   @test n.buf.path == sub
@@ -96,11 +93,6 @@ end
   @test e.buf.path == sub
   n = new_window(w)
   @test n.buf.path == sub
-  forget!()
-  # The first Markdown file of a folder isn't what shows: the folder is
-  e, w = window(joinpath(top, "aardvark.md"))
-  n = new_window(w)
-  @test n.buf.path == top
   forget!()
 end
 

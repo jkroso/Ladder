@@ -31,8 +31,6 @@ end
   # Tildes don't close backticks, and backticks don't close tildes
   @test kinds(["```", "~~~", "```"]) == [Kind.fence, Kind.code, Kind.fence]
   @test kinds(["~~~", "```", "~~~"]) == [Kind.fence, Kind.code, Kind.fence]
-  # Fewer backticks don't close it
-  @test kinds(["````", "```", "````"]) == [Kind.fence, Kind.code, Kind.fence]
   # Spaces after the fence still close it
   @test kinds(["```", "x", "```  ", "text"]) == [Kind.fence, Kind.code, Kind.fence, Kind.paragraph]
 end

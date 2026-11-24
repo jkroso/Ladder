@@ -61,10 +61,10 @@ end
 
 @testset "the settings window has the settings of the window that opened it" begin
   e, w = window(page)
-  e.theme, e.font, e.zoom, e.stat = :night, "Menlo", 1.5, :characters
+  e.theme, e.font, e.zoom = :night, "Menlo", 1.5
   press(w, Keys.comma, Keys.cmd)
   s = K.settings_editor()
-  @test (s.theme, s.font, s.zoom, s.stat) == (:night, "Menlo", 1.5, :characters)
+  @test (s.theme, s.font, s.zoom) == (:night, "Menlo", 1.5)
   close_all()
 end
 
@@ -82,8 +82,6 @@ end
   @test e.zoom == s.zoom
   K.page_width!(s, 600)
   @test e.widest == 600px
-  K.stat!(s, :characters)
-  @test e.stat == :characters
   K.spelling!(s, false)
   @test !e.spelling
   frame(w); frame(sw)
@@ -128,16 +126,7 @@ end
   @test K.settings_editor() !== nothing
   @test K.settings_editor() !== s
   close_all()
-  # In a window with a file, ⌘W closes the file and shows its folder, and the window stays.
-  # ⌘W again closes the folder, and a third ⌘W closes the window.
-  e, w = window(page)
-  press(w, Keys.w, Keys.cmd)
-  @test K.editors == [e] && e.buf.path == dirname(page)
-  press(w, Keys.w, Keys.cmd)
-  @test K.editors == [e] && K.nofile(e)
-  press(w, Keys.w, Keys.cmd)
-  @test isempty(K.editors)
-  # A plain W doesn't close the window
+  # A plain W doesn't close the window. test/close_test.jl has what ⌘W does in a window with a file.
   e, w = window(page)
   press(w, Keys.w)
   @test K.editors == [e]

@@ -163,7 +163,7 @@ end
   # A long line is folded into pieces of 75 bytes at the most, and no character is cut in two
   long = C.vcard(C.contact(["Ada", "note: " * "é"^120]))
   @test all(l -> ncodeunits(l) <= 75, split(long, "\r\n")) && isvalid(long)
-  @test replace(long, "\r\n " => "") == replace(C.vcard(C.contact(["Ada", "note: " * "é"^120])), "\r\n " => "") && occursin("é"^120, replace(long, "\r\n " => ""))
+  @test occursin("é"^120, replace(long, "\r\n " => ""))
   # Every contact of a block in one file
   file = C.vcards(C.contacts(["Ada", "", "Acme", "kind: company", "", "email:"]))
   @test count("BEGIN:VCARD", file) == 2 && count("END:VCARD\r\n", file) == 2 && occursin("FN:Acme", file)

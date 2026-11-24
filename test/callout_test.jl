@@ -10,12 +10,11 @@
   lines = ["text", "> [!NOTE]", "> First line.", "> Second line.", "", "> A plain quote.", "> [!TIP]", "", "> [!warning] Mind the step", ">", "> Still the warning."]
   ks = classify(lines)
   @test all(k -> k.kind == Kind.blockquote, ks[[2, 3, 4, 6, 7, 9, 10, 11]])
+  # A line that names a kind in the middle of a quote, like the [!TIP] here, is a line of that quote
   @test [callout(k) for k in ks] == ["", "note", "note", "note", "", "", "", "", "warning", "warning", "warning"]
   @test [opens_callout(k) for k in ks] == [false, true, false, false, false, false, false, false, true, false, false]
   # The first line's markup takes in the kind, and the spaces before a title
   @test ks[2].prefix == length("> [!NOTE]") && ks[9].prefix == length("> [!warning] ") && ks[3].prefix == 2
-  # A line that names a kind in the middle of a quote is a line of that quote
-  @test callout(ks[7]) == "" && !opens_callout(ks[7])
 end
 
 @testset "what makes a callout" begin

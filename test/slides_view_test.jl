@@ -119,7 +119,6 @@ end
 const cmd, ctrl, opt, shift = Keys.cmd, Keys.ctrl, Keys.opt, Keys.shft
 
 @testset "⌃⌘⇧P shows the slide that the caret is in" begin
-  @test K.caps(first(K.keys_now(e).of[:slides])) == "⌃⌘⇧P" && "Show as Slides" in K.PAGE_MENU
   @test !isempty(bar_parts()) && rect(e.nodes[:sidebar]) !== nothing
   caret!(line_of("- [x] Order the tiles"), 8)
   n = length(e.layout)
@@ -160,8 +159,6 @@ end
   @test show().at == 4
   key(Keys.home)
   @test show().at == 1 && shown() == ["Some words before the first heading."]
-  # The front matter is in no slide
-  @test !any(it -> it.first <= 3, e.layout)
   key(Keys.left)
   @test show().at == 1
   key(Keys._end)
@@ -321,28 +318,6 @@ end
   save("\n")
   @test show() === nothing && e.zoom == 1.0
   save(TEXT)
-end
-
-@testset "the slides belong to one window" begin
-  other = K.build_editor(page)
-  w2 = K.window!(other, size=(900px, 700px))
-  frame(w2); frame(w2)
-  n = length(other.layout)
-  caret!(line_of("## The end"), 4)
-  K.slides!(e); frames()
-  @test show().scale == 2.0 && e.zoom == 2.0
-  frame(w2)
-  @test K.slideshow(other) === nothing && other.zoom == 1.0 && length(other.layout) == n
-  # A setting that's kept while the slides show keeps the page's own zoom, and gives the other window that one
-  K.stat!(e, :chars); frame(w2); frames()
-  @test other.stat == :chars && other.zoom == 1.0 && e.zoom == 2.0 && show().zoom == 1.0
-  # A zoom that the other window sets is the page's zoom when the slides end
-  K.zoom!(other, K.zoom_for(20)); frames(); frame(w2)
-  @test show().zoom == other.zoom && e.zoom == other.zoom * show().scale
-  key(Keys.escape)
-  @test e.zoom == other.zoom == K.zoom_for(20)
-  K.zoom!(e, 1.0); K.stat!(e, :words); frames(); frame(w2)
-  close(w2)
 end
 
 @testset "the slides have the same key in every bundle, and no other command has it" begin

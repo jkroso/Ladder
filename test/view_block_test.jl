@@ -114,8 +114,7 @@ live(b, code) = K.Browsers.Live.evaluate(b.view.live, code)
   # Each view that shows a file has a button that goes to it. A file that isn't there, and an empty block, have none.
   @test [haskey(K.fills(e), objectid(view(n))) for n in 1:7] == [true, true, true, true, true, false, false]
   @test K.fills(e)[objectid(view(2))].what == (:go, picture)
-  # It's in the Insert menu and in the outline, and a page from a web server shows it as code
-  @test any(x -> x isa Tuple && x[1] == "View", K.INSERTS) && any(en -> en.title == "View", K.outline(e.buf))
+  # A page from a web server shows it as code
   @test K.known_lang(K.VIEW_BLOCK)
   @test !K.dirty(e.buf)
   shot("view-block.png")

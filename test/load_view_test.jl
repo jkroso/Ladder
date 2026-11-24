@@ -108,7 +108,6 @@ try
   v = show_block(K.LOAD, 1)
   @test K.block_lang(v) == K.LOAD && K.block_span(e.buf, v) == K.block_lines(e.buf, K.LOAD, 1)
   @test shown(v)[1] == ["id", "status", "total", "customer.name", "customer.city"] && length(shown(v)) == 4
-  @test K.filter_shown!(v).data.name == "orders.json"
   # It has no conditions, so it shows no field for them, and no line about a server
   @test !haskey(v.parts, :add) && K.load_note(v) == ""
   shot("load-file.png")

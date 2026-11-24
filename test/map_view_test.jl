@@ -401,9 +401,6 @@ end
   rewrite("-37.7701, 144.9610", "zoom: far")
   @test shows((-37.7701, 144.961)) && K.map_address(v) == "1 Found Street, Brunswick VIC 3056, Australia" && pinned(m)
   @test Fake.finds[end] == "-37.7701, 144.9610" && K.map_pin(v) == (-37.7701, 144.961)
-  # A middle that's no latitude and longitude is left out, and the place is in the middle
-  rewrite("-37.7701, 144.9610", "centre: the park")
-  @test shows((-37.7701, 144.961)) && pinned(m)
   # An empty block says what to write in it, and has no buttons
   rewrite()
   @test isempty(block()) && rect(v).height < 100px

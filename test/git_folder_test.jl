@@ -248,8 +248,6 @@ end
 @testset "a repository in the list of the folder that it's in has its branch and its changes" begin
   K.go_folder!(e, hold)
   settle()
-  @test K.directory(e) isa K.FS.Directory
-  @test K.folder_view(e, K.directory(e)).bar === nothing
   @test marks(repo) == ["main", "4"]
   @test marks(joinpath(hold, "plain")) == []
   shot("list")

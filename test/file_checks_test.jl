@@ -99,7 +99,7 @@ end
 
 @testset "the top bar says how many checks pass, and a click goes to the next that fails" begin
   @test K.check_words(last.(K.file_results(e))) == "3 of 4 checks pass"
-  @test !isempty(K.check_part(e)) && haskey(e.nodes, :check_count)
+  @test !isempty(K.check_part(e))
   @test K.tip(e.nodes[:check_count]) == "Go to the next check that fails"
   b.caret = b.anchor = (1, 0)
   K.next_check!(e)

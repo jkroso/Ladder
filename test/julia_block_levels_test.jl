@@ -77,9 +77,6 @@ end
   # Every line of the block is in it, with the lines that open and close it
   @test all(i -> part(i) === part(FIRST), FIRST-1:CALL+1) && part(SECOND).n == 2 && part(WORDS) === nothing
   @test K.levels(e) == K.CODE_LEVELS && K.level(e) == 4 && !K.low(e)
-  @test K.stop_tip(e, 4) == "The window shows the value of what you run. A click goes down a level  ⌘E"
-  @test K.stop_tip(e, 3) == "Go down a level, to the inferred code of what you run  ⌘E"
-  @test K.stop_tip(e, 1) == "Go down 3 levels, to the assembly of what you run"
   l = hover()
   @test length(l.stops) == 4
   shot("julia-block-slider.png")
@@ -97,7 +94,6 @@ const summed = run(SECOND:SECOND)
 
 @testset "at the highest level, a box shows the value" begin
   @test called.brief == "6" && called.low === nothing && summed.brief == "3" && summed.low === nothing
-  @test defined.source isa K.Defined && called.source isa K.Thunk
 end
 
 @testset "⌘E takes the block with the caret down a level, and no other part of the page" begin

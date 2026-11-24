@@ -180,7 +180,6 @@ point(p) = (it = K.item(e, p[1]); (e.origin[1] + K.spot(it.content, p[2])[2] + 1
   frames(1)
   w.keys ⊻= Keys.cmd
   frames(1)
-  @test true
 end
 
 @testset "with ⌘ held, a name that the mouse rests on shows a card of what it is" begin
@@ -344,9 +343,7 @@ end
 end
 
 @testset "the command Go To Definition" begin
-  b.caret = b.anchor = at("* HEIGHT", "HEIGHT")
-  K.go_to_definition!(e)
-  @test b.caret == (line("const HEIGHT"), 6)
+  # The tests of ⌘⌥← below check where it goes. A word with no place says so.
   b.caret = b.anchor = at("the paint", "paint")
   @test_throws ErrorException K.go_to_definition!(e)
 end

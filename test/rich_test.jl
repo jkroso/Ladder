@@ -482,16 +482,11 @@ end
   K.plain!(e, true)
   frame(w); frame(w)
   @test e.buf.plain
-  # Only the run that the caret is in shows its markup: the bold words, and not the link after them.
-  # Every other part of the page still shows as it reads. test/plain_runs_test.jl has more.
-  @test occursin("Some **bold** words", drawn(e, 3)) && !occursin("](", drawn(e, 3))
+  # No line shows all its markup, and every other part of the page still shows as it reads. test/plain_runs_test.jl
+  # has the run that the caret is in, and the caret that stops at each character of it.
   @test !any(i -> raw(e, i), (1, 3, 5, 6, 8, 10, 12))
   @test !(K.item(e, 15).content isa K.Flow)
   @test K.item(e, 21).content isa K.Grid
-  caret!(e, w, 3, 6)
-  @test e.buf.caret == (3, 6)
-  press(w, Keys.right)
-  @test e.buf.caret == (3, 7)
   # The caret takes the markup with it to the line that it goes to. In what starts a list item, the - shows.
   caret!(e, w, 5, 1)
   @test e.buf.caret == (5, 1)
@@ -554,9 +549,6 @@ end
   # The mouse is still over the picture, so the slider has opened out from it. Its ladder is where the picture was.
   click(w, e.nodes[K.LEVELS_KEY].stops[end])
   @test !e.plain
-  # A file of Julia code has a ladder of its own, for what its code comes to. test/julia_levels_test.jl has its levels.
-  e2, w2 = window("x = 1\n", name="code.jl")
-  @test haskey(e2.nodes, :mode) && K.levels(e2) == K.CODE_LEVELS && K.level(e2) == 4
 end
 
 @testset "the settings file keeps how the page shows" begin

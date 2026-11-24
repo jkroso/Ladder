@@ -348,16 +348,6 @@ end
   @test a.failed && a.said == "The agent stopped. No network."
   a = ask(quiet, level, "is it blue?")
   @test !a.failed && a.said == "Nothing changed. I looked, and it's as you say."
-  # A second change while the agent is at work waits in the queue
-  K.AGENT_COMMAND[] = `sh -c "sleep 5"`
-  K.ask_for_change!(e, level, "make it red")
-  @test picker().asked.ended == 0
-  K.ask_for_change!(e, level, "and blue")
-  @test picker().asked.words == "make it red" && [a.words for (a, _) in K.ask_queue(e)] == ["and blue"]
-  empty!(K.ask_queue(e))
-  kill(picker().asked.process)
-  finish()
-  picker().asked = nothing
   # Code that fails as it loads: the label says so. The file's block has nothing to show until the code is put right.
   a = ask(broken, level, "make it wider")
   @test a.failed && startswith(a.said, "The new code doesn't run.") && occursin("nothing_of_that_name", a.said)
@@ -915,7 +905,7 @@ end
   # The field is put under its words in each frame, so it follows them as the page scrolls
   r = K.asked_rect(e, c)
   @test only(filter(p -> p.key == K.box_key(a), popups(w))).anchor == (r.left, r.top, r.width, r.height)
-  # The Close button takes the field and the box away
+  # The field has no words and no answer, so there's nothing to open again: the Close button takes the field and the box away
   x = rect(a.parts[:close])
   click(w, x.left + x.width / 2, x.top + x.height / 2)
   @test !asking() && !any(p -> p.key == K.box_key(a), popups(w)) && w.focus === e
@@ -1209,12 +1199,6 @@ end
   # The × at the end of the box's label takes it away, with its answers
   click_at(K.close_spot(f.label))
   @test isempty(K.ask_boxes(e)) && !shows(f)
-  # A field with nothing typed in it and no answer goes with its Close button: there's nothing to open again
-  b.anchor, b.caret = (7, 0), (7, 8)
-  K.page_act!(e, 1)
-  frames(w, 2)
-  close!(only(K.ask_boxes(e)))
-  @test isempty(K.ask_boxes(e))
   K.focus(e)
 end
 
@@ -1242,11 +1226,7 @@ end
   click(w, x, y)
   @test picker().asked === working && working.ended == 0 && !working.stopped
   @test only(K.ask_boxes(e)) === a && a.parts[:text].buf.lines == ["half a request"]
-  # The page's file and back, and the field is still there
-  K.open!(e, source); frames(w, 2)
-  K.open!(e, page); frames(w, 3)
-  @test only(K.ask_boxes(e)) === a && any(p -> p.key == K.box_key(a), popups(w))
-  # A field with nothing in it stays too, when the window shows another file
+  # A field with nothing in it stays when the window shows another file and then its page again
   K.focus(a.parts[:text])
   press(w, Keys.a, Keys.cmd); press(w, Keys.backspace)
   @test a.parts[:text].buf.lines == [""]

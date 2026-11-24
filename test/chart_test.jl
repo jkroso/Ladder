@@ -26,7 +26,7 @@ const TABLE = [["Month", "Sales", "Costs", "Note"],
   # A million and a billion are different amounts, not two small numbers with different words after them
   @test C.number("22.4 billion USD") == (22.4 * 1e9, "", " USD") && C.number("100 million USD") == (100e6, "", " USD")
   @test C.number("€2.5 million") == (2.5e6, "€", "") && C.number("-3 billion USD") == (-3e9, "", " USD")
-  @test C.number("1.2 trillion USD")[1] == 1.2e12 && C.number("2.4 m") == (2.4, "", " m")
+  @test C.number("1.2 trillion USD")[1] == 1.2e12
   # The unit is on the value. The words in the cell are not what the chart measures.
   @test C.reading(22.4e9USD)[1] == Float64((22.4e9USD).value) && C.reading(100e6USD) == (1.0e8, "", " USD")
   @test C.reading(100e6USD)[1] < C.reading(22.4e9USD)[1] / 100

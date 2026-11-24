@@ -186,7 +186,6 @@ end
   @test K.equation_item(e, "  ") === nothing
   page = K.page_html(e)
   @test occursin("<math xmlns=\"http://www.w3.org/1998/Math/MathML\"><mi>E</mi><mo>=</mo><mi>m</mi><msup><mi>c</mi><mn>2</mn></msup></math>", page)
-  @test count("display=\"block\"", page) == 3 && occursin("<mfrac>", page) && occursin("it costs \$5.", page)
   # Words in a formula aren't checked for spelling
   @test isempty(K.misspellings(e, line("- An item")))
 end

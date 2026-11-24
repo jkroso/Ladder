@@ -106,15 +106,12 @@ end
 @testset "a click on a commit in git's panel shows it in the page" begin
   @test page() isa K.RepoView
   l = line(second)
-  @test l isa K.CommitLine
-  @test rect(l) !== nothing
   click(middle(l))
   settle()
   v = page()
   @test v isa K.CommitView
   @test v.hash == second
   @test e.buf.path == repo   # the window still shows the repository
-  @test rect(v) !== nothing
   @test v.scroll.scrollbar_inset == 0px   # its scrollbar is at the page's right edge, as the editor's is
   words = texts(K.describe(v))
   @test "Change a, and add a big file" in words
@@ -148,10 +145,6 @@ end
   # The changed file shows its change, drawn as a block of changes draws one
   c = v.views[k("src/a.jl")]
   @test c isa K.ChangesView
-  @test length(c.data.hunks) >= 1
-  a = c.parts[(:hunk, 1)]
-  @test a isa K.HunkArea
-  @test rect(a) !== nothing
   # Its lines are laid out as wide as the page's column
   @test K.diff_wide(c) ≈ v.wide - 2
   # The hidden file's lines were never read

@@ -12,7 +12,7 @@
 @use Test: @test, @testset
 @use "../main" => K
 @use "github.com/jkroso/MiniFB.jl" Window KeyPress KeyRelease MouseMove Keys onkey onmouse Typed ontype
-@use "github.com/jkroso/UI.jl/Interface/draw" frame rect window_tool _cursor_shape
+@use "github.com/jkroso/UI.jl/Interface/draw" frame rect _cursor_shape
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
 @use GeometryBasics: Vec2
 const px = K.px
@@ -123,7 +123,6 @@ const first_line = findfirst(startswith("describe(g::Gauge)"), readlines(source)
 end
 
 @testset "a click with ⌘ and ⌥ down shows the code" begin
-  @test window_tool(w) isa K.CodePicker
   # A click with no key down is the block's own
   click()
   @test node().clicks == 1 && isempty(code_windows())
@@ -182,10 +181,6 @@ end
   @test length(shown) == 1
   @test shown[1].buf.caret[1] == first_line
   @test !shown[1].panel
-  # A second click shows the same window
-  click(Keys.cmd, Keys.opt)
-  press_button(:show_code)
-  @test length(code_windows()) == 1
 end
 
 @testset "the agent's logo on the line opens the palette with the thing as A" for command in (:ask_agent,)
@@ -236,7 +231,6 @@ end
   frames()
   click()
   @test node().clicks == n + 1
-  @test haskey(K.COMMANDS, :show_code)
 end
 
 @testset "code that runs in the file's window changes what's loaded" begin

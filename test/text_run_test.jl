@@ -63,7 +63,6 @@ const looks = which(K.face, Tuple{K.Face,K.Span})
                           ("code", "Code", which(K.describe, Tuple{K.Seg})))
     found = picked(3, text)
     @test found !== nothing && found[1] isa K.TextRun && found[1].kind == kind && found[2] == m
-    @test found !== nothing && K.pick_name(found[1]) == kind
   end
   # The number of a footnote, and the box of a to-do item
   found = picked(3, "1")

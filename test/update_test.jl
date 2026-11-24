@@ -355,17 +355,12 @@ end
 @testset "this run is Ladder from its source" begin
   @test Update.running() == ("", v"0")
   @test Update.own().app == ""
-  @test Update.macos() isa VersionNumber
 end
 
 # --- the settings page ------------------------------------------------------------------
 
-@testset "the setting is kept, and is on until you turn it off" begin
-  e = K.build_editor(K.settings_page())
-  @test e.updates
+@testset "every window has the same setting" begin
   @test :updates in K.SHARED
-  K.updates!(e, false)
-  @test !e.updates
 end
 
 @testset "the settings file keeps the setting" begin

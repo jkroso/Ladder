@@ -20,18 +20,18 @@ K.MEDIA_CACHE[] = mktempdir()
 K.Eml.CACHE[] = mktempdir()
 
 const dir = mktempdir()
-const SIGNATURE = "v=1; a=rsa-sha256; c=relaxed/relaxed; d=ozedi.com.au; s=selector1; bh=" * "Qx7"^40 * "; b=" * "AbCdEfGh0123456789+/"^20
+const SIGNATURE = "v=1; a=rsa-sha256; c=relaxed/relaxed; d=example.com; s=selector1; bh=" * "Qx7"^40 * "; b=" * "AbCdEfGh0123456789+/"^20
 const LONG_NAME = "X-MS-Exchange-CrossTenant-OriginalAttributedTenantConnectingIp"
 const email = joinpath(dir, "RE Centient production.eml")
 write(email, join(["Delivered-To: jake@example.com",
-                   "Received: from mail.ozedi.com.au (mail.ozedi.com.au. [203.0.113.7])",
+                   "Received: from mail.example.com (mail.example.com. [203.0.113.7])",
                    "        by mx.example.com with ESMTPS id 42; Wed, 18 Nov 2026 06:24:03 +0000",
                    "DKIM-Signature: $SIGNATURE",
                    "$LONG_NAME: 203.0.113.7",
-                   "From: Athina Morfis <athina.morfis@ozedi.com.au>",
+                   "From: Sam Lee <sam@example.com>",
                    "To: Jake Rosoman <jake@example.com>",
                    "Subject: RE: Centient production",
-                   "Message-ID: <abc123@ozedi.com.au>",
+                   "Message-ID: <abc123@example.com>",
                    "Date: Wed, 18 Nov 2026 17:24:00 +1100",
                    "MIME-Version: 1.0",
                    "Content-Type: text/plain; charset=utf-8",
@@ -70,7 +70,7 @@ has(word) = any(t -> occursin(word, t), words())
 
 @testset "the top of an email is a part with levels of its own" begin
   @test parentmodule(K.fold) === K   # no function of another module has the name
-  @test head() isa K.EmailHead && has("RE: Centient production") && has("Athina Morfis")
+  @test head() isa K.EmailHead && has("RE: Centient production") && has("Sam Lee")
   # Until the top has the keyboard, the ladder is the page's
   @test K.level_part(e) isa K.Document && K.levels(e) != K.HEAD_LEVELS
   low = rect(head()).height
@@ -86,8 +86,8 @@ end
   cmd_e()
   @test head().full && K.level(e) == 1 && e.plain == page   # the page stays at its own level
   @test w.focus === head()   # and the top keeps the keyboard
-  @test has("Received") && has("Message-ID") && has("<abc123@ozedi.com.au>") && has("DKIM-Signature")
-  @test has("from mail.ozedi.com.au (mail.ozedi.com.au. [203.0.113.7]) by mx.example.com")   # a field on two lines is one
+  @test has("Received") && has("Message-ID") && has("<abc123@example.com>") && has("DKIM-Signature")
+  @test has("from mail.example.com (mail.example.com. [203.0.113.7]) by mx.example.com")   # a field on two lines is one
   # The page's layout has room for every field
   item = e.layout[1]
   @test item.content.node === head() && item.tall >= rect(head()).height
@@ -148,7 +148,7 @@ end
   K.focus(e)
   cmd_e()
   @test e.plain && K.level_part(e) isa K.Document
-  @test head() isa K.EmailHead && has("Athina Morfis")
+  @test head() isa K.EmailHead && has("Sam Lee")
   click(middle(rect(head())))
   @test w.focus === head()
   cmd_e()

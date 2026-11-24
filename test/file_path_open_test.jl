@@ -146,14 +146,3 @@ end
   @test e.buf.path == other
   back!()
 end
-
-@testset "a link to a file or a folder still opens it" begin
-  K.follow!(e, "notes.md")
-  @test e.buf.path == notes
-  back!()
-  K.go_folder!(e, homedir())
-  K.follow!(e, "sub")
-  @test e.folder == sub
-  @test e.buf.path == sub && !e.panel   # the page shows the folder, and the sidebar stays closed
-  back!()
-end

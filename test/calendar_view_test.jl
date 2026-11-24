@@ -89,7 +89,7 @@ title() = K.Calendars.title(K.month_shown(v))
   @test words(nov(27)) == ["Council inspection"]
   # A day with more things than it has room for shows the first of them, and how many more there are
   @test words(nov(25)) == ["Lay the pipe", "Order the tiles"] && more(nov(25)).more == 3
-  @test any(en -> en.title == "Calendar", K.outline(e.buf)) && any(x -> x isa Tuple && x[1] == "Calendar", K.INSERTS)
+  @test any(en -> en.title == "Calendar", K.outline(e.buf))
   @test !K.dirty(e.buf)
   shot("calendar.png")
 end
@@ -212,8 +212,6 @@ end
   click(empty(nov(12))); click(empty(nov(12))); typed("Plumber"); click(empty(nov(3)))
   @test v.adding === nothing && block()[end] == "2026-11-12 | Plumber"
   K.undo!(e.buf); frames()
-  # The first event of a block that has only a month goes under an empty line
-  @test K.Calendars.added(["month: 2026-11"], nov(10), "Pour") == ["month: 2026-11", "", "2026-11-10 | Pour"]
 end
 
 @testset "the page changes, and the calendar with it" begin

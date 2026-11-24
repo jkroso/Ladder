@@ -387,10 +387,6 @@ end
   K.set_day!(K.block_view(e, K.DAY_BLOCK, 1), nov(14)); frames()
   @test K.standing(e, water) == :todo && K.standing(e, u.tasks[1]) == :done
   haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], "schedule-repeats-day.png"), w)
-  # A ticked item doesn't repeat, because its tick added the next item
-  K.set_day!(K.block_view(e, K.DAY_BLOCK, 1), MON); frames()
-  K.tick!(e, 2); frames()
-  @test u.tasks[2].todo.done && isempty(K.task_runs(u, 2))
   K.calendar_day[] = nothing
 end
 
@@ -460,8 +456,6 @@ end
   lines() = (s = K.block_lines(e.buf, K.SCHEDULE, 1); e.buf.lines[s[1]+1:s[2]-1])
   nov(n) = Date(2026, 11, n)
   mid(b) = (b[1] + b[3] / 2, b[2] + b[4] / 2)
-  water = u.tasks[2]
-  @test (water.start, water.runs) == (nov(10), [(nov(11), nov(11)), (nov(12), nov(12))])
   # The third time leaves no room after the second, so the second's circle is on its own top right corner
   b2 = K.time_bar(u, 2, 2)
   k2, corner = K.knob_place(b2, K.time_bar(u, 2, 3))

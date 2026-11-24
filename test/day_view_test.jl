@@ -141,7 +141,6 @@ try
     @test lines() == ["2026-11-19"] && rows().series[1].values == [6.0]
     press(spot(Date(2026, 11, 19))); release()
     onkey(w, KeyPress{Keys.right}(0, w)); frames()
-    @test lines() == ["2026-11-20"] || lines() == String[]
     @test K.page_day(e) == TODAY && lines() == String[]   # today takes the line away
     onkey(w, KeyPress{Keys.left}(0, w)); frames()
     @test lines() == ["2026-11-19"]

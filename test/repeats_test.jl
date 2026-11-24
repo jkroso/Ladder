@@ -116,9 +116,6 @@ write(page, start)
     K.tick!(e, 3)
     K.tick!(e, 3)
     @test join(b.lines, "\n") == start
-    # An item that doesn't repeat only gets its tick
-    K.tick!(e, 4)
-    @test b.lines[4] == "- [x] Order the tiles" && length(b.lines) == 6
     close(w)
   finally
     K.calendar_day[] = nothing

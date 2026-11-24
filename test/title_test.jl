@@ -126,11 +126,6 @@ end
   @test e.buf.path == joinpath(dir, "draft.md") && isfile(joinpath(dir, "draft.md"))
 end
 
-@testset "the top bar shows the new name" begin
-  @test K.name(e.buf) == "draft.md"
-  @test any(n -> n isa K.Title, values(e.nodes))
-end
-
 @testset "Show in Finder is grey for a file that isn't on the disk yet" begin
   rm(joinpath(dir, "draft.md"))
   right_click(middle(rect(title())))

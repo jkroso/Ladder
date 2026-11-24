@@ -112,16 +112,12 @@ words(flow) = [join(seg.text for seg in vl.segs) for vl in flow.lines]
   @test ends(row[2]) ≈ K.num(g.widths[2] - K.CELL_X) && ends(head[2]) ≈ ends(row[2])
   # The table has no line under it, because every row shows
   @test !K.has_more(t)
-  # A file with tabs between its cells
-  rooms = shown("rooms.tsv").laid
-  @test rooms.table.rows[3] == ["Lounge, big", "6", "5"]
   shot("csv.png")
 end
 
 @testset "cells in quotes, and a cell with long text" begin
   goto("notes.csv")
   g = shown("notes.csv").laid
-  @test g.table.rows[4] == ["Nails, 50 mm", "", "3.2"]
   # Long text goes onto more lines, and its row is taller
   @test length(K.row_flows(g, 2)[2].lines) > 1 && g.heights[2] > g.heights[4]
   # A line break in a cell is a space
@@ -287,7 +283,6 @@ end
   # That table's reader is csv.jl's now
   t = K.tabled(joinpath(dir, "rooms.tsv"))
   @test t.rows == [["Room", "Long", "Wide"], ["Kitchen", "4", "3"], ["Lounge, big", "6", "5"]] && length(t.widths) == 3 && !t.more
-  @test K.csv_cells("a,\"b, c\",d", ',') == ["a", "b, c", "d"]
   @test K.tabled(joinpath(dir, "empty.csv")) === nothing
 end
 

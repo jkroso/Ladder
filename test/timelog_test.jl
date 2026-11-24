@@ -139,9 +139,3 @@ end
   # A task that's all of what was typed isn't offered, and nothing is when no task has it
   @test T.offered(log, "Roofing") == String[] && T.offered(log, "FRAMING") == ["Roof framing"] && isempty(T.offered(log, "paint"))
 end
-
-@testset "the time now" begin
-  @test T.now() isa DateTime
-  T.CLOCK[] = () -> NOW
-  @test T.now() == NOW
-end

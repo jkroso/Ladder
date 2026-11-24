@@ -140,7 +140,6 @@ end
   # Return again starts it
   key(Keys.enter)
   @test block()[end-1:end] == ["2026-11-18 09:12-10:14 | Clad", "2026-11-18 10:14- | Roofing"] && w.focus === e
-  @test count(l -> endswith(split(l, '|')[1], "- "), block()) == 1   # only one line runs
 end
 
 @testset "Stop writes the stop time, and ⌘Z takes each change back" begin

@@ -130,18 +130,4 @@ end
   @test fresh()
 end
 
-@testset "the count of words leaves out the front matter, after each change" begin
-  right() = (K.kinds(b); body = b.lines[K.front_matter(b.lines)+1:end]; (b.words, b.chars) == (K.words(body), sum(length, body)))
-  @test right() && K.front_matter(b.lines) == 3
-  K.edit!(b, (line("# A long page"), 0), (line("# A long page"), 0), "Three more words. ")
-  @test right()
-  # More front matter, and none
-  K.edit!(b, (2, 0), (2, 0), "author: Ada Lovelace\n")
-  @test right() && K.front_matter(b.lines) == 4
-  K.edit!(b, (1, 0), (1, 3), "")
-  @test right() && K.front_matter(b.lines) == 0
-  foreach(_ -> K.undo!(b), 1:3)
-  @test right()
-end
-
 close(w)

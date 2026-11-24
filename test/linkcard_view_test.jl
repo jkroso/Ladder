@@ -113,8 +113,7 @@ end
   @test rect(card(gone)).top > rect(card(slow)).top + tall
   # A card's line is a picture's: the caret goes onto it as a whole
   @test K.pictured(e.buf, paint) && K.solid(e.buf, paint) == (paint, paint)
-  # The Insert menu has a card. The sidebar lists no card, as it lists no picture.
-  @test any(x -> x isa Tuple && x[1] == "Link Card" && x[2] == ["![](https://)"], K.INSERTS)
+  # The sidebar lists no card, as it lists no picture
   @test !any(en -> en.title == "Link card", K.outline(e.buf))
   # A window that isn't on the screen asks the web for nothing with `curl`. This test has its own function in place of it.
   mine = C.getter[]
@@ -152,9 +151,6 @@ end
   @test sort(asked) == sort([PAINT, SLOW, GONE, PHOTO])
   c = card(paint)
   @test c.card == C.Card(PAINT) && c.picture == "" && c.icon == ""
-  # Until the page comes, the card's title is the line's words, with the address under them. With no words, it's the address.
-  @test C.heading(c.card, c.words) == "Paint for the hall" && C.blurb(c.card, c.words) == PAINT && C.source(c.card) == "bunnings.com.au"
-  @test C.heading(card(slow).card, card(slow).words) == SLOW
   # Until Ladder knows what's at the photo's address, its line shows a card too
   @test card(photo) !== nothing && card(photo).card == C.Card(PHOTO)
   shot("cards-waiting.png")

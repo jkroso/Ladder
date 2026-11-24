@@ -75,7 +75,6 @@ end
   frames(3)
   @test e.buf.view == :file && K.readonly(e.buf)
   t = tree()
-  @test t isa K.JSONTree
   # The first row is the whole file, an object. Its keys are rows under it, and the objects and lists in it are open too.
   @test shown(t, 1) == (nothing, "{9 keys}") && t.rows[1].depth == 0
   @test [r.key for r in t.rows if r.depth == 1] == ["job", "rooms", "price", "paid", "note", "client", "items", "tags", "extra"]

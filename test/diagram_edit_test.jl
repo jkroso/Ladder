@@ -78,7 +78,6 @@ end
   @test m !== nothing && m.editing && !m.bar
   # The tools for the whole diagram have buttons, before the ones that change its size
   @test tool_names() == [:add, :way]
-  @test rect(tool_button(:add)) !== nothing
   @test K.num(rect(tool_button(:add)).left) < K.num(rect(v.parts[(:button, :smaller)]).left)
   shot("1-filled")
 end
@@ -88,7 +87,6 @@ end
   click(spot((:box, "B")))
   @test m.picked == (:box, "B")
   @test tool_names() == [:add, :join, :shape, :delete]
-  @test rect(tool_button(:join)) !== nothing
   shot("2-selected")
   click(spot((:line, 2)))
   @test m.picked == (:line, 2) && tool_names() == [:look, :turn, :delete]

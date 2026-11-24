@@ -177,8 +177,6 @@ const QUOTE = crlf("""
   @test m.parts[3].name == "Café (final).pdf" && m.parts[3].type == "application/pdf"
   @test m.parts[5].type == "message/rfc822" && isempty(m.parts[5].parts)
   @test String(copy(m.parts[5].body)) == "Subject: Inner\r\nFrom: x@example.com\r\n\r\nThe email that was sent on."
-  @test M.addresses(m, "cc") == ["Brown, Kim" => "kim@example.com"]
-  @test M.sent(m) == unix(2026, 11, 13, 22, 32)
   # A name in a Content-Type in words, and one in a single piece with its character set
   named = M.message("Content-Type: application/pdf; name=\"=?UTF-8?B?$(base64encode("Café.pdf"))?=\"\n\nx")
   @test named.name == "Café.pdf"

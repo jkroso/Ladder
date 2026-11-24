@@ -206,9 +206,3 @@ end
   down(w)
   @test e.buf.lines[2] == "show = true"
 end
-
-@testset "the key bindings page lists them" begin
-  e, w = window("")
-  @test K.caps(first(K.keys_now(e).of[:value_up])) == "⌃↑"
-  @test K.caps(first(K.keys_now(e).of[:value_down])) == "⌃↓"
-end

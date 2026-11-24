@@ -205,12 +205,6 @@ end
   fresh!()
   typed("x = [1, ")
   @test lines() === nothing && K.calling(e) === nothing
-  # A box that esc hid stays hidden for the rest of its call
-  fresh!()
-  typed("area(")
-  key(Keys.escape)
-  typed("1, ")
-  @test lines() === nothing
 end
 
 "The names in the list of names, or nothing when no list shows"

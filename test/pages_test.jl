@@ -52,8 +52,6 @@ end
   for lang in [K.LIVE, K.SHEET, K.SPREADSHEET, K.DIAGRAM, K.TAKEOFF, K.SCHEDULE, "julia", filter(!=(K.WEBVIEW), keys(K.BLOCKS))...]
     @test occursin("\n```$lang\n", text)
   end
-  # The welcome page has the sums in a line of text, and they come to what it says
-  @test "sums-in-a-line-of-text" in headings(hub)
   @test !isfile(joinpath(pages, "examples.md"))
 end
 

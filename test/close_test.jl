@@ -44,7 +44,6 @@ shot(w, name) = haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHO
 
 @testset "⌘W closes the file and shows its folder" begin
   e, w, folder = window("a.md", "b.md")
-  @test K.caps(first(K.bundle_keys("Ladder")[:close])) == "⌘W"
   press(w, Keys.w, cmd)
   @test e in K.editors
   # The page shows the folder, and the sidebar lists it, as a click on the folder in the sidebar's trail does

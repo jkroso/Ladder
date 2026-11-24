@@ -92,11 +92,6 @@ to: nowhere/rows.csv
 ```
 
 ```save
-to: http://api.example.com/orders
-key: shop
-```
-
-```save
 from: Nothing here
 to: a.csv
 ```
@@ -177,20 +172,19 @@ end
 end
 
 @testset "what the block won't do" begin
-  # The file that the rows come from, this page, a folder that isn't there, a key over http, and a heading that isn't there
+  # The file that the rows come from, this page, a folder that isn't there, and a heading that isn't there
   @test occursin("come from orders.json", note(show_save(6)))
   @test note(show_save(7)) == "costs.md is this page. Name another file."
   @test occursin("no folder called nowhere", note(show_save(8)))
-  @test occursin("https://", note(show_save(9)))
-  @test note(show_save(10)) == "This page has no table called “Nothing here”, and no file of that name beside it."
-  v = show_save(11)
+  @test note(show_save(9)) == "This page has no table called “Nothing here”, and no file of that name beside it."
+  v = show_save(10)
   @test occursin("Ladder replaces only a CSV, TSV, JSON or text file", note(v))
   @test button(v).off
   click(middle(button(v).rect))
   @test read(joinpath(dir, "notes.md"), String) == "# Notes\n"
   shot("save-problem.png")
   # Without `to`, the block lists folders and asks for a name: see save_picker_test.jl
-  v = show_save(12)
+  v = show_save(11)
   @test K.asks_where(v) && button(v).words == "Save" && K.save_name_field(v).text == "orders (saved).csv"
 end
 

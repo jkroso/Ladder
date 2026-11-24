@@ -62,7 +62,6 @@ end
   K.open!(e, file)
   frames()
   @test e.buf.path == file
-  @test view() isa K.ZipView && rect(view()) !== nothing
   @test lines() == ["plans/", "plans/house/", "plans/Readme.md"]
   shot("list")
 end

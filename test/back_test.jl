@@ -65,8 +65,6 @@ showing(e) = basename(e.buf.path)
 
 @testset "⌘⌥← goes back to the file that showed before, and ⌘⌥→ goes forward again" begin
   e, w, _ = window("a.md", "b.md", "c.md")
-  @test K.caps(first(K.bundle_keys("Ladder")[:back])) == "⌘⌥←"
-  @test K.caps(first(K.bundle_keys("Ladder")[:forward])) == "⌘⌥→"
   K.follow!(e, "b.md"); frames(w)
   K.follow!(e, "c.md"); frames(w)
   @test showing(e) == "c.md"
@@ -188,8 +186,6 @@ end
 end
 
 @testset "⌘[ and ⌘] aren't the keys that go back and forward" begin
-  of = K.bundle_keys("Ladder")
-  @test K.caps(first(of[:back])) == "⌘⌥←" && K.caps(first(of[:forward])) == "⌘⌥→"
   e, w, _ = window("a.md", "b.md")
   K.follow!(e, "b.md"); frames(w)
   press(w, Keys.left_bracket, cmd)

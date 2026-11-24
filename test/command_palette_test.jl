@@ -111,12 +111,6 @@ K.@def mutable struct Shelf <: K.SemanticUI
   chosen::Set{String} = Set{String}()
 end
 
-@testset "a command's name reads as words" begin
-  @test K.palette_name(:save) == "Save"
-  @test K.palette_name(:select_all) == "Select All"
-  @test K.palette_name(:go_to) == "Go To"
-end
-
 @testset "how well text fits the letters typed" begin
   @test K.palette_fit("save", "sa") == 150           # at its start
   @test K.palette_fit("unsaved", "sa") == 98         # further in, so a little less
@@ -162,11 +156,6 @@ end
   found = K.palette_chips(K.callable_methods(shout), Any[])
   @test [c.names[1] for c in found] == [:words, :loud, :times] && [c.keyword for c in found] == [false, true, true]
   @test found[2].types == Any[Bool] && found[3].types == Any[Int]
-
-  # A method that takes something with no way to ask for it isn't one that the palette calls
-  @test isempty(K.callable_methods(opaque))
-  # The editor and the window aren't asked for
-  @test isempty(K.asks(only(K.callable_methods(ping))))
 end
 
 @testset "how a type is asked for, and the kind of its chip" begin

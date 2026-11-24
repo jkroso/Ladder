@@ -139,7 +139,6 @@ end
   g = D.grid(v.area, D.Look())
   order = D.sorted(desk, v.names, :kind)
   @test [v.spots[n] for n in order] == [D.spot(g, i) for i in 1:4]
-  @test v.spots[order[1]][1] > v.area[1] - 124   # the first is at the right edge
 end
 
 @testset "a long name takes two lines, and loses its middle when it's longer" begin
@@ -366,9 +365,6 @@ end
   @test e2.buf.path == desk
   @test Base.invokelatest(K.page_covered, e2)
   @test e2.folder == desk && !e2.panel
-  # A folder of no kind with no page in it shows what it holds, and the sidebar stays closed
-  e3 = K.build_editor(joinpath(desk, "Projects"))
-  @test e3.buf.path == joinpath(desk, "Projects") && e3.buf.view == :file && !e3.panel
   close(w2)
 end
 

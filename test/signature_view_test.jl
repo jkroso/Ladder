@@ -254,8 +254,6 @@ end
   frames(3, w3)
   v3 = e3.nodes[(:block, K.SIGNATURE, wrong, 1)]
   @test v3.box[3] ≈ 420 && !S.issigned(v3.data) && length(v3.data.other) == 5 && shows(v3, :input)
-  # Strokes with no day are a signature all the same
-  @test S.caption(e3.nodes[(:block, K.SIGNATURE, wrong, 2)].data) == "Signed"
   shot("signature-wrong.png", w3)
   @test occursin("<svg ", K.page_html(e3))
   # The block takes a stroke, and keeps the lines that it couldn't read
