@@ -227,41 +227,38 @@ end
   @test view() === nothing
 end
 
-@testset "a model fills the window, and the page keeps its room" begin
+@testset "a model's own file covers the page's whole space" begin
   K.open!(e, joinpath(dir, "knot.stl"))
   frames(3)
-  fv = only(n for n in values(e.nodes) if n isa K.FileView && n.path == joinpath(dir, "knot.stl"))
-  m = fv.viewer
-  @test m isa K.STLViewer
+  m = only(n for n in values(e.nodes) if n isa K.STLViewer && n.path == joinpath(dir, "knot.stl"))
+  # The model has all of the window under the top bar, with no room round it and no button that fills the window
   r = rect(m)
-  @test r !== nothing
-  tall = m.height
-  at(middle(r))
-  click(middle(rect(button(fv))))
-  v = view()
-  @test v !== nothing && v.what[1] == :node && v.what[2] === m
-  frames(2)
-  @test m.height > tall
-  @test K.num(rect(m).height) > K.num(r.height)
+  @test (r.left, r.top, r.width, r.height) == (0px, K.TOPBAR_H, 1000px, 1400px - K.TOPBAR_H)
+  @test m.fill
+  @test view() === nothing
+  @test !any(n -> n isa K.FillButton && rect(n) !== nothing, values(e.nodes))
   shot("7-model")
-  # A pinch on it zooms the model, as it does in the page
+  # A pinch on it makes the model bigger, and so does a scroll, since there's no page to scroll
   z = m.zoom
-  at(middle(rect(m)))
+  at(middle(r))
   onpinch(w, 1.3); frames()
   @test m.zoom ≈ 1.3z
-  key(Keys.escape)
-  @test view() === nothing
-  frames(2)
-  @test m.height == tall
+  onscroll(w, Vec2{px}(0px, 2px)); frames()
+  @test m.zoom > 1.3z
+  # A drag turns it
+  turn = m.turn
+  press(middle(r))
+  at(middle(r) .+ (40, 0))
+  release()
+  @test m.turn ≈ turn + 20
 end
 
 @testset "a glTF model shows what it's made of" begin
   cp(joinpath(@__DIR__, "..", "pages", "satellite.glb"), joinpath(dir, "satellite.glb"))
   K.open!(e, joinpath(dir, "satellite.glb"))
   frames(3)
-  fv = only(n for n in values(e.nodes) if n isa K.FileView && n.path == joinpath(dir, "satellite.glb"))
-  m = fv.viewer
-  @test m isa K.STLViewer && m.model isa K.Mesh
+  m = only(n for n in values(e.nodes) if n isa K.STLViewer && n.path == joinpath(dir, "satellite.glb"))
+  @test m.model isa K.Mesh && rect(m).top == K.TOPBAR_H
   # The satellite has ten materials, and the file's first is for a part that names none
   @test m.model.look !== nothing && length(m.model.look.materials) == 11
   # Its wings span 70 metres

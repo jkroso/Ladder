@@ -60,7 +60,7 @@ The viewer shows the model in an STL file or a 3MF file, the kinds of file that 
 STLViewer("knot.stl")
 ```
 
-Under the model are its number of triangles and its width, depth and height, in the units of its file. The path can start from the folder of this page, as `knot.stl` does. Give the viewer a `height` or a `color` to change how it looks.
+Under the model are its number of triangles and its width, depth and height, in the units of its file. When you open a model's file by itself, the model fills the window under the top bar, and any scroll makes it bigger or smaller. The path can start from the folder of this page, as `knot.stl` does. Give the viewer a `height` or a `color` to change how it looks.
 
 The viewer shows a glTF file too. Its name ends in `.glb` or `.gltf`. That kind of file also says what each part is made of: its colour, how much it's a metal, how rough it is, and the pictures wrapped round it. So the viewer shows it in its own colours, in the light of a studio, in front of a grey wall.
 

@@ -6506,12 +6506,30 @@ cursor(::FileView) = :arrow
 file_item(e, b::Buffer) = begin
   v = node!(() -> FileView(path=b.path), e, (:fileview, b.path))
   # What covers the page's whole space isn't one of the page's items, so it has no height to learn
-  b === e.buf && (page_covered(e) || html_shown(e)) && return Item(1, 1, 0px, 1px, Live(v, 1px))
+  b === e.buf && (page_covered(e) || html_shown(e) || model_shown(e)) && return Item(1, 1, 0px, 1px, Live(v, 1px))
   # Lay it out once to learn how tall it is
   concrete = describe(Column(fixed(e.width), Alignment.Start, geometry(v)), (e.width, 9999px))
   high = concrete.height + 2LIVE_GAP
   Item(1, 1, 0px, high, Live(v, high))
 end
+
+# A file that you open is all that its page shows, so a model's file covers the page's whole space in the
+# window, under the top bar, as the page of an HTML file does. A model in another page, like one in a
+# gallery, has the room that the page gives it.
+
+"The viewer that covers the page's space with the model in the file that shows, or nothing if the page shows no file that can be read as a model"
+model_part(e) = begin
+  b = e.buf
+  (b.view == :file && lowercase(splitext(b.path)[2]) in MODELS && isfile(b.path)) || return nothing
+  m = node!(() -> STLViewer(path=b.path, fill=true), e, (:model_page, b.path))
+  load!(m) isa Mesh || return nothing
+  # The top bar says how big the file is and when it changed, as it does for a table
+  b.about = bytes(filesize(b.path)) * "  ·  Changed " * Libc.strftime("%-d %b %Y, %H:%M", mtime(b.path))
+  m
+end
+
+"True when the page shows a model's file as the model, which covers the page's whole space"
+model_shown(e) = model_part(e) !== nothing
 
 "The picture kept under `key`, `wide` across, and no wider than the page's text"
 fitted(e, key, wide; line=false) = begin
@@ -25653,6 +25671,9 @@ describe(p::Page) = begin
   cover === nothing || return cover
   # An HTML file at its highest level covers it with the page that its HTML makes, as a browser's window would show it
   html_shown(e) && return Box(width(grow=grow), height(grow=grow), Alignment.Start, html_part(e))
+  # A model's file covers it with the model, which is a component, so it gets a live block's colours and text size
+  model = model_part(e)
+  model === nothing || return with_theme(() -> Box(width(grow=grow), height(grow=grow), Alignment.Start, model), component_theme(e.zoom))
   # Long lines that don't wrap go on to the right edge of the window. The text moves left as the page
   # scrolls sideways. None of it shows past the edges of the page, and the numbers of the lines go over it.
   # A kind of folder can show something under the text of each page that it holds
