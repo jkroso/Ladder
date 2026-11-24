@@ -71,8 +71,9 @@
 #     of what's round it. Drag the map to move it, and click it to put the
 #     pin where you clicked.
 #   - Write a code block in the language `web` with the address of a page of
-#     the web in it to show that page. Click it to make it fill the window,
-#     where you scroll the page, follow its links and type in its fields.
+#     the web in it to show that page. Click, drag and type in it where it
+#     is. The button beside its top right corner makes it fill the window,
+#     where the wheel scrolls the page and a bar goes to other pages.
 #   - Write a code block in the language `find` to list the to-do items
 #     that aren't ticked in every page of the folder. At its top, type words
 #     to keep only the lines that have them, and choose the kind of line and
@@ -21919,11 +21920,21 @@ end
 # that starts with a tag, like `<h1>`, holds the HTML of the page itself.
 #
 # In the document, the block shows the top of the page, and the page's scripts
-# run. A click on it, or the button that shows beside its top right corner
-# while the mouse is over it, makes it fill the window. There the page is
-# yours to use: the wheel scrolls it, a click follows a link or presses a
-# button, and you type in its fields. The bar over the page has what a
-# browser has:
+# run. The page is yours to use where it is, as a model in the page is:
+#
+#   - A click follows a link or presses a button, and a drag goes to the
+#     page's scripts, as a drag turns a model that a script draws. After a
+#     click the page has the keyboard, so you type in its fields. Esc gives
+#     the keyboard back to the document.
+#   - The wheel scrolls the document, so the page doesn't stop it as it goes
+#     past. With ⌘ held the wheel is the page's, and so is a pinch: a script
+#     hears it as a browser sends it, as the wheel with Ctrl held.
+#   - A click with ⌘ held opens the page in your browser. With ⌥ held the
+#     document shows the block's lines.
+#
+# Only the button that shows beside its top right corner, while the mouse is
+# over it, makes it fill the window. There the wheel scrolls the page too,
+# and the bar over the page has what a browser has:
 #
 #   - The arrows go back to the page before, and forward again. ⌘[ and ⌘]
 #     do the same.
@@ -21975,8 +21986,17 @@ web_browser(v::WebView) = begin
   v.browser === nothing || return v.browser
   e = editor(v)
   files = Webfiles.Files(getter=(a...) -> WEB_GETTER[](a...), online=() -> web_online(e))
-  v.browser = own!(v, Browsers.Browser(files=files, open=url -> BROWSER[](url), idle=:hand, active=false))
+  v.browser = own!(v, Browsers.Browser(files=files, open=url -> BROWSER[](url), takes=ev -> page_takes(v, ev)))
 end
+
+"""
+True when the page of the web view `v` gets `ev`, a click, a turn of the wheel
+or a pinch. While the view fills the window, the page gets them all. In the
+document, a click with ⌘ or ⌥ held is the block's, and the wheel scrolls the
+document unless ⌘ is held, as over a model.
+"""
+page_takes(v::WebView, ev) = v.full || (ev isa MouseScroll ? only_held(ev, Keys.cmd) :
+                                         ev isa KeyPress ? !(only_held(ev, Keys.cmd) || only_held(ev, Keys.opt)) : true)
 
 """
 What the lines of a `web` block ask for: the address of a page, or the HTML
@@ -22145,10 +22165,9 @@ describe(v::WebView) = begin
   with_theme(component_theme(e.zoom)) do
     b.zoom = round(Float64(e.zoom), digits=2)
     if !v.full
-      # In the page it shows the top of the page of the web, as tall as that page up to `WEB_HIGH`. A click makes it fill the window.
+      # In the page it shows the top of the page of the web, as tall as that page up to `WEB_HIGH`. Its button makes it fill the window.
       isempty(b.address) && isempty(b.html) &&
         return Column(block_look()..., name="Web page", block_note("Write the address of a page in this block, like https://julialang.org"))
-      b.active = false
       b.wide = e.width - 2px
       p = b.view.page
       # Until a page has come, the block is as tall as it's likely to be with one
@@ -22162,7 +22181,6 @@ describe(v::WebView) = begin
     typing = win !== nothing && win.focus === input
     # The field shows where the page is, until someone types in it
     typing || (input.text = web_address(v); input.cursor = input.anchor = 0)
-    b.active = true
     b.wide, b.high = w, max(40px, h - TOPBAR_H - 38px)
     field = Row(width(grow=grow), height(26px), padding(8px, 0px), child_gap=7px, radius(6px), Alignment.Center, background(colours.bg),
                 border(1px, :solid, typing ? colours.accent : colours.line),
@@ -22211,13 +22229,13 @@ end
 
 cursor(v::WebView) = :arrow
 
-# In the document, a click makes the web view fill the window. With ⌘ held it opens the page in the browser, and with
-# ⌥ held the document shows the block's lines. A click beside a button of one that fills the window is the block's.
+# In the document, a click on the page is the page's: see `page_takes`. With ⌘ held it opens the page in the browser,
+# and the rest go on to the document: with ⌥ held it shows the block's lines. A click beside a button of one that fills
+# the window is the block's.
 onkey(v::WebView, ::KeyPress{Keys.mouse_left}) = begin
   v.full && return (focus(web_browser(v)); handled)
-  only_held(v, Keys.opt) && return nothing
   only_held(v, Keys.cmd) && return (isempty(web_address(v)) || BROWSER[](web_address(v)); handled)
-  full!(v, true)
+  nothing
 end
 
 # Return in the field goes to the address that's typed there. Esc leaves the field first, and then puts the block

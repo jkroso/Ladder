@@ -538,7 +538,7 @@ In a page of your own, a click on a link to an address that ends in `.md` shows 
 
 ## Pages of the web
 
-A code block in the language `web` shows a page of the web. Write the page's address in it, like `https://julialang.org`, or the name of a file of HTML beside the document. Ladder draws the page itself and runs its scripts. Click the block and it fills the window. There you scroll the page, follow its links and type in its fields, and the bar over it goes back, forward and to another address. Esc puts the block back in the page.
+A code block in the language `web` shows a page of the web. Write the page's address in it, like `https://julialang.org`, or the name of a file of HTML beside the document. Ladder draws the page itself and runs its scripts. You use the page where it is: click its links and buttons, drag in it, and type in its fields. Esc gives the keyboard back to your page. The wheel scrolls your page past it. Scroll with ⌘ held to scroll the web page. A pinch goes to the web page too, so a map or a model in it can zoom. The button beside its top right corner makes the block fill the window. There the wheel scrolls the web page, and the bar over it goes back, forward and to another address. Esc puts the block back in the page.
 
 A block that starts with a tag holds the page itself, like this one:
 

@@ -340,7 +340,7 @@ const build = () => {
   return { span: s.span };
 };
 
-// ------------------------------------------------------------------ the view: drag to turn it, and the wheel to come nearer
+// ------------------------------------------------------------------ the view: drag to turn it, and the wheel or a pinch to come nearer
 let turn = -0.55, tilt = 0.5, far = 1.0;
 let made = build();
 const draw = () => {
@@ -370,7 +370,8 @@ addEventListener('mousemove', e => {
   draw();
 });
 addEventListener('mouseup', () => { down = null });
-addEventListener('wheel', e => { far = THREE.MathUtils.clamp(far * Math.exp(e.deltaY * 0.0015), 0.04, 6); draw(); e.preventDefault() }, { passive: false });
+// A pinch comes as the wheel with Ctrl held, where each 100 px is a factor of e, so it brings the satellite as near as the fingers spread
+addEventListener('wheel', e => { far = THREE.MathUtils.clamp(far * Math.exp(e.deltaY * (e.ctrlKey ? 0.01 : 0.0015)), 0.04, 6); draw(); e.preventDefault() }, { passive: false });
 addEventListener('resize', draw);
 // Ladder tells the page when the sums change, as while a number is dragged
 addEventListener('sums', () => { made = build(); draw() });

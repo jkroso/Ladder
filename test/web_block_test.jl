@@ -7,7 +7,7 @@
 @use Test: @test, @testset
 @use "../main" => K
 @use "github.com/jkroso/MiniFB.jl" Window KeyPress KeyRelease MouseMove Keys onkey onmouse onscroll Typed ontype
-@use "github.com/jkroso/UI.jl/Interface/draw" frame rect
+@use "github.com/jkroso/UI.jl/Interface/draw" frame rect onpinch
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
 @use GeometryBasics: Vec2
 const px = K.px
@@ -89,6 +89,8 @@ end
 typed(s) = (foreach(c -> ontype(w, Typed(c, w)), s); frames())
 middle(r) = (K.num(r.left + r.width / 2), K.num(r.top + r.height / 2))
 button(name) = click(middle(rect(v.parts[(:button, name)])))
+"Click the button beside the top right corner of the first block, which shows while the mouse is over the block"
+fill_button() = (at(middle(rect(b))); click(middle(rect(K.fills(e)[objectid(v)].button))))
 "Where a point of the page of the web is in the window"
 spot(x, y) = (r = rect(b); (K.num(r.left) + x, K.num(r.top) + y - K.Browsers.scrolled(b)))
 live(code) = K.Browsers.Live.evaluate(b.view.live, code)
@@ -102,7 +104,7 @@ block_text(n) = (span = K.block_lines(e.buf, K.WEBVIEW, n); span === nothing ? n
   @test live("document.title") == "Example, with scripts" && live("getComputedStyle(document.querySelector('h1')).color") == "rgb(0, 90, 160)"
   # In the document it's as wide as the text, and no taller than `WEB_HIGH`
   r = rect(b)
-  @test r.width == e.width - 2px && r.height == K.WEB_HIGH && !b.active
+  @test r.width == e.width - 2px && r.height == K.WEB_HIGH && b.active
   @test any(en -> en.title == "Web page", K.outline(e.buf)) && any(x -> x isa Tuple && x[1] == "Web Page", K.INSERTS)
   @test !K.dirty(e.buf)
   # A page that the block holds shows, as tall as it is with the margin that a page has, and its scripts run
@@ -116,13 +118,47 @@ block_text(n) = (span = K.block_lines(e.buf, K.WEBVIEW, n); span === nothing ? n
   shot("web-block.png")
 end
 
-@testset "in the document it only shows" begin
+@testset "in the document the page is yours to use where it is" begin
   # The wheel over it scrolls the document, and not the page of the web
   at(middle(rect(b)))
   onscroll(w, Vec2{px}(0px, -2px), true)
   frames()
   @test K.Browsers.scrolled(b) == 0 && e.scroll.offset > 0px
   e.scroll.offset = 0px
+  frames()
+  live("window.clicks = 0; window.dragged = 0; window.wheels = []; addEventListener('click', () => clicks++);" *
+       "addEventListener('mousemove', ev => { if (ev.buttons) dragged++ });" *
+       "addEventListener('wheel', ev => wheels.push([ev.deltaY, ev.ctrlKey, ev.metaKey]))")
+  # A click is the page's, and the block stays in the document. The page has the keyboard after it.
+  click(spot(20, 30))
+  @test live("clicks") == 1 && !v.full && w.focus === b
+  # A drag reaches the page's scripts, as a drag turns a model that a script draws
+  press(spot(20, 30))
+  at(spot(60, 40))
+  at(spot(90, 45))
+  release()
+  @test live("dragged") >= 2 && live("clicks") == 1 && !v.full
+  # With ⌘ held the wheel is the page's: its scripts hear it, and it scrolls the page and not the document
+  w.keys |= Keys.cmd
+  onscroll(w, Vec2{px}(0px, -2px), true)
+  w.keys ⊻= Keys.cmd
+  frames()
+  @test K.Browsers.scrolled(b) == 60 && e.scroll.offset == 0px && live("wheels.length") == 1 && live("wheels[0][2]") == true
+  K.Browsers.scroll!(b, 0.0)
+  # A pinch reaches the scripts as a browser sends it: as the wheel with Ctrl held
+  onpinch(w, 1.1)
+  frames()
+  @test live("wheels.length") == 2 && live("wheels[1][1]") == true && isapprox(live("wheels[1][0]"), -100log(1.1), atol=0.01)
+  @test !v.full && e.scroll.offset == 0px
+  # Esc gives the keyboard back to the document
+  key(Keys.escape)
+  @test w.focus === e && !v.full
+  # A click with ⌥ held is the document's, which shows the block's lines, and the page doesn't hear it
+  w.keys |= Keys.opt
+  click(spot(20, 30))
+  w.keys ⊻= Keys.opt
+  @test live("clicks") == 1 && w.focus === e && !v.full && e.buf.caret[1] == K.block_lines(e.buf, K.WEBVIEW, 1)[1] + 1
+  e.buf.caret = e.buf.anchor = (length(e.buf.lines), 0)
   frames()
   # A click with ⌘ held opens the page in the browser
   opened = String[]
@@ -136,8 +172,8 @@ end
   K.BROWSER[] = old
 end
 
-@testset "it fills the window, and the page is yours to use" begin
-  click(spot(20, 80))   # where the link is: in the document, the click only makes the block fill the window
+@testset "its button makes it fill the window, and the page is yours to use there too" begin
+  fill_button()
   @test v.full && b.shown == "https://example.com/" && b.active && w.focus === b
   r = rect(b)
   @test r.left == 0px && r.width == 1000px && r.top == K.TOPBAR_H + 38px && r.height == 900px - K.TOPBAR_H - 38px
@@ -193,7 +229,7 @@ end
   # The block's line is the page that shows
   @test block_text(1) == ["https://julialang.org/"] && b.shown == "https://julialang.org/"
   # The button of the bar does the same
-  click(middle(rect(b)))
+  fill_button()
   @test v.full
   button(:full)
   @test !v.full
@@ -204,12 +240,15 @@ end
   b5 = v5.browser
   written = block_text(5)
   @test !K.Browsers.can_back(b5)
+  # In the document, a link out of the page that the block holds goes to its page there, and puts its address in the
+  # block, in place of the HTML
+  r = rect(b5)
+  # The document scrolls to it, if it's under the bottom of the window
+  r.top + 30px > 900px && (e.scroll.offset += r.top - 400px; frames(); r = rect(b5))
+  click((K.num(r.left) + 10, K.num(r.top) + 15))
+  @test !v5.full && b5.shown == "https://julialang.org/" && block_text(5) == ["https://julialang.org/"]
   K.full!(v5, true)
   frames()
-  # A link out of the page that the block holds puts the address of its page in the block, in place of the HTML
-  r = rect(b5)
-  click((K.num(r.left) + 10, K.num(r.top) + 15))
-  @test b5.shown == "https://julialang.org/" && block_text(5) == ["https://julialang.org/"]
   # ⌘E shows the lines of the block: the address of the page that shows
   key(Keys.e, Keys.cmd)
   @test e.plain && !v5.full && e.buf.lines[e.buf.caret[1]] == "https://julialang.org/"

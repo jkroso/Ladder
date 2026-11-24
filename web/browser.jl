@@ -58,6 +58,11 @@
 # While it isn't active, it only shows the page: a click and a key go to the
 # nodes above it. `idle` is the shape of the mouse over it then.
 #
+# `takes` says which clicks, turns of the wheel and pinches an active view
+# gives the page. Its owner can keep some for itself: a view in a document
+# leaves the plain wheel to the document. A pinch reaches the page's scripts
+# as a browser sends it, as the wheel with Ctrl held.
+#
 # What it doesn't do yet: a box that's fixed in the window scrolls with the
 # page. What the page's CSS says for the mouse over an element (`:hover`) or
 # for the field with the keyboard (`:focus`) is left out. Text in a field
@@ -72,7 +77,7 @@
 @use "github.com/jkroso/UI.jl/Interface/Geometric"...
 @use "github.com/jkroso/UI.jl/Interface/Specific" ConcreteRect
 @use "github.com/jkroso/UI.jl/Interface/abstract" SemanticUI describe handled window_of focus onblur
-@use "github.com/jkroso/UI.jl/Interface/draw" draw cursor open_url rect redraw_in! MouseScroll clipboard clipboard! show_menu! with_clip
+@use "github.com/jkroso/UI.jl/Interface/draw" draw cursor open_url rect redraw_in! MouseScroll Pinch onpinch clipboard clipboard! show_menu! with_clip
 @use Skia
 @use GLFW
 @use "./main" => Web
@@ -122,6 +127,7 @@ end
   zoom::Float64 = 1.0
   active::Bool = true       # the mouse and the keyboard reach the page
   idle::Symbol = :arrow     # the shape of the mouse over a page that isn't active
+  takes::Any = ev -> true   # true when the page gets a click, a turn of the wheel or a pinch. One that it doesn't get goes to the nodes above.
   scripts::Bool = true      # run the page's scripts
   open::Any = open_url      # opens an address that's no page of the web, like `mailto:`
   say::Any = (level, text) -> nothing   # called with each line that a script prints
@@ -922,11 +928,13 @@ onmouse(b::Browser, ev::MouseMove) = begin
 end
 
 onscroll(b::Browser, ev::MouseScroll) = begin
-  b.active || return nothing
+  (b.active && b.takes(ev)) || return nothing
   # The page's scripts hear the wheel first, and one that says to do no more with it keeps the page where it is
   l, at = live(b), point(b, b.locked)
   if l !== nothing && at !== nothing
-    go = Live.wheel!(l, at..., -30 * Float64(flt(ev.delta[1])), -30 * Float64(flt(ev.delta[2])))
+    w = ev.window
+    go = Live.wheel!(l, at..., -30 * Float64(flt(ev.delta[1])), -30 * Float64(flt(ev.delta[2]));
+                     ctrl=Keys.ctrl in w.keys, meta=Keys.cmd in w.keys, alt=Keys.opt in w.keys, shift=Keys.shft in w.keys)
     l.scripts.changed && wake!(b)
     (go && b.locked === nothing) || return handled
   end
@@ -936,8 +944,19 @@ onscroll(b::Browser, ev::MouseScroll) = begin
   handled
 end
 
+# A pinch reaches the page's scripts as a browser sends it: as the wheel with Ctrl held, where each 100 px down makes
+# the page e times smaller. A pinch that no script takes goes on to the nodes above, since the page doesn't zoom.
+onpinch(b::Browser, ev::Pinch) = begin
+  (b.active && b.takes(ev)) || return nothing
+  l, at = live(b), point(b, b.locked)
+  (l === nothing || at === nothing || ev.scale <= 0) && return nothing
+  go = Live.wheel!(l, at..., 0.0, -100 * log(ev.scale); ctrl=true)
+  l.scripts.changed && wake!(b)
+  go ? nothing : handled
+end
+
 onkey(b::Browser, ev::KeyPress{Keys.mouse_left}) = begin
-  b.active || return nothing
+  (b.active && b.takes(ev)) || return nothing
   focus(b)
   at = point(b)
   at === nothing && return handled

@@ -247,13 +247,15 @@ release!(l::Live, x, y) = (z = l.options.zoom; JS.fire!(l.scripts, at(l, x / z, 
 """
 The wheel or the trackpad scrolls by `(dx, dy)` px, as the page is drawn,
 with the mouse at the point `(x, y)` of the page. More than 0 is down, and to
-the right. The page's scripts hear `wheel` on the element there. False when
-a script said to do no more with it: then the page doesn't scroll.
+the right. The page's scripts hear `wheel` on the element there, with the
+keys that were held: `ctrl` is true for a pinch, as a browser sends one. False
+when a script said to do no more with it: then the page doesn't scroll.
 """
-wheel!(l::Live, x, y, dx, dy) = begin
+wheel!(l::Live, x, y, dx, dy; ctrl=false, meta=false, alt=false, shift=false) = begin
   z = l.options.zoom
   init = mouse(l, x, y)
   init["deltaX"], init["deltaY"], init["deltaMode"] = dx / z, dy / z, 0
+  init["ctrlKey"], init["metaKey"], init["altKey"], init["shiftKey"] = ctrl, meta, alt, shift
   JS.fire!(l.scripts, at(l, x / z, y / z; fresh=false), "wheel", init)
 end
 
