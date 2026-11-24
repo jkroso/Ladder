@@ -193,6 +193,43 @@ end
   haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], "view-wall.png"), w2)
 end
 
+@testset "a line `aspect:` sets the shape of a model and of a page" begin
+  @test K.aspect_of("16:9") ≈ 16 / 9 && K.aspect_of("16/9") ≈ 16 / 9 && K.aspect_of("2") == 2 && K.aspect_of("1.5") == 1.5
+  @test K.aspect_of("wide") == 0 && K.aspect_of("0:1") == 0 && K.aspect_of("2:0") == 0
+  # A setting is no name of a file, and a line of a page's HTML is no setting
+  @test K.view_parts(["shape.jl", "aspect: 2:1"]) == (source=["shape.jl"], settings=["aspect: 2:1"])
+  @test K.view_parts(["aspect: 3", "<p>", "aspect: 1", "</p>"]) == (source=["<p>", "aspect: 1", "</p>"], settings=["aspect: 3"])
+  write(joinpath(dir, "page.html"), "<p>A page</p>")
+  shapes = joinpath(dir, "shapes.md")
+  write(shapes, "The wing spans !`span = 70m`.\n\n```view\nshape.jl\naspect: 2:1\n```\n\n```view\naspect: 16/9\nwall.glb\n```\n\n" *
+                "```view\npage.html\naspect: 4\n```\n\n```view\nshape.jl\n```\n")
+  e3 = K.build_editor(shapes)
+  w3 = Window(e3, size=(900px, 1600px))
+  foreach(_ -> frame(w3), 1:3)
+  v3(n) = e3.nodes[(:block, K.VIEW_BLOCK, shapes, n)]
+  made, file, html, plain = v3(1), v3(2), v3(3), v3(4)
+  @test made.target == realpath(shape) || made.target == shape
+  @test made.aspect == 2 && file.aspect ≈ 16 / 9 && html.aspect == 4 && plain.aspect == 0
+  # The viewer's frame and the rounding to a whole pixel take up to 3 pixels from the shape
+  r = rect(made.made.node)
+  @test abs(r.height - r.width / 2) <= 3px && rect(made).height == r.height
+  r = rect(file.crumb.viewer)
+  @test abs(r.height - r.width * 9 / 16) <= 3px
+  # A page is as tall as its shape says, whatever it shows
+  b = html.browser
+  @test b !== nothing && abs(b.high - b.wide / 4) <= 3px
+  # With no such line, a model is as tall as it always was
+  @test plain.made.node.height == K.MODEL_HEIGHT
+  # Take the line away, and the model is that tall again
+  i = findfirst(==("aspect: 2:1"), e3.buf.lines)
+  K.edit!(e3.buf, (i, 0), (i, length(e3.buf.lines[i])), "", typing=true)
+  # The caret leaves the block, so the page shows the view again and not its lines
+  e3.buf.caret = e3.buf.anchor = (1, 0)
+  foreach(_ -> frame(w3), 1:3)
+  @test made.aspect == 0 && made.made.node.height == K.MODEL_HEIGHT
+  haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], "view-aspect.png"), w3)
+end
+
 @testset "a page from somebody else runs no file" begin
   @test K.foreign("https://example.com/made.md")
   was = e.buf.path

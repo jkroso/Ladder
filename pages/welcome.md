@@ -554,6 +554,8 @@ What shows depends on the kind of file:
 
 While the mouse is over the block, two buttons show beside its top right corner. The first makes what the block shows fill the window: a page, a model, a video, a picture or a PDF file. Your page is still the file that's open, and Esc puts it back. A view that would show no more that way, like a table or a folder, doesn't have this button. The second button goes to the file. The window shows the file, as it does when you click a link to it, and ⌘⌥← comes back to your page. A click on the block with ⌘ held does the same.
 
+A line like `aspect: 16:9` under the file's name sets the shape of a page, a model or a video: its width to its height. The view is as wide as your page's text, so it keeps that shape at any width of the window. `aspect: 2` is the same as `aspect: 2:1`. Without the line, a page of the web is as tall as what it shows, up to a limit, and a model is 260 pixels tall.
+
 ```view
 costs.csv
 ```

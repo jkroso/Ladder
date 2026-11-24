@@ -131,6 +131,7 @@ Here is the same copy as a model in Ladder's own viewer. The file satellite.jl, 
 
 ```view
 satellite.jl
+aspect: 2:1
 ```
 
 ```mermaid

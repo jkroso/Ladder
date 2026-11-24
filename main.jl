@@ -22360,6 +22360,12 @@ keyboard_part(v::HTMLPage) = html_browser(v)
 # back. A click on the block with ⌘ held does the same, and one with ⌥ held
 # shows the block's line. An HTML file that you go to keeps the sums that
 # the block gave its page, so the page there looks as it did in the document.
+#
+# A line like `aspect: 16:9` under the name sets the shape of a page, a model
+# or a video: its width to its height. The view is as wide as the document's
+# text, so it keeps that shape at any width of the window. `aspect: 2` is the
+# same as `aspect: 2:1`. With no such line, a page is as tall as what it shows
+# and a model is 260 pixels tall.
 
 const VIEW_BLOCK = "view"
 push!(BLOCK_ICONS, "eye", "arrow-up-right")
@@ -22370,6 +22376,9 @@ push!(BLOCK_ICONS, "eye", "arrow-up-right")
   first::Int = 0                           # the lines of its block, when the page was last laid out
   last::Int = 0
   lines::Any = nothing                     # the lines that it was last read from
+  source::Vector{String} = String[]        # those lines without its settings: the name of what it shows, or its HTML
+  settings::Vector{String} = String[]      # its lines of settings, like `aspect: 16:9`, as they're written
+  aspect::Float64 = 0.0                    # its width over its height, from its line `aspect:`, or 0 when it has none
   lang::String = VIEW_BLOCK                # the language of its block: `view`, or `web` as it was called before
   target::String = ""                      # the path or the address that its line names, as `view_target` gives it
   held::Bool = false                       # its lines hold the HTML of a page, which starts with a tag
@@ -22379,6 +22388,36 @@ push!(BLOCK_ICONS, "eye", "arrow-up-right")
   sent::Any = nothing                      # the page that was last given the sums, and what it was given: see `send_sums!`
   made::Any = nothing                      # what the function `view` of a Julia file made for it: a Made
 end
+
+"A line of settings of a `view` block, like `aspect: 16:9`, or nothing for any other line"
+view_setting(line) = match(r"^\s*(aspect)\s*:\s*(.*?)\s*$"i, line)
+
+"""
+The lines of a `view` block, `lines`, in two parts: those that name what it
+shows, or hold its HTML, and its lines of settings. A line of HTML is no
+setting, so the settings of a page that the block holds are above its first tag.
+"""
+view_parts(lines) = begin
+  html = findfirst(l -> startswith(strip(l), '<'), lines)
+  upto = html === nothing ? length(lines) : html - 1
+  set = [i for i in 1:upto if view_setting(lines[i]) !== nothing]
+  (source=String.(lines[setdiff(eachindex(lines), set)]), settings=String.(lines[set]))
+end
+
+"""
+The width over the height that `text` says, like 16:9, 16/9, 2 or 1.5, or 0
+when it says none.
+"""
+aspect_of(text) = begin
+  m = match(r"^(\d+(?:\.\d+)?)\s*(?:[:/x×]\s*(\d+(?:\.\d+)?))?$", strip(text))
+  m === nothing && return 0.0
+  wide = parse(Float64, m[1])
+  high = m[2] === nothing ? 1.0 : parse(Float64, m[2])
+  wide > 0 && high > 0 ? wide / high : 0.0
+end
+
+"How tall a model or a video of the `view` block `v` is in the document `e`: as its line `aspect:` says, or `MODEL_HEIGHT`"
+view_high(v::ViewBlock, e) = v.aspect > 0 ? px(round(num(e.width) / v.aspect)) : MODEL_HEIGHT
 
 "True when `name` is the address of a page of the web, or of anything with a scheme, and not a path on the Mac"
 has_scheme(name::AbstractString) = occursin(r"^[a-z][a-z0-9+.-]*:"i, name)
@@ -22429,9 +22468,12 @@ reread!(v::ViewBlock, lines) = begin
   lines == v.lines && return v
   v.lines = lines
   e = editor(v)
-  src = web_source(e, lines)
+  v.source, v.settings = view_parts(lines)
+  said = filter(!isnothing, view_setting.(v.settings))
+  v.aspect = isempty(said) ? 0.0 : aspect_of(last(said)[2])
+  src = web_source(e, v.source)
   v.held = !isempty(src.html)
-  v.target = v.held ? "" : view_target(e, lines)
+  v.target = v.held ? "" : view_target(e, v.source)
   if view_web(v)
     b = web_browser(v)
     b.address, b.html, b.base = src
@@ -22497,7 +22539,8 @@ view_content(v::ViewBlock, e) = begin
     b.wide = e.width - 2px
     p = b.view.page
     # Until a page has come, the block is as tall as it's likely to be with one
-    b.high = p === nothing || isempty(b.view.html) ? WEB_HIGH * e.zoom : clamp(px(p.tall), WEB_LEAST * e.zoom, WEB_HIGH * e.zoom)
+    b.high = v.aspect > 0 ? px(round(num(b.wide) / v.aspect)) :
+             p === nothing || isempty(b.view.html) ? WEB_HIGH * e.zoom : clamp(px(p.tall), WEB_LEAST * e.zoom, WEB_HIGH * e.zoom)
     return Column(block_look()..., clip=true, name="Web page", b)
   end
   view_made(v) && return made_content(v, e)
@@ -22527,6 +22570,8 @@ view_content(v::ViewBlock, e) = begin
     nothing
   end
   content === nothing && (content = label("This file has no preview", 12px, color=colours.dim))
+  # A model or a video is as tall as the block's line `aspect:` says, except while it fills the window
+  (l.viewer isa STLViewer || l.viewer isa VideoPlayer) && !zoomed_node(e, l.viewer) && (l.viewer.height = view_high(v, e))
   # A model in a view has no line under it, as it has under a path: the model is all that shows
   l.viewer isa STLViewer && (l.viewer.foot = false; return bare_view(content))
   Column(block_look()..., padding(6px), child_gap=8px, name="View", content, Box(padding(4px, 0px), label(about, 12px, color=colours.dim)))
@@ -22593,8 +22638,10 @@ block_tick!(v::ViewBlock) = begin
   page = Browsers.page_now(b)
   (page === nothing || b.asked != (b.address, b.html, b.base)) && return v
   e = editor(v)
-  (readonly(e.buf) || e.buf.fixed || web_says(e, v.lines, page)) && return v
-  write_block!(v, v.lang, web_lines(e, page))
+  (readonly(e.buf) || e.buf.fixed || web_says(e, v.source, page)) && return v
+  # The block's settings stay. Those of a page that the block holds stay above its HTML.
+  said = web_lines(e, page)
+  write_block!(v, v.lang, page isa Browsers.Written ? vcat(v.settings, said) : vcat(said, v.settings))
   # The view is at that page already, so it doesn't get it again
   view_web(v) && v.browser === b && Browsers.asked!(b)
   v
@@ -22622,11 +22669,12 @@ keyboard_part(v::ViewBlock) = view_web(v) ? web_browser(v) : v.crumb !== nothing
 "The `view` block as HTML: the page that it holds, in a frame, the picture that it shows, or a link to its file or its page"
 view_html(e, v::ViewBlock) = begin
   if v.held
-    held = replace(join(v.lines, "\n"), '&' => "&amp;", '"' => "&quot;")
-    return "<iframe srcdoc=\"$held\" style=\"width:100%;height:$(round(Int, num(WEB_HIGH)))px;border:1px solid #d8d2c8;border-radius:8px\"></iframe>"
+    held = replace(join(v.source, "\n"), '&' => "&amp;", '"' => "&quot;")
+    shape = v.aspect > 0 ? "aspect-ratio:$(v.aspect)" : "height:$(round(Int, num(WEB_HIGH)))px"
+    return "<iframe srcdoc=\"$held\" style=\"width:100%;$shape;border:1px solid #d8d2c8;border-radius:8px\"></iframe>"
   end
   isempty(v.target) && return nothing
-  name = has_scheme(v.target) ? Browsers.whole(v.target) : String(strip(v.lines[findfirst(l -> !isempty(strip(l)), v.lines)]))
+  name = has_scheme(v.target) ? Browsers.whole(v.target) : String(strip(v.source[findfirst(l -> !isempty(strip(l)), v.source)]))
   shown = replace(name, '&' => "&amp;", '<' => "&lt;", '>' => "&gt;", '"' => "&quot;")
   ispicture(v.target) && return "<p><img src=\"$shown\" style=\"max-width:100%\"></p>"
   "<p><a href=\"$shown\">$shown</a></p>"
@@ -22759,7 +22807,10 @@ end
 "What the `view` block `v` shows of a Julia file that has a function `view`: what the function made, or what went wrong"
 made_content(v::ViewBlock, e) = begin
   m = made!(v, e)
-  isempty(m.fault) && m.ready && m.node isa STLViewer && return bare_view(in_page(e, m.node))
+  if isempty(m.fault) && m.ready && m.node isa STLViewer
+    zoomed_node(e, m.node) || (m.node.height = view_high(v, e))
+    return bare_view(in_page(e, m.node))
+  end
   name = basename(v.target)
   about = name * "  ·  Changed " * Libc.strftime("%-d %b %Y, %H:%M", mtime(v.target))
   content = !isempty(m.fault) ? note(m.fault, colours.accent) :
