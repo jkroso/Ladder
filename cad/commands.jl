@@ -23,7 +23,7 @@
 struct Field
   key::String                     # the name of the parameter
   label::String
-  kind::Symbol                    # :length :angle :count :text :json :choice :flag :vector, or what's clicked: :faces :face :edges :bodies :body :profiles :plane :spot
+  kind::Symbol                    # :length :angle :count :number :text :json :choice :flag :vector, or what's clicked: :faces :face :edges :bodies :body :profiles :plane :spot
   default::Any
   options::Vector{Pair{Any,String}}   # for a :choice: each value that's sent, and what the form calls it
   optional::Bool
@@ -42,6 +42,12 @@ section(f::Field) = f.section !== nothing ? f.section : f.kind == :flag ? "Optio
 
 "True for a field that's filled by clicks in the design"
 picks(f::Field) = f.kind in (:faces, :face, :edges, :bodies, :body, :profiles, :plane, :spot)
+"""
+True for a field that takes Julia code, like `4.5cm + 2mm*1.5`: a length, an
+angle, a count, any other number, or three of them. See expressions.jl.
+"""
+iscode(f::Field) = f.kind in (:length, :angle, :count, :number, :vector)
+
 "True for a field that takes any number of clicks"
 many(f::Field) = f.kind in (:faces, :edges, :bodies, :profiles)
 
@@ -177,7 +183,7 @@ const SPECS = Dict{String,Spec}(s.command => s for s in [
     Field("copy", "Create Copy", :flag)]),
   Spec("solid.scale", "Scale", "scale", [
     Field("bodies", "Bodies", :bodies),
-    Field("factor", "Factor", :count, default="2")]),
+    Field("factor", "Factor", :number, default="2")]),
   Spec("solid.draft", "Draft", "draft", [
     Field("faces", "Faces", :faces),
     Field("angle", "Angle", :angle, default="3 deg"),
@@ -219,9 +225,12 @@ field_kind(name, about::AbstractDict) = begin
   name in ("body", "target") && return :body
   get(about, "type", nothing) == "boolean" && return :flag
   haskey(about, "enum") && return :choice
+  # A number, or text that SolidCraft reads as one like "w / 2", is Julia code in the form
   kinds = get(about, "type", nothing)
-  kinds == "string" || kinds == "number" || kinds == "integer" ? :text :
-  any(a -> a isa AbstractDict && get(a, "type", "") in ("number", "string"), get(about, "anyOf", Any[])) && !any(a -> a isa AbstractDict && get(a, "type", "") in ("array", "object"), get(about, "anyOf", Any[])) ? :text : :json
+  types = kinds isa Vector ? String[string(k) for k in kinds] : kinds isa String ? [kinds] :
+          String[string(get(a, "type", "")) for a in get(about, "anyOf", Any[]) if a isa AbstractDict]
+  any(in(("array", "object")), types) && return :json
+  any(in(("number", "integer")), types) ? :number : "string" in types ? :text : :json
 end
 
 "Words for a parameter's name: `through_all` is Through all"
@@ -306,7 +315,7 @@ fields_in(help::AbstractString) = begin
         options = match(r"^([A-Za-z_0-9]+(?:\|[A-Za-z_0-9]+)+)", about)
         kind = field_kind(name, Object())
         kind = kind != :json ? kind : name == "position" ? :spot : startswith(about, "bool") ? :flag : options !== nothing ? :choice :
-               startswith(about, "[x,y,z]") ? :vector : :text
+               startswith(about, "[x,y,z]") ? :vector : occursin(r"^(expr|number|int|length|angle)", about) ? :number : :text
         choices = kind == :choice && options !== nothing ? Pair{Any,String}[o => words(String(o)) for o in split(options[1], '|')] : Pair{Any,String}[]
         kind == :choice && isempty(choices) && (kind = :text)
         needed = m[2] === nothing && length(ways) == 1
@@ -325,9 +334,11 @@ value(text::AbstractString) = (x = tryparse(Float64, strip(text)); x === nothing
 The parameters of a command as SolidCraft takes them, from what a form holds.
 `values` has each field's text, choice or flag by its key, and for a field
 that's clicked the list of what each click sends. It gives the parameters, or
-words that say what's still missing.
+words that say what's still missing. `read(field, text)` gives what SolidCraft
+gets for the code of a field that takes it (see `iscode`), as `Some(value)`,
+or words that say what's wrong with it. With none, the text is sent as it is.
 """
-params(s::Spec, values::AbstractDict) = begin
+params(s::Spec, values::AbstractDict; read=nothing) = begin
   out = JSON.Object()
   for f in s.fields
     v = get(values, f.key, f.default)
@@ -348,6 +359,15 @@ params(s::Spec, values::AbstractDict) = begin
       (v === true || !f.optional) && (out[f.key] = v === true)
     elseif f.kind == :choice
       v === nothing || v == "" || (out[f.key] = v)
+    elseif read !== nothing && iscode(f)
+      text = strip(v isa AbstractString ? v : "")
+      if isempty(text)
+        f.optional && continue
+        return "Type the $(lowercase(f.label))."
+      end
+      got = read(f, text)
+      got isa Some || return got
+      out[f.key] = something(got)
     elseif f.kind == :vector
       text = strip(v isa AbstractString ? v : "")
       if isempty(text)

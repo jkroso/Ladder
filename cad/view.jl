@@ -28,6 +28,13 @@
 # command, and SolidCraft's hidden program works out the new shape: see
 # engine.jl.
 #
+# A length, an angle or a count is Julia code, like `4.5cm + 2mm*1.5`, in the
+# colours of a code block. It has the units of Units.jl, `deg` for a degree,
+# and each parameter of the design by its name, like `d1`. ⌘Return runs the
+# code of the field that has the keyboard, or the part of it that's selected,
+# and shows what it comes to under the field, as it does in a Julia file.
+# expressions.jl says what SolidCraft gets for the code.
+#
 # Two clicks on a sketch, in the browser or the history, open it. The toolbar
 # then has the sketch's tools. A tool takes clicks in the sketch, and snaps to
 # the points and curves that are near. With no tool, a drag moves a point or a
@@ -68,7 +75,9 @@
 @use "./ink" => Ink
 @use "./ink" Glyph
 @use "./commands" => Commands
+@use "./expressions" => Expressions
 @use "../zip" => Zips
+@use "github.com/jkroso/UI.jl/Interface/Specific" text_width
 
 const grow = GrowType.Grow
 const clear = RGBA(0.0, 0.0, 0.0, 0.0)
@@ -305,6 +314,214 @@ input!(v::DesignView, key; text="", placeholder="") =
 
 "Forget the fields to type in whose key starts with `kind`, so that they show their first text again"
 forget!(v::DesignView, kind) = filter!(p -> !(p.first isa Tuple && !isempty(p.first) && p.first[1] == kind), v.parts)
+
+# --- fields of Julia code -------------------------------------------------------------
+
+"""
+How code looks in a field: the colours of a code block, and the font of code,
+as `(colours, family)`. Ladder sets this to a function that gives the page's.
+Without one, a field has the colours here and the page's font.
+"""
+const CODE_LOOK = Ref{Any}(nothing)
+const LIGHT_CODE = (comment=colorant"rgb(140,140,140)", string=colorant"rgb(30,120,60)", number=colorant"rgb(180,95,0)",
+                    keyword=colorant"rgb(170,40,130)", call=colorant"rgb(30,90,180)", type=colorant"rgb(0,120,130)")
+const DARK_CODE = (comment=colorant"rgb(112,112,118)", string=colorant"rgb(160,200,120)", number=colorant"rgb(230,170,100)",
+                   keyword=colorant"rgb(200,130,220)", call=colorant"rgb(120,170,250)", type=colorant"rgb(110,200,200)")
+const WRONG = colorant"rgb(226,96,84)"
+code_look(v) = CODE_LOOK[] !== nothing ? CODE_LOOK[]() : (dark(theme(v)) ? DARK_CODE : LIGHT_CODE, theme(v).family)
+
+"A field of Julia code, kept under `key`, in the colours of code. `text` is what it holds when it's first shown."
+code!(v::DesignView, key; text="", placeholder="") = begin
+  box = input!(v, key; text, placeholder)
+  colours, family = code_look(v)
+  box.colours = code -> Expressions.pieces(code, colours)
+  box.font_family = family
+  box
+end
+
+"Is `box` a field of Julia code?"
+iscode(box) = box isa TextInput && box.colours !== nothing
+
+"The kind of value that a parameter with the unit `unit` takes. A parameter of text takes no code."
+unit_kind(unit) = unit in ("deg", "rad") ? :angle : unit in ("", "unitless", nothing) ? :number : unit == "text" ? :text : :length
+
+"The design's parameters, as `parameters.list` gives them: the user's, and the lengths of the steps, like d1"
+every_param(v::DesignView) = (m = v.model; m === nothing ? Any[] : isempty(m.parameters) ? Designs.params(m) : m.parameters)
+
+"The parameter of the design called `name`, or nothing"
+param_named(v::DesignView, name) = (list = every_param(v); i = findfirst(p -> get(p, "name", nothing) == name, list); i === nothing ? nothing : list[i])
+
+"The comment of the parameter called `name`, or \"\""
+param_note(v::DesignView, name) = (p = param_named(v, name); p === nothing ? "" : string(something(get(p, "comment", ""), "")))
+
+"The module that the code of the fields runs in, with each parameter of the design as it is now"
+workspace!(v::DesignView) = Expressions.parameters!(get!(Expressions.workspace, v.parts, :julia), every_param(v))
+
+"""
+What the code of a field comes to: `(value, failed)`. The form asks for the
+values of its fields in each frame, so the same code with the same parameters
+isn't run again.
+"""
+ran(v::DesignView, code) = begin
+  memo = get!(() -> Dict{String,Any}(), v.parts, :ran)
+  stamp = hash([(get(p, "name", ""), get(p, "value", nothing)) for p in every_param(v)])
+  get(v.parts, :ran_with, nothing) == stamp || (empty!(memo); v.parts[:ran_with] = stamp)
+  get!(() -> Expressions.evaluate(workspace!(v), code), memo, String(code))
+end
+
+"""
+What a field of code holds, for a value of the kind `kind`: what SolidCraft
+gets, the code, the code as SolidCraft reads it (`solid`), the kind of value
+and what it comes to (see `Expressions.reading`). Words say what's wrong, with
+the field's `label` first. It's nothing for a field with nothing in it.
+"""
+read_code(v::DesignView, text, kind, label) = begin
+  code = String(strip(text))
+  isempty(code) && return nothing
+  value, failed = ran(v, code)
+  failed && return "$label: $(Expressions.shown(value, true))"
+  r = Expressions.reading(value, kind)
+  r isa String ? "$label $r" : (; r..., code, solid=Expressions.solidcraft_code(code))
+end
+
+"What ⌘Return showed under each field, and what each field said was wrong with its code"
+outcomes(v::DesignView) = get!(IdDict{Any,Any}, v.parts, :outcomes)
+
+"Show `words` under the field `box` in red, till its text changes"
+wrong!(v::DesignView, box, words) = (outcomes(v)[box] = (text=box.text, shown=String(words), failed=true); v)
+
+"""
+Run the code of the field `box`, or the part of it that's selected, as
+⌘Return does in a Julia file. What it comes to shows under the field.
+"""
+run_field!(v::DesignView, box::TextInput) = begin
+  lo, hi = minmax(box.anchor, box.cursor)
+  code = lo == hi ? box.text : String(collect(box.text)[lo+1:hi])
+  value, failed = Expressions.evaluate(workspace!(v), code)
+  # The code can give a name a value, which the code of the other fields can use
+  empty!(get!(() -> Dict{String,Any}(), v.parts, :ran))
+  outcomes(v)[box] = (text=box.text, shown=Expressions.shown(value, failed), failed=failed)
+  v
+end
+
+"""
+What ⌘Return showed for the field `box`, while the field still holds what it
+held then: a box with the value in the colours of code, or what went wrong in
+red. It's nothing when there's none.
+"""
+outcome(v::DesignView, box) = begin
+  o = get(outcomes(v), box, nothing)
+  (o === nothing || o.text != box.text) && return nothing
+  t = theme(v)
+  colours, family = code_look(v)
+  look = (radius(5px), border(1px, :solid, o.failed ? Ink.faded(WRONG, 0.45) : t.line), background(Ink.mixed(t.surface, colorant"black", dark(t) ? 0.2 : 0.03)))
+  o.failed && return Box(width(grow=grow), padding(7px, 4px), Alignment.Start, look..., Text(o.shown, size=11.5px, color=WRONG))
+  piece(s, colour) = (w = Text(s, size=11.5px, family=family, color=colour, wrap=WrapMode.none); Box(width(text_width(w, s)), w))
+  Row(height(22px), padding(7px, 0px), Alignment.Center, clip_x=true, look..., [piece(s, something(c, t.text)) for (s, c) in Expressions.parts(o.shown, colours)]...)
+end
+
+"A row of a form for a field of code: what it asks for, the field, and what ⌘Return showed under the field"
+code_row(v::DesignView, label, box) = begin
+  row = labelled(v, label, box)
+  shown = outcome(v, box)
+  shown === nothing && return row
+  Column(width(grow=grow), child_gap=4px, Alignment.Start, row,
+    Row(width(grow=grow), child_gap=8px, justify=Alignment.Start, Box(width(LABEL_W)), Row(width(grow=grow), justify=Alignment.Start, clip_x=true, shown)))
+end
+
+"""
+Ask SolidCraft what the code of each of `readings` comes to, as SolidCraft reads
+it. Then `then(agreed)` gets the keys of those that come to what Julia got:
+SolidCraft can have the code itself for those, and follow the parameters that
+it names. The others get the number that Julia got.
+"""
+agree!(then, v::DesignView, readings) = begin
+  asked = [(k, r) for (k, r) in readings if r.number !== nothing && !isempty(r.kind)]
+  agreed = Set{Any}()
+  isempty(asked) && return then(agreed)
+  left = Ref(length(asked))
+  for (k, r) in asked
+    Designs.ask!(v.model, "expr.evaluate", JSON.Object("expression" => r.solid, "kind" => r.kind)) do answer, problem
+      answer isa AbstractDict && get(answer, "ok", false) === true && get(answer, "value", nothing) isa Real &&
+        isapprox(Float64(answer["value"]), r.number, rtol=1e-9, atol=1e-9) && push!(agreed, k)
+      (left[] -= 1) == 0 && then(agreed)
+    end
+  end
+  nothing
+end
+
+"What SolidCraft gets for the code of `r`: the code as SolidCraft reads it when that comes to what Julia got, else the number"
+given(r, agreed) = agreed ? r.solid : r.sent
+
+"""
+The comment that a parameter with the comment `old` gets for the code of `r`:
+with a line that keeps the code, when SolidCraft got a number for it or wrote
+it another way (π as pi), or without one when SolidCraft got the code itself.
+Nothing when the comment stays the same.
+"""
+noted(r, agreed, old) = begin
+  got = given(r, agreed)
+  new = Expressions.with_code(old, got == r.code ? nothing : Expressions.comment(r.code, got))
+  new == old ? nothing : new
+end
+
+"""
+Set the parameter `name` to the code `text`. It gives words that say what's
+wrong with the code, or nothing.
+"""
+set_param!(v::DesignView, name, text) = begin
+  p = param_named(v, name)
+  kind = p === nothing ? :number : unit_kind(get(p, "unit", ""))
+  kind == :text && return (Designs.change!(v.model, "parameters.change", JSON.Object("name" => name, "expression" => String(strip(text)))); nothing)
+  r = read_code(v, text, kind, name)
+  r isa String && return r
+  r === nothing && return nothing
+  old = param_note(v, name)
+  agree!(v, Dict(name => r)) do agreed
+    params = JSON.Object("name" => name, "expression" => given(r, name in agreed))
+    note = noted(r, name in agreed, old)
+    note === nothing || (params["comment"] = note)
+    Designs.change!(v.model, "parameters.change", params)
+  end
+  nothing
+end
+
+"""
+Keep the code of each field that SolidCraft got a number for in the comment of
+its parameter, so that the field shows the code again: see expressions.jl.
+`answer` is what the command of a new step said, or nothing for a step that
+was changed, whose `readings` are by the names of its parameters. `before` is
+how many steps could be taken back before the change: ⌘Z takes back the change
+and its comments together.
+"""
+note!(v::DesignView, answer, readings, agreed, before) = begin
+  m = v.model
+  write!(notes) = begin
+    isempty(notes) && return
+    for (name, note) in notes
+      Designs.change!(m, "parameters.comment", JSON.Object("name" => name, "comment" => note))
+    end
+    Designs.refresh!(m; then=() -> Designs.together!(m, before))
+  end
+  if answer === nothing
+    write!([name => note for (name, r) in readings for note in (noted(r, name in agreed, param_note(v, name)),) if note !== nothing])
+    return v
+  end
+  # The parameters of a new step are found by what they were set to
+  kept = [(r, given(r, k in agreed)) for (k, r) in readings if r.number !== nothing && given(r, k in agreed) != r.code]
+  feature = answer isa AbstractDict ? get(answer, "feature", nothing) : nothing
+  (isempty(kept) || !(feature isa Real)) && return v
+  Designs.ask!(m, "timeline.inspect", JSON.Object("feature" => Int(feature))) do step, _
+    step isa AbstractDict || return
+    notes = Pair{String,String}[]
+    for input in get(step, "inputs", Any[])
+      i = findfirst(k -> k[2] == get(input, "expression", nothing), kept)
+      i === nothing || push!(notes, String(input["param"]) => Expressions.comment(kept[i][1].code, kept[i][2]))
+    end
+    write!(notes)
+  end
+  v
+end
 
 words(s, size=12px; color=theme().text, weight="") = Text(String(s), size=size, subfamily=weight, color=color, wrap=WrapMode.none)
 
@@ -771,11 +988,12 @@ rename!(v::DesignView, window, key, name, done) = ask!(v, window, get(v.parts, k
 """
 Show a field to type in under the node `under`, or at the place `under` of the
 window. Return gives `done` what was typed, and Escape or a click elsewhere
-gives it nothing.
+gives it nothing. With `code`, the field takes Julia code, and ⌘Return runs
+it. When `done` gives words, they say what's wrong, and the field stays.
 """
-ask!(v::DesignView, window, under, text, done; width=200px) = begin
+ask!(v::DesignView, window, under, text, done; width=200px, code=false) = begin
   forget!(v, :ask)
-  field = input!(v, (:ask, time()); text)
+  field = code ? code!(v, (:ask, time()); text) : input!(v, (:ask, time()); text)
   field.anchor, field.cursor = 0, length(text)
   t = theme(v)
   asker = Asker(field=field, done=done, of=v)
@@ -792,12 +1010,17 @@ end
 end
 describe(a::Asker) = begin
   t = theme(a)
-  Box(width(grow=grow), padding(6px), radius(8px), background(t.surface), border(1px, :solid, t.accent), shadow(0, 4, 14, RGBA(0, 0, 0, 0.3)), a.field)
+  shown = a.of isa DesignView ? outcome(a.of, a.field) : nothing
+  Box(width(grow=grow), padding(6px), radius(8px), background(t.surface), border(1px, :solid, t.accent), shadow(0, 4, 14, RGBA(0, 0, 0, 0.3)),
+      shown === nothing ? a.field : Column(width(grow=grow), child_gap=5px, Alignment.Start, a.field, shown))
 end
 onkey(a::Asker, e::KeyPress{Keys.enter}) = begin
-  close_popup!(e.window, :ask)
+  # ⌘Return runs the code, and the field stays
+  iscode(a.field) && held_keys(e.window) == (true, false, false, false) && return (run_field!(a.of, a.field); handled)
   text = strip(a.field.text)
-  isempty(text) || a.done(String(text))
+  said = isempty(text) ? nothing : a.done(String(text))
+  said isa String && return (wrong!(a.of, a.field, said); handled)
+  close_popup!(e.window, :ask)
   focus(a.of)
   handled
 end
@@ -1107,27 +1330,38 @@ held(v::DesignView, f::Form) = begin
 end
 
 """
-What the form `f` asks for now: `(command, parameters)` as SolidCraft takes
-them, or words that say what's still missing, or nothing when the form of a
-step has no change.
+What the form `f` asks for now: `(command, parameters, readings)` as
+SolidCraft takes them, or words that say what's still missing or wrong, or
+nothing when the form of a step has no change. The parameters have the
+numbers that the code of the fields came to. `readings` has what
+`read_code` said of each field of code, by the parameter that it's for.
 """
 request(v::DesignView, f::Form) = begin
+  readings = Dict{String,Any}()
   if f.step !== nothing
-    # A step that's changed gets each of its lengths and angles as it's typed now
+    # A step that's changed gets each of its lengths and angles that was changed, as it's typed now
     changes = JSON.Object()
     for input in f.inputs
-      box = get(v.parts, (:field, "step", String(input["param"])), nothing)
-      (box === nothing || isempty(strip(box.text)) || strip(box.text) == input["expression"]) || (changes[String(input["param"])] = Commands.value(box.text))
+      param = String(input["param"])
+      box = get(v.parts, (:field, "step", param), nothing)
+      (box === nothing || isempty(strip(box.text)) || strip(box.text) == strip(String(get(input, "code", input["expression"])))) && continue
+      kind = unit_kind(get(input, "unit", ""))
+      kind == :text && (changes[param] = String(strip(box.text)); continue)
+      r = read_code(v, box.text, kind, String(get(input, "label", param)))
+      r isa String && return r
+      changes[param] = r.sent
+      readings[param] = r
     end
-    return isempty(changes) ? nothing : ("parameters.change", JSON.Object("changes" => changes))
+    return isempty(changes) ? nothing : ("parameters.change", JSON.Object("changes" => changes), readings)
   end
-  params = Commands.params(f.spec, held(v, f))
+  read(field, text) = (r = read_code(v, text, field.kind, field.label); r isa String ? r : (readings[field.key] = r; Some(r.sent)))
+  params = Commands.params(f.spec, held(v, f); read)
   params isa String && return params
   merge!(params, f.extra)
   # SolidCraft finds each region of a sketch from a place inside it, and needs to know which sketch
   regions = get(f.shows, "profiles", Any[])
   isempty(regions) || (params["sketch"] = regions[1].n)
-  (f.spec.command, params)
+  (f.spec.command, params, readings)
 end
 
 "Run the command of the form that's open"
@@ -1137,13 +1371,22 @@ apply!(v::DesignView) = begin
   want = request(v, f)
   want === nothing && return (v.form = nothing; v)
   want isa String && return (f.problem = want; v)
-  command, params = want
-  # A new sketch is opened to draw in, and seen flat
-  command == "sketch.create" && (v.parts[:eye_before] = v.eye; v.parts[:look_at] = :new)
-  Designs.change!(m, command, params; quiet=true, then=(answer, problem) -> begin
-    problem === nothing || command != "sketch.create" || (delete!(v.parts, :look_at); delete!(v.parts, :eye_before))
-    problem === nothing ? (v.form === f && (v.form = nothing); empty!(v.picked)) : (f.problem = problem)
-  end)
+  command, params, readings = want
+  before = Designs.undos(m)
+  agree!(v, readings) do agreed
+    # SolidCraft keeps the code itself where it comes to what Julia got, and then follows the parameters that it names
+    into = command == "parameters.change" ? params["changes"] : params
+    for (k, r) in readings
+      k in agreed && haskey(into, k) && (into[k] = r.solid)
+    end
+    # A new sketch is opened to draw in, and seen flat
+    command == "sketch.create" && (v.parts[:eye_before] = v.eye; v.parts[:look_at] = :new)
+    Designs.change!(m, command, params; quiet=true, then=(answer, problem) -> begin
+      problem === nothing || command != "sketch.create" || (delete!(v.parts, :look_at); delete!(v.parts, :eye_before))
+      problem === nothing ? (v.form === f && (v.form = nothing); empty!(v.picked)) : (f.problem = problem)
+      problem === nothing && note!(v, f.step === nothing ? answer : nothing, readings, agreed, before)
+    end)
+  end
   v
 end
 
@@ -1168,7 +1411,7 @@ preview!(v::DesignView) = begin
   (m.trying || Designs.busy(m) || Designs.redoable(m) > 0) && return
   wait = 0.25 - (time() - f.since)
   wait > 0 && return redraw_in!(v, wait)
-  Designs.try!(m, key, want...)
+  Designs.try!(m, key, want[1], want[2])
   redraw_in!(v, 0.016)
   nothing
 end
@@ -1189,6 +1432,8 @@ edit_step!(v::DesignView, id, window=nothing) = begin
   Designs.ask!(m, "timeline.inspect", JSON.Object("feature" => id)) do answer, problem
     answer isa AbstractDict || return (m.said = something(problem, "SolidCraft said nothing of that step."))
     inputs = Any[i for i in get(answer, "inputs", Any[]) if i isa AbstractDict && get(i, "param", nothing) isa String]
+    # Its field shows its text as Julia code, or the code that its comment keeps
+    foreach(i -> i["code"] = Expressions.field_code(i["expression"], param_note(v, i["param"])), inputs)
     forget!(v, :field)
     spec = Commands.Spec("", String(step["name"]), Ink.step_icon(String(step["type"])), Commands.Field[], "")
     v.form = Form(spec, id, inputs)
@@ -1333,6 +1578,11 @@ field_row(v::DesignView, f::Form, field::Commands.Field) = begin
     end
     return labelled(v, field.label, clicked)
   end
+  if Commands.iscode(field)
+    # SolidCraft's way of writing a length, like 10 mm, is Julia's in the field: 10mm
+    box = code!(v, key; text=field.default isa AbstractString ? Expressions.julia_code(field.default) : "", placeholder=field.optional ? "optional" : "")
+    return code_row(v, field.label, box)
+  end
   box = input!(v, key; text=field.default isa AbstractString ? field.default : "", placeholder=field.optional ? "optional" : "")
   field.kind == :json ? Column(width(grow=grow), child_gap=4px, Alignment.Start, Box(words(field.label, 12px)), Box(width(grow=grow), box)) : labelled(v, field.label, box)
 end
@@ -1354,7 +1604,10 @@ form_card(v::DesignView) = begin
     isempty(f.inputs) && push!(rows, Box(width(grow=grow), Alignment.Start, Text("This step has no lengths or angles to change.", size=12px, color=t.dim)))
     for input in f.inputs
       param = String(input["param"])
-      push!(rows, labelled(v, String(get(input, "label", param)), input!(v, (:field, "step", param); text=String(input["expression"]))))
+      label = String(get(input, "label", param))
+      text = String(get(input, "code", input["expression"]))
+      push!(rows, unit_kind(get(input, "unit", "")) == :text ? labelled(v, label, input!(v, (:field, "step", param); text)) :
+                  code_row(v, label, code!(v, (:field, "step", param); text)))
     end
   end
   # The design shows what the command would make, unless Preview is off
@@ -1405,7 +1658,9 @@ sketch_card(v::DesignView) = begin
   if tool isa Commands.Tool
     push!(rows, Box(width(grow=grow), Alignment.Start, Text(command_label(v, tool.command) * ": " * tool_hint(v, tool), size=11.5px, color=t.dim)))
     for field in tool.fields
-      push!(rows, labelled(v, field.label, input!(v, (:toolfield, tool.command, field.key); text=String(field.default))))
+      key = (:toolfield, tool.command, field.key)
+      push!(rows, Commands.iscode(field) ? code_row(v, field.label, code!(v, key; text=Expressions.julia_code(String(field.default)))) :
+                                          labelled(v, field.label, input!(v, key; text=String(field.default))))
     end
   elseif tool isa Symbol
     hint = tool == :dimension ? "click what to measure, then where its length goes" : tool == :trim ? "click the piece of a line to cut away" :
@@ -1440,46 +1695,69 @@ params_card(v::DesignView) = begin
   rows = Any[]
   for p in list
     name = String(p["name"])
-    box = input!(v, (:param, name); text=String(p["expression"]))
+    # Code, unless it's a parameter of text. A parameter that SolidCraft got a number for has its code in its comment.
+    plain = unit_kind(get(p, "unit", "")) == :text
+    text = plain ? String(p["expression"]) : Expressions.field_code(p["expression"], something(get(p, "comment", nothing), param_note(v, name)))
+    box = plain ? input!(v, (:param, name); text) : code!(v, (:param, name); text)
     # A field that isn't being typed in follows the design
     w = part_window(v)
-    (w === nothing || w.focus !== box) && get(v.parts, (:param_at, name), "") != p["expression"] &&
-      (box.text = String(p["expression"]); box.cursor = box.anchor = length(box.text); v.parts[(:param_at, name)] = p["expression"])
+    (w === nothing || w.focus !== box) && get(v.parts, (:param_at, name), "") != text &&
+      (box.text = text; box.cursor = box.anchor = length(box.text); v.parts[(:param_at, name)] = text)
     wrong = get(p, "error", nothing) isa String
     value = p["value"] isa Number ? Sketching.fixed(p["value"]) * " " * String(get(p, "unit", "")) : ""
     push!(rows, Row(width(grow=grow), height(28px), child_gap=6px,
       Row(width(74px), justify=Alignment.Start, clip_x=true, words(name, 12px, color=get(p, "model", false) === true ? t.dim : t.text)),
       Box(width(grow=grow), box),
-      Row(width(64px), justify=Alignment.End, clip_x=true, words(wrong ? "error" : value, 11px, color=wrong ? colorant"rgb(226,96,84)" : t.dim))))
+      Row(width(64px), justify=Alignment.End, clip_x=true, words(wrong ? "error" : value, 11px, color=wrong ? WRONG : t.dim))))
+    shown = outcome(v, box)
+    shown === nothing || push!(rows, Row(width(grow=grow), padding(0px, 0px, 4px, 80px), justify=Alignment.Start, clip_x=true, shown))
   end
+  added = code!(v, (:newparam, :value); placeholder="10mm")
+  below = outcome(v, added)
   tall = min(max(120.0, v.area[4] - 360), length(rows) * 30.0 + 4)
   side_card(v, :params, "params", "Parameters", e -> (v.panel = :none),
     Scroll(width(grow=grow), height(px(tall)), key=:params, Column(width(grow=grow), child_gap=2px, Alignment.Start, rows...)),
     Row(width(grow=grow), child_gap=6px, padding(4px, 0px, 0px, 0px),
       Box(width(86px), input!(v, (:newparam, :name); placeholder="name")),
-      Box(width(grow=grow), input!(v, (:newparam, :value); placeholder="10 mm")),
-      word_button(v, (:newparam, :add), "Add"; act=e -> add_param!(v))))
+      Box(width(grow=grow), added),
+      word_button(v, (:newparam, :add), "Add"; act=e -> add_param!(v))),
+    (below === nothing ? () : (Row(width(grow=grow), padding(0px, 0px, 0px, 92px), justify=Alignment.Start, clip_x=true, below),))...)
 end
 
 "The window that `v` is in, or nothing"
 part_window(v::DesignView) = window_of(v)
 
-"Add the parameter that's typed under the list"
+"Add the parameter that's typed under the list. Its value is Julia code, as SolidCraft keeps it best: see `agree!`."
 add_param!(v::DesignView) = begin
   name, value = v.parts[(:newparam, :name)], v.parts[(:newparam, :value)]
   (isempty(strip(name.text)) || isempty(strip(value.text))) && return v
-  Designs.change!(v.model, "parameters.add", JSON.Object("name" => String(strip(name.text)), "expression" => String(strip(value.text))))
+  called = String(strip(name.text))
+  r = read_code(v, value.text, :number, called)
+  r isa String && return wrong!(v, value, r)
+  agree!(v, Dict(called => r)) do agreed
+    got = given(r, called in agreed)
+    params = JSON.Object("name" => called, "expression" => got)
+    got == r.code || (params["comment"] = Expressions.comment(r.code, got))
+    Designs.change!(v.model, "parameters.add", params)
+  end
   name.text = value.text = ""
   name.cursor = name.anchor = value.cursor = value.anchor = 0
   v
 end
 
-"Set a parameter to what's typed in its field, when Return is pressed there"
+"""
+Set a parameter to what's typed in its field, when Return is pressed there.
+It gives `:wrong` when the code of the field is wrong, and what that is shows
+under the field. It gives nothing for a field that Return does nothing in.
+"""
 commit!(v::DesignView, box) = begin
   for (key, node) in v.parts
     node === box || continue
     key isa Tuple || continue
-    key[1] == :param && return Designs.change!(v.model, "parameters.change", JSON.Object("name" => key[2], "expression" => Commands.value(box.text)))
+    if key[1] == :param
+      said = set_param!(v, key[2], box.text)
+      return said isa String ? (wrong!(v, box, said); :wrong) : v
+    end
     key[1] == :newparam && return add_param!(v)
     key[1] == :field && return apply!(v)
   end
@@ -2276,7 +2554,13 @@ finish_tool!(v::DesignView) = begin
   end
   for field in tool.fields
     box = get(v.parts, (:toolfield, tool.command, field.key), nothing)
-    params[field.key] = Commands.value(box === nothing ? String(field.default) : box.text)
+    text = box === nothing ? String(field.default) : box.text
+    Commands.iscode(field) || (params[field.key] = Commands.value(text); continue)
+    r = read_code(v, box === nothing ? Expressions.julia_code(text) : text, field.kind, field.label)
+    r === nothing && continue
+    # What's wrong shows under the field, and the clicks start again
+    r isa String && return (box === nothing || wrong!(v, box, r); empty!(v.clicks); v)
+    params[field.key] = r.sent
   end
   v.building && (params["construction"] = true)
   # A line goes on from where it ended, until Return or Escape
@@ -2333,7 +2617,7 @@ edit_size!(v::DesignView, window, what) = begin
   now isa String || (now = string(get(k, "value", "")))
   at = shown_at(v, what.at)
   at === nothing && return v
-  ask!(v, window, (px(at[1] - 50), px(at[2] - 10), 100px, 20px), now, new -> Designs.change!(v.model, "parameters.change", JSON.Object("name" => param, "expression" => Commands.value(new))); width=130px)
+  ask!(v, window, (px(at[1] - 50), px(at[2] - 10), 100px, 20px), Expressions.field_code(now, param_note(v, param)), new -> set_param!(v, param, new); width=150px, code=true)
   v
 end
 
@@ -2521,7 +2805,11 @@ end
 onkey(v::DesignView, e::KeyPress{Keys.enter}) = begin
   v.readonly && return nothing
   box = e.window.focus
-  box isa TextInput && commit!(v, box) !== nothing && return (focus(v); handled)
+  # ⌘Return runs the code of a field, as it does in a Julia file
+  iscode(box) && held_keys(e.window) == (true, false, false, false) && return (run_field!(v, box); handled)
+  done = box isa TextInput ? commit!(v, box) : nothing
+  done === :wrong && return handled
+  done === nothing || return (focus(v); handled)
   if v.tool isa Commands.Tool && v.tool.clicks == ["points"] && !isempty(v.clicks)
     v.tool.command == "sketch.line" ? empty!(v.clicks) : finish_tool!(v)
   elseif v.form !== nothing

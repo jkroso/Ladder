@@ -117,6 +117,51 @@ end
     JSON.Object("input" => JSON.Object("required" => Any["thickness"], "properties" => JSON.Object(
       "thickness" => JSON.Object("type" => "string"), "flip" => JSON.Object("type" => "boolean"), "direction" => JSON.Object("enum" => Any["in_plane", "normal"])))))
   @test [f.key => f.kind for f in made.fields] == ["thickness" => :text, "direction" => :choice, "flip" => :flag]
+  # A number, or a number that can be text, is Julia code in the form
+  numbers = Commands.spec(JSON.Object("id" => "solid.thing", "label" => "Thing", "params" => ""),
+    JSON.Object("input" => JSON.Object("required" => Any["count", "size"], "properties" => JSON.Object(
+      "count" => JSON.Object("type" => "integer"), "size" => JSON.Object("type" => Any["number", "string"])))))
+  @test [f.key => f.kind for f in numbers.fields] == ["count" => :number, "size" => :number]
+  @test all(Commands.iscode, numbers.fields)
+  # With a reader, a field of code gets what the reader gives for its code
+  reader(f, text) = text == "oops" ? "The radius is wrong" : Some(f.key * " is " * text)
+  @test Commands.params(spec, Dict("edges" => Any[Any[1, 2, 3]], "radius" => "1mm*2"); read=reader)["radius"] == "radius is 1mm*2"
+  @test Commands.params(spec, Dict("edges" => Any[Any[1, 2, 3]], "radius" => "oops"); read=reader) == "The radius is wrong"
+end
+
+@testset "Julia code in a field of numbers" begin
+  X = V.Expressions
+  m = X.workspace()
+  X.parameters!(m, [JSON.Object("name" => "d1", "value" => 48.0, "unit" => "mm"), JSON.Object("name" => "tilt", "value" => 30.0, "unit" => "deg")])
+  value, failed = X.evaluate(m, "4.5cm + 2mm*1.5")
+  @test !failed && X.shown(value) == "48mm"
+  @test X.reading(value, :length) == (sent="48 mm", kind="length", number=48.0)
+  # The design's parameters are names, a length in mm and an angle in degrees
+  @test X.reading(first(X.evaluate(m, "d1/2")), :length).number == 24.0
+  @test X.reading(first(X.evaluate(m, "tilt + 15deg")), :angle).sent == "45 deg"
+  # What isn't the field's kind of value is wrong
+  @test X.reading(first(X.evaluate(m, "2mm*3mm")), :length) isa String       # an area
+  @test X.reading(2.5, :count) isa String && X.reading(3.0, :count).sent == "3"
+  @test X.reading(first(X.evaluate(m, "0, 0, 10mm")), :vector).sent == Any[0, 0, 10.0]
+  # A name that code gives a value stays for the next code
+  X.evaluate(m, "wall = 3mm")
+  @test X.reading(first(X.evaluate(m, "2wall")), :length).sent == "6 mm"
+  value, failed = X.evaluate(m, "1 +")
+  @test failed && startswith(X.shown(value, true), "ParseError: ")
+  # SolidCraft's text as Julia's, and Julia's as SolidCraft reads it
+  @test X.julia_code("8 mm") == "8mm" && X.julia_code("16 in + w/2 - 6") == "16inch + w/2 - 6" && X.julia_code("30 deg") == "30deg"
+  @test X.solidcraft_code("π*2mm") == "pi*2mm"
+  # A comment keeps the code while the parameter is still the number it came to, under the comment's own words
+  note = X.with_code("wall thickness", X.comment("π*2mm", "6.283185307179586 mm"))
+  @test note == "wall thickness\nJulia: π*2mm = 6.283185307179586 mm"
+  @test X.field_code("6.283185307179586 mm", note) == "π*2mm"
+  @test X.field_code("7 mm", note) == "7mm"
+  @test X.field_code("6.283185307179586 mm", X.comment("x = 2π*1mm", "6.283185307179586 mm")) == "x = 2π*1mm"
+  @test X.with_code(note, nothing) == "wall thickness"
+  # The pieces of code have the colours of a code block, and every character is in one
+  palette = (number=:N, call=:C, string=:S, comment=:M, keyword=:K, type=:T)
+  @test X.pieces("sqrt(2)*10mm", palette) == [4 => :C, 1 => nothing, 1 => :N, 2 => nothing, 2 => :N, 2 => nothing]
+  @test sum(first, X.pieces("a = 2mm  # wall", palette)) == length("a = 2mm  # wall")
 end
 
 if !Engines.available()
@@ -268,6 +313,10 @@ else
     box = w.focus
     box.text = ""; box.cursor = box.anchor = 0
     foreach(c -> ontype(w, Typed(c, w)), "8")
+    # The field takes Julia code: ⌘Return shows what it comes to, and the field stays
+    @test V.iscode(box)
+    key(Keys.enter, Keys.cmd)
+    @test any(p -> p.key == :ask, popups(w)) && V.outcomes(view())[box].shown == "8"
     key(Keys.enter)
     settle()
     @test isapprox(V.sketch(v)["curves"][end]["radius"], 4.0, atol=1e-6)
@@ -308,13 +357,98 @@ else
     settle()
     @test v.form !== nothing && v.form.step == 2 && length(v.form.inputs) == 1
     box = v.parts[(:field, "step", String(v.form.inputs[1]["param"]))]
-    @test box.text == "10 mm"
-    box.text = "14 mm"
+    @test box.text == "10mm"                    # SolidCraft's 10 mm, as Julia writes it
+    box.text = "14mm"
     click(v.parts[(:form, :ok)])
     settle()
     @test v.form === nothing && isempty(m.said)
     @test isapprox(m.shapes[1].high[3], 14.0, atol=1e-9)
     shot("design-5-taller.png")
+  end
+
+  @testset "a field of numbers takes Julia code, and ⌘Return runs it" begin
+    v = view()
+    m = v.model
+    steps = length(Models.timeline(m))
+    V.start!(v, "solid.fillet")
+    frame(w)
+    click(shows((0.0, -10.0, 10.0)))
+    box = v.parts[(:field, "solid.fillet", "radius")]
+    @test box.text == "2mm" && V.iscode(box)
+    # Its pieces have the colours of the page's code, in the font of code
+    box.text = "1.5mm + 2mm*0.25"
+    pieces = box.colours(box.text)
+    @test sum(first, pieces) == length(box.text) && pieces[1] == (3 => K.colours.number)
+    @test box.font_family == K.codefont()
+    # ⌘Return runs the code that's selected, and what it comes to shows under the field. The form stays.
+    click(box)
+    @test w.focus === box
+    box.anchor, box.cursor = 8, 16                     # 2mm*0.25
+    key(Keys.enter, Keys.cmd)
+    @test v.form !== nothing && V.outcomes(v)[box].shown == "0.5mm" && !V.outcomes(v)[box].failed
+    # With nothing selected, it runs all of the code
+    box.anchor = box.cursor = 0
+    key(Keys.enter, Keys.cmd)
+    @test V.outcomes(v)[box].shown == "2mm" && V.outcome(v, box) !== nothing
+    shot("design-7-julia.png")
+    # What went wrong shows in red
+    box.text = "1.5mm + nothing_here"
+    key(Keys.enter, Keys.cmd)
+    @test V.outcomes(v)[box].failed && occursin("nothing_here", V.outcomes(v)[box].shown)
+    # SolidCraft reads `1.5mm + 2mm*0.25` as Julia does, so it keeps the code itself
+    box.text = "1.5mm + 2mm*0.25"
+    @test V.outcome(v, box) === nothing                # the code has changed since it ran
+    frame(w)                                           # the box under the field has gone, so OK is higher
+    click(v.parts[(:form, :ok)])
+    settle()
+    @test v.form === nothing && isempty(m.said) && length(Models.timeline(m)) == steps + 1
+    fillet = last(Models.timeline(m))["name"]
+    p = only(p for p in m.parameters if get(p, "feature", "") == fillet)
+    @test p["expression"] == "1.5mm + 2mm*0.25" && p["value"] == 2.0 && p["comment"] == ""
+    key(Keys.z, Keys.cmd)
+    settle()
+    @test length(Models.timeline(m)) == steps
+  end
+
+  @testset "code that SolidCraft reads in another way is kept in a comment" begin
+    v = view()
+    m = v.model
+    open_step() = (click(v.parts[(:step, 2)]); click(v.parts[(:step, 2)]); settle())
+    open_step()
+    param = String(v.form.inputs[1]["param"])
+    @test v.parts[(:field, "step", param)].text == "14mm"
+    undo = Models.undos(m)
+    # Julia's 2 + 1cm is 3 cm. SolidCraft reads it as 2 mm and 1 cm.
+    v.parts[(:field, "step", param)].text = "2 + 1cm"
+    click(v.parts[(:form, :ok)])
+    settle()
+    @test v.form === nothing && isempty(m.said)
+    @test isapprox(m.shapes[1].high[3], 30.0, atol=1e-9)
+    p = V.param_named(v, param)
+    @test p["expression"] == "30 mm" && p["comment"] == "Julia: 2 + 1cm = 30 mm"
+    # The field shows the code again
+    open_step()
+    @test v.parts[(:field, "step", param)].text == "2 + 1cm"
+    click(v.parts[(:form, :cancel)])
+    frame(w)
+    # ⌘Z takes back the change and its comment together, and ⇧⌘Z does both again
+    key(Keys.z, Keys.cmd)
+    settle()
+    @test Models.undos(m) == undo && isapprox(m.shapes[1].high[3], 14.0, atol=1e-9) && V.param_note(v, param) == ""
+    key(Keys.z, Keys.cmd, Keys.shft)
+    settle()
+    @test Models.undos(m) == undo + 2 && V.param_note(v, param) == "Julia: 2 + 1cm = 30 mm"
+    key(Keys.z, Keys.cmd)
+    settle()
+    @test Models.undos(m) == undo
+    # Code that's wrong says so in the form, and nothing changes
+    open_step()
+    v.parts[(:field, "step", param)].text = "14mm + nothing_here"
+    click(v.parts[(:form, :ok)])
+    settle()
+    @test v.form !== nothing && occursin("nothing_here", v.form.problem) && Models.undos(m) == undo
+    click(v.parts[(:form, :cancel)])
+    frame(w)
   end
 
   @testset "the parameters" begin
@@ -324,10 +458,28 @@ else
     frame(w)
     @test v.panel == :params
     name, value = v.parts[(:newparam, :name)], v.parts[(:newparam, :value)]
-    name.text, value.text = "wall", "3 mm"
+    name.text, value.text = "wall", "3mm"
     click(v.parts[(:newparam, :add)])
     settle()
     @test any(p -> p["name"] == "wall" && p["value"] == 3.0, Models.params(m))
+    # A parameter's field takes code too. Return sets it, and what SolidCraft got a number for shows as its code.
+    box = v.parts[(:param, "wall")]
+    @test box.text == "3mm" && V.iscode(box)
+    click(box)
+    box.text = "π*1mm"
+    key(Keys.enter)
+    settle()
+    # SolidCraft reads π as pi, so it gets that, and the comment keeps the code as it was typed
+    @test V.param_named(v, "wall")["expression"] == "pi*1mm" && V.param_note(v, "wall") == "Julia: π*1mm = pi*1mm" && box.text == "π*1mm"
+    # Code that's wrong shows what's wrong under the field, which keeps the keyboard
+    click(box)
+    box.text = "π*"
+    key(Keys.enter)
+    @test w.focus === box && V.outcomes(v)[box].failed && V.outcome(v, box) !== nothing
+    box.text = "3mm"
+    key(Keys.enter)
+    settle()
+    @test V.param_named(v, "wall")["expression"] == "3mm"
     shot("design-6-parameters.png")
     key(Keys.escape)
     @test v.panel == :none
@@ -617,7 +769,7 @@ else
     frame(w)
     click_edge()
     @test length(v.form.values["edges"]) == 1
-    v.parts[(:field, "solid.fillet", "radius")].text = "1 mm"
+    v.parts[(:field, "solid.fillet", "radius")].text = "1mm"
     trial = tried()
     @test trial !== nothing && isempty(trial.problem) && trial.changed == [m.shapes[1].name]
     @test length(trial.shapes[1].flat) > faces                     # the round is a face more
@@ -630,14 +782,14 @@ else
     @test count(x -> x isa V.GLs.Solid && x.bare, list) == 1 && count(x -> x isa V.GLs.Solid && !x.bare, list) == 1
     shot("design-12-preview.png")
     # Another radius is tried in its turn
-    v.parts[(:field, "solid.fillet", "radius")].text = "1.5 mm"
+    v.parts[(:field, "solid.fillet", "radius")].text = "1.5mm"
     again = tried()
     @test again !== nothing && again.key != trial.key && isempty(again.problem)
     # A radius that's too big: SolidCraft's words show in the form, and the body shows as it is
-    v.parts[(:field, "solid.fillet", "radius")].text = "500 mm"
+    v.parts[(:field, "solid.fillet", "radius")].text = "500mm"
     failed = tried()
     @test failed !== nothing && !isempty(failed.problem) && !any(x -> x isa V.GLs.Solid && x.bare, drawn())
-    v.parts[(:field, "solid.fillet", "radius")].text = "1 mm"
+    v.parts[(:field, "solid.fillet", "radius")].text = "1mm"
     @test tried() !== nothing
     # With Preview off, nothing is tried
     click(v.parts[(:form, :preview)])
@@ -657,7 +809,7 @@ else
     V.start!(v, "solid.fillet")
     frame(w)
     click_edge()
-    v.parts[(:field, "solid.fillet", "radius")].text = "1 mm"
+    v.parts[(:field, "solid.fillet", "radius")].text = "1mm"
     @test tried() !== nothing
     click(v.parts[(:form, :ok)])
     settle()

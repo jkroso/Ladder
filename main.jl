@@ -47355,8 +47355,9 @@ const DesignFile = Union{FS.File{:sc},FS.File{:SC},FS.File{:solidcraft}}
 push!(BLOCK_ICONS, "arrow-counterclockwise", "arrow-clockwise", "save", "x-lg", "x", "check-lg", "chevron-down", "chevron-right", "eye", "eye-slash",
       "house", "skip-start-fill", "caret-left-fill", "caret-right-fill", "skip-end-fill")
 
-"What shows the SolidCraft design at `path` in the window of `e`"
-design_part(e, path) = node!(() -> Designs.DesignView(path=path), e, (:design, path))
+"What shows the SolidCraft design at `path` in the window of `e`. Its fields of code have the colours and the font of the page's code."
+design_part(e, path) = (Designs.CODE_LOOK[] = design_code_look; node!(() -> Designs.DesignView(path=path), e, (:design, path)))
+design_code_look() = (colours, codefont())
 
 page_view(e, o::DesignFile) = design_part(e, string(o.path))
 page_fills(e, ::DesignFile) = true

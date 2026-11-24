@@ -56,11 +56,14 @@ mutable struct Model
   asked::Int                        # the number of the last time the lists were asked for. An older answer is dropped.
   said::String                      # what went wrong with the last change, or ""
   read::Float64                     # when the file had last changed, as it was opened or saved
+  parameters::Vector{Any}           # every parameter, as `parameters.list` gives them: the user's, and the lengths of the steps, like d1
+  joined::Dict{Int,Int}             # where several steps that can be taken back are one change: how many there are, by how many steps could be taken back after them
+  rejoined::Dict{Int,Int}           # the same for steps that can be done again, by how many could be done again before them
 end
 
 Model(path) = Model(path, nothing, "", "", JSON.Object(), Shape[], nothing, Dict{String,Vec3}(), Dict{String,Float64}(), Any[],
                     Any[], nothing, true, false, Any[], 0, nothing,
-                    Dict{Int,JSON.Object}(), Any[], Dict{String,JSON.Object}(), 0, 0, "", 0.0)
+                    Dict{Int,JSON.Object}(), Any[], Dict{String,JSON.Object}(), 0, 0, "", 0.0, Any[], Dict{Int,Int}(), Dict{Int,Int}())
 
 "Open the design at `path`. With no SolidCraft on this Mac, the model says so in `problem`."
 open_design(path::AbstractString) = begin
@@ -135,6 +138,9 @@ edited(m::Model) = get(m.doc, "dirty", false) === true
 "How many steps are active: the steps after that are rolled back"
 marker(m::Model) = Int(get(m.doc, "marker", length(timeline(m))))
 
+"How many steps the program can take back"
+undos(m::Model) = (n = get(m.doc, "undo", 0); n isa Number ? Int(n) : 0)
+
 "How many steps the program can do again. A command that was tried and taken back isn't one of them."
 redoable(m::Model) = (n = get(m.doc, "redo", 0); n isa Number ? max(0, Int(n) - m.ghost) : 0)
 
@@ -173,6 +179,11 @@ refresh!(m::Model; then=nothing) = free(m) do
       shapes!(m)
       planes!(m)
       sketches!(m, n)
+      # The parameters of the steps, like d1, and the comments of all of them, are only in this list
+      Engines.call!(e, "execute", JSON.Object("command" => "parameters.list", "params" => JSON.Object())) do list, _
+        (n == m.asked && m.engine === e) || return
+        list isa JSON.Object && get(list, "parameters", nothing) isa Vector && (m.parameters = list["parameters"]; m.version += 1)
+      end
     else
       problem === nothing || (m.said = problem)
     end
@@ -329,12 +340,27 @@ change!(m::Model, command::AbstractString, params=JSON.Object(); then=nothing, q
   e = m.engine
   e === nothing && return
   m.said = ""
+  # A change takes away what could be done again, and the steps after this one that could be taken back are other ones now
+  empty!(m.rejoined)
+  filter!(p -> p.first <= undos(m), m.joined)
   Engines.run!(e, command, params) do answer, problem
     problem === nothing || quiet || (m.said = problem)
     m.version += 1
     then === nothing || then(answer, problem)
   end
   refresh!(m)
+end
+
+"""
+Make the steps that the program can take back since there were `before` of
+them one change, after the editor made them for one thing that was asked of
+it: ⌘Z takes them all back, and ⇧⌘Z does them all again. Call it when the
+design's lists have come since the last of them.
+"""
+together!(m::Model, before) = begin
+  now = undos(m)
+  now - before > 1 && (m.joined[now] = now - before)
+  m
 end
 
 "Run a command that changes nothing, and give `then` its answer"
@@ -420,8 +446,14 @@ step!(m::Model, tool) = free(m) do
   # A command that was tried and taken back is nothing to redo
   tool == "redo" && redoable(m) == 0 && return
   m.said = ""
-  Engines.call!(m.engine, tool) do answer, problem
-    problem === nothing || (m.said = problem)
+  # Steps that the editor made as one change go back together, and come again together: see `together!`
+  undo, redo = undos(m), redoable(m)
+  n = tool == "undo" ? pop!(m.joined, undo, 1) : pop!(m.rejoined, redo, 1)
+  n > 1 && (tool == "undo" ? (m.rejoined[redo + n] = n) : (m.joined[undo + n] = n))
+  for _ in 1:n
+    Engines.call!(m.engine, tool) do answer, problem
+      problem === nothing || (m.said = problem)
+    end
   end
   hidden!(m)
   refresh!(m)
