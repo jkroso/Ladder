@@ -549,12 +549,13 @@ What shows depends on the kind of file:
 - An HTML file and a page of the web show their page, and you use it where it is: see the next part.
 - A Markdown page shows as it reads.
 - A picture, a model, a sound, a video, a PDF file, a CSV file, a zip and a file of text show as they do under a path.
+- A SolidCraft design shows alone, without its editor: see [SolidCraft designs](#solidcraft-designs).
 - A folder shows its files and folders. Click one to go to it.
 - A Julia file with a function called `view` shows what that function makes: see [A view that code makes](#a-view-that-code-makes).
 
 While the mouse is over the block, two buttons show beside its top right corner. The first makes what the block shows fill the window: a page, a model, a video, a picture or a PDF file. Your page is still the file that's open, and Esc puts it back. A view that would show no more that way, like a table or a folder, doesn't have this button. The second button goes to the file. The window shows the file, as it does when you click a link to it, and ⌘⌥← comes back to your page. A click on the block with ⌘ held does the same.
 
-A line like `aspect: 16:9` under the file's name sets the shape of a page, a model or a video: its width to its height. The view is as wide as your page's text, so it keeps that shape at any width of the window. `aspect: 2` is the same as `aspect: 2:1`. Without the line, a page of the web is as tall as what it shows, up to a limit, and a model is 260 pixels tall.
+A line like `aspect: 16:9` under the file's name sets the shape of a page, a model, a SolidCraft design or a video: its width to its height. The view is as wide as your page's text, so it keeps that shape at any width of the window. `aspect: 2` is the same as `aspect: 2:1`. Without the line, a page of the web is as tall as what it shows, up to a limit, and a model or a design is 260 pixels tall.
 
 ```view
 costs.csv
@@ -614,6 +615,34 @@ aspect: 16:9
 The first button beside the block makes the model fill the window, where any scroll brings it nearer. The second goes to [wall.jl](wall.jl), which is about 60 lines of code. When you save a change to the file, the block shows what the new code makes. A slow function doesn't hold the window up: the block shows what the function made last until the new one comes.
 
 The page [space-data-centres.md](space-data-centres.md) shows its satellite this way too, from the file `satellite.jl` beside it, with the Sun and the Earth round it.
+
+## SolidCraft designs
+
+A SolidCraft design is a file whose name ends in `.sc`. Ladder shows it in two ways. A `view` block shows the design alone, and the file's own page is an editor that's laid out as SolidCraft's window is. Ladder works out no shapes by itself. It uses the program that's inside SolidCraft.app, so both ways need SolidCraft on your Mac.
+
+```view
+bracket.sc
+aspect: 16:9
+```
+
+This block shows the design in the file `bracket.sc`, which is beside this page. Here the design is only shown, and nothing that you do changes the file:
+
+- Drag to turn the design. Drag with ⇧ held to move it.
+- Pinch, or scroll with ⌘ held, to bring it nearer.
+- Click twice to see all of it again.
+
+To change the design, move the mouse over the block and click the second button beside its top right corner. The window goes to the file, where the design has its editor, and ⌘⌥← comes back to this page. When you save a change there, this block shows the changed design.
+
+In the editor, the design fills the window. A toolbar is at the top, a browser is at the left, and the history of the design's steps is along the bottom.
+
+- **The view.** Drag to turn the design. Drag with ⇧ held, or with the middle button, to move it. Two fingers on the trackpad move it too. The wheel, a pinch, or two fingers with ⌘ held bring it nearer. The three balls at the top right show the design's axes. Click one to look along that axis.
+- **Selecting.** The mouse lights the face or the edge that it's over. Click to select it, and hold ⇧ to select one more.
+- **Commands.** The toolbar has SolidCraft's commands, like Extrude, Fillet and Hole. A command opens a form at the right. You type its lengths there, and click the faces, the edges or the regions of a sketch that it takes. When the form has what the command needs, the design shows what the command would make, in a tint. OK runs the command. The letters E, F and H start Extrude, Fillet and Hole.
+- **Sketches.** Two clicks on a sketch, in the browser or in the history, open it. The toolbar then has the sketch's tools. The letters L, R, C and D start a line, a rectangle, a circle and a dimension. A tool takes clicks in the sketch, and goes to a point that's near. With no tool, drag a point or a curve to move it as far as its constraints allow. Two clicks on a dimension change its length. Finish Sketch, in the panel at the right, closes the sketch.
+- **The browser.** It lists the origin, the bodies, the sketches and the construction planes. The eye at the end of a line shows or hides what the line names.
+- **The history.** Each step of the design is there, in order. Two clicks on a step open its form, so that you can change its lengths.
+- **Colours.** A body shows the colour that it has in SolidCraft: its own, or the colour of its material.
+- **Saving.** ⌘Z takes back the last change, and ⇧⌘Z does it again. ⌘S writes the file. Until then, a change isn't in the file. So a window asks before it closes with changes that aren't saved.
 
 ## Takeoffs
 
@@ -1182,7 +1211,7 @@ You can write the file `.ladder` yourself too. It ends with a block like the one
 
 A zip file shows what it holds, without being unpacked: its folders and files, each file with its size and when it changed. Click a folder to open it, and click a file to see that one file. Ladder doesn't change a file that it shows from a zip file. Click Unpack to unpack the whole file beside itself, as two clicks in the Finder do.
 
-A SolidCraft design, a file whose name ends in `.sc`, opens in an editor that's laid out as SolidCraft's own window is. The design shows in 3D. Drag to turn it, and click a face or an edge to select it. The toolbar has SolidCraft's commands, like Extrude and Fillet. A command opens a form: you type its lengths there, and click the faces, the edges or the regions of a sketch that it takes. The design shows what the command would make before you click OK. Two clicks on a sketch open it, so that you can draw in it and change its dimensions. ⌘Z takes back a change, and ⌘S writes the file. A window asks before it closes with changes that aren't saved. Ladder works out no shapes by itself. It uses the program that's inside SolidCraft.app, so this needs SolidCraft on your Mac.
+A SolidCraft design, a file whose name ends in `.sc`, opens in an editor of its own: see [SolidCraft designs](#solidcraft-designs).
 
 Right-click the page to cut, copy or paste. The menu's Insert item adds a new block where you clicked: a heading, a list, a to-do item, a table, a sheet, a spreadsheet, a diagram, a takeoff, a schedule, a chart, a board, a calendar, a sketch, a canvas, a live block and more.
 

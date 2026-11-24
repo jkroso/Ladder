@@ -4730,8 +4730,20 @@ player(l::Breadcrumb, path, Player) = begin
   l.viewer = own!(l, Player === VideoPlayer ? VideoPlayer(path=path, height=MODEL_HEIGHT) : AudioPlayer(path=path))
 end
 
-"Stop the sound or the video that the breadcrumb's player is playing"
-hush!(l::Breadcrumb) = (l.viewer isa Union{AudioPlayer,VideoPlayer} && pause!(l.viewer); l)
+"Stop the sound or the video that the breadcrumb's player is playing, and end the program of a SolidCraft design that it shows"
+hush!(l::Breadcrumb) = (l.viewer isa Union{AudioPlayer,VideoPlayer} && pause!(l.viewer); l.viewer isa Designs.DesignView && Designs.close!(l.viewer); l)
+
+"""
+What shows the SolidCraft design at `path` under a path and in a `view` block:
+the design alone, which you turn and nothing changes. The file's own page is
+the editor: see "a SolidCraft design".
+"""
+design(l::Breadcrumb, path) = begin
+  v = l.viewer
+  (v isa Designs.DesignView && v.path == path) && return v
+  hush!(l)
+  l.viewer = own!(l, Designs.DesignView(path=path, readonly=true, fill=false, height=MODEL_HEIGHT))
+end
 
 const LINE_H = 18px          # the height of a line of a file's text
 const TEXT_PAD = 8px         # above the first line and under the last
@@ -5051,6 +5063,9 @@ peek(l::Breadcrumb, path, ext, note) = begin
   elseif ext in MODELS
     viewer = model(l, path)
     viewer === nothing || return fillable(l, (:node, viewer), viewer, wide=:grow)
+  elseif ext in DESIGNS
+    viewer = design(l, path)
+    return fillable(l, (:node, viewer), viewer, wide=:grow)
   elseif mac && ext in SOUNDS
     return player(l, path, AudioPlayer)
   elseif mac && ext in VIDEOS
@@ -11257,7 +11272,7 @@ zoom_in!(e, what, from=nothing) = begin
   elseif what[1] == :node
     r = rect(what[2])
     # A model fills the window with no frame, so it has that to get back too. A page of the web is sized by its block.
-    v.home = what[2] isa STLViewer ? (what[2].height, what[2].fill) : what[2] isa Browsers.Browser ? nothing : what[2].height
+    v.home = what[2] isa Union{STLViewer,Designs.DesignView} ? (what[2].height, what[2].fill) : what[2] isa Browsers.Browser ? nothing : what[2].height
     v.held = r !== nothing ? r.height : what[2] isa Browsers.Browser ? what[2].high : what[2].height
   end
   # A page of the web has the keyboard, for its fields and its keys. Esc comes back from it when the page doesn't take it.
@@ -11434,6 +11449,12 @@ describe(v::ZoomView) = begin
     b.zoom = round(Float64(e.zoom), digits=2)
     b.wide, b.high = w, max(40px, h - TOPBAR_H)
     return Stack(width(grow=grow), height(grow=grow), Alignment.Start, b)
+  elseif what[1] == :node && what[2] isa Designs.DesignView
+    # A SolidCraft design that's only shown has all of the window under the top bar, as a model has. Esc puts the document back.
+    node = what[2]
+    node.fill = true
+    shows = with_theme(() -> geometry(node), component_theme(e.zoom))
+    return Stack(width(grow=grow), height(grow=grow), Alignment.Start, Box(width(grow=grow), height(grow=grow), shows))
   elseif what[1] == :node && what[2] isa STLViewer
     # A model has all of the window under the top bar too, with no frame, and nothing lies over it: Esc puts the document
     # back. Only a model of a gallery has a bar, to go to the file before it and the next one. It's above the line that
@@ -22403,6 +22424,8 @@ keyboard_part(v::HTMLPage) = html_browser(v)
 #   - A Markdown page shows as it reads, a little smaller than the document.
 #   - A picture, a model, a sound, a video, a PDF file, a CSV file, a zip, a
 #     Word file, a font and a file of text show as they do under a path.
+#   - A SolidCraft design shows alone, with none of its editor: you turn it,
+#     and nothing changes it. The button that goes to the file shows the editor.
 #   - A Julia file with a function called `view` shows what that function
 #     makes from the document's sums: see "a view of what code makes".
 #   - A folder shows the files and the folders in it. A click on one goes to it.
@@ -22627,9 +22650,11 @@ view_content(v::ViewBlock, e) = begin
   end
   content === nothing && (content = label("This file has no preview", 12px, color=colours.dim))
   # A model or a video is as tall as the block's line `aspect:` says, except while it fills the window
-  (l.viewer isa STLViewer || l.viewer isa VideoPlayer) && !zoomed_node(e, l.viewer) && (l.viewer.height = view_high(v, e))
+  (l.viewer isa STLViewer || l.viewer isa VideoPlayer || l.viewer isa Designs.DesignView) && !zoomed_node(e, l.viewer) && (l.viewer.height = view_high(v, e))
   # A model in a view has no line under it, as it has under a path: the model is all that shows
   l.viewer isa STLViewer && (l.viewer.foot = false; return bare_view(content))
+  # A SolidCraft design is the same: the design is all that shows
+  l.viewer isa Designs.DesignView && return bare_view(content)
   Column(block_look()..., padding(6px), child_gap=8px, name="View", content, Box(padding(4px, 0px), label(about, 12px, color=colours.dim)))
 end
 

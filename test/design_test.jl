@@ -799,6 +799,85 @@ end
 
 # A window asks before it closes with a design that has changes
 if Engines.available()
+  @testset "a view block only shows a design, and its button goes to the editor" begin
+    shown = joinpath(dir, "shown.sc")
+    cp(file, shown)
+    page = joinpath(dir, "shows.md")
+    write(page, "# A design\n\n```view\nshown.sc\n```\n\nThe end.\n")
+    e2 = K.build_editor(page)
+    w2 = Window(e2, size=(900px, 700px))
+    block() = e2.nodes[(:block, K.VIEW_BLOCK, page, 1)]
+    until(done) = for _ in 1:1500
+      frame(w2)
+      done() && break
+      sleep(0.01)
+    end
+    frame(w2); frame(w2)
+    d = block().crumb.viewer
+    @test d isa V.DesignView && d.readonly && !d.fill
+    until(() -> d.model !== nothing && !isempty(d.model.shapes) && d.model.engine === nothing)
+    frame(w2)
+    # SolidCraft's program gave the bodies, and ended
+    @test !isempty(d.model.shapes) && d.model.engine === nothing && isempty(d.model.problem)
+    # The design shows alone, as tall as a model in a page: it has no toolbar and no browser
+    @test haskey(d.parts, :scene) && !haskey(d.parts, :ribbon) && !any(n -> n isa V.Card, values(d.parts))
+    @test K.num(rect(d).height) == K.num(K.MODEL_HEIGHT) && K.num(rect(d).width) > 400
+    @test d.image !== nothing && d.image.image != C_NULL
+    haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], "design-16-in-a-page.png"), w2)
+    r = rect(d)
+    mid = (K.num(r.left + r.width / 2), K.num(r.top + r.height / 2))
+    move((x, y)) = (w2.mouse = typeof(w2.mouse)(px(x), px(y)); onmouse(w2, MouseMove(Vec2{px}(px(x), px(y)), w2)); frame(w2))
+    down() = (w2.keys |= Keys.mouse_left; onkey(w2, KeyPress{Keys.mouse_left}(0, w2)))
+    up() = (w2.keys ⊻= Keys.mouse_left; onkey(w2, KeyRelease{Keys.mouse_left}(0, w2)); frame(w2))
+    first_eye = d.eye
+    # The mouse lights nothing, and a click selects nothing
+    move(mid)
+    @test d.hover === nothing
+    down(); up()
+    @test isempty(d.picked) && d.form === nothing && d.eye == first_eye
+    sleep(0.5)
+    # A drag turns the design
+    down(); move(mid .+ (60, 20)); up()
+    @test d.eye != first_eye && d.drag === nothing && isempty(d.picked)
+    # Two clicks show all of it again, as it was first shown
+    move(mid)
+    down(); up(); down(); up()
+    @test d.eye == first_eye
+    sleep(0.5)
+    # Two fingers scroll the page. With ⌘ held they bring the design nearer.
+    @test onscroll(d, K.MouseScroll(Vec2{px}(px(0), px(-30)), w2)) === nothing && d.eye == first_eye
+    w2.keys |= Keys.cmd
+    onscroll(d, K.MouseScroll(Vec2{px}(px(0), px(-30)), w2))
+    w2.keys ⊻= Keys.cmd
+    @test d.eye != first_eye
+    # The first button beside the block makes the design fill the window, still with no panels
+    @test K.view_fills(block(), e2) == (:node, d)
+    K.zoom_in!(e2, (:node, d), block())
+    frame(w2); frame(w2)
+    @test d.fill && K.num(rect(d).height) > 500 && !haskey(d.parts, :ribbon) && e2.buf.path == page
+    K.zoom_out!(K.zooming(e2))
+    frame(w2); frame(w2)
+    @test !d.fill && K.num(rect(d).height) == K.num(K.MODEL_HEIGHT)
+    # When the file changes, the view reads it again
+    was = d.model
+    sleep(1.1)
+    let again = Engines.start(shown)
+      Engines.ask(again, "solid.box", JSON.Object("length" => 5, "width" => 5, "height" => 5, "corner" => Any[40, 40, 0]))
+      Engines.ask(again, "file.save", JSON.Object("path" => shown))
+      Engines.stop!(again)
+    end
+    until(() -> d.model !== was && d.model.engine === nothing)
+    @test d.model !== was && length(d.model.shapes) == length(was.shapes) + 1 && was.engine === nothing
+    # The second button goes to the file, and there the design has its editor
+    K.go_view!(block())
+    frame(w2); frame(w2)
+    full = get(e2.nodes, (:design, shown), nothing)
+    @test e2.buf.path == shown && full isa V.DesignView && !full.readonly && full !== d
+    until(() -> full.model !== nothing && !isempty(full.model.shapes) && !Models.busy(full.model))
+    @test haskey(full.parts, :ribbon) && full.model.engine !== nothing
+    K.close_designs!(e2)
+  end
+
   @testset "a window asks before it closes with a design that has changes" begin
     K.open!(e, file)
     frame(w); settle()

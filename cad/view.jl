@@ -38,6 +38,16 @@
 #
 # ⌘Z takes back the last change and ⇧⌘Z does it again. ⌘S writes the file.
 # Until then, every change is only in the hidden program.
+#
+# A design can also be only shown, as it is in a `view` block of a page:
+#
+#     DesignView(path="bracket.sc", readonly=true, fill=false, height=260px)
+#
+# That one is the picture alone, with no panels, and nothing changes the
+# design. A drag turns it, and with ⇧ held moves it. A pinch, or two fingers
+# with ⌘ held, bring it nearer, and two clicks show all of it again. The
+# hidden program ends as soon as it has given the bodies. When the file
+# changes, the design is read again.
 
 @use "github.com/jkroso/Prospects.jl" @def
 @use "github.com/jkroso/MiniFB.jl" Keys KeyPress KeyRelease MouseMove Typed onkey onmouse ontype onscroll flt
@@ -267,6 +277,9 @@ Form(spec, step=nothing, inputs=Any[]) = Form(spec, Dict{String,Any}(), Dict{Str
   slice::Bool = false                 # while a sketch is edited, the part of each body between its plane and the eye doesn't show
   previews::Bool = true               # the design shows what the command of the open form would make
   along::Float64 = 0.0                # how far the history has moved left
+  readonly::Bool = false              # it only shows the design: it has no panels, and nothing changes the design
+  fill::Bool = true                   # it takes all the room that it's given. A design that's shown in a page has `height` instead.
+  height::Any = nothing               # how tall it is in a page
   seen::Int = -1                      # the model's version when it was last drawn
 end
 
@@ -348,7 +361,69 @@ saved_picture(v::DesignView) = begin
   end
 end
 
+"""
+The design of `v`, which is only shown, read again when its file has changed.
+The design that showed stays until SolidCraft's program has given the new one.
+"""
+follow!(v::DesignView) = begin
+  m = load!(v)
+  next = get(v.parts, :next, nothing)
+  if next === nothing
+    changed = isfile(v.path) && mtime(v.path) != m.read
+    (changed && !Designs.busy(m) && time() >= get(v.parts, :again, 0.0)) || return m
+    next = v.parts[:next] = Designs.open_design(v.path)
+  end
+  Designs.tick!(next)
+  if !isempty(next.problem)
+    # The file can be half written. The design that shows stays, and the file is read again soon.
+    Designs.close!(next)
+    delete!(v.parts, :next)
+    v.parts[:again] = time() + 2
+    redraw_in!(v, 2)
+  elseif isempty(next.doc) || Designs.busy(next)
+    redraw_in!(v, 0.016)
+  else
+    Designs.close!(m)
+    delete!(v.parts, :next)
+    v.model = m = next
+    v.image === nothing || (v.image.of = nothing)
+  end
+  m
+end
+
+"""
+What shows of a design that's only shown: its picture, with no panels. In a
+page it has a line round it, as a model has. SolidCraft's program ends when it
+has given everything, since nothing more is asked of it.
+"""
+shown_only(v::DesignView) = begin
+  m = follow!(v)
+  t = theme(v)
+  frame = v.fill ? (height(grow=grow),) : (height(v.height), radius(8px), border(1px, :solid, t.line))
+  if !isempty(m.problem)
+    picture = saved_picture(v)
+    return Column(width(grow=grow), frame..., padding(16px), child_gap=10px, Alignment.Center, justify=Alignment.Center, background(t.surface), clip=true,
+      (picture === nothing ? () : (Image(picture, height(max=v.fill ? 420px : max(v.height - 70px, 40px))),))...,
+      Box(width(max=460px), Text(m.problem, size=12px, color=t.dim)))
+  end
+  Designs.tick!(m)
+  if Designs.busy(m)
+    redraw_in!(v, 0.016)
+  elseif !isempty(m.doc) && m.engine !== nothing
+    Designs.close!(m)
+  end
+  if !v.fitted && !isempty(m.shapes)
+    home!(v)
+    v.fitted = true
+  end
+  Stack(width(grow=grow), frame..., Alignment.Start, background(t.surface), clip=true, part!(() -> Scene(of=v), v, :scene))
+end
+
+"Show all of the design, turned as it is when it's first shown. No panels lie over it, so it has little room round it."
+home!(v::DesignView) = (v.eye = Scenes.fit(Scenes.Eye(), Scenes.box(v.model.shapes), (max(v.area[3], 100.0), max(v.area[4], 100.0)); room=1.05); v)
+
 describe(v::DesignView) = begin
+  v.readonly && return shown_only(v)
   m = load!(v)
   t = theme(v)
   if !isempty(m.problem)
@@ -1778,6 +1853,16 @@ draw(ctx, size, ui::ConcreteRect, scene::Scene) = begin
       shot.of = of
     end
   end
+  # A design that's only shown in a page stops inside its line and its round corners
+  framed = v.readonly && !v.fill
+  clip = C_NULL
+  if framed
+    edge = Ref(Skia.sk_rect_t(Float32(v.area[1] + 1), Float32(v.area[2] + 1), Float32(v.area[1] + v.area[3] - 1), Float32(v.area[2] + v.area[4] - 1)))
+    clip = Skia.sk_path_new()
+    Skia.sk_path_add_rounded_rect(clip, edge, 7f0, 7f0, Skia.SK_PATH_DIRECTION_CW)
+    Skia.sk_canvas_save(ctx)
+    Skia.sk_canvas_clip_path_with_operation(ctx, clip, Skia.SK_CLIP_OP_INTERSECT, true)
+  end
   if shot.image == C_NULL
     Ink.box(ctx, v.area..., RGB(c.back...))
   else
@@ -1785,6 +1870,12 @@ draw(ctx, size, ui::ConcreteRect, scene::Scene) = begin
     to = Ref(Skia.sk_rect_t(Float32(v.area[1]), Float32(v.area[2]), Float32(v.area[1] + v.area[3]), Float32(v.area[2] + v.area[4])))
     sampling = Ref(Skia.sk_sampling_options_t(0, false, Skia.sk_cubic_resampler_t(0f0, 0f0), Skia.SK_FILTER_MODE_LINEAR, Skia.SK_MIPMAP_MODE_NONE))
     Ink.painted(p -> Skia.sk_canvas_draw_image_rect(ctx, shot.image, from, to, sampling, p, Skia.SRC_RECT_CONSTRAINT_FAST), colorant"white")
+  end
+  if v.readonly
+    # Only the origin's point is drawn over the picture of a design that's only shown
+    draw_origin(ctx, v, t)
+    framed && (Skia.sk_canvas_restore(ctx); Skia.sk_path_delete(clip))
+    return nothing
   end
   # The sketch that's being edited is drawn over the picture, so no body hides it. The graphics card draws the others.
   active = Designs.editing(m)
@@ -2260,8 +2351,31 @@ click!(v::DesignView, what, more) = begin
   v
 end
 
+"""
+The mouse was pressed on a design that's only shown. A drag from here turns
+it, and with ⇧ held moves it. Two clicks show all of it again. In a page, a
+click with ⌘ or ⌥ held is the page's.
+"""
+grab!(v::DesignView, e) = begin
+  cmd, _, opt, _ = held_keys(e.window)
+  !v.fill && (cmd || opt) && return nothing
+  # The keyboard comes too, so that the button's release comes here
+  focus(v)
+  at = local_spot(v, e.window.mouse)
+  v.mouse = at
+  now = time()
+  last = get(v.parts, :clicked_at, (-99.0, -99.0))
+  twice = now - v.clicked < 0.4 && hypot(at[1] - last[1], at[2] - last[2]) < 5
+  v.clicked = twice ? 0.0 : now
+  v.parts[:clicked_at] = at
+  twice && return (home!(v); handled)
+  v.drag = Drag(:press, at, nothing, Keys.shft in e.window.keys, point_at(v, at), (0.0, 0.0), false)
+  handled
+end
+
 onkey(v::DesignView, e::KeyPress{Keys.mouse_left}) = begin
   v.model === nothing && return
+  v.readonly && return grab!(v, e)
   focus(v)
   hide_tooltip!(e.window)
   at = local_spot(v, e.window.mouse)
@@ -2287,6 +2401,7 @@ onkey(v::DesignView, e::KeyRelease{Keys.mouse_left}) = begin
   d = v.drag
   v.drag = nothing
   d === nothing && return handled
+  v.readonly && return handled
   d.kind == :press && click!(v, d.what, d.more)
   d.kind == :pull && v.model !== nothing && Designs.change!(v.model, "sketch.drag_end")
   handled
@@ -2323,13 +2438,15 @@ onmouse(v::DesignView, e::MouseMove) = begin
   d === nothing || held_ || (v.drag = d = nothing)
   if d === nothing
     v.mouse = at
+    # Nothing lights in a design that's only shown, and the mouse's move goes on to the page
+    v.readonly && return (v.hover = nothing)
     v.hover = panel_at(v, e.window, e.position) === nothing ? under(v, at) : nothing
     return handled
   end
   by = (at[1] - d.at[1], at[2] - d.at[2])
   if d.kind == :press
     hypot(by...) < 4 && return handled
-    s = sketch(v)
+    s = v.readonly ? nothing : sketch(v)
     if s !== nothing && d.what !== nothing && d.what.kind in (:point, :curve)
       d.kind = :pull
       spot = Sketching.on_plane(Sketching.Frame(s["plane"]), Scenes.ray(v.eye, size, d.at))
@@ -2351,6 +2468,8 @@ end
 # Two fingers on the trackpad move the design, and with ⇧ turn it. The wheel of a mouse, and two fingers with ⌘, bring it nearer.
 onscroll(v::DesignView, e::MouseScroll) = begin
   v.model === nothing && return
+  # In a page, the wheel and two fingers scroll the page, unless ⌘ is held
+  v.readonly && !v.fill && !(Keys.cmd in e.window.keys) && return nothing
   over = panel_at(v, e.window)
   dx, dy = num(e.delta[1]), num(e.delta[2])
   if over == :history
@@ -2383,6 +2502,7 @@ cursor(v::DesignView) = v.tool !== nothing ? :crosshair : nothing
 # --- the keys ------------------------------------------------------------------------
 
 onkey(v::DesignView, e::KeyPress{Keys.escape}) = begin
+  v.readonly && return nothing
   if !isempty(v.clicks)
     empty!(v.clicks)
   elseif v.tool !== nothing
@@ -2399,6 +2519,7 @@ onkey(v::DesignView, e::KeyPress{Keys.escape}) = begin
 end
 
 onkey(v::DesignView, e::KeyPress{Keys.enter}) = begin
+  v.readonly && return nothing
   box = e.window.focus
   box isa TextInput && commit!(v, box) !== nothing && return (focus(v); handled)
   if v.tool isa Commands.Tool && v.tool.clicks == ["points"] && !isempty(v.clicks)
@@ -2425,22 +2546,23 @@ delete_picked!(v::DesignView) = begin
   v
 end
 
-onkey(v::DesignView, e::KeyPress{Keys.backspace}) = e.window.focus === v ? (delete_picked!(v); handled) : nothing
-onkey(v::DesignView, e::KeyPress{Keys.delete}) = e.window.focus === v ? (delete_picked!(v); handled) : nothing
+onkey(v::DesignView, e::KeyPress{Keys.backspace}) = e.window.focus === v && !v.readonly ? (delete_picked!(v); handled) : nothing
+onkey(v::DesignView, e::KeyPress{Keys.delete}) = e.window.focus === v && !v.readonly ? (delete_picked!(v); handled) : nothing
 
 "Which of ⌘, ⇧, ⌥ and ⌃ are held"
 held_keys(w) = (Keys.cmd in w.keys, Keys.shft in w.keys, Keys.opt in w.keys, Keys.ctrl in w.keys)
 
-# ⌘S writes the file. ⌘Z takes back the last change, and ⇧⌘Z does it again.
-onkey(v::DesignView, e::KeyPress{Keys.s}) = held_keys(e.window) == (true, false, false, false) ? (save!(v); handled) : nothing
+# ⌘S writes the file. ⌘Z takes back the last change, and ⇧⌘Z does it again. A design that's only shown leaves them to the page.
+onkey(v::DesignView, e::KeyPress{Keys.s}) = !v.readonly && held_keys(e.window) == (true, false, false, false) ? (save!(v); handled) : nothing
 onkey(v::DesignView, e::KeyPress{Keys.z}) = begin
+  v.readonly && return nothing
   keys = held_keys(e.window)
   keys == (true, false, false, false) ? (undo!(v); handled) : keys == (true, true, false, false) ? (redo!(v); handled) : nothing
 end
 
 # A letter starts a command while the design has the keyboard, and not while a field is typed in
 ontype(v::DesignView, e::Typed) = begin
-  (v.model === nothing || e.window.focus !== v) && return
+  (v.model === nothing || v.readonly || e.window.focus !== v) && return
   (Keys.cmd in e.window.keys || Keys.ctrl in e.window.keys) && return
   id = get(sketch(v) === nothing ? MODEL_KEYS : SKETCH_KEYS, lowercase(e.char), nothing)
   id === nothing && return
