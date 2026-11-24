@@ -151,7 +151,8 @@ end
   @test first_one.node === node() && first_one.words == "Level" && first_one.note == "drawn at level.jl:17"
   @test (first_one.file, first_one.first, first_one.last) == (realpath(source), 16, 18)
   prompt = K.change_prompt(first_one, "make it red")
-  @test occursin("a part of its window, a Level. The function that draws that part", prompt) && occursin("lines 16 to 18", prompt)
+  # The agent is told which page the window shows. The bar has no words, so it's told of none.
+  @test occursin("a part of its window, a Level. The window shows $(e.buf.path). The function that draws that part", prompt) && occursin("lines 16 to 18", prompt)
   # Then the block itself and the page, which Ladder's own code draws
   @test any(c -> c.node isa K.FileBlock, offered(e, (3, 0))) && !any(c -> c.node === node(), offered(e, (7, 0)))
   # A `julia` code block of the page is a block to change, with no code that runs after the change

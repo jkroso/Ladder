@@ -248,6 +248,19 @@ end
   empty!(K.SITE_LISTS)
 end
 
+@testset "an agent asked about a line of the list is told what the line says" begin
+  # The agent was told only that the part is a ListingRow and where its code is, so it couldn't tell which line was meant
+  Base.invokelatest(K.open!, e, K.FS.get(FSPath(city))); frames()
+  c = K.part_choice(e.nodes[(:listing, city)].rows[(:entry, joinpath(city, "future city.md"))])
+  what, _ = K.thing_words(c)
+  @test occursin("a ListingRow. It shows these words: \"future city.md\", \"If we started from scratch\"", what)
+  @test occursin("The window shows $city.", what)
+  @test occursin("\"If we started from scratch\"", K.either_prompt([c], "Is this spelt right?"))
+  @test occursin("\"future city.md\"", K.about_prompt([c], "Is this spelt right?"))
+  # A part that isn't drawn now shows no words
+  @test K.shown_words(K.ListingRow()) == String[]
+end
+
 @testset "a section with its own index.md shows only that page, as its site does" begin
   proof = joinpath(canon, "Proof")
   mkpath(proof)

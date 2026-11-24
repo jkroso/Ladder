@@ -46563,15 +46563,60 @@ chip_wider(c::ToChange, e) = begin
   ToChange(basename(c.file), "the whole file", c.file, 1, n, nothing, c.mod)
 end
 
-"What the thing `c` of Ask For Change is, in words for an agent, and the first line of its code"
+"""
+What the thing `c` of Ask For Change is, in words for an agent, and the first
+line of its code. A part of the window is told with the words that it shows
+and what the window shows, so that a question about what it says, like "is
+this spelt right?", has an answer: see `part_words`.
+"""
 thing_words(c::ToChange) = begin
   c.node isa PickedText && return ("words that the user selected in a file", picked_words(c.node))
   lines = text(c.file)
   start = 1 <= c.first <= length(lines) ? lines[code_start(lines, c.first)] : ""
-  what = c.node !== nothing ? "a part of its window, a $(pick_name(c.node)). The function that draws that part" :
+  what = c.node !== nothing ? "a part of its window, a $(pick_name(c.node)).$(part_words(c.node)) The function that draws that part" :
          whole_file(c) ? "the whole of a file" :
          endswith(c.file, ".jl") ? "a block of the file's Julia code" : "a block of Julia code on a page of Markdown"
   (what, start)
+end
+
+"Where the last frame drew the part `x` of the window, or nothing when it wasn't drawn"
+drawn_rect(x) = (node = shown_now(x); node === nothing ? nothing : try rect(node) catch; nothing end)
+
+"""
+The words that the part `x` of the window showed in the last frame, in the
+order that it drew them: the words of each piece of text in it, no more than
+1,000 characters in all. A part that draws its own text, like a paragraph of
+the page, has none, and so does a part that wasn't drawn.
+"""
+shown_words(x) = begin
+  r = drawn_rect(x)
+  out, room = String[], Ref(1000)
+  walk(u) = room[] <= 0 ? nothing :
+    u isa ConcreteText ? (s = String(strip(replace(u.from.content, r"\s+" => " "))); isempty(s) || (push!(out, s); room[] -= length(s))) :
+    u isa ConcreteRect ? foreach(walk, u.children) : nothing
+  r === nothing || walk(r)
+  out
+end
+
+"The file, folder or address that the window with the part `x` shows, or \"\" when `x` isn't in a window of the editor"
+window_shows(x) = begin
+  while x !== nothing && !(x isa Editor)
+    x = try x.parent catch; nothing end
+  end
+  x === nothing ? "" : x.buf.path
+end
+
+"""
+What an agent is told of what the part `x` of the window shows: the words in
+it, and the file or folder that the window shows. Without them, the agent
+can't tell which line of a list, or which button, the user means. It's "" for
+a part that wasn't drawn in the last frame.
+"""
+part_words(x) = begin
+  drawn_rect(x) === nothing && return ""
+  words, shows = shown_words(x), window_shows(x)
+  told = isempty(words) ? "" : " It shows these words: " * join(("\"$w\"" for w in words), ", ") * "."
+  isempty(shows) ? told : told * " The window shows $shows."
 end
 
 "What an agent is told after it's told what to change: the user's words, and how to change the files in the folders `dirs`"
@@ -46856,7 +46901,7 @@ either_prompt(cs::AbstractVector, words) = begin
 
   The words ask for a change, or ask a question. For a change, change that, or the code that it uses. Change only files in $(join(unique(dirname(c.file) for c in cs), " and ")). Keep the change small, and write code that looks like the code around it. Ladder runs the changed code as soon as you end, so leave the file in a state that runs. Then say what you changed, in one short sentence.
 
-  For a question, don't change any file. Read the code to find the answer. Answer in a few short sentences of plain words, with no Markdown, as the answer shows in a small card beside the thing.
+  For a question, don't change any file. Read the code, or the files that the window shows, to find the answer. Answer in a few short sentences of plain words, with no Markdown, as the answer shows in a small card beside the thing.
   """
 end
 
@@ -47926,7 +47971,7 @@ about_prompt(cs::AbstractVector, words, talk=Tuple{String,String}[]) = begin
 
   The user's question: $words
 
-  Read the code to find the answer. Don't change any file. Answer in a few short sentences of plain words, with no Markdown, as the answer shows in a small card beside the thing.
+  Read the code, or the files that the window shows, to find the answer. Don't change any file. Answer in a few short sentences of plain words, with no Markdown, as the answer shows in a small card beside the thing.
   """
 end
 
