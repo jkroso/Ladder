@@ -47541,6 +47541,8 @@ design_key!(f::DesignField, e, w, K, command) = begin
   done
 end
 field_key(f::DesignField, e, w, K, command) = begin
+  # While the list of parameters shows under the field, ↑ ↓ Return Tab and Esc are the list's: see cad/view.jl
+  K in (Keys.up, Keys.down, Keys.enter, Keys.tab, Keys.escape) && unmodified(w) && Designs.names_key!(f, w, K) && return handled
   K in (Keys.enter, Keys.escape) && return nothing
   if K == Keys.tab
     # The field is the tab stop, and not its editor. A form with no other field keeps the keyboard in this one.
@@ -47566,6 +47568,8 @@ Designs.set_text!(f::DesignField, text) = begin
   f
 end
 Designs.select_all!(f::DesignField) = (select_all!(f.sub); f)
+Designs.before_caret(f::DesignField) = (b = f.sub.buf; b.anchor == b.caret ? first(b.lines[b.caret[1]], b.caret[2]) : nothing)
+Designs.complete!(f::DesignField, n, name) = (b = f.sub.buf; edit!(b, (b.caret[1], b.caret[2] - n), b.caret, String(name)); f)
 Designs.keyed(e::Editor) = something(design_field_of(e), e)
 Designs.isfield(::DesignField) = true
 Designs.iscode(f::DesignField) = f.code

@@ -646,6 +646,69 @@ else
     @test v.panel == :none
   end
 
+  @testset "a field of code offers the parameters whose names are typed" begin
+    v = view()
+    m = v.model
+    "The names in the list under the field, or nothing when no list shows"
+    names_shown() = (i = findfirst(p -> p.key == V.NAMES_KEY, popups(w)); i === nothing ? nothing : [first(n) for n in popups(w)[i].content.names])
+    type(text) = (foreach(c -> ontype(w, Typed(c, w)), text); frame(w))
+    V.start!(v, "solid.fillet")
+    frame(w)
+    box = v.parts[(:field, "solid.fillet", "radius")]
+    click(box)
+    key(Keys.a, Keys.cmd)
+    type("wa")
+    @test names_shown() == ["wall"] && V.names_for(w, box).names[1].second == "3.00 mm"
+    # Return puts the name in, and the form stays open
+    key(Keys.enter)
+    @test V.text_of(box) == "wall" && names_shown() === nothing && v.form !== nothing
+    # The lengths of the steps are offered too, each with the name of its step
+    type("/2 + d")
+    shot("design-6b-names.png")
+    shown = names_shown()
+    @test shown !== nothing && all(n -> startswith(n, "d"), shown) && any(n -> startswith(n.second, "Block  "), V.names_for(w, box).names)
+    key(Keys.down)
+    @test V.names_for(w, box).lit == mod1(2, length(shown))
+    # Esc hides the list, and the form stays open. The next name has a list again.
+    key(Keys.escape)
+    @test names_shown() === nothing && v.form !== nothing
+    type("1 + w")
+    @test names_shown() == ["wall"]
+    # Tab puts the name in too
+    key(Keys.tab)
+    @test V.text_of(box) == "wall/2 + d1 + wall" && V.has_keys(w, box)
+    # A name just after a number is its unit, and a moved caret takes the list away
+    type(" + 10m")
+    @test names_shown() === nothing
+    type(" + wa")
+    @test names_shown() == ["wall"]
+    key(Keys.left)
+    @test names_shown() === nothing
+    # Typing shows it again, and a whole name has no list
+    key(Keys.right)
+    type("l")
+    @test names_shown() == ["wall"]
+    type("l")
+    @test names_shown() === nothing
+    # A click on a name puts it in
+    key(Keys.a, Keys.cmd)
+    type("w")
+    click(V.names_for(w, box).rows[1])
+    @test V.text_of(box) == "wall" && names_shown() === nothing
+    key(Keys.escape)
+    @test v.form === nothing
+    # A parameter's field doesn't offer that parameter
+    V.start!(v, "parameters")
+    frame(w)
+    own = v.parts[(:param, "wall")]
+    click(own)
+    key(Keys.a, Keys.cmd)
+    type("wa")
+    @test names_shown() === nothing
+    key(Keys.escape)
+    @test v.panel == :none
+  end
+
   @testset "a new sketch on a face" begin
     v = view()
     m = v.model

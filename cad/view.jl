@@ -345,6 +345,17 @@ text_of(box::TextInput) = box.text
 "Make the field `box` hold `text`, with the caret after it"
 set_text!(box::TextInput, text) = (box.text = String(text); box.cursor = box.anchor = length(box.text); box)
 
+"The text of the field `box` before its caret, on the caret's line, or nothing while text is selected"
+before_caret(box::TextInput) = box.anchor == box.cursor ? first(box.text, box.cursor) : nothing
+
+"Put `name` in place of the `n` characters before the caret of the field `box`, with the caret after it"
+complete!(box::TextInput, n, name) = begin
+  chars, at = collect(box.text), box.cursor
+  box.text = String(vcat(chars[1:at-n], collect(String(name)), chars[at+1:end]))
+  box.cursor = box.anchor = at - n + length(name)
+  box
+end
+
 "Select all the text of the field `box`"
 select_all!(box::TextInput) = ((box.anchor, box.cursor) = (0, length(box.text)); box)
 
@@ -733,6 +744,7 @@ describe(v::DesignView) = begin
   editing = Designs.editing(m) !== nothing
   editing ? (v.tab = "Sketch") : v.tab == "Sketch" && (v.tab = "Model"; v.tool = nothing; empty!(v.clicks))
   preview!(v)
+  offers!(v)
   scene = part!(() -> Scene(of=v), v, :scene)
   Stack(width(grow=grow), height(grow=grow), Alignment.Start,
     scene,
@@ -1069,6 +1081,8 @@ describe(a::Asker) = begin
       shown === nothing ? a.field : Column(width(grow=grow), child_gap=5px, Alignment.Start, a.field, shown))
 end
 onkey(a::Asker, e::KeyPress{Keys.enter}) = begin
+  # With the list of parameters under the field, Return puts the lit one in
+  plain(e) && names_key!(a.field, e.window, Keys.enter) && return handled
   # ⌘Return runs the code, and the field stays
   iscode(a.field) && held_keys(e.window) == (true, false, false, false) && return (run_field!(a.of, a.field); handled)
   text = strip(text_of(a.field))
@@ -1079,6 +1093,204 @@ onkey(a::Asker, e::KeyPress{Keys.enter}) = begin
   handled
 end
 onkey(::Asker, ::KeyPress{Keys.mouse_left}) = handled
+# Esc hides the list of parameters under the field, and with no list it closes the field
+onkey(a::Asker, e::KeyPress{Keys.escape}) = plain(e) && names_key!(a.field, e.window, Keys.escape) ? handled : nothing
+
+# --- parameters offered in a field of code ---------------------------------------------
+#
+# While a name is typed in a field of Julia code, a list under the field
+# offers the design's parameters whose names start with what's typed, or have
+# a word that does: `thic` offers thickness, and `wall` offers inner_wall. The
+# user's own parameters come first, then the lengths of the steps and of the
+# sketches' dimensions, like d1. A field of a parameter doesn't offer that
+# parameter. Each name has its value at its right, as the panel of parameters
+# writes it, and a length of a step has its step's name too.
+#
+# The list shows only while a name is typed: a caret that moves, a selection,
+# or a field that loses the keyboard takes it away. A name just after a number
+# is a unit, like the mm of 10mm, so it gets no list. ↑ and ↓ light another
+# name, Return or Tab puts the lit one in place of what's typed, and Esc hides
+# the list until another name is typed. A click on a name puts it in too. The
+# keys come here from the field: see `names_key!`.
+
+const NAMES_KEY = :design_names
+const NAMES_SHOWN = 8          # the most names in the list
+
+"The list of parameters under a field of code: see \"parameters offered in a field of code\""
+@def mutable struct Offers <: SemanticUI
+  of::Any = nothing              # the design
+  box::Any = nothing             # the field
+  typed::Int = 0                 # how many characters of the name are typed
+  names::Vector{Any} = Any[]     # each name with what's at its right
+  lit::Int = 1
+  rows::Vector{Any} = Any[]
+end
+
+"A name in the list of an `Offers`"
+@def mutable struct Offer <: SemanticUI
+  of::Any = nothing
+  i::Int = 0
+end
+
+"The list of parameters that shows in each window, by the window's objectid"
+const SHOWN_NAMES = Dict{UInt,Any}()
+
+"""
+The parameters of the design `v` that the text `before` the caret of a field
+could be the start of the name of: how many characters of the name are typed,
+and the names, each with the words at its right, the best first. A field of
+the parameter `own` doesn't offer it. Nothing when no name is being typed, a
+whole name is typed, or no name fits.
+"""
+offered(v::DesignView, before::AbstractString, own=nothing) = begin
+  chars = collect(before)
+  start = length(chars)
+  while start > 0 && (isletter(chars[start]) || isdigit(chars[start]) || chars[start] in ('_', '!')); start -= 1 end
+  # 2n is two times n, so a name starts after the digits
+  while start < length(chars) && !(isletter(chars[start+1]) || chars[start+1] == '_'); start += 1 end
+  start < length(chars) || return nothing
+  # Just after a number, a name is its unit. After a dot it's a part of a value.
+  start > 0 && (isdigit(chars[start]) || chars[start] == '.') && return nothing
+  # Not in a comment or a string
+  pieces = Expressions.parts(before, (comment=:comment, string=:string))
+  !isempty(pieces) && last(pieces).second in (:comment, :string) && return nothing
+  typed = lowercase(String(chars[start+1:end]))
+  found = Any[]
+  for p in every_param(v)
+    name = String(something(get(p, "name", ""), ""))
+    (isempty(name) || name == own) && continue
+    low = lowercase(name)
+    low == typed && return nothing
+    fit = startswith(low, typed) ? 0 : any(w -> startswith(w, typed), split(low, '_', keepempty=false)) ? 1 : 2
+    fit < 2 || continue
+    # A length of a step or of a sketch's dimension, like d1, comes after the user's own parameters
+    step = something(get(p, "source", "user"), "user") != "user"
+    value = get(p, "value", nothing) isa Real ? Sketching.fixed(p["value"]) * " " * String(something(get(p, "unit", ""), "")) : ""
+    note = step && get(p, "feature", nothing) isa String ? strip(string(p["feature"], "  ", value)) : strip(value)
+    # d2 before d10
+    push!(found, (fit, step, length(name), low, name => String(note)))
+  end
+  isempty(found) && return nothing
+  (length(chars) - start, Any[last(f) for f in first(sort!(found, by=f -> f[1:4]), NAMES_SHOWN)])
+end
+
+"The parameter that the field `box` of the design `v` is the code of, or nothing"
+own_param(v::DesignView, box) = begin
+  for (k, b) in v.parts
+    b === box || continue
+    k isa Tuple && length(k) == 3 && k[1] == :field && k[2] == "step" && return String(k[3])
+    k isa Tuple && length(k) == 2 && k[1] == :param && return String(k[2])
+    return nothing
+  end
+  nothing
+end
+
+"The list of parameters that shows now in the window `w` for the field `box`, or nothing"
+names_for(w, box) = (o = get(SHOWN_NAMES, objectid(w), nothing); o !== nothing && o.box === box ? o : nothing)
+
+"Take the list of parameters away from the window `w`"
+close_names!(w) = (delete!(SHOWN_NAMES, objectid(w)); close_popup!(w, NAMES_KEY); nothing)
+
+"""
+Keep the list of parameters under the field that has the keyboard up to date:
+the list shows just after the text of the field changes, while a name is typed.
+"""
+offers!(v::DesignView) = begin
+  w = part_window(v)
+  w === nothing && return
+  box = keyed(w.focus)
+  ours = isfield(box) && iscode(box) && (box === get(v.parts, :named_box, nothing) || own_box(v, box))
+  ours && (v.parts[:named_box] = box)
+  now = ours ? (box, text_of(box), before_caret(box)) : nothing
+  seen = get(v.parts, :named_seen, nothing)
+  same = seen === now || (seen !== nothing && now !== nothing && seen[1] === now[1] && seen[2] == now[2] && seen[3] == now[3])
+  same && return
+  v.parts[:named_seen] = now
+  shown = get(SHOWN_NAMES, objectid(w), nothing)
+  # Only a change to the text shows the list. A caret that moves, a selection, or another field takes it away.
+  found = now === nothing || now[3] === nothing || seen === nothing || seen[1] !== box || seen[2] == now[2] ? nothing : offered(v, now[3], own_param(v, box))
+  hidden = get(v.parts, :named_hidden, nothing)
+  if found !== nothing && hidden == (box, length(now[3]) - found[1])
+    found = nothing   # Esc hid the list of this name
+  elseif found !== nothing || now === nothing || seen === nothing || seen[1] !== box
+    delete!(v.parts, :named_hidden)
+  end
+  if found === nothing
+    shown !== nothing && shown.of === v && close_names!(w)
+    return
+  end
+  n, names = found
+  if shown !== nothing && shown.box === box
+    shown.lit = names == shown.names ? clamp(shown.lit, 1, length(names)) : 1
+    shown.typed, shown.names = n, names
+    return
+  end
+  o = Offers(of=v, box=box, typed=n, names=names)
+  SHOWN_NAMES[objectid(w)] = o
+  # The keys stay with the field, and a click outside the list is the design's, as it is with no list
+  popup!(w, o, anchor=box, placement=:below, gap=4px, width=menu_width(box, 180px), key=NAMES_KEY, modal=false,
+         onclose=() -> get(SHOWN_NAMES, objectid(w), nothing) === o && delete!(SHOWN_NAMES, objectid(w)), theme=theme(v))
+  nothing
+end
+
+"True when `box` is one of the fields of the design `v`"
+own_box(v::DesignView, box) = any(b -> b === box, values(v.parts))
+
+"""
+What a key does in the field `box` of the window `w` while its list of
+parameters shows: ↑ and ↓ light another name, Return and Tab put the lit one
+in, and Esc hides the list. True when the key was for the list.
+"""
+names_key!(box, w, K) = begin
+  o = names_for(w, box)
+  o === nothing && return false
+  if K == Keys.down || K == Keys.up
+    o.lit = mod1(o.lit + (K == Keys.down ? 1 : -1), length(o.names))
+  elseif K == Keys.enter || K == Keys.tab
+    take_name!(o, o.lit, w)
+  elseif K == Keys.escape
+    o.of.parts[:named_hidden] = (box, length(something(before_caret(box), "")) - o.typed)
+    close_names!(w)
+  else
+    return false
+  end
+  redraw_in!(o.of, 0.0)
+  true
+end
+
+"Put the name at row `i` of the list `o` in place of what's typed of it, and take the list away"
+take_name!(o::Offers, i, w) = begin
+  i in eachindex(o.names) && complete!(o.box, o.typed, first(o.names[i]))
+  close_names!(w)
+  focus(o.box)
+  nothing
+end
+
+describe(o::Offers) = begin
+  c = menu_colours(theme(o))
+  length(o.rows) == length(o.names) || (o.rows = Any[Offer(of=o, i=i) for i in eachindex(o.names)])
+  Box(width(grow=grow), padding(5px), radius(8px), background(c.frame), border(1px, :solid, c.line),
+      shadow(0, 6, 16, RGBA(60 / 255, 45 / 255, 20 / 255, 0.2)), name="Parameters",
+    Column(width(grow=grow), Alignment.Start, o.rows...))
+end
+
+describe(l::Offer) = begin
+  o = l.of
+  l.i <= length(o.names) || return Box(height(0px))
+  c = menu_colours(theme(o))
+  name, note = o.names[l.i]
+  _, family = code_look(o.of)
+  Row(width(grow=grow), height(24px), padding(7px, 0px), radius(5px), child_gap=10px, Alignment.Center,
+      background(l.i == o.lit ? c.pick : c.frame),
+    Box(Text(name, size=12px, family=family, color=c.ink, wrap=WrapMode.none)),
+    Box(width(grow=grow)),
+    Row(justify=Alignment.End, clip_x=true, words(note, 11px, color=c.dim)))
+end
+
+cursor(::Offer) = :hand
+onmouse(l::Offer, ::MouseMove) = (l.of.lit = l.i; handled)
+onkey(l::Offer, e::KeyPress{Keys.mouse_left}) = (take_name!(l.of, l.i, e.window); handled)
+onkey(::Offer, ::KeyPress{Keys.mouse_right}) = handled
 
 # --- the history ---------------------------------------------------------------------
 
