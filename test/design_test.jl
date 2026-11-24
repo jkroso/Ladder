@@ -351,6 +351,47 @@ else
     @test length(Models.timeline(v.model)) == 2 && length(v.model.shapes[1].flat) == 6
   end
 
+  @testset "an extrude of a flat face of a body" begin
+    v = view()
+    m = v.model
+    @test isempty(m.sketches)                    # no sketch shows, so only a face can be the profile
+    V.start!(v, "solid.extrude")
+    frame(w)
+    @test v.form.active == "profiles"
+    click(shows((-10.0, -5.0, 10.0)))            # the block's top
+    p = only(v.form.shows["profiles"])
+    @test p.kind == :face && p.of == m.shapes[1].name && m.shapes[1].flat[p.n]
+    @test V.count_words(Commands.SPECS["solid.extrude"].fields[1], v.form.shows["profiles"]) == "1 face"
+    # SolidCraft gets a point on each face in place of a sketch's regions
+    command, params, _ = V.request(v, v.form)
+    @test command == "solid.extrude" && !haskey(params, "profiles") && !haskey(params, "sketch")
+    @test length(params["faces"]) == 1 && isapprox(params["faces"][1][3], 10.0, atol=1e-6) && params["face_body"] == p.of
+    # A second click on the face takes it out again, and a third puts it back
+    click(shows((-10.0, -5.0, 10.0)))
+    @test isempty(v.form.shows["profiles"])
+    click(shows((-10.0, -5.0, 10.0)))
+    @test length(v.form.shows["profiles"]) == 1
+    click(v.parts[(:form, :ok)])
+    settle()
+    @test v.form === nothing && isempty(m.said)
+    # SolidCraft makes a sketch on the face, then the extrude of it, and one ⌘Z takes both back
+    @test [s["type"] for s in Models.timeline(m)] == ["Sketch", "ExtrudeFeature", "Sketch", "ExtrudeFeature"] && length(m.shapes) == 1
+    @test isapprox(m.shapes[1].high[3], 20.0, atol=1e-6)    # the form's 10 mm on top of the block's 10
+    # Revolve takes one face, as `face`
+    V.start!(v, "solid.revolve")
+    frame(w)
+    click(shows((-10.0, -5.0, 20.0)))
+    click(shows((0.0, -10.0, 5.0)))              # the front: it takes the top's place
+    p = only(v.form.shows["profiles"])
+    @test p.kind == :face && isapprox(p.at[2], -10.0, atol=1e-6)
+    _, params, _ = V.request(v, v.form)
+    @test params["face"] isa Vector && length(params["face"]) == 3 && !haskey(params, "faces")
+    v.form = nothing
+    key(Keys.z, Keys.cmd)
+    settle()
+    @test length(Models.timeline(m)) == 2 && isapprox(m.shapes[1].high[3], 10.0, atol=1e-6)
+  end
+
   @testset "a sketch is drawn in" begin
     v = view()
     click(v.parts[(:step, 1)]); click(v.parts[(:step, 1)])       # two clicks on the sketch's step of the history
@@ -577,6 +618,35 @@ else
     V.start!(v, "sketch.finish")
     settle()
     @test Models.editing(m) === nothing && v.eye.tilt == 28.0     # the view is as it was before the sketch
+  end
+
+  @testset "a profile is a region of a sketch on a face, and a body's face hides a sketch behind it" begin
+    v = view()
+    m = v.model
+    id = Int(last(filter(s -> s["type"] == "Sketch", Models.timeline(m)))["id"])
+    seen(id, on) = (Models.change!(m, "browser.visibility", JSON.Object("items" => Any[id], "visible" => on)); settle())
+    was = haskey(m.sketches, id)
+    was || seen(id, true)
+    @test haskey(m.sketches, id) && haskey(m.sketches, 1)   # the sketch on the top, and the one under the block
+    V.start!(v, "solid.extrude")
+    frame(w)
+    f = Sketching.Frame(m.sketches[id]["plane"])
+    click(shows(Sketching.world(f, (-12.0, -4.0))))          # in the rectangle drawn on the top
+    p = only(v.form.shows["profiles"])
+    @test p.kind == :region && p.n == id
+    # The sketch on the top has the top's outline too, so the rest of the top is a region of it as well
+    click(shows((10.0, 5.0, 14.0)))
+    @test length(v.form.shows["profiles"]) == 2 && all(p -> p.kind == :region && p.n == id, v.form.shows["profiles"])
+    v.form = nothing
+    # With that sketch hidden, the top is a face, and the sketch under the block doesn't show through it
+    seen(id, false)
+    V.start!(v, "solid.extrude")
+    frame(w)
+    click(shows((10.0, 5.0, 14.0)))
+    p = only(v.form.shows["profiles"])
+    @test p.kind == :face && isapprox(p.at[3], 14.0, atol=1e-6)
+    v.form = nothing
+    seen(id, was)
   end
 
   @testset "the view turns, moves and comes nearer" begin

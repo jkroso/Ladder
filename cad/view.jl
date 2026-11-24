@@ -1272,7 +1272,7 @@ open_form!(v::DesignView, id) = begin
   # What's selected fills the fields that it suits
   for p in keep, field in spec.fields
     suits = (field.kind == :edges && p.kind == :edge) || (field.kind in (:faces, :face) && p.kind == :face) || (field.kind in (:bodies, :body) && p.kind == :body) ||
-            (field.kind == :plane && p.kind == :plane)
+            (field.kind == :plane && p.kind == :plane) || (field.kind == :profiles && flat_face(v.model, p))
     suits || continue
     (Commands.many(field) || field.kind == :plane || isempty(f.values[field.key])) && take!(f, field, p)
     break
@@ -1295,8 +1295,14 @@ end
 "What a click on `p` sends for the field `field`"
 sent(field::Commands.Field, p) =
   field.kind in (:bodies, :body) ? p.of :
-  field.kind == :profiles ? JSON.Object("point" => Any[p.at[1], p.at[2]]) :
+  field.kind == :profiles ? (p.kind == :face ? Any[p.at...] : JSON.Object("point" => Any[p.at[1], p.at[2]])) :
   field.kind == :plane ? (p.kind == :plane ? p.of : JSON.Object("face" => Any[p.at...])) : Any[p.at...]
+
+"True when `p` is a flat face of a body, which Extrude and Revolve take in place of a sketch's profile"
+flat_face(m, p) = p.kind == :face && any(s -> s.name == p.of && 1 <= p.n <= length(s.flat) && s.flat[p.n], m.shapes)
+
+"True when the profiles `p` and `q` go in one command: regions of one sketch, or flat faces of one body"
+together(p, q) = p.kind == q.kind && (p.kind == :face ? p.of == q.of : p.n == q.n)
 
 "Put the click on `p` in the field `field` of the form `f`. A second click on the same thing takes it out again."
 take!(f::Form, field::Commands.Field, p) = begin
@@ -1310,7 +1316,8 @@ take!(f::Form, field::Commands.Field, p) = begin
     deleteat!(shows, i)
     deleteat!(f.values[field.key], i)
   else
-    Commands.many(field) || (empty!(shows); empty!(f.values[field.key]))
+    alone = !Commands.many(field) || (field.kind == :profiles && (!all(q -> together(q, p), shows) || (p.kind == :face && f.spec.command == "solid.revolve")))
+    alone && (empty!(shows); empty!(f.values[field.key]))
     push!(shows, p)
     push!(f.values[field.key], sent(field, p))
   end
@@ -1358,9 +1365,17 @@ request(v::DesignView, f::Form) = begin
   params = Commands.params(f.spec, held(v, f); read)
   params isa String && return params
   merge!(params, f.extra)
-  # SolidCraft finds each region of a sketch from a place inside it, and needs to know which sketch
+  # SolidCraft finds each region of a sketch from a place inside it, and needs to know which sketch.
+  # Flat faces of a body go in place of a sketch's regions, each by a point on it: Extrude takes several, Revolve one.
   regions = get(f.shows, "profiles", Any[])
-  isempty(regions) || (params["sketch"] = regions[1].n)
+  if !isempty(regions) && regions[1].kind == :face
+    delete!(params, "profiles")
+    points = Any[Any[p.at...] for p in regions]
+    f.spec.command == "solid.revolve" ? (params["face"] = points[1]) : (params["faces"] = points)
+    params["face_body"] = regions[1].of
+  elseif !isempty(regions)
+    params["sketch"] = regions[1].n
+  end
   (f.spec.command, params, readings)
 end
 
@@ -1534,7 +1549,7 @@ count_words(field::Commands.Field, shows) = begin
   n == 0 && return "Select"
   field.kind == :plane && return shows[1].kind == :plane ? String(shows[1].of) : "1 face"
   one = field.kind in (:faces, :face) ? "face" : field.kind == :edges ? "edge" : field.kind in (:bodies, :body) ? "body" :
-        field.kind == :profiles ? "profile" : "place"
+        field.kind == :profiles ? (shows[1].kind == :face ? "face" : "profile") : "place"
   n == 1 ? "1 $one" : "$n $(one == "body" ? "bodies" : one * "s")"
 end
 
@@ -1599,7 +1614,7 @@ form_card(v::DesignView) = begin
     end
     append!(rows, get(parts, "", Any[]))
     any(field -> field.kind == :profiles, f.spec.fields) && isempty(m.sketches) &&
-      push!(rows, Box(width(grow=grow), Alignment.Start, Text("No sketch shows. Click the eye beside a sketch in the browser, then click a profile of it.", size=11.5px, color=t.dim)))
+      push!(rows, Box(width(grow=grow), Alignment.Start, Text("Click a flat face of a body. To use a sketch, click the eye beside it in the browser, then click a profile of it.", size=11.5px, color=t.dim)))
   else
     isempty(f.inputs) && push!(rows, Box(width(grow=grow), Alignment.Start, Text("This step has no lengths or angles to change.", size=12px, color=t.dim)))
     for input in f.inputs
@@ -2455,13 +2470,18 @@ sketch_under(v::DesignView, s, at) = begin
   found
 end
 
-"The region of a sketch that shows at the place `at` of the picture, or nothing"
-region_under(v::DesignView, at) = begin
+"""
+The region of a sketch that shows at the place `at` of the picture, or
+nothing. A sketch farther along the line of sight than `before` is hidden by
+what's there. A sketch drawn on a face still shows.
+"""
+region_under(v::DesignView, at; before=Inf) = begin
   line = Scenes.ray(v.eye, (v.area[3], v.area[4]), at)
   for (id, s) in v.model.sketches
     f = Sketching.Frame(s["plane"])
     spot = Sketching.on_plane(f, line)
     spot === nothing && continue
+    Scenes.dot(Sketching.world(f, spot) .- line[1], line[2]) > before * (1 + 1e-4) + 1e-3 && continue
     r = regions(v, s)
     n = Sketching.region(r, spot)
     n >= 2 || continue
@@ -2469,6 +2489,21 @@ region_under(v::DesignView, at) = begin
     return (kind=:region, of=n, n=id, at=(inside[1], inside[2], 0.0))
   end
   nothing
+end
+
+"""
+What a click at `at` gives a field of profiles: the region of a sketch that
+shows there, or else a flat face of a body. A face in front of a sketch hides it.
+"""
+profile_under(v::DesignView, at) = begin
+  m = v.model
+  line = Scenes.ray(v.eye, (v.area[3], v.area[4]), at)
+  hit = Scenes.hit(m.shapes, line; shown=b -> Designs.shown(m, b.name))
+  region = region_under(v, at; before=hit === nothing ? Inf : hit.far)
+  region === nothing || return region
+  hit === nothing && return nothing
+  shape = m.shapes[hit.shape]
+  shape.flat[hit.face] ? (kind=:face, of=shape.name, n=hit.face, at=hit.point) : nothing
 end
 
 "What shows at the place `at` of the picture, of the kinds that a click there would take"
@@ -2484,7 +2519,7 @@ under(v::DesignView, at) = begin
   end
   field = wanted(v)
   kind = field === nothing ? :any : field.kind
-  kind == :profiles && return region_under(v, at)
+  kind == :profiles && return profile_under(v, at)
   size = (v.area[3], v.area[4])
   shown = b -> Designs.shown(m, b.name)
   hit = Scenes.hit(m.shapes, Scenes.ray(v.eye, size, at); shown)
@@ -2626,7 +2661,7 @@ click!(v::DesignView, what, more) = begin
   field = wanted(v)
   if field !== nothing && sketch(v) === nothing
     what === nothing && return v
-    suits = field.kind == :edges ? what.kind == :edge : field.kind == :profiles ? what.kind == :region :
+    suits = field.kind == :edges ? what.kind == :edge : field.kind == :profiles ? what.kind in (:region, :face) :
             field.kind in (:bodies, :body) ? what.kind == :body : field.kind == :plane ? what.kind in (:face, :plane) : what.kind == :face
     suits && take!(v.form, field, what)
     return v
