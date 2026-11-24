@@ -54538,10 +54538,11 @@ listing_column(v, e, list; up=nothing, stale=Set{String}(), go, sizes=true) = be
     r.act, r.cells, r.last = _ -> (go(path); nothing), cells, false
     r
   end
+  # A name that's wider than its column goes on to more lines, as the site's does, so none of it is cut off
   name_cell(icon, colour, name, over, dot=false) =
     Row(fixed(name_w), height(grow=grow), padding(s * 0.45, s * 1.1, s * 0.45, 0px), Alignment.Center, child_gap=s * 0.6, clip=true,
       Icon(icon, size=s * 1.15, color=colour),
-      said(name, s, style="SemiBold", color=over ? colours.accent : colours.ink),
+      Box(Alignment.Start, Text(name, size=s, family=font, subfamily="SemiBold", color=over ? colours.accent : colours.ink, wrap=WrapMode.words)),
       (dot ? (Box(width(6px), height(6px), radius(3px), background(colours.accent)),) : ())...,
       Box(width(grow=grow)))
   rows = Any[]

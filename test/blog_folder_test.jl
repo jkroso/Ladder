@@ -235,6 +235,19 @@ end
   shot("canon-city.png")
 end
 
+@testset "a name too long for its column goes on to a second line, as on the site" begin
+  long = joinpath(city, "Why Things Happened the Way They Did and Why They Will Again.md")
+  write(long, "Words.\n")
+  empty!(K.SITE_LISTS)
+  Base.invokelatest(K.open!, e, K.FS.get(FSPath(city))); frames()
+  rows = e.nodes[(:listing, city)].rows
+  tall, short = rect(rows[(:entry, long)]), rect(rows[(:entry, joinpath(city, "future city.md"))])
+  @test tall.height > short.height * 1.3
+  shot("canon-long-name.png")
+  rm(long)
+  empty!(K.SITE_LISTS)
+end
+
 @testset "a section with its own index.md shows only that page, as its site does" begin
   proof = joinpath(canon, "Proof")
   mkpath(proof)
