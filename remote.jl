@@ -212,3 +212,52 @@ problem(a::Answer) = begin
   a.status in (401, 403) && return "$name doesn't let Ladder read that page."
   ok(a) ? "" : "$name answered with the error $(a.status)."
 end
+
+# --- a copy on the Mac --------------------------------------------------------------------
+#
+# A page that Ladder shows can be saved on the Mac with the pages and files
+# that it links to: see "a copy of a page from a web server" in main.jl. They
+# go in one folder, at the places that they have on the site, so a page's
+# links to them name the same places:
+#
+#     copy_path("https://example.com/a/b.html", page=true)   # "a/b.md": a page of Markdown is a .md file
+#     copy_path("https://example.com/a/", page=true)         # "a/index.md": the page of a folder
+#     copy_path("https://example.com/i/air%20cost.png")      # "i/air cost.png"
+#     inside("https://example.com/a/c.md", "https://example.com/a/b.md")   # true: c.md is in b.md's folder
+
+"The start of `address`: how it's asked for and the computer that it's on, like https://example.com, in lower case"
+site(address::AbstractString) = (m = match(r"^(https?://[^/?#]*)"i, address); m === nothing ? "" : lowercase(m[1]))
+
+"The folder of the path `p`, with the / at its end: /a/ of /a/b.md"
+folder(p::AbstractString) = p[1:something(findlast('/', p), 0)]
+
+"True when `address` is on the site of `page`, in the folder of `page` there or in a folder in that"
+inside(address::AbstractString, page::AbstractString) = begin
+  a, p = path(address), path(page)
+  site(address) == site(page) && startswith(isempty(a) ? "/" : a, folder(isempty(p) ? "/" : p))
+end
+
+"How the name of a page of the copy can end. Any other page of Markdown, like plans.html, ends in .md there."
+const KEPT_ENDS = (".md", ".markdown")
+
+"""
+Where the copy of what's at `address` goes, from the folder of the site's
+copy, or nothing when no file of the copy can be it. A `page` of Markdown
+ends in .md, or keeps .markdown: the page of an address that ends in / is
+index.md in that folder. Any other file keeps its name, and one at an
+address that ends in / is called index. No part of the path can start with
+a dot, so a copy has no hidden file, like the `.ladder` page of a folder,
+which runs its code.
+"""
+copy_path(address::AbstractString; page=false) = begin
+  p = path(address)
+  isempty(p) && (p = "/")
+  names = unescaped.(split(p, '/')[2:end])
+  any(n -> startswith(n, '.') || occursin('/', n) || occursin('\0', n), names) && return nothing
+  any(isempty, names[1:end-1]) && return nothing   # a path like /a//b names no folder
+  name = names[end]
+  name = isempty(name) ? (page ? "index.md" : "index") :
+         page && !(lowercase(splitext(name)[2]) in KEPT_ENDS) ? splitext(name)[1] * ".md" : name
+  ncodeunits(name) > 250 && return nothing   # longer than a file's name can be
+  join([names[1:end-1]; name], '/')
+end
