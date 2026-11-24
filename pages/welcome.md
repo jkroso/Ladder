@@ -536,16 +536,39 @@ Somebody else wrote the page, so Ladder runs none of its code, and the page can 
 
 In a page of your own, a click on a link to an address that ends in `.md` shows that page in Ladder. Any other web address opens in your browser.
 
+## Views of other files
+
+A code block in the language `view` shows another file in your page, as the file is. Write the file's name in it, like `plan.pdf` for a file beside your page, or its path, like `~/Desktop/notes.md`. The name of a folder works too, and so does the address of a page of the web.
+
+```view
+plan.pdf
+```
+
+What shows depends on the kind of file:
+
+- An HTML file and a page of the web show their page, and you use it where it is: see the next part.
+- A Markdown page shows as it reads.
+- A picture, a model, a sound, a video, a PDF file, a CSV file, a zip and a file of text show as they do under a path.
+- A folder shows its files and folders. Click one to go to it.
+
+While the mouse is over the block, a button beside its top right corner goes to the file. The window shows the file, as it does when you click a link to it, and ⌘⌥← comes back to your page. A click on the block with ⌘ held does the same.
+
+```view
+costs.csv
+```
+
 ## Pages of the web
 
-A code block in the language `web` shows a page of the web. Write the page's address in it, like `https://julialang.org`, or the name of a file of HTML beside the document. Ladder draws the page itself and runs its scripts. You use the page where it is: click its links and buttons, drag in it, and type in its fields. Esc gives the keyboard back to your page. The wheel scrolls your page past it. Scroll with ⌘ held to scroll the web page. A pinch goes to the web page too, so a map or a model in it can zoom. The button beside its top right corner makes the block fill the window. There the wheel scrolls the web page, and the bar over it goes back, forward and to another address. Esc puts the block back in the page.
+A `view` block shows a page of the web too. Write the page's address in it, like `https://julialang.org`, or the name of an HTML file beside your page. Ladder draws the page itself and runs its scripts. You use the page where it is: click its links and buttons, drag in it, and type in its fields. Esc gives the keyboard back to your page. The wheel scrolls your page past it. Scroll with ⌘ held to scroll the web page. A pinch goes to the web page too, so a map or a model in it can zoom.
+
+When a link takes the block to another page, the block's line changes to that page's address. ⌘Z takes it back, and the page with it. The button beside the block's top right corner goes to the page that shows. A page of Markdown on a web server shows in the window, and any other page of the web opens in your browser. An HTML file shows its page in the window.
 
 A block that starts with a tag holds the page itself, like this one:
 
-```web
+```view
 <body style="margin:16px; font:15px/22px system-ui">
 <h3 style="margin:0 0 8px">A page that's written here</h3>
-<p style="margin:0 0 10px">Click the block to make it fill the window. Then type your name, and press the button.</p>
+<p style="margin:0 0 10px">Click the field, type your name, and press the button.</p>
 <input id="name" placeholder="Your name" style="font-size:14px; width:180px">
 <button id="hello" style="font-size:14px">Say hello</button>
 <p id="out" style="margin:10px 0 0; color:#2a78d6"></p>
@@ -560,7 +583,7 @@ A block that starts with a tag holds the page itself, like this one:
 
 The scripts of the page can read the document's sums. `ladder.sums` has the value of each sum in a line of text that gives a name, as a number in SI units: metres, kilograms, seconds and watts. A percentage is a share, so 98% is 0.98, and money is a number of its currency. `ladder.shown` has the text that the document shows for each sum. The page hears the event `sums` each time they change, so it draws again while you drag a number. This block follows the wall in "Sums in a line of text":
 
-```web
+```view
 <body style="margin:16px; font:15px/22px system-ui">
 <p id="wall" style="margin:0">The wall's sums haven't come yet.</p>
 <script>
@@ -572,7 +595,9 @@ The scripts of the page can read the document's sums. `ladder.sums` has the valu
 </body>
 ```
 
-The page [space-data-centres.md](space-data-centres.md) draws one of its satellites in 3D this way, with three.js, from the file `satellite.html` beside it.
+The page [space-data-centres.md](space-data-centres.md) draws one of its satellites in 3D this way, with three.js, from the file `satellite.html` beside it. When you go to that file from its block, the satellite there keeps your page's sums.
+
+A block in the language `web` is a `view` block too: `web` is the name that it had before.
 
 ## Takeoffs
 

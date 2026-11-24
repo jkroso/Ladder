@@ -123,7 +123,8 @@ Exit code 3 means that Ladder is not installed, or that it is too old to send a 
 | A video or a sound | `![what it is](walk.mov)` on a line of its own, as for a picture. `walk.mov#t=61,86` plays only from second 61 to second 86. |
 | Several pictures or files as a grid | A `gallery` code block. See below. |
 | A web page as a card, with its title, its description and its picture | `![what it is](https://julialang.org)` on a line of its own. Ladder gets the page. An address that ends as a picture's does, like `.png`, shows the picture. A bare address stays text. |
-| A web page that the user can use in the page | A `web` code block with the address in it, or with a page of HTML that starts with a tag. Ladder draws the page and runs its scripts. Use it only when the user must see a page work. Its scripts can read the page's sums: see `sums.md`. |
+| Another file, shown as it is | A `view` code block with the file's name in it, like `plan.pdf` beside the page, or its path. It shows a picture, a PDF file, a 3D model, a video, a CSV file, a Markdown page or the page of an HTML file. A button beside the block goes to the file. |
+| A web page that the user can use in the page | A `view` code block with the address in it, the name of an HTML file, or a page of HTML that starts with a tag. Ladder draws the page and runs its scripts. Use it only when the user must see a page work. Its scripts can read the page's sums: see `sums.md`. |
 | A footnote | `[^1]` in the text, and a line that starts with `[^1]:`. |
 | Words with a highlighter's colour behind them | `==the words==`. |
 | Another page | `[[name]]` links to the page `name.md`, wherever it is in the project. `[[name#Heading]]` goes to a heading of it, and `[[name|other words]]` shows other words. A Markdown link to a `.md` file works too. The user holds ⌘ and clicks the link. |
@@ -138,7 +139,7 @@ Exit code 3 means that Ladder is not installed, or that it is too old to send a 
 | A plan to measure from: a page of a PDF, or a picture | A `takeoff` code block with the lines `plan: plan.pdf`, `page: 1` and `scale: 1:100`. The user counts and measures on the plan, and Ladder writes the measures into the block. |
 | A part of another page, which the user can change in this page | `![[name#Heading]]` on a line of its own shows the heading and the lines under it from the page `name.md`. `![[name#table 2]]` shows its second table, and `![[name]]` the whole page. What the user types there changes `name.md`. |
 
-Ladder does not draw HTML tags, except in a `web` block. Do not use them.
+Ladder does not draw HTML tags, except in a `view` block. Do not use them.
 
 The user can show a page as slides, one part at a time, with ⌃⌘⇧P. Each heading of level 1 or 2 starts a slide, and so does a line of `---`.
 

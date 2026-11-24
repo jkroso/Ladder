@@ -45,9 +45,11 @@ end
     (K.ismarkdown(name) && name ∉ ("welcome.md", joinpath("settings", "startup.md"))) || continue
     @test name in linked
   end
-  # Every kind of block has an example in the welcome page or a page that it links to
+  # Every kind of block has an example in the welcome page or a page that it links to. `web` is the name that a `view`
+  # block had before, which still works, and the pages use the new one.
   text = join((read(joinpath(pages, file), String) for file in unique([linked; "welcome.md"]) if K.ismarkdown(file)), "\n")
-  for lang in [K.LIVE, K.SHEET, K.SPREADSHEET, K.DIAGRAM, K.TAKEOFF, K.SCHEDULE, "julia", keys(K.BLOCKS)...]
+  @test !occursin("\n```$(K.WEBVIEW)\n", text)
+  for lang in [K.LIVE, K.SHEET, K.SPREADSHEET, K.DIAGRAM, K.TAKEOFF, K.SCHEDULE, "julia", filter(!=(K.WEBVIEW), keys(K.BLOCKS))...]
     @test occursin("\n```$lang\n", text)
   end
   # The welcome page has the sums in a line of text, and they come to what it says

@@ -1,4 +1,4 @@
-# Tests for the sums that the scripts of a `web` block get from their
+# Tests for the sums that the scripts of a `view` block get from their
 # document, in main.jl: `ladder.sums`, `ladder.shown` and the event `sums`.
 # Run them with `julia -O0 --project=. test/web_sums_test.jl`. They draw in a
 # window that isn't on the screen, and ask the web for nothing.
@@ -22,7 +22,7 @@ write(page, """
 The wing spans !`span = 70m`, and the sun is out !`sun = 98Percent` of the time. Cells cost !`cell = 0.30USD/W`,
 and each square metre weighs !`foil = 500g`. It's !`kind = "a roll"`. !`span * 2`
 
-```web
+```view
 <p id=out style="margin:0;height:20px">no sums</p>
 <script>
   var heard = 0
@@ -40,7 +40,7 @@ const e = K.build_editor(page)
 const w = Window(e, size=(900px, 700px))
 frames(n=3) = foreach(_ -> frame(w), 1:n)
 frames()
-const b = e.nodes[(:block, K.WEBVIEW, page, 1)].browser
+const b = e.nodes[(:block, K.VIEW_BLOCK, page, 1)].browser
 live(code) = K.Browsers.Live.evaluate(b.view.live, code)
 "The number or the words that the page's script has for the sum `name`"
 got(name) = live("ladder.sums[$(repr(name))]")

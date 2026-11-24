@@ -72,10 +72,10 @@
 #     the map of that place. The + and the − on the map show less and more
 #     of what's round it. Drag the map to move it, and click it to put the
 #     pin where you clicked.
-#   - Write a code block in the language `web` with the address of a page of
-#     the web in it to show that page. Click, drag and type in it where it
-#     is. The button beside its top right corner makes it fill the window,
-#     where the wheel scrolls the page and a bar goes to other pages.
+#   - Write a code block in the language `view` with the name of a file in
+#     it, or the address of a page of the web, to show it as it is: a page,
+#     a picture, a PDF file, a model, a table. Click, drag and type in a page
+#     where it is. The button beside its top right corner goes to the file.
 #   - Write a code block in the language `find` to list the to-do items
 #     that aren't ticked in every page of the folder. At its top, type words
 #     to keep only the lines that have them, and choose the kind of line and
@@ -5095,8 +5095,9 @@ cursor(::FileEntry) = :hand
 
 onkey(r::FileEntry, ev::KeyPress{Keys.mouse_left}) = begin
   l = r.parent::Breadcrumb
-  # A click with ⌘ held shows the file in the window, as a click on a link with ⌘ held does
-  only_held(r, Keys.cmd) && !l.folders && return show_crumb!(l, r.path, ev.window)
+  # A click with ⌘ held shows the file in the window, as a click on a link with ⌘ held does. In a `view` block any
+  # click does, since the block shows the folder that its line names.
+  (only_held(r, Keys.cmd) || l.parent isa ViewBlock) && !l.folders && return show_crumb!(l, r.path, ev.window)
   l.at = r.path
 end
 
@@ -10981,7 +10982,7 @@ fill_over(e) = begin
   best, spot, least = nothing, nothing, Inf
   for f in values(fills(e))
     r = rect(f)
-    r === nothing && continue
+    (r === nothing || button_above(f)) && continue
     s = fill_spot(e, r)
     if f.transcript !== nothing && f.transcript.open
       best, spot = f, s
@@ -11003,9 +11004,27 @@ fill_over(e) = begin
      Column(Alignment.Start, child_gap=FILL_GAP, buttons...)),)
 end
 
+"""
+True when a part that holds the Fillable `f`, like a `view` block, has a
+button of its own beside it that stands for all that's in it. Then `f` shows
+no button.
+"""
+button_above(f::Fillable) = begin
+  n = f.parent === nothing ? nothing : f.parent.parent
+  while n !== nothing
+    own_button(n) && return true
+    n = hasproperty(n, :parent) ? n.parent : nothing
+  end
+  false
+end
+
+"True when the node `n` has a button beside it that stands for all that's in it. A `view` block's goes to its file."
+own_button(n) = false
+
+# A `view` block's button goes to its file, `(:go, path)`. The rest make what they show fill the window.
 describe(b::FillButton) = begin
   ishovered(b) || (b.quiet = false)
-  square_button("arrows-fullscreen", ishovered(b))
+  square_button(b.parent.what[1] == :go ? "arrow-up-right" : "arrows-fullscreen", ishovered(b))
 end
 
 cursor(::FillButton) = :hand
@@ -11013,7 +11032,8 @@ draw(ctx, size, ui::ConcreteRect, b::FillButton) = (b.rect = (ui.left, ui.top, u
 
 onmouse(b::FillButton, ev::MouseMove) = begin
   b.quiet && return handled
-  tip = b.parent.what[1] == :node ? "Fill the window" : "Fill the window  pinch"
+  what = b.parent.what
+  tip = what[1] == :go ? "Go to " * view_name(what[2]) : what[1] == :node ? "Fill the window" : "Fill the window  pinch"
   # A video's tooltip goes beside the button, so that it doesn't cover the button under it
   show_tooltip!(ev.window, tip_label(tip), b.rect...,
                 placement=video_of(b.parent) === nothing ? :bottom : :right, gap=6px)
@@ -11030,16 +11050,16 @@ end
 """
 Make `what`, which a Fillable of the node `from` shows, fill the window. A
 block like a sketch, `(:block, view)`, fills it by itself. The rest fill the
-ZoomView.
+ZoomView. A `view` block's `(:go, path)` goes to its file instead.
 """
-fill_window!(e, what, from) = what[1] == :block ? full!(what[2], true) : zoom_in!(e, what, from)
+fill_window!(e, what, from) = what[1] == :block ? full!(what[2], true) : what[1] == :go ? go_view!(from) : zoom_in!(e, what, from)
 
 "A pinch outwards on a picture, a diagram, a page or a sketch in the page makes it fill the window"
 pinch_open(owner, ev::Pinch) = begin
   ev.scale > 1 || return nothing
   e = editor(owner)
   f = get(fills(e), objectid(owner), nothing)
-  (f === nothing || f.what === nothing || f.what[1] == :node) && return nothing
+  (f === nothing || f.what === nothing || f.what[1] in (:node, :go)) && return nothing
   # Only when the fingers are on the picture, not beside it
   r = rect(f)
   x, y = num(ev.window.mouse[1]), num(ev.window.mouse[2])
@@ -21930,19 +21950,14 @@ end
 
 # --- a page of the web ------------------------------------------------------------------------
 #
-# A code block in the language `web` shows a page of the web, which Ladder's
-# own engine lays out and draws: see web/browser.jl. The block's first line is
-# the page's address:
+# A `view` block shows a page of the web, or the page of an HTML file, with
+# Ladder's own engine: see web/browser.jl and "a view of another file". Its
+# line is the page's address, like https://julialang.org, or the name of an
+# HTML file beside the document. A block whose first line starts with a tag,
+# like `<h1>`, holds the HTML of the page itself.
 #
-#     ```web
-#     https://julialang.org
-#     ```
-#
-# The address can be the name of a file of HTML beside the document. A block
-# that starts with a tag, like `<h1>`, holds the HTML of the page itself.
-#
-# In the document, the block shows the top of the page, and the page's scripts
-# run. The page is yours to use where it is, as a model in the page is:
+# The page's scripts run, and the page is yours to use where it is, as a
+# model in the page is:
 #
 #   - A click follows a link or presses a button, and a drag goes to the
 #     page's scripts, as a drag turns a model that a script draws. After a
@@ -21951,77 +21966,35 @@ end
 #   - The wheel scrolls the document, so the page doesn't stop it as it goes
 #     past. With ⌘ held the wheel is the page's, and so is a pinch: a script
 #     hears it as a browser sends it, as the wheel with Ctrl held.
-#   - A click with ⌘ held opens the page in your browser. With ⌥ held the
-#     document shows the block's lines.
+#   - A click with ⌘ held goes to the page, as the button beside the block's
+#     top right corner does. With ⌥ held the document shows the block's line.
 #
-# Only the button that shows beside its top right corner, while the mouse is
-# over it, makes it fill the window. There the wheel scrolls the page too,
-# and the bar over the page has what a browser has:
+# The block's line always says the page that shows. When a link goes to
+# another page, the line becomes that page's address, and ⌘Z in the document
+# takes it back, and the page with it. A page that the block held goes back
+# into the block as its HTML.
 #
-#   - The arrows go back to the page before, and forward again. ⌘[ and ⌘]
-#     do the same.
-#   - The round arrow gets the page again, with all of its files. So does ⌘R.
-#   - The field shows the address of the page that shows. Click it, or press
-#     ⌘L, type another address and press Return to go there.
-#   - The next button opens the page in your browser. In the document, a
-#     click with ⌘ held does that.
-#   - The last button puts the block back in the document. So does Esc, once
-#     no field of the page has the keyboard.
+# A block in the language `web` is a `view` block too: `web` is the name that
+# it had before.
 #
-# The block's lines always say the page that shows. When you go to another
-# page, the block's line becomes that page's address, and ⌘Z in the document
-# takes it back. A page that the block held is among the pages that the arrow
-# goes back to, and going back to it puts its HTML back in the block. So ⌘E,
-# while the block fills the window, shows the source of the page that shows.
-#
-# A page of an email asks the web for nothing, so a `web` block there shows no
-# page. A window that isn't on the screen asks for nothing either, unless a
-# test put its own function in `WEB_GETTER`.
+# A page of an email asks the web for nothing, so a `view` block there shows
+# no page of the web. A window that isn't on the screen asks for nothing
+# either, unless a test put its own function in `WEB_GETTER`.
 
+"The name that a `view` block of a page of the web had before, which still works"
 const WEBVIEW = "web"
 const WEB_HIGH = 420px     # how tall the page is in the document at the most, before the zoom
 const WEB_LEAST = 60px     # and at the least
 push!(BLOCK_ICONS, "globe", "arrow-left", "arrow-right", "arrow-clockwise", "box-arrow-up-right", "fullscreen-exit")
 
-"What gets a file from the web for a `web` block. A test puts its own function here, so that it uses no network."
+"What gets a file from the web for the page of a `view` block. A test puts its own function here, so that it uses no network."
 const WEB_GETTER = Ref{Function}(Webfiles.curl)
 
-"What a `web` block shows: a page of the web"
-@def mutable struct WebView <: SemanticUI
-  n::Int = 0                               # its place among the page's web views
-  first::Int = 0                           # the lines of its block, when the page was last laid out
-  last::Int = 0
-  lines::Any = nothing                     # the lines that it was last read from
-  browser::Any = nothing                   # the Browser that gets the page and shows it
-  parts::Dict{Any,Any} = Dict{Any,Any}()   # its buttons and its text field, kept between frames
-  full::Bool = false                       # it fills the window, over the page
-  tall::px = 0px                           # how tall it was in the page when it was last laid out there
-  pinned::px = 0px                         # how far the page was scrolled when it filled the window
-  sent::Any = nothing                      # the page of the web that was last given the sums, and what it was given
-end
-
-"True when a `web` block of `e` may ask the web: the page isn't an email, and its window is on the screen or a test stands in for `curl`"
+"True when a `view` block of `e` may ask the web for its page: the document isn't an email, and its window is on the screen or a test stands in for `curl`"
 web_online(e) = !Eml.isemail(e.buf.path) && (WEB_GETTER[] !== Webfiles.curl || on_screen(e))
 
-"The Browser of the web view `v`, which it keeps for as long as the document is open"
-web_browser(v::WebView) = begin
-  v.browser === nothing || return v.browser
-  e = editor(v)
-  files = Webfiles.Files(getter=(a...) -> WEB_GETTER[](a...), online=() -> web_online(e))
-  v.browser = own!(v, Browsers.Browser(files=files, open=url -> BROWSER[](url), takes=ev -> page_takes(v, ev)))
-end
-
 """
-True when the page of the web view `v` gets `ev`, a click, a turn of the wheel
-or a pinch. While the view fills the window, the page gets them all. In the
-document, a click with ⌘ or ⌥ held is the block's, and the wheel scrolls the
-document unless ⌘ is held, as over a model.
-"""
-page_takes(v::WebView, ev) = v.full || (ev isa MouseScroll ? only_held(ev, Keys.cmd) :
-                                         ev isa KeyPress ? !(only_held(ev, Keys.cmd) || only_held(ev, Keys.opt)) : true)
-
-"""
-What the lines of a `web` block ask for: the address of a page, or the HTML
+What the lines of a `view` block of a page ask for: its address, or the HTML
 of one with the address that the addresses in it are from. The name of a
 file beside the document is that file.
 """
@@ -22039,15 +22012,7 @@ web_source(e, lines) = begin
   (address=first, html="", base="")
 end
 
-reread!(v::WebView, lines) = begin
-  lines == v.lines && return v
-  v.lines = lines
-  b = web_browser(v)
-  b.address, b.html, b.base = web_source(editor(v), lines)
-  v
-end
-
-"The lines of a `web` block that say `page`: its address, or the HTML of a page that was written in the block. A file in the document's folder is said by its name there."
+"The lines of a `view` block that say `page`: its address, or the HTML of a page that was written in the block. A file in the document's folder is said by its name there."
 web_lines(e, page) = begin
   page isa Browsers.Written && return String.(split(page.html, '\n'))
   file = Webfiles.path(page)
@@ -22056,7 +22021,7 @@ web_lines(e, page) = begin
   [String(page)]
 end
 
-"True when `lines`, the lines of a `web` block, say `page`"
+"True when `lines`, the lines of a `view` block, say `page`"
 web_says(e, lines, page) = begin
   src = web_source(e, lines)
   page isa Browsers.Written && return src.html == page.html && src.base == page.base
@@ -22067,31 +22032,7 @@ web_says(e, lines, page) = begin
   file === nothing ? said == page : file == Webfiles.path(page)
 end
 
-# When you go to another page in the web view, or back to one, the block's lines change to say it. They change once
-# the view has read them: until then, they're what the view goes by.
-block_tick!(v::WebView) = begin
-  b = v.browser
-  (b === nothing || v.lines === nothing) && return v
-  page = Browsers.page_now(b)
-  (page === nothing || b.asked != (b.address, b.html, b.base)) && return v
-  e = editor(v)
-  (readonly(e.buf) || e.buf.fixed || web_says(e, v.lines, page)) && return v
-  write_block!(v, WEBVIEW, web_lines(e, page))
-  # The view is at that page already, so it doesn't get it again
-  Browsers.asked!(b)
-  v
-end
-
-"The field at the top of a web view that fills the window, which shows the page's address and takes another"
-web_input(v::WebView) = block_part!(v, :input) do
-  TextInput(placeholder="An address, like julialang.org", font_family=SANS, font_size=13px,
-            look=(_, text) -> Row(width(grow=grow), height(grow=grow), clip=true, text))
-end
-
-"The address that the top of the web view `v` shows: of the page that's on its way, or of the page that shows"
-web_address(v::WebView) = (b = web_browser(v); Browsers.loading(b) ? b.coming.address : b.shown)
-
-# The scripts of the page in a `web` block can read the sums of the document. `ladder.sums` has the value of each sum
+# The scripts of the page in a `view` block can read the sums of the document. `ladder.sums` has the value of each sum
 # in a line of text that gives a name, like !`span = 70m`, and `ladder.shown` has the text that the document shows for
 # it. The page hears the event `sums` when it's given them, and again each time they change, as while a number is
 # dragged. A page whose scripts wait for a module can find them already there, so it reads them at its start too.
@@ -22155,11 +22096,11 @@ script_sums(e) = begin
 end
 
 """
-Give the scripts of the page in the web view `v` the sums of the document, if
-they've changed since it was last given them, and tell the page with the
+Give the scripts of the page of the `view` block `v` the sums of the document,
+if they've changed since it was last given them, and tell the page with the
 event `sums`.
 """
-send_sums!(v::WebView) = begin
+send_sums!(v) = begin
   b = web_browser(v)
   l = Browsers.live(b)
   # The page starts as the browser draws, which doesn't lay the block out again. So the block looks again soon.
@@ -22180,129 +22121,11 @@ send_sums!(v::WebView) = begin
   v
 end
 
-describe(v::WebView) = begin
-  e = editor(v)
-  b = web_browser(v)
-  send_sums!(v)
-  with_theme(component_theme(e.zoom)) do
-    b.zoom = round(Float64(e.zoom), digits=2)
-    if !v.full
-      # In the page it shows the top of the page of the web, as tall as that page up to `WEB_HIGH`. Its button makes it fill the window.
-      isempty(b.address) && isempty(b.html) &&
-        return Column(block_look()..., name="Web page", block_note("Write the address of a page in this block, like https://julialang.org"))
-      b.wide = e.width - 2px
-      p = b.view.page
-      # Until a page has come, the block is as tall as it's likely to be with one
-      b.high = p === nothing || isempty(b.view.html) ? WEB_HIGH * e.zoom : clamp(px(p.tall), WEB_LEAST * e.zoom, WEB_HIGH * e.zoom)
-      return Box(width(grow=grow), Alignment.Start, fillable(v, (:block, v), Column(block_look()..., clip=true, name="Web page", b), wide=:grow))
-    end
-    w, h = window_size(e)
-    win = window_of(v)
-    input = web_input(v)
-    input.color = colours.ink
-    typing = win !== nothing && win.focus === input
-    # The field shows where the page is, until someone types in it
-    typing || (input.text = web_address(v); input.cursor = input.anchor = 0)
-    b.wide, b.high = w, max(40px, h - TOPBAR_H - 38px)
-    field = Row(width(grow=grow), height(26px), padding(8px, 0px), child_gap=7px, radius(6px), Alignment.Center, background(colours.bg),
-                border(1px, :solid, typing ? colours.accent : colours.line),
-                Icon(b.failed ? "exclamation-circle" : "globe", size=12px, color=colours.dim), Box(width(grow=grow), height(grow=grow), input))
-    bar = block_bar(block_button!(v, :back, :back, icon="arrow-left", tip="Back to the page before  ⌘[", off=!Browsers.can_back(b)),
-                    block_button!(v, :forward, :forward, icon="arrow-right", tip="Forward again  ⌘]", off=!Browsers.can_forward(b)),
-                    block_button!(v, :reload, :reload, icon="arrow-clockwise", tip="Get the page again  ⌘R"),
-                    Box(width(4px)), field, Box(width(4px)),
-                    block_button!(v, :browser, :browser, icon="box-arrow-up-right", tip="Open the page in your browser"),
-                    block_button!(v, :full, :full, icon="fullscreen-exit", tip="Back to the document  esc"))
-    Column(width(grow=grow), height(grow=grow), Alignment.Start, background(takeoff_back()), name="Web page", bar, b)
-  end
-end
-push!(BLOCK_ICONS, "exclamation-circle")
-
-"""
-Make the web view fill the window, or put it back in the document. While it
-fills the window, the page of the web has the keyboard.
-"""
-full!(v::WebView, on::Bool) = begin
-  e = editor(v)
-  on && unfill!(e)   # one block at a time fills the window
-  v.full = on
-  v.pinned = e.scroll.offset
-  on ? focus(web_browser(v)) : focus(e)
-  handled
-end
-
-act!(v::WebView, action, w) = begin
-  b = web_browser(v)
-  action == :full && return full!(v, !v.full)
-  action == :back ? Browsers.back!(b) : action == :forward ? Browsers.forward!(b) : action == :reload ? Browsers.reload!(b) :
-  action == :browser ? (isempty(web_address(v)) || BROWSER[](web_address(v))) : nothing
-  v.full && focus(b)
-  handled
-end
-
-"Go to the address that was typed in the field at the top of the web view, and give the keyboard to the page"
-web_go!(v::WebView) = begin
-  b = web_browser(v)
-  words = strip(web_input(v).text)
-  isempty(words) || Browsers.go!(b, words)
-  focus(b)
-  handled
-end
-
-cursor(v::WebView) = :arrow
-
-# In the document, a click on the page is the page's: see `page_takes`. With ⌘ held it opens the page in the browser,
-# and the rest go on to the document: with ⌥ held it shows the block's lines. A click beside a button of one that fills
-# the window is the block's.
-onkey(v::WebView, ::KeyPress{Keys.mouse_left}) = begin
-  v.full && return (focus(web_browser(v)); handled)
-  only_held(v, Keys.cmd) && return (isempty(web_address(v)) || BROWSER[](web_address(v)); handled)
-  nothing
-end
-
-# Return in the field goes to the address that's typed there. Esc leaves the field first, and then puts the block
-# back in the document. The page has taken its own Esc by then: see web/browser.jl.
-onkey(v::WebView, ev::KeyPress{Keys.enter}) = unmodified(ev) ? (v.full && ev.window.focus === web_input(v) ? web_go!(v) : nothing) : nothing
-onkey(v::WebView, ev::KeyPress{Keys.escape}) = begin
-  unmodified(ev) || return nothing
-  v.full || return nothing
-  ev.window.focus === web_input(v) ? (focus(web_browser(v)); handled) : full!(v, false)
-end
-onkey(v::WebView, ev::KeyPress{K}) where K = begin
-  (v.full && only_held(ev, Keys.cmd)) || return nothing
-  K == Keys.l && return (focus(web_input(v)); tabbed!(web_input(v)); handled)
-  K == Keys.r && return act!(v, :reload, ev.window)
-  K == Keys.left_bracket && return act!(v, :back, ev.window)
-  K == Keys.right_bracket && return act!(v, :forward, ev.window)
-  nothing
-end
-
-# While it fills the window, the mouse and the wheel are its own, and never the document's under it
-onmouse(v::WebView, ::MouseMove) = v.full ? handled : nothing
-onscroll(v::WebView, ::MouseScroll) = v.full ? handled : nothing
-
-keyboard_part(v::WebView) = web_browser(v)
-
-"The web view as HTML: a link to its page, or the page that the block holds, in a frame"
-web_html(e, v::WebView) = begin
-  b = web_browser(v)
-  if !isempty(b.html)
-    held = replace(b.html, '&' => "&amp;", '"' => "&quot;")
-    return "<iframe srcdoc=\"$held\" style=\"width:100%;height:$(round(Int, num(WEB_HIGH)))px;border:1px solid #d8d2c8;border-radius:8px\"></iframe>"
-  end
-  isempty(b.address) && return nothing
-  address = startswith(b.address, '/') ? "file://" * b.address : Browsers.whole(b.address)
-  shown = replace(address, '&' => "&amp;", '<' => "&lt;", '>' => "&gt;", '"' => "&quot;")
-  "<p><a href=\"$shown\">$shown</a></p>"
-end
-
-BLOCKS[WEBVIEW] = BlockKind("Web page", "globe", WebView, web_html)
-
 # --- an HTML file as its page ---------------------------------------------------------------------
 #
 # An HTML file has four levels. Over its bits, its bytes in hexadecimal and its
 # text is the page that its HTML makes, which Ladder's own engine lays out and
-# draws, as a `web` block does. That's its highest level, the ladder, so an
+# draws, as a `view` block does. That's its highest level, the ladder, so an
 # HTML file opens as its page, and ⌘E shows its text.
 #
 # The page covers the page's whole space in the window, as it would a
@@ -22344,12 +22167,263 @@ describe(v::HTMLPage) = begin
   # A file that changed on the disk shows afresh, as after a browser's reload
   at = mtime(v.path)
   at == v.read || (v.read = at; Browsers.reload!(b))
+  carry_sums!(v, b)
   b.zoom = round(Float64(e.zoom), digits=2)
   b.wide, b.high = page_room(e)
   Box(width(grow=grow), height(grow=grow), Alignment.Start, name="Web page", b)
 end
 
 keyboard_part(v::HTMLPage) = html_browser(v)
+
+# --- a view of another file -------------------------------------------------------------------
+#
+# A code block in the language `view` shows another file in the document, as
+# the file is. Its line names the file:
+#
+#     ```view
+#     satellite.html
+#     ```
+#
+# The name can be of a file or a folder beside the document, a path like
+# ~/Desktop/plan.pdf, or the address of a page of the web. What shows depends
+# on the kind of file:
+#
+#   - An HTML file and a page of the web show the page that their HTML makes,
+#     and so does a block whose first line starts with a tag, like `<h1>`,
+#     which holds the HTML itself. The page is yours to use where it is: see
+#     "a page of the web". Its scripts read the document's sums.
+#   - A Markdown page shows as it reads, a little smaller than the document.
+#   - A picture, a model, a sound, a video, a PDF file, a CSV file, a zip, a
+#     Word file, a font and a file of text show as they do under a path.
+#   - A folder shows the files and the folders in it. A click on one goes to it.
+#
+# While the mouse is over the block, a button beside its top right corner goes
+# to the file: the window shows it, as a click on a link to it does, and ⌘⌥←
+# comes back. A click on the block with ⌘ held does the same, and one with ⌥
+# held shows the block's line. An HTML file that you go to keeps the sums that
+# the block gave its page, so the page there looks as it did in the document.
+
+const VIEW_BLOCK = "view"
+push!(BLOCK_ICONS, "eye", "arrow-up-right")
+
+"What a `view` block shows: another file, a folder, or a page of the web"
+@def mutable struct ViewBlock <: SemanticUI
+  n::Int = 0                               # its place among the page's `view` blocks
+  first::Int = 0                           # the lines of its block, when the page was last laid out
+  last::Int = 0
+  lines::Any = nothing                     # the lines that it was last read from
+  lang::String = VIEW_BLOCK                # the language of its block: `view`, or `web` as it was called before
+  target::String = ""                      # the path or the address that its line names, as `view_target` gives it
+  held::Bool = false                       # its lines hold the HTML of a page, which starts with a tag
+  browser::Any = nothing                   # the Browser that shows an HTML file or a page of the web
+  crumb::Any = nothing                     # the Breadcrumb that keeps what shows any other file: its model, its player, its text
+  parts::Dict{Any,Any} = Dict{Any,Any}()
+  sent::Any = nothing                      # the page that was last given the sums, and what it was given: see `send_sums!`
+end
+
+"True when `name` is the address of a page of the web, or of anything with a scheme, and not a path on the Mac"
+has_scheme(name::AbstractString) = occursin(r"^[a-z][a-z0-9+.-]*:"i, name)
+
+"""
+What the lines of a `view` block name: the whole path of a file or a folder,
+or the address of a page of the web. A name with no / at its start is beside
+the document, and one with ~ at its start is in the home folder. It's "" when
+the block names nothing.
+"""
+view_target(e, lines) = begin
+  i = findfirst(l -> !isempty(strip(l)), lines)
+  i === nothing && return ""
+  name = String(strip(lines[i]))
+  has_scheme(name) && return name
+  path = abspath(docdir(e), expanduser(name))
+  length(path) > 1 ? String(rstrip(path, '/')) : path
+end
+
+"What a tooltip calls the file or the page at `target`: its name, or the address of a page of the web"
+view_name(target) = has_scheme(target) ? target : basename(target)
+
+"True when the `view` block `v` shows a page that its HTML makes: of an HTML file, of the web, or that its lines hold"
+view_web(v::ViewBlock) = v.held || !isempty(v.target) && (has_scheme(v.target) || lowercase(splitext(v.target)[2]) in HTMLS && isfile(v.target))
+
+"""
+True when the page of the `view` block `v` gets `ev`, a click, a turn of the
+wheel or a pinch. A click with ⌘ or ⌥ held is the block's, and the wheel
+scrolls the document unless ⌘ is held, as over a model.
+"""
+page_takes(v::ViewBlock, ev) = ev isa MouseScroll ? only_held(ev, Keys.cmd) :
+                               ev isa KeyPress ? !(only_held(ev, Keys.cmd) || only_held(ev, Keys.opt)) : true
+
+"The Browser of the `view` block `v`, for an HTML file or a page of the web"
+web_browser(v::ViewBlock) = begin
+  v.browser === nothing || return v.browser
+  e = editor(v)
+  files = Webfiles.Files(getter=(a...) -> WEB_GETTER[](a...), online=() -> web_online(e))
+  v.browser = own!(v, Browsers.Browser(files=files, open=url -> BROWSER[](url), takes=ev -> page_takes(v, ev)))
+end
+
+"The Breadcrumb that keeps what shows the file of `v` when it's no page of HTML: its model, its player, its text"
+view_crumb(v::ViewBlock) = v.crumb === nothing ? (v.crumb = own!(v, Breadcrumb())) : v.crumb
+
+reread!(v::ViewBlock, lines) = begin
+  lines == v.lines && return v
+  v.lines = lines
+  e = editor(v)
+  src = web_source(e, lines)
+  v.held = !isempty(src.html)
+  v.target = v.held ? "" : view_target(e, lines)
+  if view_web(v)
+    b = web_browser(v)
+    b.address, b.html, b.base = src
+  elseif v.browser !== nothing
+    # It showed a page before, and its scripts end with it
+    v.browser = nothing
+    v.sent = nothing
+  end
+  v
+end
+
+describe(v::ViewBlock) = begin
+  e = editor(v)
+  isempty(v.target) && !v.held &&
+    return Column(block_look()..., name="View", block_note("Write the name of a file in this block, like plan.pdf, or the address of a page of the web"))
+  v.held || has_scheme(v.target) || ispath(v.target) ||
+    return Column(block_look()..., name="View", block_note("$(basename(v.target)) isn't there"))
+  with_theme(component_theme(e.zoom)) do
+    # A page that the block holds is in no file, so it has no button that goes to one
+    content = view_content(v, e)
+    Box(width(grow=grow), Alignment.Start, v.held ? content : fillable(v, (:go, v.target), content, wide=:grow))
+  end
+end
+
+"What shows in the `view` block `v`: the page that an HTML file makes, the list of a folder, or what any other file shows under a path"
+view_content(v::ViewBlock, e) = begin
+  if view_web(v)
+    b = web_browser(v)
+    send_sums!(v)
+    b.zoom = round(Float64(e.zoom), digits=2)
+    b.wide = e.width - 2px
+    p = b.view.page
+    # Until a page has come, the block is as tall as it's likely to be with one
+    b.high = p === nothing || isempty(b.view.html) ? WEB_HIGH * e.zoom : clamp(px(p.tall), WEB_LEAST * e.zoom, WEB_HIGH * e.zoom)
+    return Column(block_look()..., clip=true, name="Web page", b)
+  end
+  l = view_crumb(v)
+  path = v.target
+  if isdir(path)
+    l.at = path
+    names = listing(path)
+    folders = count(n -> isdir(joinpath(path, n)), names)
+    held = filter(!isempty, [how_many(length(names) - folders, "file"), how_many(folders, "folder")])
+    about = isempty(held) ? basename(path) : basename(path) * "  ·  " * join(held, " and ")
+    return Column(block_look()..., padding(6px), child_gap=1px, name="View", contents(l)...,
+                  Box(padding(10px, 6px, 0px, 10px), label(about, 12px, color=colours.dim)))
+  end
+  # A player that was made for another file stops when the block names another
+  l.viewer !== nothing && l.viewer.path != path && (hush!(l); l.viewer = nothing)
+  l.at = path
+  about = basename(path) * "  ·  Changed " * Libc.strftime("%-d %b %Y, %H:%M", mtime(path))
+  content = try
+    peek(l, path, lowercase(splitext(path)[2]), words -> (about *= "  ·  " * words))
+  catch
+    nothing
+  end
+  content === nothing && (content = label("This file has no preview", 12px, color=colours.dim))
+  Column(block_look()..., padding(6px), child_gap=8px, name="View", content, Box(padding(4px, 0px), label(about, 12px, color=colours.dim)))
+end
+
+"`n` things of a kind, like 3 files or 1 folder, or nothing when there are none"
+how_many(n, thing) = n == 0 ? "" : "$n $thing$(n == 1 ? "" : "s")"
+
+own_button(::ViewBlock) = true
+
+"""
+Show the file of the `view` block `v` in the window, as a click on a link to
+it does. ⌘⌥← comes back. An HTML file there keeps the sums that the block gave
+its page: see `carry_sums!`.
+"""
+go_view!(v::ViewBlock) = begin
+  e = top_editor(editor(v))
+  to = v.target
+  isempty(to) && return handled
+  # A page of Markdown on a web server shows in the window, and any other page in your browser
+  has_scheme(to) && return (reads_here(e, to) ? get_page!(e, to, else_browser=true) : BROWSER[](to); handled)
+  ispath(to) || return handled
+  sent = v.sent
+  show_path!(e, to)
+  if sent !== nothing && e.buf.path == to && html_shown(e)
+    e.nodes[(:carried_sums, to)] = (sums=sent[3], shown=sent[4], page=html_part(e), given=nothing)
+  end
+  handled
+end
+
+"""
+Give the page of the HTML file of `v` the sums that a `view` block gave it, when
+the window went to the file from that block. A page of the file that opens
+another way gets none.
+"""
+carry_sums!(v::HTMLPage, b) = begin
+  e = editor(v)
+  key = (:carried_sums, v.path)
+  c = get(e.nodes, key, nothing)
+  c === nothing && return v
+  c.page === v || (delete!(e.nodes, key); return v)
+  l = Browsers.live(b)
+  # The page starts as the browser draws, which doesn't lay the page out again. So it looks again soon.
+  (l === nothing || Browsers.loading(b)) && (redraw_in!(v, 0.25); return v)
+  c.given === l && return v
+  l.scripts.js["ladder"] = Dict{String,Any}("sums" => c.sums, "shown" => c.shown)
+  Browsers.Live.fire!(l, "sums")
+  e.nodes[key] = merge(c, (given=l,))
+  v
+end
+
+# When a link goes to another page, the block's line changes to say it. It changes once the view has read the line:
+# until then, the line is what the view goes by.
+block_tick!(v::ViewBlock) = begin
+  b = v.browser
+  (b === nothing || v.lines === nothing || !view_web(v)) && return v
+  page = Browsers.page_now(b)
+  (page === nothing || b.asked != (b.address, b.html, b.base)) && return v
+  e = editor(v)
+  (readonly(e.buf) || e.buf.fixed || web_says(e, v.lines, page)) && return v
+  write_block!(v, v.lang, web_lines(e, page))
+  # The view is at that page already, so it doesn't get it again
+  view_web(v) && v.browser === b && Browsers.asked!(b)
+  v
+end
+
+cursor(v::ViewBlock) = :arrow
+
+# A click with ⌘ held goes to the file. The rest are the page's or the viewer's, or go on to the document, which picks
+# the block, or shows its line with ⌥ held.
+onkey(v::ViewBlock, ::KeyPress{Keys.mouse_left}) = only_held(v, Keys.cmd) ? go_view!(v) : nothing
+
+# Esc gives the keyboard back to the document, once no field of the page has it
+onkey(v::ViewBlock, ev::KeyPress{Keys.escape}) = begin
+  unmodified(ev) || return nothing
+  (v.browser !== nothing && ev.window.focus === v.browser) || return nothing
+  focus(editor(v))
+  handled
+end
+
+keyboard_part(v::ViewBlock) = view_web(v) ? web_browser(v) : v.crumb !== nothing && v.crumb.viewer isa Pages ? v.crumb.viewer : nothing
+
+"The `view` block as HTML: the page that it holds, in a frame, the picture that it shows, or a link to its file or its page"
+view_html(e, v::ViewBlock) = begin
+  if v.held
+    held = replace(join(v.lines, "\n"), '&' => "&amp;", '"' => "&quot;")
+    return "<iframe srcdoc=\"$held\" style=\"width:100%;height:$(round(Int, num(WEB_HIGH)))px;border:1px solid #d8d2c8;border-radius:8px\"></iframe>"
+  end
+  isempty(v.target) && return nothing
+  name = has_scheme(v.target) ? Browsers.whole(v.target) : String(strip(v.lines[findfirst(l -> !isempty(strip(l)), v.lines)]))
+  shown = replace(name, '&' => "&amp;", '<' => "&lt;", '>' => "&gt;", '"' => "&quot;")
+  ispicture(v.target) && return "<p><img src=\"$shown\" style=\"max-width:100%\"></p>"
+  "<p><a href=\"$shown\">$shown</a></p>"
+end
+
+BLOCKS[VIEW_BLOCK] = BlockKind("View", "eye", ViewBlock, view_html)
+# A block in the language `web` is a view by the name that it had before. It writes its line back in its own language.
+BLOCKS[WEBVIEW] = BlockKind("View", "eye", (; n) -> ViewBlock(n=n, lang=WEBVIEW), view_html)
 
 # --- one thing in many parts of the page -------------------------------------------------------
 #
@@ -33267,7 +33341,8 @@ const INSERTS = [
   ("Form",          ["```$FORM", "```", "", ""], (4, 0)),
   ("Sketch",        ["```$SKETCH", "```", "", ""],  (4, 0)),
   ("Canvas",        ["```$CANVAS", "```", "", ""],  (4, 0)),
-  ("Web Page",      ["```$WEBVIEW", "https://", "```", "", ""], (2, 8)),
+  # The caret goes onto the block's empty line, for the name of the file or the address of the page
+  ("View",          ["```$VIEW_BLOCK", "", "```"], (2, 0)),
   ("Signature",     ["```$SIGNATURE", "```", "", ""], (4, 0)),
   ("Contact",       ["```$CONTACT", "", "```"],     (2, 0)),
   ("Gallery",       ["```$GALLERY", "```", "", ""], (4, 0)),
@@ -42217,7 +42292,7 @@ add_command!(copy_link_to_block!, title="Copy a link that shows the block at the
 #     a path on the Mac, and no block that reads a file or a folder. Such a
 #     block shows as its code. A wiki link, like [[Ideas]], goes nowhere.
 #   - A block that asks a server for something, or sends it something, shows
-#     as its code: `load`, `save`, `web` and the like.
+#     as its code: `load`, `save`, `view` and the like.
 #
 # What still shows as more than its text: tables, diagrams, formulas, the
 # card of the front matter, callouts, footnotes and pictures.
