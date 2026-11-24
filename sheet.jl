@@ -213,12 +213,12 @@ const prelude = Ref{Any}(nothing)
 "The currencies that a sheet has, like USD and €, from Units.jl's Money"
 const CURRENCIES = (:USD, :AUD, :NZD, :EUR, :GBP, :JPY, :€, :£, :¥)
 
-"A module that holds the units, for every sheet to use"
+"A module that holds the units, for every sheet to use. `deg` is a degree, as SolidCraft writes it."
 units() = begin
   prelude[] === nothing || return prelude[]
   mod = Module(:SheetUnits)
   money = Dict{Symbol,Any}(n => getfield(Cash, n) for n in CURRENCIES if isdefined(Cash, n))
-  all = merge(bindings(Units), bindings(Imperial), money)
+  all = merge(bindings(Units), bindings(Imperial), money, Dict{Symbol,Any}(:deg => getfield(Units, :°)))
   Core.eval(mod, Expr(:block, [Expr(:const, Expr(:(=), n, QuoteNode(v))) for (n, v) in all]...))
   Core.eval(mod, Expr(:export, keys(all)...))
   prelude[] = mod

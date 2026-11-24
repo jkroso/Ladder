@@ -60,17 +60,23 @@ workspace() = begin
 end
 
 """
-Give the module `m` each parameter of the design by its name, as SolidCraft
-lists them: a length in mm, an angle in degrees, and any other as a number.
+What the parameter `p` is, as SolidCraft lists it: a length in mm, an angle
+in degrees, and any other as a number. It's nothing for a parameter of text.
 """
+value_of(p) = begin
+  value = get(p, "value", nothing)
+  value isa Real || return nothing
+  unit = String(something(get(p, "unit", ""), ""))
+  unit in ("deg", "rad") ? value * Units.° : unit in ("", "unitless") ? value : value * Units.mm
+end
+
+"Give the module `m` each parameter of the design by its name, with its value as `value_of` gives it"
 parameters!(m::Module, params) = begin
   for p in params
     name = Symbol(String(p["name"]))
     Base.isidentifier(name) || continue
-    value = get(p, "value", nothing)
-    value isa Real || continue
-    unit = String(something(get(p, "unit", ""), ""))
-    x = unit in ("deg", "rad") ? value * Units.° : unit in ("", "unitless") ? value : value * Units.mm
+    x = value_of(p)
+    x === nothing && continue
     try Core.eval(m, :($name = $(QuoteNode(x)))) catch end
   end
   m

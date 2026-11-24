@@ -575,20 +575,22 @@ else
     key(Keys.escape)
     @test v.form === nothing
     # Tab goes to the next field, and selects its text. ⇧Tab goes back.
-    V.start!(v, "parameters")
+    V.start!(v, "solid.box")
     frame(w)
-    name, value = v.parts[(:newparam, :name)], v.parts[(:newparam, :value)]
-    click(name)
+    long, wide = v.parts[(:field, "solid.box", "length")], v.parts[(:field, "solid.box", "width")]
+    was = V.text_of(long)
+    click(long)
+    key(Keys.a, Keys.cmd)
     foreach(c -> ontype(w, Typed(c, w)), "deep")
     key(Keys.tab)
-    @test V.has_keys(w, value)
+    @test V.has_keys(w, wide)
     key(Keys.tab, Keys.shft)
-    @test V.has_keys(w, name) && name.sub.buf.anchor == (1, 0) && name.sub.buf.caret == (1, 4)
+    @test V.has_keys(w, long) && long.sub.buf.anchor == (1, 0) && long.sub.buf.caret == (1, 4)
     # ⌘Z takes back what was typed in the field
     key(Keys.z, Keys.cmd)
-    @test V.text_of(name) == ""
+    @test V.text_of(long) == was
     key(Keys.escape)
-    @test v.panel == :none
+    @test v.form === nothing
   end
 
   @testset "code that SolidCraft reads in another way is kept in a comment" begin
@@ -632,36 +634,102 @@ else
     frame(w)
   end
 
-  @testset "the parameters" begin
+  @testset "the parameters are a sheet" begin
     v = view()
     m = v.model
+    type(text) = (foreach(c -> ontype(w, Typed(c, w)), text); frame(w))
     V.start!(v, "parameters")
     frame(w)
     @test v.panel == :params
-    name, value = v.parts[(:newparam, :name)], v.parts[(:newparam, :value)]
-    V.set_text!(name, "wall"); V.set_text!(value, "3mm")
-    click(v.parts[(:newparam, :add)])
+    s = v.parts[:param_sheet]
+    b = s.sub.buf
+    "Put the caret at the end of row `r` of the sheet"
+    to_row(r) = (b.caret = b.anchor = K.line_end(b, r + 1); frame(w))
+    "What row `r` of the sheet comes to, as the sheet shows it"
+    result(r) = s.sub.layout[1].content.results[r]
+    # A row for each parameter. A design with none has one empty row.
+    rows = V.param_rows(v)
+    @test V.sheet_rows(s) == (isempty(rows) ? [("", "")] : rows)
+    @test s.sub.layout[1].content isa K.Sheet && !result(1).failed
+    # A new row is a new parameter. Return at the end of the last row starts one, and Tab goes from its name to its code.
+    # A design with no parameters has one empty row, which is the new one.
+    K.focus(s)
+    empty = V.sheet_rows(s) == [("", "")]
+    b.caret = b.anchor = empty ? (2, 0) : K.line_end(b, length(b.lines) - 1)
+    frame(w)
+    empty || key(Keys.enter)
+    @test V.has_keys(w, s) && V.sheet_rows(s)[V.caret_row(s)] == ("", "")
+    type("wall")
+    key(Keys.tab)
+    type("3mm")
+    @test result(V.caret_row(s)).text == "3mm"
+    # It goes to SolidCraft when the caret leaves the row. Return starts a row under it, which keeps the caret.
+    key(Keys.enter)
     settle()
     @test any(p -> p["name"] == "wall" && p["value"] == 3.0, Models.params(m))
-    # A parameter's field takes code too. Return sets it, and what SolidCraft got a number for shows as its code.
-    box = v.parts[(:param, "wall")]
-    @test V.text_of(box) == "3mm" && V.iscode(box)
-    click(box)
-    V.set_text!(box, "π*1mm")
-    key(Keys.enter)
+    # The user's parameters come first
+    @test V.sheet_rows(s)[1] == ("wall", "3mm") && V.sheet_rows(s)[V.caret_row(s)] == ("", "")
+    # A row can use a row over it, before SolidCraft has the new value of that row
+    k = V.caret_row(s)
+    to_row(1)
+    foreach(_ -> key(Keys.backspace), 1:3)
+    type("4mm")
+    b.caret = b.anchor = (k + 1, 0)
+    frame(w)
+    type("deep")
+    key(Keys.tab)
+    type("wall*2")
+    @test V.caret_row(s) == k && result(k).text == "8mm"
+    to_row(1)
     settle()
-    # SolidCraft reads π as pi, so it gets that, and the comment keeps the code as it was typed
-    @test V.param_named(v, "wall")["expression"] == "pi*1mm" && V.param_note(v, "wall") == "Julia: π*1mm = pi*1mm" && V.text_of(box) == "π*1mm"
-    # Code that's wrong shows what's wrong under the field, which keeps the keyboard
-    click(box)
-    V.set_text!(box, "π*")
-    key(Keys.enter)
-    @test V.has_keys(w, box) && V.outcomes(v)[box].failed && V.outcome(v, box) !== nothing
-    V.set_text!(box, "3mm")
-    key(Keys.enter)
+    @test V.param_named(v, "wall")["expression"] == "4mm" && V.param_named(v, "deep")["value"] == 8.0
+    @test [r[1] for r in V.sheet_rows(s)[1:2]] == ["wall", "deep"]
+    # A row's code is Julia code. SolidCraft reads π as pi, so it gets that, and the comment keeps the code as it was typed.
+    foreach(_ -> key(Keys.backspace), 1:3)
+    type("π*1mm")
+    to_row(2)
     settle()
-    @test V.param_named(v, "wall")["expression"] == "3mm"
+    @test V.param_named(v, "wall")["expression"] == "pi*1mm" && V.param_note(v, "wall") == "Julia: π*1mm = pi*1mm" && V.sheet_rows(s)[1] == ("wall", "π*1mm")
+    # Code that's wrong shows a ! in its row, and SolidCraft gets nothing. The top of the design says what's wrong.
+    to_row(1)
+    type(" + ")
+    @test result(1).failed
+    to_row(2)
+    settle()
+    @test V.param_named(v, "wall")["expression"] == "pi*1mm" && occursin("wall", m.said)
+    to_row(1)
+    foreach(_ -> key(Keys.backspace), 1:8)
+    type("3mm")
+    to_row(2)
+    settle()
+    @test V.param_named(v, "wall")["expression"] == "3mm" && V.param_named(v, "deep")["value"] == 6.0
+    # A new name renames the parameter, and the code that uses it follows
+    b.caret = b.anchor = (2, 4)
+    frame(w)
+    type("s")
+    to_row(2)
+    settle()
+    @test V.param_named(v, "wall") === nothing && V.param_named(v, "walls")["value"] == 3.0 && occursin("walls", V.param_named(v, "deep")["expression"])
+    @test V.sheet_rows(s)[1][1] == "walls" && occursin("walls", V.sheet_rows(s)[2][2])
+    # A row that's taken away deletes its parameter, and ⌘Z brings it back. As in a page's sheet, the row's cells are
+    # emptied first, and then ⌫ on the empty row takes it away.
+    b.anchor, b.caret = (3, 7), K.line_end(b, 3)
+    frame(w)
+    key(Keys.backspace)
+    b.anchor, b.caret = (3, 0), (3, 4)
+    key(Keys.backspace)
+    @test b.lines[3] == " = "
+    key(Keys.backspace)
+    settle()
+    @test V.param_named(v, "deep") === nothing && !any(r -> r[1] == "deep", V.sheet_rows(s))
+    key(Keys.z, Keys.cmd)
+    settle()
+    @test V.param_named(v, "deep") !== nothing && any(r -> r[1] == "deep", V.sheet_rows(s))
     shot("design-6-parameters.png")
+    # The next ⌘Z takes back the new name
+    key(Keys.z, Keys.cmd)
+    settle()
+    @test V.param_named(v, "wall") !== nothing && V.sheet_rows(s)[1][1] == "wall"
     key(Keys.escape)
     @test v.panel == :none
   end
@@ -717,14 +785,29 @@ else
     @test V.text_of(box) == "wall" && names_shown() === nothing
     key(Keys.escape)
     @test v.form === nothing
-    # A parameter's field doesn't offer that parameter
+    # In the sheet of parameters, a row's code is offered the names too, but not the row's own
     V.start!(v, "parameters")
     frame(w)
-    own = v.parts[(:param, "wall")]
-    click(own)
-    key(Keys.a, Keys.cmd)
-    type("wa")
+    s = v.parts[:param_sheet]
+    b = s.sub.buf
+    K.focus(s)
+    b.caret = b.anchor = K.line_end(b, 2)
+    frame(w)
+    @test V.sheet_rows(s)[1][1] == "wall"
+    type(" + wa")
     @test names_shown() === nothing
+    key(Keys.z, Keys.cmd)
+    n, code = length(V.sheet_rows(s)), V.sheet_rows(s)[2][2]
+    b.caret = b.anchor = K.line_end(b, 3)
+    frame(w)
+    type(" + wa")
+    @test names_shown() == ["wall"] && V.names_for(w, s).names[1].second == "3.00 mm"
+    # Return puts the name in, and starts no row
+    key(Keys.enter)
+    @test V.sheet_rows(s)[2][2] == code * " + wall" && names_shown() === nothing && length(V.sheet_rows(s)) == n
+    key(Keys.z, Keys.cmd)
+    key(Keys.z, Keys.cmd)
+    @test V.sheet_rows(s)[2][2] == code
     key(Keys.escape)
     @test v.panel == :none
   end

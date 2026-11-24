@@ -4029,6 +4029,8 @@ offered(e) = begin
   b = e.buf
   i, col = b.caret
   selecting(b) && return nothing
+  # The sheet of a SolidCraft design's parameters shows the design's own list of names: see cad/view.jl
+  design_field_of(e) isa DesignSheet && return nothing
   # A code block offers names too, and the name of a wiki link offers pages
   insheet(b, i) || return (found = code_offered(e); found === nothing ? wiki_offered(e) : found)
   cs = sheetcells(b.lines[i])
@@ -24961,8 +24963,13 @@ A sum over the sheet that hasn't run since the page changed runs here, as it
 would when its line is laid out, from the top down. A chart near the top of
 the page asks for every table of the page before the sums under it are laid
 out, and the sheet then has the same values for it as for the rest of the frame.
+
+A sheet that's on no page has the names that the part that shows it gives:
+the sheet of a SolidCraft design's parameters has the design's.
 """
 sheet_given(e, upto::Int) = begin
+  outside = get(e.nodes, :sheet_names, nothing)
+  outside === nothing || return outside
   b = e.buf
   given, spots = given_and_sums(e, upto, true)
   foreach(((_, code, n),) -> made(e, code, n), spots)
@@ -30147,7 +30154,8 @@ onkey(e::Editor, ev::KeyPress{K}) where K = begin
   hosted(e) === nothing || !part_key!(e, w, K, command, select) || return handled
   # In the text of a request in place, Return gives the request to the agent and esc takes the field away
   ask_box_of(e) === nothing || !ask_key!(e, w, K, command) || return handled
-  # In a field of a SolidCraft design, Return, Esc, Tab and the window's keys are the design's and the window's
+  # In a field of a SolidCraft design, Return, Esc, Tab and the window's keys are the design's and the window's. In
+  # the sheet of its parameters, Return and Tab are the sheet's.
   field = design_field_of(e)
   field === nothing || (done = design_key!(field, e, w, K, command); done === :text || return done)
   # While the command palette shows, every key is its own, whatever part of it has the keyboard
@@ -48551,10 +48559,15 @@ const DesignFile = Union{FS.File{:sc},FS.File{:SC},FS.File{:solidcraft}}
 push!(BLOCK_ICONS, "arrow-counterclockwise", "arrow-clockwise", "save", "x-lg", "x", "check-lg", "chevron-down", "chevron-right", "eye", "eye-slash",
       "house", "skip-start-fill", "caret-left-fill", "caret-right-fill", "skip-end-fill")
 
-"What shows the SolidCraft design at `path` in the window of `e`. Its fields are Ladder's editor of text: see \"the fields of a SolidCraft design\"."
+"""
+What shows the SolidCraft design at `path` in the window of `e`. Its fields are
+Ladder's editor of text, and its parameters are a sheet: see "the fields of a
+SolidCraft design" and "the sheet of a SolidCraft design's parameters".
+"""
 design_part(e, path) = begin
   Designs.CODE_LOOK[] = design_code_look
   Designs.FIELD[] = design_field
+  Designs.SHEET[] = design_sheet
   node!(() -> Designs.DesignView(path=path), e, (:design, path))
 end
 design_code_look() = (colours, codefont())
@@ -48808,6 +48821,203 @@ Designs.under(f::DesignField) = begin
   d.across = min(across, most)
   d.corners = radius(OUTCOME_ROUND)
   with_theme(() -> Box(Alignment.Start, d), unscaled(Designs.theme(f.parent)))
+end
+
+# --- the sheet of a SolidCraft design's parameters -----------------------------------------
+#
+# The panel of a design's parameters is a sheet, as a `sheet` block of a page
+# is, and Ladder's editor of a page edits it: see "the sheet of parameters" in
+# cad/view.jl. The editor holds a page with one sheet on it, a row for each
+# parameter. The lines that open and close the block never show. The caret
+# stays off them, and a key that would change them is taken back.
+#
+# Each row works itself out as a page's sheet does, with the design's units,
+# like deg, and with the value of each parameter of the design as SolidCraft
+# has it. So a row can use a parameter whose row is under it, and a row takes
+# the name from the design's value.
+#
+# The list of names under a row's code is the design's, as in a field of code,
+# with each parameter's value. The keys work as they do in a page's sheet: Tab
+# goes to the next cell, and Return starts a row. Esc, ⌘S and the window's
+# keys go to the design, then to the window. ⌘Z takes back what was typed, and
+# when nothing was, the design's last change.
+
+"The sheet of a SolidCraft design's parameters: see \"the sheet of a SolidCraft design's parameters\""
+@def mutable struct DesignSheet <: SemanticUI
+  sub::Any = nothing          # the editor of its page
+  room::Any = nothing         # how wide the panel has room for it to be, or nothing before the panel says
+  took::Bool = false          # the editor took the last key, which goes no further: see `design_key!`
+  names::Any = nothing        # the design's version, and each parameter's name and value then, for the rows to use
+end
+
+const SHEET_OPEN = "```" * SHEET   # the line that opens the block of the sheet
+
+"The sheet of the parameters of the design `v`, with one empty row"
+design_sheet(v) = begin
+  s = DesignSheet()
+  sub = Editor()
+  sub.buf = Buffer(lines=[SHEET_OPEN, " = ", "```"])
+  sub.buf.caret = sub.buf.anchor = (2, 0)
+  sub.nodes[:input] = own!(sub, TextInput())
+  sub.nodes[:design_field] = s
+  setfield!(sub, :parent, s)
+  s.sub = sub
+  s
+end
+
+"""
+Give the editor of the sheet `s` the colours and the keys of the page that
+shows the design, with text as big as a field's. Its rows have the names of
+the design's parameters, with their values.
+"""
+follow_page!(s::DesignSheet) = begin
+  sub = s.sub
+  follow_host!(sub, editor(s.parent))
+  sub.wrap = true
+  sub.font, sub.look = SANS, :own
+  # `sheetgrid` makes a sheet's text 0.86 times as big as the page's
+  sub.zoom = num(Designs.field_size(s.parent)) / (num(TEXT_SIZE) * 0.86)
+  key = (sub.zoom, sub.font)
+  get(sub.nodes, :field_style, nothing) == key || (sub.nodes[:field_style] = key; empty!(sub.flows))
+  v = s.parent
+  version = v.model === nothing ? -1 : v.model.version
+  if s.names === nothing || s.names[1] != version
+    s.names = (version, Tuple{String,Any}[(String(p["name"]), Given(x)) for p in Designs.every_param(v)
+                                          for x in (Designs.Expressions.value_of(p),) if x !== nothing])
+  end
+  sub.nodes[:sheet_names] = s.names[2]
+  s
+end
+
+"""
+Keep the sheet `s` a sheet: a key that changed the lines that open and close
+its block is taken back, and the caret stays in its rows.
+"""
+mend!(s::DesignSheet) = begin
+  b = s.sub.buf
+  whole(b) = (n = length(b.lines); n >= 3 && b.lines[1] == SHEET_OPEN && b.lines[n] == "```" && !any(l -> startswith(lstrip(l), "```"), view(b.lines, 2:n-1)))
+  if !whole(b)
+    isempty(b.undo) || (undo!(b); pop!(b.redo))
+    whole(b) || Designs.set_rows!(s, [parts(l) for l in b.lines if !startswith(lstrip(l), "```")])
+  end
+  n = length(b.lines)
+  inside(p) = p[1] <= 1 ? (2, 0) : p[1] >= n ? line_end(b, n - 1) : p
+  b.caret, b.anchor = inside(b.caret), inside(b.anchor)
+  s
+end
+
+describe(s::DesignSheet) = begin
+  sub = s.sub
+  follow_page!(s)
+  mend!(s)
+  w = window_of(s)
+  b = sub.buf
+  # The selection shows only while the sheet has the keyboard
+  (w !== nothing && w.focus === sub) || (b.anchor = b.caret)
+  t = Designs.theme(s.parent)
+  # A sheet that the panel hasn't told how wide it is is as wide as it was in the last frame
+  r = s.room === nothing ? rect(s) : nothing
+  wide = s.room !== nothing ? s.room : r !== nothing ? r.width : FIELD_ROOM
+  layout!(sub, wide)
+  tall = isempty(sub.layout) ? FIELD_H : lowest(sub, sub.layout)
+  # The sheet is made in the theme at its usual size, so it's as big as it was laid out: see `DesignField`
+  with_theme(unscaled(t)) do
+    Row(fixed(wide), height(tall), Alignment.Start, name="Parameters", node!(Document, sub, :document))
+  end
+end
+
+# A key that the editor took goes no further. The design would take it too, as ⌘Z.
+onkey(s::DesignSheet, ::KeyPress) = s.took ? (s.took = false; mend!(s); handled) : nothing
+focus(s::DesignSheet) = focus(s.sub)
+
+"""
+What a key does in the sheet of a design's parameters, before its editor does
+what it does with a key: `handled`, nothing when the key goes on to the
+design and then the window, or :text when the editor does what it does with
+the key. See "the sheet of a SolidCraft design's parameters".
+"""
+design_key!(s::DesignSheet, e, w, K, command) = begin
+  done = sheet_key(s, e, w, K, command)
+  s.took = done === :text
+  done
+end
+sheet_key(s::DesignSheet, e, w, K, command) = begin
+  # While the list of parameters shows under the row, ↑ ↓ Return Tab and Esc are the list's: see cad/view.jl
+  K in (Keys.up, Keys.down, Keys.enter, Keys.tab, Keys.escape) && unmodified(w) && Designs.names_key!(s, w, K) && return handled
+  K == Keys.escape && return nothing
+  b = e.buf
+  # ⌘A selects the rows, and not the lines of the block round them
+  command == :select_all && ((b.anchor, b.caret) = ((2, 0), line_end(b, length(b.lines) - 1)); touch!(e); return handled)
+  command === nothing && return :text
+  # ⌘Z takes back the design's last change when the sheet has nothing of its own to take back
+  command == :undo && isempty(b.undo) && return nothing
+  command == :redo && isempty(b.redo) && return nothing
+  COMMANDS[command].kind == :window || command in (:commands, :find, :find_next, :find_last, :plain, :slides, :forward) ? nothing : :text
+end
+
+Designs.text_of(s::DesignSheet) = join(s.sub.buf.lines, '\n')
+Designs.sheet_rows(s::DesignSheet) = (b = s.sub.buf; Tuple{String,String}[parts(l) for l in view(b.lines, 2:length(b.lines)-1)])
+Designs.caret_row(s::DesignSheet) = s.sub.buf.caret[1] - 1
+Designs.sent!(s::DesignSheet) = (b = s.sub.buf; empty!(b.undo); empty!(b.redo); s)
+Designs.isfield(::DesignSheet) = true
+Designs.iscode(::DesignSheet) = true
+Designs.room!(s::DesignSheet, wide) = (s.room = wide; s)
+
+Designs.set_rows!(s::DesignSheet, rows) = begin
+  b = s.sub.buf
+  at, name = b.caret, Designs.caret_name(s)
+  lines = isempty(rows) ? [" = "] : ["$n = $c" for (n, c) in rows]
+  edit!(b, (1, 0), line_end(b, length(b.lines)), join([SHEET_OPEN; lines; "```"], '\n'))
+  # The design put the rows there, so ⌘Z in the sheet doesn't take them back
+  empty!(b.undo)
+  empty!(b.redo)
+  # The caret stays in the row with the same name, or else on the same row
+  k = name === nothing ? nothing : findfirst(r -> r[1] == name, rows)
+  i = clamp(k === nothing ? at[1] : k + 1, 2, length(b.lines) - 1)
+  b.caret = b.anchor = (i, min(at[2], length(b.lines[i])))
+  s
+end
+
+"The code of the row with the caret, before the caret, or nothing when the caret isn't in a row's code or text is selected"
+Designs.before_caret(s::DesignSheet) = begin
+  b = s.sub.buf
+  b.anchor == b.caret || return nothing
+  i, col = b.caret
+  1 < i < length(b.lines) || return nothing
+  cs = sheetcells(b.lines[i])
+  (length(cs) == 2 && nearest(cs, col) == 2 && col >= cs[2].lo) || return nothing
+  String(collect(b.lines[i])[cs[2].lo+1:col])
+end
+Designs.complete!(s::DesignSheet, n, name) = (b = s.sub.buf; edit!(b, (b.caret[1], b.caret[2] - n), b.caret, String(name)); s)
+
+"Where the list of parameters shows: under the name being typed, which is the last `n` characters before the caret"
+Designs.names_place(s::DesignSheet, n) = begin
+  sub = s.sub
+  d = rect(node!(Document, sub, :document))
+  it = isempty(sub.layout) ? nothing : sub.layout[1]
+  (d === nothing || it === nothing || !(it.content isa Sheet)) && return (s, Designs.menu_width(s, 180px))
+  g = it.content
+  i, col = sub.buf.caret
+  r = findfirst(==(i), g.rows)
+  r === nothing && return (s, Designs.menu_width(s, 180px))
+  f, dx = cellflow(g, r, length(g.cells[r]))
+  k, x = spot(f, max(col - n, 0))
+  ((d.left + dx + x - 9px, d.top + it.top + row_top(g, r) + f.lh * (k - 1), 1px, f.lh), 180px)
+end
+
+"How wide the sheet `s` needs to be to show each row on one line: its name, its code and what that comes to"
+Designs.wants(s::DesignSheet) = begin
+  sub = s.sub
+  follow_page!(s)
+  size = body(sub).size * 0.86
+  ink = Face(SHEET_FONT, SHEET_WEIGHT, size, colours.ink, false)
+  rows = Designs.sheet_rows(s)
+  name = max(maximum(r -> measure(ink, r[1]), rows, init=0px) + 2px, 3size)
+  code = maximum(r -> measure(ink, r[2]), rows, init=0px)
+  g = isempty(sub.layout) ? nothing : sub.layout[1].content
+  chip = g isa Sheet ? maximum(r -> chip_w(ink, r), g.results, init=0px) : 0px
+  # As `sheetgrid` lays a row out, with a little more for the names in the code, which are chips
+  num(name + code + chip + 7SHEET_X + 3px)
 end
 
 page_view(e, o::DesignFile) = design_part(e, string(o.path))

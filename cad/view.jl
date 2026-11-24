@@ -450,11 +450,13 @@ What a field of code holds, for a value of the kind `kind`: what SolidCraft
 gets, the code, the code as SolidCraft reads it (`solid`), the kind of value
 and what it comes to (see `Expressions.reading`). Words say what's wrong, with
 the field's `label` first. It's nothing for a field with nothing in it.
+`got` is what the code came to, as `(value, failed)`, when that's known
+already. Without it, the code runs with the design's parameters.
 """
-read_code(v::DesignView, text, kind, label) = begin
+read_code(v::DesignView, text, kind, label; got=nothing) = begin
   code = String(strip(text))
   isempty(code) && return nothing
-  value, failed = ran(v, code)
+  value, failed = got === nothing ? ran(v, code) : got
   failed && return "$label: $(Expressions.shown(value, true))"
   r = Expressions.reading(value, kind)
   r isa String ? "$label $r" : (; r..., code, solid=Expressions.solidcraft_code(code))
@@ -835,6 +837,7 @@ describe(v::DesignView) = begin
   editing ? (v.tab = "Sketch") : v.tab == "Sketch" && (v.tab = "Model"; v.tool = nothing; empty!(v.clicks))
   preview!(v)
   offers!(v)
+  left_row!(v)
   scene = part!(() -> Scene(of=v), v, :scene)
   Stack(width(grow=grow), height(grow=grow), Alignment.Start,
     scene,
@@ -1281,16 +1284,23 @@ offered(v::DesignView, before::AbstractString, own=nothing) = begin
   (length(chars) - start, Any[last(f) for f in first(sort!(found, by=f -> f[1:4]), NAMES_SHOWN)])
 end
 
-"The parameter that the field `box` of the design `v` is the code of, or nothing"
+"The parameter that the field `box` of the design `v` is the code of, or nothing. In the sheet of parameters, it's the caret's row."
 own_param(v::DesignView, box) = begin
+  box === get(v.parts, :param_sheet, nothing) && return caret_name(box)
   for (k, b) in v.parts
     b === box || continue
     k isa Tuple && length(k) == 3 && k[1] == :field && k[2] == "step" && return String(k[3])
-    k isa Tuple && length(k) == 2 && k[1] == :param && return String(k[2])
     return nothing
   end
   nothing
 end
+
+"""
+Where the list of parameters for the field `box` shows, when the name that's
+typed is the last `n` characters before the caret: the place to show it under,
+and how wide it is. It's under the field, and as wide.
+"""
+names_place(box, n) = (box, menu_width(box, 180px))
 
 "The list of parameters that shows now in the window `w` for the field `box`, or nothing"
 names_for(w, box) = (o = get(SHOWN_NAMES, objectid(w), nothing); o !== nothing && o.box === box ? o : nothing)
@@ -1335,7 +1345,8 @@ offers!(v::DesignView) = begin
   o = Offers(of=v, box=box, typed=n, names=names)
   SHOWN_NAMES[objectid(w)] = o
   # The keys stay with the field, and a click outside the list is the design's, as it is with no list
-  popup!(w, o, anchor=box, placement=:below, gap=4px, width=menu_width(box, 180px), key=NAMES_KEY, modal=false,
+  under, wide = names_place(box, n)
+  popup!(w, o, anchor=under, placement=:below, gap=4px, width=wide, key=NAMES_KEY, modal=false,
          onclose=() -> get(SHOWN_NAMES, objectid(w), nothing) === o && delete!(SHOWN_NAMES, objectid(w)), theme=theme(v))
   nothing
 end
@@ -2149,93 +2160,292 @@ tool_hint(v::DesignView, tool::Commands.Tool) = begin
   n >= length(tool.clicks) ? "" : "click " * (n == 0 ? "its first point" : n == length(tool.clicks) - 1 ? "its last point" : "its next point")
 end
 
-"The parameters of the design: each with its name, what it's set to, and what that comes to"
+# --- the sheet of parameters -----------------------------------------------------------
+#
+# The panel of parameters is a sheet, the same one as a `sheet` block of a
+# page: a row for each parameter, with its name at the left, its code in the
+# middle, and what that comes to at the right. Ladder gives it (see `SHEET`),
+# so the names of other rows are chips, and each row works itself out while
+# it's typed. It has the design's units, and every parameter of the design,
+# so a row can use one that's under it. The user's parameters come first,
+# then the lengths of the steps and of the sketches' dimensions, like d1.
+#
+# What's typed goes to SolidCraft when the caret leaves its row, and when the
+# sheet gives up the keyboard, as when the panel closes:
+#   - A row whose code changed sets its parameter, as a field of code does: see `agree!`.
+#   - A row whose name changed renames its parameter. SolidCraft changes the
+#     code that uses the old name.
+#   - A new row adds a parameter, just under the row over it.
+#   - A row that's taken away deletes its parameter. SolidCraft won't delete
+#     one that something uses, and says what uses it. A length of a step stays.
+# What goes wrong shows at the top of the design, as a step's problem does.
+#
+# The sheet shows the design's parameters again once SolidCraft has them. A row
+# that isn't a parameter yet, like the one that Return just made, stays where
+# it is. While a row holds typing that hasn't gone to SolidCraft, the sheet
+# waits. ⌘Z takes back what was typed in the caret's row, and when nothing
+# was, the design's last change, which the sheet then shows.
+
+"""
+What makes the sheet of parameters, when Ladder gives one: `SHEET[](v)` gives
+a node that Ladder edits as a `sheet` block of a page. It has methods of
+`text_of`, `sheet_rows`, `set_rows!`, `caret_row`, `sent!`, `before_caret`,
+`complete!`, `names_place`, `wants` and `room!`. Without one, the panel only
+lists the parameters.
+"""
+const SHEET = Ref{Any}(nothing)
+
+"Each row of the sheet `s`, as its name and its code"
+function sheet_rows end
+"Make the sheet `s` hold `rows`, each a name and its code. The caret stays in the row with the same name."
+function set_rows! end
+"The number of the row of the sheet `s` that the caret is in"
+function caret_row end
+"Forget what was typed in the sheet `s`, for ⌘Z: it's gone to SolidCraft"
+function sent! end
+
+"The name of the row of the sheet `s` that the caret is in, or nothing"
+caret_name(s) = (rows = sheet_rows(s); r = caret_row(s); 1 <= r <= length(rows) && !isempty(strip(rows[r][1])) ? String(strip(rows[r][1])) : nothing)
+
+"The parameters that the panel shows: the user's, then the lengths of the steps"
+panel_params(v::DesignView) = sort(Designs.params(v.model), by=p -> get(p, "model", false) === true)
+
+"True for a length of a step or of a sketch's dimension, like d1, which isn't one of the user's parameters"
+model_param(p) = p !== nothing && get(p, "model", false) === true
+
+"""
+The code of the row of the parameter `p`. A parameter that SolidCraft got a
+number for has its code in its comment. One of text is in quotes.
+"""
+param_code(v::DesignView, p) =
+  unit_kind(get(p, "unit", "")) == :text ? repr(String(something(get(p, "expression", ""), ""))) :
+    Expressions.field_code(p["expression"], something(get(p, "comment", nothing), param_note(v, String(p["name"]))))
+
+"The rows of the sheet for the parameters of `v`, each as its name and its code"
+param_rows(v::DesignView) = Tuple{String,String}[(String(p["name"]), param_code(v, p)) for p in panel_params(v)]
+
+"The sheet of parameters of `v`"
+param_sheet(v::DesignView) = part!(() -> SHEET[](v), v, :param_sheet)
+
+"The parameters of the design, in a sheet: see \"the sheet of parameters\""
 params_card(v::DesignView) = begin
   t = theme(v)
-  m = v.model
-  list = sort(Designs.params(m), by=p -> get(p, "model", false) === true)
-  side_width!(v, param_fields(v, list))   # before the fields are laid out in their rows
-  rows = Any[]
-  for p in list
-    name = String(p["name"])
-    # Code, unless it's a parameter of text. A parameter that SolidCraft got a number for has its code in its comment.
-    plain = unit_kind(get(p, "unit", "")) == :text
-    text = plain ? String(p["expression"]) : Expressions.field_code(p["expression"], something(get(p, "comment", nothing), param_note(v, name)))
-    box = plain ? input!(v, (:param, name); text) : code!(v, (:param, name); text)
-    # A field that isn't being typed in follows the design
-    w = part_window(v)
-    !has_keys(w, box) && get(v.parts, (:param_at, name), "") != text && (set_text!(box, text); v.parts[(:param_at, name)] = text)
-    wrong = get(p, "error", nothing) isa String
-    value = p["value"] isa Number ? Sketching.fixed(p["value"]) * " " * String(get(p, "unit", "")) : ""
-    push!(rows, Row(width(grow=grow), height(min=28px), child_gap=6px,
-      Row(width(74px), justify=Alignment.Start, clip_x=true, words(name, 12px, color=get(p, "model", false) === true ? t.dim : t.text)),
-      Box(width(grow=grow), box),
-      Row(width(64px), justify=Alignment.End, clip_x=true, words(wrong ? "error" : value, 11px, color=wrong ? WRONG : t.dim))))
-    shown = something(outcome(v, box), Some(under(box)))
-    shown === nothing || push!(rows, Row(width(grow=grow), padding(0px, 0px, 4px, 80px), justify=Alignment.Start, clip_x=true, shown))
-  end
-  added = code!(v, (:newparam, :value); placeholder="10mm")
-  below = something(outcome(v, added), Some(under(added)))
-  tall = min(max(120.0, v.area[4] - 360), length(rows) * 30.0 + 4)
-  side_card(v, :params, "params", "Parameters", e -> (v.panel = :none), wide=side_width!(v, param_fields(v, list)),
-    Scroll(width(grow=grow), height(px(tall)), key=:params, Column(width(grow=grow), child_gap=2px, Alignment.Start, rows...)),
-    Row(width(grow=grow), child_gap=6px, padding(4px, 0px, 0px, 0px),
-      Box(width(86px), room!(input!(v, (:newparam, :name); placeholder="name"), 86px)),
-      Box(width(grow=grow), added),
-      word_button(v, (:newparam, :add), "Add"; act=e -> add_param!(v))),
-    (below === nothing ? () : (Row(width(grow=grow), padding(0px, 0px, 0px, 92px), justify=Alignment.Start, clip_x=true, below),))...)
+  close(e) = (v.panel = :none)
+  SHEET[] === nothing && return side_card(v, :params, "params", "Parameters", close,
+    (Row(width(grow=grow), child_gap=8px, words(n, 12px), Box(width(grow=grow)), words(c, 12px, color=t.dim)) for (n, c) in param_rows(v))...)
+  s = param_sheet(v)
+  follow_sheet!(v, s)
+  wide = side_width!(v, Pair{Any,Any}[s => SIDE_PAD])
+  side_card(v, :params, "params", "Parameters", close, s; wide)
 end
 
-const ADD_W = 52px   # how wide the Add button under the parameters is
-
-"The fields of the parameters in `list` that the panel of parameters has made, and the field of a new one's value, each with how much of the panel's width is beside it"
-param_fields(v::DesignView, list) = begin
-  out = Pair{Any,Any}[]
-  for p in list
-    box = get(v.parts, (:param, String(p["name"])), nothing)
-    isfield(box) && push!(out, box => SIDE_PAD + 74px + 64px + 12px)
+"""
+Show the design's parameters in the sheet `s` when they've changed since it
+last showed them, or when SolidCraft refused what the sheet gave it. It waits
+while a row holds typing that hasn't gone to SolidCraft.
+"""
+follow_sheet!(v::DesignView, s) = begin
+  rows = param_rows(v)
+  given = get(v.parts, :sheet_given, nothing)
+  (rows == given && !get(v.parts, :sheet_refused, false)) && return
+  text_of(s) == get(v.parts, :sheet_sent, text_of(s)) || return
+  # A row that isn't a parameter, and never was, stays where it is: one with no name yet, or one that SolidCraft
+  # wouldn't add. A row that was a parameter, and isn't now, goes: ⌘Z took it away. So does an empty row that
+  # the caret isn't in.
+  shown = copy(rows)
+  if given !== nothing
+    had = Set(n for (n, _) in given)
+    names = Set(n for (n, _) in rows)
+    typing = has_keys(part_window(v), s) ? caret_row(s) : 0
+    for (i, (n, c)) in enumerate(sheet_rows(s))
+      name = String(strip(n))
+      (name in names || name in had || (isempty(name) && isempty(strip(c)) && i != typing)) && continue
+      insert!(shown, min(i, length(shown) + 1), (n, c))
+    end
   end
-  added = get(v.parts, (:newparam, :value), nothing)
-  isfield(added) && push!(out, added => SIDE_PAD + 86px + 12px + ADD_W)
+  set_rows!(s, shown)
+  v.parts[:sheet_given] = v.parts[:sheet_base] = rows
+  v.parts[:sheet_sent] = text_of(s)
+  v.parts[:sheet_refused] = false
+  s
+end
+
+"SolidCraft refused what the sheet of parameters gave it: the sheet shows the design's parameters, as SolidCraft has them"
+refused!(v::DesignView) = (v.parts[:sheet_refused] = true; v.parts[:sheet_base] = nothing; v)
+
+"""
+The rows of the sheet whose names were changed, as pairs of the old name and
+the new one, which it takes out of `gone` and `added`. A row of `now` that
+`base` doesn't have takes the name of a row of `base` that `now` doesn't have,
+when both are in the same gap between the rows that both have. In a gap, the
+first that went goes with the first that came, and so on.
+"""
+renames!(gone, added, base, now) = begin
+  both = Set(n for (n, _) in base) ∩ Set(n for (n, _) in now)
+  # The gap of each name that only `rows` has: how many of the rows over it both have
+  gaps(rows) = begin
+    k, out = 0, Dict{String,Int}()
+    for (n, _) in rows
+      isempty(n) && continue
+      n in both ? (k += 1) : (out[n] = k)
+    end
+    out
+  end
+  went, came = gaps(base), gaps(now)
+  pairs = Tuple{String,String}[]
+  for g in unique(went[n] for n in gone)
+    append!(pairs, zip(filter(n -> went[n] == g, gone), filter(n -> get(came, n, -1) == g, added)))
+  end
+  filter!(n -> !any(p -> p[1] == n, pairs), gone)
+  filter!(n -> !any(p -> p[2] == n, pairs), added)
+  pairs
+end
+
+"""
+What the code of each row of `now` comes to, as `(value, failed)` by the row's
+name, for the rows named in `wanted` and the rows over them. The rows run from
+the top down, as the sheet works them out, with the design's parameters. So a
+row has the new value of a row over it, which SolidCraft may not have yet.
+"""
+row_values(v::DesignView, now, wanted) = begin
+  out = Dict{String,Any}()
+  last = findlast(r -> r[1] in wanted, now)
+  last === nothing && return out
+  mod = Expressions.parameters!(Expressions.workspace(), every_param(v))
+  for (n, c) in now[1:last]
+    (isempty(n) || isempty(c)) && continue
+    value, failed = out[n] = Expressions.evaluate(mod, c)
+    failed || !Base.isidentifier(n) || try Core.eval(mod, :($(Symbol(n)) = $(QuoteNode(value)))) catch end
+  end
   out
+end
+
+"""
+Give SolidCraft what was typed in the sheet of parameters, when the caret has
+left the row it was in, or the sheet has given up the keyboard. A sheet that
+doesn't show gives the keyboard to the design.
+"""
+left_row!(v::DesignView) = begin
+  s = get(v.parts, :param_sheet, nothing)
+  s === nothing && return
+  w = part_window(v)
+  on = has_keys(w, s)
+  on && v.panel != :params && (focus(v); on = false)
+  row = on ? caret_row(s) : 0
+  was = get(v.parts, :sheet_row, 0)
+  v.parts[:sheet_row] = row
+  row != was && was != 0 && send_sheet!(v, s)
+  nothing
+end
+
+"""
+Give SolidCraft what was typed in the sheet `s` since it last showed the
+design's parameters, or last gave SolidCraft its rows: see "the sheet of
+parameters". The changes that it makes are one step for ⌘Z.
+"""
+send_sheet!(v::DesignView, s) = begin
+  # Nothing was typed since the sheet last showed the design's parameters, or last gave SolidCraft its rows
+  text_of(s) == get(v.parts, :sheet_sent, nothing) && return v
+  m = v.model
+  base = something(get(v.parts, :sheet_base, nothing), param_rows(v))
+  now = Tuple{String,String}[(String(strip(n)), String(strip(c))) for (n, c) in sheet_rows(s)]
+  v.parts[:sheet_sent] = text_of(s)
+  # The parameters that the design has now are older than what was typed, which the sheet shows till SolidCraft has it
+  v.parts[:sheet_given] = param_rows(v)
+  was = Dict(base)
+  is = Dict((n, c) for (n, c) in now if !isempty(n))
+  problems = String[]
+  nameless = any(((n, c),) -> isempty(n) && !isempty(c), now)
+  nameless && push!(problems, "Give each row a name, at its left.")
+  twice = [n for n in keys(is) if count(r -> r[1] == n, now) > 1]
+  isempty(twice) || push!(problems, "Two rows are called $(first(twice)).")
+  # A row whose name was taken away is still being written, and so is one with a name and no code
+  gone = nameless ? String[] : String[n for (n, _) in base if !haskey(is, n)]
+  added = String[n for (n, c) in now if !isempty(n) && !haskey(was, n) && !isempty(c) && !(n in twice)]
+  renamed = renames!(gone, added, base, now)
+  old = Dict(b => a for (a, b) in renamed)   # the name that a renamed row had
+  changed = String[n for (n, c) in now if !isempty(c) && haskey(was, get(old, n, n)) && was[get(old, n, n)] != c]
+  # What SolidCraft gets for each row: Julia's reading of its code, or the text of a parameter of text
+  readings, texts = Dict{String,Any}(), Dict{String,String}()
+  values = row_values(v, now, changed ∪ added)
+  for n in unique(vcat(changed, added))
+    p = param_named(v, get(old, n, n))
+    kind = p === nothing ? :number : unit_kind(get(p, "unit", ""))
+    if kind == :text
+      x = try Meta.parse(is[n]) catch; nothing end
+      x isa String ? (texts[n] = x) : push!(problems, "$n is text: write it in quotes, like \"steel\".")
+      continue
+    end
+    r = read_code(v, is[n], kind, n; got=get(values, n, nothing))
+    r isa String ? push!(problems, r) : r === nothing || (readings[n] = r)
+  end
+  notes = Dict(n => param_note(v, get(old, n, n)) for n in changed)
+  users = Set{String}(String(p["name"]) for p in panel_params(v) if !model_param(p))
+  # A length of a step can't be deleted, so its row comes back
+  deleted = filter(n -> !model_param(param_named(v, n)), gone)
+  length(deleted) < length(gone) && refused!(v)
+  # What the design will have, as far as the sheet knows. A row that doesn't go to SolidCraft stays as it was.
+  will = Dict(base)
+  for (a, b) in renamed
+    will[b] = pop!(will, a)
+    a in users && push!(users, b)
+  end
+  foreach(n -> will[n] = is[n], keys(readings) ∪ keys(texts))
+  foreach(n -> delete!(will, n), deleted)
+  v.parts[:sheet_base] = Tuple{String,String}[(n, will[n]) for n in unique(vcat([n for (n, _) in now if haskey(will, n)], collect(keys(will))))]
+  # What went to SolidCraft is ⌘Z's to take back from now on, and not the sheet's. Typing that didn't go stays the sheet's.
+  isempty(renamed) && isempty(readings) && isempty(texts) && isempty(deleted) || sent!(s)
+  before = Designs.undos(m)
+  agree!(v, readings) do agreed
+    steps = 0
+    send(command, params) = (steps += 1; Designs.change!(m, command, params; then=(_, problem) -> problem === nothing || refused!(v)))
+    for (a, b) in renamed
+      send("parameters.rename", JSON.Object("name" => a, "new_name" => b))
+    end
+    for n in changed
+      if haskey(texts, n)
+        send("parameters.change", JSON.Object("name" => n, "expression" => texts[n]))
+      elseif haskey(readings, n)
+        r = readings[n]
+        params = JSON.Object("name" => n, "expression" => given(r, n in agreed))
+        note = noted(r, n in agreed, notes[n])
+        note === nothing || (params["comment"] = note)
+        send("parameters.change", params)
+      end
+    end
+    for n in added
+      r = get(readings, n, nothing)
+      r === nothing && continue
+      got = given(r, n in agreed)
+      params = JSON.Object("name" => n, "expression" => got)
+      got == r.code || (params["comment"] = Expressions.comment(r.code, got))
+      send("parameters.add", params)
+      # SolidCraft puts a new parameter last. It goes under the row over it, when one of the user's comes after it.
+      k = findfirst(x -> x[1] == n, now)
+      over = findlast(x -> x[1] in users, now[1:k-1])
+      next = findfirst(x -> x[1] in users, now[k+1:end])
+      next === nothing || send("parameters.move", over === nothing ? JSON.Object("name" => n, "before" => now[k+next][1]) :
+                                                                       JSON.Object("name" => n, "after" => now[over][1]))
+      push!(users, n)
+    end
+    foreach(n -> send("parameters.delete", JSON.Object("name" => n)), deleted)
+    steps > 1 && Designs.refresh!(m; then=() -> Designs.together!(m, before))
+    isempty(problems) || (m.said = join(problems, " "))
+  end
+  v
 end
 
 "The window that `v` is in, or nothing"
 part_window(v::DesignView) = window_of(v)
 
-"Add the parameter that's typed under the list. Its value is Julia code, as SolidCraft keeps it best: see `agree!`."
-add_param!(v::DesignView) = begin
-  name, value = v.parts[(:newparam, :name)], v.parts[(:newparam, :value)]
-  (isempty(strip(text_of(name))) || isempty(strip(text_of(value)))) && return v
-  called = String(strip(text_of(name)))
-  r = read_code(v, text_of(value), :number, called)
-  r isa String && return wrong!(v, value, r)
-  agree!(v, Dict(called => r)) do agreed
-    got = given(r, called in agreed)
-    params = JSON.Object("name" => called, "expression" => got)
-    got == r.code || (params["comment"] = Expressions.comment(r.code, got))
-    Designs.change!(v.model, "parameters.add", params)
-  end
-  set_text!(name, "")
-  set_text!(value, "")
-  v
-end
-
 """
-Set a parameter to what's typed in its field, when Return is pressed there.
-It gives `:wrong` when the code of the field is wrong, and what that is shows
-under the field. It gives nothing for a field that Return does nothing in.
+What Return does in the field `box`. In a form's field, it gives the form to
+SolidCraft, and it gives nothing for a field that Return does nothing in.
 """
 commit!(v::DesignView, box) = begin
   for (key, node) in v.parts
     node === box || continue
-    key isa Tuple || continue
-    if key[1] == :param
-      said = set_param!(v, key[2], text_of(box))
-      return said isa String ? (wrong!(v, box, said); :wrong) : v
-    end
-    key[1] == :newparam && return add_param!(v)
-    key[1] == :field && return apply!(v)
+    key isa Tuple && key[1] == :field && return apply!(v)
   end
   nothing
 end
