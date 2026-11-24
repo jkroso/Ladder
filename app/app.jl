@@ -11,7 +11,7 @@
 
 include("start.jl")
 
-@use ".." build_editor open_editor move_old_folders! run_startup! startup_page STARTUP_FOLDER STARTUP WELCOME restyle! problems pages_dir SIDEBAR_ICONS FILE_ICONS todo_at inbox Agent INSERTS PLAN_ICONS SCHEDULE_ICONS BLOCK_ICONS window! editors settings_editor theme! Update open! level! SOURCE_FILES kinds
+@use ".." build_editor open_editor move_old_folders! run_startup! startup_page STARTUP_FOLDER STARTUP WELCOME restyle! problems pages_dir SIDEBAR_ICONS FILE_ICONS todo_at inbox Agent INSERTS PLAN_ICONS SCHEDULE_ICONS BLOCK_ICONS window! editors settings_editor theme! Update open! level! SOURCE_FILES kinds LAST_RUN
 @use "github.com/jkroso/MiniFB.jl" Window KeyPress KeyRelease MouseMove Keys onkey onmouse Typed ontype
 @use "github.com/jkroso/Font.jl/units" px
 @use "github.com/jkroso/UI.jl/Interface/abstract" focus window_of
@@ -166,7 +166,7 @@ Draw every part of each page in `dir`, and fail if a live block on one shows an
 error. An editor only runs the blocks that are on screen, so this scrolls down
 each page a screen at a time.
 """
-check_pages(dir) =
+check_pages(dir) = begin
   for name in ("welcome.md", "components.md", "julia.md", "settings/settings.md", "settings/code-editor.md", "settings/key-bindings.md", "schedule.md", "counter.md")
     empty!(problems)
     e = build_editor(joinpath(dir, name))
@@ -178,6 +178,12 @@ check_pages(dir) =
     end
     isempty(problems) || error("A live block in $name failed: ", join(unique(problems), "\n"))
   end
+  # A view of a Julia file, like the welcome page's wall.jl, runs the file's code in a task, and the last task
+  # stays in LAST_RUN. Julia can't write a task into the app, so the build failed with "Task cannot be serialized".
+  run = LAST_RUN[]
+  run === nothing || (try wait(run) catch end; LAST_RUN[] = nothing)
+  nothing
+end
 
 # An email for the warm-up, with the kinds of thing that email is made of: a table in a table, cells over two
 # columns, a button, a float, a list, a picture that's written into it, and CSS for a narrow window
