@@ -3659,6 +3659,9 @@ spare(ps::Vector{Piece}) = begin
   out
 end
 
+"How wide `text` is in the face `f`, with each character that the font lacks in a font that has it"
+spared_width(text::AbstractString, f::Face) = isempty(text) ? 0px : sum(measure(pf, part) for (part, pf) in runs(text, f))
+
 "`text` in the face `f`, as the parts of a row. A character that the font lacks is in a font that has it."
 spared(text::AbstractString, f::Face) =
   [Box(fixed(measure(pf, part)), Alignment.Start,
@@ -31137,7 +31140,7 @@ describe(t::TopBar) = begin
   # What a file that's only shown says of itself, like how many rows a CSV file has, can need more room than that.
   # The words move aside as the slider of the levels opens, so then they need its room too.
   grown = isempty(mode) ? 0px : slider_grown(e)
-  said = readonly(b) && !isempty(b.about) ? measure(Face(SANS, "", 12px, colours.dim, false), b.about) + LOCK_W + 70px + grown : 0px
+  said = readonly(b) && !isempty(b.about) ? spared_width(b.about, said_face()) + LOCK_W + 70px + grown : 0px
   side = max(isempty(more) && isempty(checks) ? 250px : 330px, said) + (isempty(mode) ? 0px : MODE_W)
   ended_rename!(e)
   # The two ends of the bar are as wide as each other, so the file's name is in the middle of the space beside
@@ -31201,6 +31204,9 @@ describe(t::TopBar) = begin
                       copy_part(e)...))...))
 end
 
+"The face of what a file that's only shown says of itself, in the top bar"
+said_face() = Face(SANS, "", 12px, colours.dim, false)
+
 """
 What a file that's only shown says of itself, for the top bar, in `room` at
 most. With less room than the words need, their start is cut off. That
@@ -31208,8 +31214,9 @@ happens in a narrow window, when the slider of the levels takes their room as
 it opens.
 """
 said_part(words, room) = begin
-  tag = Box(height(28px), padding(8px, 0px), label(words, 12px, color=colours.dim))
-  wide = measure(Face(SANS, "", 12px, colours.dim, false), words) + 16px
+  # A character that the font lacks is in a font that has it, like the ✳ that starts Claude Code's title
+  tag = Box(height(28px), padding(8px, 0px), Row(Alignment.Center, spared(words, said_face())...))
+  wide = spared_width(words, said_face()) + 16px
   wide <= room && return tag
   room = max(room, 0px)
   Row(fixed(room), height(28px), Alignment.Start, clip=true, Box(Alignment.Start, offset_x=room - wide, Row(fixed(wide), height(28px), tag)))
