@@ -536,6 +536,8 @@ The top bar shows the page's address, and says "Read only", because you can't ch
 
 Somebody else wrote the page, so Ladder runs none of its code, and the page can show no file of your Mac. A live block or a sum in it shows as its code. An email follows the same rule. The scripts of a page of HTML run, as a browser runs them, and they get no file of your Mac either.
 
+A folder on the server can change how the pages in it show, with a page called `.ladder`, as a folder on your Mac can. Ladder asks for the `.ladder` page of each folder that a page is in. Its code comes from whoever runs the site, so the first time that a site sends one, Ladder asks you whether to run it. Ladder keeps your answer for the site. The commands Run Site Code and Stop Site Code change it. When the code runs, a blog's pages look on the web as they look on your Mac.
+
 To change the page, save a copy of it on your Mac. Click the Save button after "Read only" in the top bar, or press ⌘S, and choose where the copy goes. Ladder makes a folder named for the site, like `example.com`, and puts the page in it at its place on the site. It also saves each page and file that the page links to, and what those link to, when they're on the same site and in the page's own folder or a folder in it. So the first page of a site, like `example.com/`, brings the whole site. Each picture of those pages comes too. When the copy is made, the window shows it, and you can change it.
 
 The copy's pages end in `.md`, and their links name the copies. A link to something that wasn't saved, like a page of HTML, still goes to the web. The copy runs no code either, because somebody else wrote it.

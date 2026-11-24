@@ -1705,9 +1705,14 @@ it's set to, as it's written.
 """
 matter_view(e, d, o, rows) = nothing
 
-"The object of the page of text that shows, or nothing. One that the sidebar doesn't list is found again after a second, and not in each frame."
+"""
+The object of the page of text that shows, or nothing. One that the sidebar
+doesn't list is found again after a second, and not in each frame. A page
+from a web server is a `WebPage`, in the web folders that it's in.
+"""
 text_object(e) = begin
   path = e.buf.path
+  isremote(path) && return web_page(path)
   haskey(e.entries, path) && return e.entries[path]
   kept = get(e.nodes, :text_object, nothing)
   kept !== nothing && kept[1] == path && time() - kept[2] < 1 && return kept[3]
@@ -25078,15 +25083,14 @@ const PAGE_WINDOWS = Dict{String,Any}()
 "The pages whose code has all run in their module, by path, as the kinds of block that a page defines need"
 const PAGES_RUN = Set{String}()
 
-"The path that the module of the page at `path` is kept by: the file's real path, as Kip keeps a module by"
-page_key(path::AbstractString) = isfile(path) ? realpath(path) : abspath(path)
+"The path that the module of the page at `path` is kept by: the file's real path, as Kip keeps a module by, or the address of a page on the web"
+page_key(path::AbstractString) = isremote(path) ? String(path) : isfile(path) ? realpath(path) : abspath(path)
 
 "The name of the module of the page at `path`: its path, with ~ for your home folder, and a ⭒ in front, as Kip's modules have"
 page_module_name(path::AbstractString) = Symbol("⭒", Base.Filesystem.contractuser(page_key(path)))
 
-"The code of each `julia` block of the Markdown page at `path`, with the line of the page that it starts on"
-page_code(path::AbstractString) = begin
-  lines = text(path)
+"The code of each `julia` block of the Markdown page at `path`, with the line of the page that it starts on. `lines` are the page's lines."
+page_code(path::AbstractString, lines=text(path)) = begin
   ks = classify(lines)
   out = Tuple{Int,String}[]
   for (i, k) in enumerate(ks)
@@ -25103,10 +25107,14 @@ Run the code of the Markdown page at `path` in the module `m`: each of its
 """
 run_page!(m::Module, path::AbstractString) = (page_value(m, path); m)
 
-"Run the code of the Markdown page at `path` in the module `m`, as `run_page!` does. It gives the value of the last `julia` block, or nothing when the page has none."
-page_value(m::Module, path::AbstractString) = begin
+"""
+Run the code of the Markdown page at `path` in the module `m`, as `run_page!`
+does. It gives the value of the last `julia` block, or nothing when the page
+has none. `lines` are the page's lines, as a page from a web server gives them.
+"""
+page_value(m::Module, path::AbstractString, lines=text(path)) = begin
   value = nothing
-  for (line, code) in page_code(path)
+  for (line, code) in page_code(path, lines)
     try
       # Empty lines before the code give each line of it the number that it has in the page
       value = run_in(m, "\n"^(line - 1) * code, path)
@@ -42036,6 +42044,9 @@ describe(e::Editor) = begin
   # A folder's page that waits runs when the frame is made, so that no part of a frame meets code that's
   # newer than the frame. The next frame is drawn with what the page loaded.
   isempty(FOLDER_PAGES_DUE) || run_folder_pages!()
+  # A web folder's page runs then too, once its site may run code. See "a web folder's own page".
+  isempty(WEB_PAGES_DUE) || run_web_folder_pages!()
+  isempty(SITES_TO_ASK) || ask_site!(e)
   scene
 end
 
@@ -43286,6 +43297,10 @@ add_command!(copy_link_to_block!, title="Copy a link that shows the block at the
 # email runs no code, and a block that Ladder would do more with shows as its
 # code. See `foreign`.
 #
+# A folder on the server can change how the pages in it show, with a page
+# called `.ladder`, as a folder on the Mac can. Ladder runs that page's code
+# only for a site that you allow: see "a web folder's own page".
+#
 # A window that isn't on the screen, like one a test makes, asks the web for
 # nothing, unless a test put its own function in `PAGE_GETTER`.
 
@@ -43342,11 +43357,14 @@ const PAGE_WAIT = 0.4
 
 "Look whether the page that the window of `e` asked a web server for has come, and show it when it has. Each frame calls this."
 remote_tick!(e) = begin
+  isempty(WEB_FOLDER_PAGES) || web_folders_tick!(e)
   a = get(e.nodes, :page_asked, nothing)
   a isa PageAsked || return nothing
   if a.coming === nothing
     page_online(e) || return nothing   # a window that isn't on the screen yet asks once it is
     a.coming = Remote.ask(a.address, getter=(args...) -> PAGE_GETTER[](args...))
+    # The page of each folder that it's in comes beside it: see "a web folder's own page"
+    ask_web_folders!(a.address, again=a.again)
   end
   got = Remote.landed(a.coming)
   if got === nothing
@@ -43358,6 +43376,7 @@ remote_tick!(e) = begin
     return nothing
   end
   delete!(e.nodes, :page_asked)
+  Remote.ismarkdown(got) && ask_web_folders!(got.address)   # a page that moved is in other folders
   land_page!(e, a, got)
   redraw_in!(e, 0)
   nothing
@@ -47815,6 +47834,283 @@ folder_pages_tick!(e) = begin
   show_opened!(e)   # a window that was opened on a folder shows it in the page, if its page said that its kind does
   nothing
 end
+
+# --- a web folder's own page ------------------------------------------------------------
+#
+# A folder on a web server gives itself a kind as a folder on the Mac does:
+# with a page called `.ladder`, in the folder. A folder's address ends in a /,
+# like https://example.com/notes/, so its page is at
+# https://example.com/notes/.ladder. The kind changes how the pages in the
+# folder show, as it does on the Mac: the pages of a blog look as the blog's
+# site does, wherever the blog is.
+#
+# When Ladder asks a server for a page, it asks for the .ladder page of each
+# folder that the page is in too, from the top of the site down, and at the
+# same time. It asks once for each folder while Ladder is open. Reload Page
+# asks again. A folder with no such page, or one that sends HTML for it, has
+# no kind of its own.
+#
+# The page's code comes from whoever runs the site, so Ladder runs it only
+# for a site that you allow. The first time that a site sends a page with
+# code, Ladder shows the page plain and asks you. Ladder keeps your answer
+# for the site, in the file "sites that run code" beside the settings file.
+# Run Site Code and Stop Site Code, in the command palette, change it. Code
+# that ran stays loaded until Ladder quits, but a site that you stop has no
+# kinds from then on.
+#
+# A page that's allowed runs as a folder's page on the Mac does: from the
+# top, after the frame, in a module named by its address. The value of its
+# last `julia` block is the folder's kind. A web folder of no kind takes the
+# kind of its own .ladder page. A folder in a folder of a kind takes what
+# that kind says, with its method of `web_kind`: a folder in a blog is a
+# section of the blog, unless its own page says otherwise.
+#
+# A page from a web server is a `WebPage`, in a `WebFolder` of the folder's
+# kind, so a kind has methods for the pages on the web that it holds, as it
+# has for its files on the Mac:
+#
+#     page_foot(e, d::WebFolder{Notes}, o::WebPage) = ...
+#     matter_view(e, d::WebFolder{<:BlogFolder}, o::WebPage, rows) = ...
+#
+# The page itself still runs no code: see "a page from a web server".
+
+"""
+A folder on a web server: its address, which ends in a /, and the web folder
+that it's in, or nothing at the top of its site. `K` is its kind, a type
+under `AbstractDirectory`, as a folder on the Mac has one. A folder of no
+kind is a `WebFolder{FS.Directory}`.
+"""
+struct WebFolder{K<:AbstractDirectory}
+  address::String
+  parent::Union{WebFolder,Nothing}
+end
+
+"A page on a web server, in the web folder `parent`"
+struct WebPage
+  address::String
+  parent::WebFolder
+end
+
+"What Ladder has of the .ladder page of a web folder"
+mutable struct WebFolderPage
+  coming::Any               # the Remote.Coming while the page is on its way, or nothing
+  lines::Vector{String}     # the page's lines, or none when the folder has no such page
+  code::Bool                # the page has a `julia` block
+  ran::Bool                 # its code has run since these lines came
+  kind::Any                 # the kind that its code gave, or nothing
+end
+
+"The .ladder page of each web folder that Ladder asked for, by the folder's address"
+const WEB_FOLDER_PAGES = Dict{String,WebFolderPage}()
+"The addresses of the web folders whose page waits to run"
+const WEB_PAGES_DUE = String[]
+"The sites whose .ladder pages wait for your answer: whether Ladder runs their code"
+const SITES_TO_ASK = Set{String}()
+
+"The site of `address`: how it's asked for and the computer that it's on, like https://example.com"
+web_site(address::AbstractString) = (m = match(r"^https?://[^/?#]*"i, address); m === nothing ? "" : lowercase(m.match))
+
+"""
+Ask the server of the page at `address` for the .ladder page of each folder
+that the page is in, unless Ladder has it or is getting it. With `again`,
+Ladder asks again for each page that it has.
+"""
+ask_web_folders!(address::AbstractString; again=false) = begin
+  for f in Remote.folders(address)
+    kept = get(WEB_FOLDER_PAGES, f, nothing)
+    (kept === nothing || (again && kept.coming === nothing)) || continue
+    c = Remote.ask(f * FOLDER_PAGE, getter=(args...) -> PAGE_GETTER[](args...))
+    kept === nothing ? (WEB_FOLDER_PAGES[f] = WebFolderPage(c, String[], false, false, nothing)) : (kept.coming = c)
+  end
+  nothing
+end
+
+"The lines of the .ladder page that a server sent, or none. A page of HTML, like one that says the server has no such page, isn't one."
+folder_page_lines(got) =
+  Remote.ok(got) && (got.type in Remote.MARKDOWN_TYPES || got.type in Remote.VAGUE_TYPES) ? Remote.lines(got) : String[]
+
+"""
+Look whether a .ladder page that Ladder asked a web server for has come.
+Each frame of `e` calls this. A page whose lines changed runs again.
+"""
+web_folders_tick!(e) = begin
+  waits = false
+  for (f, p) in WEB_FOLDER_PAGES
+    p.coming === nothing && continue
+    got = Remote.landed(p.coming)
+    got === nothing && (waits = true; continue)
+    p.coming = nothing
+    lines = folder_page_lines(got)
+    lines == p.lines && continue
+    p.lines, p.ran, p.kind = lines, false, nothing
+    p.code = !isempty(page_code(f * FOLDER_PAGE, lines))
+    foreach(e -> redraw_in!(e, 0), editors)
+  end
+  waits && redraw_in!(e, 0.05)
+  nothing
+end
+
+"The file in Ladder's own folder that keeps your answer for each site with .ladder pages: whether Ladder runs their code"
+sites_file() = joinpath(dirname(settings_file()), "sites that run code")
+
+"Your answers from `sites_file()`, as the file was when it was last read: the file, when it was saved, and the answer for each site"
+const SITE_ANSWERS = Ref(("", 0.0, Dict{String,Bool}()))
+
+"Your answer for each site: true when Ladder runs the code of its .ladder pages, and false when it doesn't"
+site_answers() = begin
+  file = sites_file()
+  at = mtime(file)   # 0 when there's no file
+  kept = SITE_ANSWERS[]
+  kept[1] == file && kept[2] == at && return kept[3]
+  said = Dict{String,Bool}()
+  for line in (isfile(file) ? readlines(file) : String[])
+    parts = split(line, '\t', limit=2)
+    length(parts) == 2 && (said[String(parts[2])] = parts[1] == "yes")
+  end
+  SITE_ANSWERS[] = (file, at, said)
+  said
+end
+
+"True when Ladder runs the code of the .ladder pages of `site`, false when it doesn't, or nothing when you haven't said"
+site_runs(site::AbstractString) = get(site_answers(), site, nothing)
+
+"Keep your answer for `site`: whether Ladder runs the code of its .ladder pages"
+site_runs!(site::AbstractString, yes::Bool) = begin
+  said = copy(site_answers())
+  said[site] = yes
+  mkpath(dirname(sites_file()))
+  write(sites_file(), join(("$(said[s] ? "yes" : "no")\t$s" for s in sort!(collect(keys(said)))), "\n") * "\n")
+  SITE_ANSWERS[] = ("", 0.0, said)   # the file is read again
+  delete!(SITES_TO_ASK, site)
+  foreach(e -> redraw_in!(e, 0), editors)
+  nothing
+end
+
+"""
+The kind that the .ladder page of the web folder at `f` gives the folder, or
+nothing: the folder has no page, its page gave no kind, or its site doesn't
+run code. A page whose site you haven't answered for waits for your answer,
+and a page that hasn't run waits to run after the frame. Code that started
+before a page ran can't make a folder of its kind, as on the Mac.
+"""
+web_page_kind(f::AbstractString) = begin
+  p = get(WEB_FOLDER_PAGES, f, nothing)
+  (p === nothing || !p.code) && return nothing
+  runs = site_runs(web_site(f))
+  if !p.ran
+    runs === nothing && push!(SITES_TO_ASK, web_site(f))
+    runs === true && !(f in WEB_PAGES_DUE) && push!(WEB_PAGES_DUE, f)
+    return nothing
+  end
+  runs === true && pages_callable() ? p.kind : nothing
+end
+
+"""
+The kind of the web folder at `f`, which is in the web folder `d`: a type
+under `AbstractDirectory`, as `FS.kind` gives one to a folder on the Mac. A
+folder in a folder of no kind takes the kind of its own .ladder page. A kind
+of folder has a method of this when the folders in it have a kind too.
+"""
+web_kind(d::WebFolder, f::AbstractString) = FS.Directory
+web_kind(d::WebFolder{FS.Directory}, f::AbstractString) = something(web_page_kind(f), FS.Directory)
+
+"The page at `address` on a web server, in the web folders that it's in, each of its kind"
+web_page(address::AbstractString) = begin
+  d = nothing
+  for f in Remote.folders(address)
+    k = d === nothing ? something(web_page_kind(f), FS.Directory) : web_kind(d, f)
+    d = WebFolder{k}(f, d)
+  end
+  d === nothing ? nothing : WebPage(address, d)
+end
+
+"""
+Run the .ladder page of each web folder that waits, as `run_folder_pages!`
+runs the page of a folder on the Mac. The kind that a page gives is its
+folder's until the page changes. Code that fails leaves the folder plain,
+and the window says which line failed.
+"""
+run_web_folder_pages!() = begin
+  while !isempty(WEB_PAGES_DUE)
+    f = popfirst!(WEB_PAGES_DUE)
+    p = get(WEB_FOLDER_PAGES, f, nothing)
+    (p === nothing || p.ran || site_runs(web_site(f)) !== true) && continue
+    address = f * FOLDER_PAGE
+    p.kind = try
+      value = Base.invokelatest(page_value, code_module!(address), address, p.lines)
+      value === nothing || (value isa Type && value <: AbstractDirectory) ||
+        error("The last `julia` block of the page gave $(Base.invokelatest(repr, value)), which isn't a kind of folder.")
+      value
+    catch err
+      FOLDER_PAGE_STOPPED[] = ("The $FOLDER_PAGE page of $(Remote.label(f)) stopped. " * trouble(err), time())
+      nothing
+    end
+    p.ran = true
+  end
+  FOLDER_PAGES_WORLD[] = Base.get_world_counter()
+  foreach(e -> redraw_in!(e, 0), editors)
+  nothing
+end
+
+"""
+Ask whether Ladder may run the code of the .ladder pages of `site`, in a
+panel. True when you say that it may. The button that Return presses is
+Don't Run.
+"""
+site_code_panel(site::AbstractString) = with_pool() do
+  alert = msg(msg(cls("NSAlert"), "alloc"), "init")
+  msg(alert, "setMessageText:", nsstring("Run the code of $(Remote.host(site))?"))
+  msg(alert, "setInformativeText:", nsstring(
+    "$site has a .ladder page with Julia code. The code changes how the site's pages show in Ladder. " *
+    "It can also do anything that a program on your Mac can do.\n\n" *
+    "Ladder keeps your answer. Run Site Code and Stop Site Code, in the command palette, change it."))
+  msg(alert, "addButtonWithTitle:", nsstring("Don't Run"))
+  msg(alert, "addButtonWithTitle:", nsstring("Run Its Code"))
+  # 1000 is the first button, Don't Run
+  yes = ccall((:objc_msgSend, libobjc), Int, (Ptr{Cvoid}, Ptr{Cvoid}), alert, sel("runModal")) == 1001
+  msg(alert, "release")
+  yes
+end
+
+"What asks whether a site may run the code of its .ladder pages. A test puts its own function here."
+const SITE_ASKER = Ref{Function}(site_code_panel)
+
+"""
+Ask you whether the site of the page that `e` shows may run the code of its
+.ladder pages, when the site waits for your answer. The page shows first:
+Ladder asks in the frame after the one that showed it. Only a window on the
+screen asks, unless a test put its own function in `SITE_ASKER`.
+"""
+ask_site!(e) = begin
+  path = e.buf.path
+  site = isremote(path) ? web_site(path) : ""
+  (site in SITES_TO_ASK && site_runs(site) === nothing) || return nothing
+  (SITE_ASKER[] !== site_code_panel || on_screen(e)) || return nothing
+  if get(e.nodes, :site_ask, "") != path
+    e.nodes[:site_ask] = path   # this frame shows the page, and the next asks
+    redraw_in!(e, 0.05)
+    return nothing
+  end
+  delete!(e.nodes, :site_ask)
+  delete!(SITES_TO_ASK, site)
+  yes = SITE_ASKER[](site)
+  # The panel took the keyboard, so the window never heard the keys that answered it come up
+  w = window_of(e)
+  w === nothing || (w.keys = Keys(0))
+  site_runs!(site, yes)
+end
+
+"Run Site Code: let the site of the page from the web that shows run the code of its .ladder pages"
+run_site_code!(e) = (isremote(e.buf.path) && site_runs!(web_site(e.buf.path), true); e)
+
+"Stop Site Code: stop the site of the page from the web that shows from running the code of its .ladder pages"
+stop_site_code!(e) = (isremote(e.buf.path) && site_runs!(web_site(e.buf.path), false); e)
+
+works_here(e, ::Val{:run_site_code}) = isremote(e.buf.path) && site_runs(web_site(e.buf.path)) !== true
+works_here(e, ::Val{:stop_site_code}) = isremote(e.buf.path) && site_runs(web_site(e.buf.path)) === true
+
+add_command!(run_site_code!, title="Let this page's site run the code of its .ladder pages, which change how its pages show", kind=:look)
+add_command!(stop_site_code!, title="Stop this page's site from running the code of its .ladder pages", kind=:look)
 
 # --- a SolidCraft design -------------------------------------------------------------------
 #
@@ -52718,6 +53014,8 @@ entry_marks(e, o::BlogFolder) = git_marks(e, o)
 entry_marks(e, ::BlogFolder, o::FSObject) = git_marks(e, o)
 # A folder in a blog is a section of it, unless its own page gives it another kind, or Ladder finds one for it
 FS.kind(::BlogFolder, path::FSPath) = (k = folder_kind(path); k === FS.Directory ? BlogSection : k)
+# A folder of a blog on a web server is a section too, unless its own .ladder page gives it another kind. See "a web folder's own page".
+web_kind(::WebFolder{<:BlogFolder}, f::AbstractString) = (k = web_page_kind(f); k === nothing || k === FS.Directory ? BlogSection : k)
 push!(BLOCK_ICONS, "rss", "globe", "cloud-upload", "pencil-square", "folder-fill", "markdown", "pencil", "book", "file-earmark", "star-fill")
 
 "The blog's own folder, of the folder `d` of a blog"
@@ -53218,7 +53516,14 @@ describe(l::SiteLink) = Box(name="Link", border(1px, :solid, RGBA(colours.accent
 cursor(::SiteLink) = :hand
 onkey(l::SiteLink, ::KeyPress{Keys.mouse_left}) = (isempty(l.url) || BROWSER[](l.url); handled)
 
-matter_view(e, ::BlogFolder, ::FS.File{:review}, rows) = begin
+matter_view(e, ::BlogFolder, ::FS.File{:review}, rows) = review_head(e, rows)
+
+# A page of a blog on a web server has no .review at the end of its address, so its front matter says that it's a
+# book review: it has a rating, as each .review file has
+matter_view(e, ::WebFolder{<:BlogFolder}, ::WebPage, rows) = any(r -> lowercase(r[2]) == "rating", rows) ? review_head(e, rows) : nothing
+
+"The top of a book review of a blog, with what its front matter `rows` say"
+review_head(e, rows) = begin
   h = node!(ReviewHead, e, :review_head)
   h.said = Dict(lowercase(k) => String(strip(v, ['"', '\''])) for (_, k, v) in rows)
   h
@@ -53318,8 +53623,11 @@ end
 # as big as the site's. The window has the site's colours while such a page
 # shows, whatever the theme. The page's front matter shows as on any page.
 
-"How the page that's in the window looks: :site for a page of a blog, as its site has it, or :own, as the settings say"
-page_look(e) = page_blog_folder(e) === nothing ? :own : :site
+"How the page that's in the window looks: :site for a page of a blog, on the Mac or on a web server, as its site has it, or :own, as the settings say"
+page_look(e) = page_blog_folder(e) !== nothing || web_blog_page(e) ? :site : :own
+
+"True when the page that shows is from a web server, in a folder of a blog there: see \"a web folder's own page\""
+web_blog_page(e) = (o = text_object(e); o isa WebPage && o.parent isa WebFolder{<:BlogFolder})
 
 "What the window's colours are called now, for what's kept with them: :site on a page of a blog, or else the theme's name"
 look_key(e) = e.look == :site ? :site : e.theme

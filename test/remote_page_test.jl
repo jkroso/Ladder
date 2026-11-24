@@ -26,7 +26,8 @@ page!(address, text; type="text/markdown; charset=utf-8", status=200, moved="") 
 # The tests put these back when they end, for the tests that share their process
 const was_getter, was_browser = K.PAGE_GETTER[], K.BROWSER[]
 K.PAGE_GETTER[] = (address, file, about) -> begin
-  push!(asked, address)
+  # Ladder asks for the .ladder page of each folder of a page too: see test/web_folder_page_test.jl
+  endswith(address, "/.ladder") || push!(asked, address)
   at = get(SITE, address, nothing)
   if at === nothing
     write(file, "Not found"); write(about, "$address\ntext/plain\n404\n")

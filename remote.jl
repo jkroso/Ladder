@@ -139,6 +139,25 @@ trail(address::AbstractString) = begin
 end
 
 """
+The folders that the page at `address` is in, from the top of its site down,
+each as its address with a / at its end. A folder's own page is in the folder.
+
+    folders("https://example.com/a/b/c.md")   # ["https://example.com/", "https://example.com/a/", "https://example.com/a/b/"]
+    folders("https://example.com/a/")         # ["https://example.com/", "https://example.com/a/"]
+"""
+folders(address::AbstractString) = begin
+  m = match(r"^(https?://[^/?#]*)([^?#]*)"i, bare(address))
+  m === nothing && return String[]
+  parts = split(String(m[2]), '/')   # "/a/b/c.md" is "", "a", "b" and "c.md"
+  out = [String(m[1]) * "/"]
+  for name in parts[2:end-1]
+    isempty(name) && break   # a path like /a//b names no folder
+    push!(out, out[end] * name * "/")
+  end
+  out
+end
+
+"""
 Start to get what's at the web address `address` into `file`. `about` is a
 file for three lines: the address that it ended up at, the kind of file that
 the server says it is, and the number that the server answered with, like 200.
