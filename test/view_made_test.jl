@@ -138,6 +138,8 @@ end
   @test z !== nothing && z.what == (:node, viewer) && e.buf.path == page && viewer.fill
   r = rect(viewer)
   @test (r.left, r.top, r.width, r.height) == (0px, K.TOPBAR_H, 1000px, 1600px - K.TOPBAR_H)
+  # Nothing lies over the model: no button of the view that fills the window shows
+  @test !any(b -> b isa K.PlanButton && rect(b) !== nothing, values(z.parts))
   shot("view-made-full.png")
   # Esc puts the document back, with the model in it as it was
   onkey(w, KeyPress{Keys.escape}(0, w)); frames()

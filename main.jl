@@ -11371,20 +11371,23 @@ describe(v::ZoomView) = begin
         border(1px, :solid, colours.line), lifted, buttons...))
   close = v.bare ? nothing : button!(v, :close, :close, icon="x-lg", tip="Back to the page  esc")
   if what[1] == :node && what[2] isa Browsers.Browser
-    # A page of the web has all of the window under the top bar, as it has a browser's window
+    # A page of the web has all of the window under the top bar, as it has a browser's window. Nothing lies over it:
+    # Esc puts the document back.
     b = what[2]
     w, h = window_size(e)
     b.zoom = round(Float64(e.zoom), digits=2)
     b.wide, b.high = w, max(40px, h - TOPBAR_H)
-    return Stack(width(grow=grow), height(grow=grow), Alignment.Start, b, bar(close))
+    return Stack(width(grow=grow), height(grow=grow), Alignment.Start, b)
   elseif what[1] == :node && what[2] isa STLViewer
-    # A model has all of the window under the top bar too, with no frame. The bar is over it, above the line that says what it is,
-    # if it has that line.
+    # A model has all of the window under the top bar too, with no frame, and nothing lies over it: Esc puts the document
+    # back. Only a model of a gallery has a bar, to go to the file before it and the next one. It's above the line that
+    # says what the model is, if the model has that line.
     node = what[2]
     node.fill = true
     shows = with_theme(() -> geometry(node), component_theme(e.zoom))
+    steps = gallery_buttons(v, rest=100)
     return Stack(width(grow=grow), height(grow=grow), Alignment.Start, Box(width(grow=grow), height(grow=grow), shows),
-      gallery_edges(v)..., bar(gallery_buttons(v, rest=100)..., close, up=node.foot ? MODEL_FOOT : 0px))
+      gallery_edges(v)..., (isempty(steps) ? () : (bar(steps..., close, up=node.foot ? MODEL_FOOT : 0px),))...)
   elseif what[1] == :node
     # A model or a video is as tall as the window has room for. Its own bar is under its picture.
     node = what[2]

@@ -182,6 +182,7 @@ end
   r = rect(b)
   @test (r.left, r.top, r.width, r.height) == (0px, K.TOPBAR_H, 1000px, 2600px - K.TOPBAR_H)
   @test K.page_takes(view(1), nothing)
+  @test !any(b -> b isa K.PlanButton && rect(b) !== nothing, values(K.zooming(e).parts))
   haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], "view-page-full.png"), w)
   # It still has the document's sums there, and Esc puts it back in the document
   @test live(b, "ladder.sums.span") == 70
