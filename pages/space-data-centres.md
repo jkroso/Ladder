@@ -121,10 +121,16 @@ The fleet's panels cover !`array_area = round(panels / (sunlight * float(eff)) /
 
 Starmind AI1 is a satellite of about this power. Its wings span 70 metres, and it has 110 square metres of radiators for 150 kilowatts.[^4]
 
-Here is one copy, drawn from the sums on this page. It changes as you drag them: the span of the wings, the pipes, the radiator, the height. Drag it to turn it. Pinch it, or scroll with ⌘ held, to come nearer. The button beside its top right corner goes to its file, satellite.html, where the model fills the window and keeps these sums.
+Here is one copy, drawn from the sums on this page. It changes as you drag them: the span of the wings, the pipes, the radiator, the height. Drag it to turn it. Pinch it, or scroll with ⌘ held, to come nearer. The first button beside its top right corner makes it fill the window. The second goes to its file, satellite.html, where the model keeps these sums.
 
 ```view
 satellite.html
+```
+
+Here is the same copy as a model in Ladder's own viewer. The file satellite.jl, beside this page, is Julia code that makes the model from the same sums. So this one changes as you drag them too, and it stays turned as you left it. Around it are the Sun and the Earth, from the height of the orbit. The first button beside it makes it fill the window.
+
+```view
+satellite.jl
 ```
 
 ```mermaid

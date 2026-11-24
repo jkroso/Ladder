@@ -163,6 +163,32 @@ end
   back!()
 end
 
+@testset "the first button makes what a view shows fill the window" begin
+  # A picture and a page have something to fill the window with. A table, a page of Markdown and a folder have only
+  # the button that goes to the file.
+  @test K.fills(e)[objectid(view(1))].also == (:node, view(1).browser)
+  @test K.fills(e)[objectid(view(2))].also[1] == :picture
+  @test all(n -> K.fills(e)[objectid(view(n))].also === nothing, 3:5)
+  go_button(2)
+  click(middle(rect(K.fills(e)[objectid(view(2))].expand)))
+  @test K.zooming(e) !== nothing && K.zooming(e).what[1] == :picture && e.buf.path == page
+  onkey(w, KeyPress{Keys.escape}(0, w)); frames()
+  @test K.zooming(e) === nothing
+  # A page of the web has all of the window under the top bar, and the keyboard. The document stays where it is.
+  b = view(1).browser
+  go_button(1)
+  click(middle(rect(K.fills(e)[objectid(view(1))].expand)))
+  @test K.zooming(e) !== nothing && K.zooming(e).what == (:node, b) && e.buf.path == page && w.focus === b
+  r = rect(b)
+  @test (r.left, r.top, r.width, r.height) == (0px, K.TOPBAR_H, 1000px, 2600px - K.TOPBAR_H)
+  @test K.page_takes(view(1), nothing)
+  haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], "view-page-full.png"), w)
+  # It still has the document's sums there, and Esc puts it back in the document
+  @test live(b, "ladder.sums.span") == 70
+  onkey(w, KeyPress{Keys.escape}(0, w)); frames()
+  @test K.zooming(e) === nothing && rect(b).width < 1000px && rect(b).top > K.TOPBAR_H
+end
+
 @testset "an empty view shows the file that's written in it" begin
   K.write_block!(view(7), K.VIEW_BLOCK, ["costs.csv"])
   frames()

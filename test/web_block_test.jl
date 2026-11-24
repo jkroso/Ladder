@@ -178,8 +178,9 @@ end
   w.keys = was
   @test opened == ["https://example.com", "https://example.com"] && e.buf.path == page
   K.BROWSER[] = old
-  # A page that the block holds is in no file, so it has no button
-  @test !haskey(K.fills(e), objectid(e.nodes[(:block, K.VIEW_BLOCK, page, 2)]))
+  # A page that the block holds is in no file, so no button goes to one. Its one button makes it fill the window.
+  held = e.nodes[(:block, K.VIEW_BLOCK, page, 2)]
+  @test K.fills(e)[objectid(held)].what == (:node, held.browser) && K.fills(e)[objectid(held)].also === nothing
 end
 
 @testset "a link goes to its page where it is, and the block's line says it" begin

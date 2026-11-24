@@ -1,15 +1,27 @@
-# Builds pages/satellite.glb: one satellite of the fleet on the page "Data
-# centres in space", as a 3D model with materials.
+# One satellite of the fleet on the page "Data centres in space", as a 3D model
+# with materials. Its sizes come from the page's sums, as those of the model in
+# satellite.html do.
 #
-#     julia --project=. app/satellite.jl
+# In Ladder, a `view` block that names this file shows the model:
 #
-# The satellite is the one that pages/satellite.html draws, at the page's first
-# numbers, with more of its parts worked out: seams and tape on the foil, wings
-# in bays, yokes for the drums, sleeves where the loops of tube join, the
-# coolant's pipes, baffles on the star trackers. A .glb file is fixed, so change
-# the numbers under "the sizes" and run this again when the page's sums change.
+#     ```view
+#     satellite.jl
+#     ```
 #
-# The file also has what's round the satellite: the Sun as a light, and a
+# Ladder calls `view` with the page's sums, and again each time they change, as
+# while a number is dragged. So the model follows the page.
+#
+#     julia --project=. pages/satellite.jl
+#
+# writes pages/satellite.glb, the same model at the page's first numbers. A
+# .glb file is fixed, so that one follows nothing.
+#
+# The satellite is the one that pages/satellite.html draws, with more of its
+# parts worked out: seams and tape on the foil, wings in bays, yokes for the
+# drums, sleeves where the loops of tube pass the tips, the coolant's pipes,
+# baffles on the star trackers.
+#
+# The model also has what's round the satellite: the Sun as a light, and a
 # picture of the whole sky with the Earth in it, 1000 km below. Ladder's viewer
 # shows the sky behind the model and lights the model with it.
 #
@@ -23,27 +35,50 @@ const UV = NTuple{2,Float64}
 
 # --- the sizes -----------------------------------------------------------------
 
-const span, array_area, nsat = 70.0, 3406586.0, 6667     # m across the wings, m² of cells in the fleet, satellites
-const rad_use, loop_d, loop_out = 14.0, 0.03, 0.3       # % of the cells' area that the radiator has, m across a loop's tube, how far a loop passes in front of the middle for each metre of half the span
-const sat_kg, lens = 2180.0, 0.02                        # kg of one satellite, m across the laser's lens
+"""
+The page's first numbers, in SI units, as Ladder gives a sum to `view`: m
+across the wings, m² of cells in the fleet, satellites, % of the cells' area
+that the radiator has, m across a loop's tube, how far a loop passes in front
+of the middle for each metre of half the span, kg of one satellite, m across
+the laser's lens, and m above the ground.
+"""
+const FIRST = (span=70.0, array_area=3406586.0, nsat=6667.0, rad_use=14.0, loop_d=0.03, loop_out=0.3, sat_kg=2180.0, lens=0.02, alt=1.0e6)
 
-const area = array_area / nsat                           # m² of cells on one satellite
-const body = clamp(cbrt(sat_kg / 450), 0.8, 4)           # m, a side of the body, at 450 kg a cubic metre
-const reach = max(1, (span - body) / 2 - 0.6)            # m, how far each wing reaches past its drum
-const chord = area / 2reach                              # m, how tall each wing is
-const loop_r = loop_d / 2                                # m, the radius of a loop's tube
-const tip = body / 2 + 0.6 + reach                       # m from the middle to the tip of each wing
-const deep = max(loop_out * tip, body / 2 + 1.4)         # m from the middle to the front of each loop, and to its back
-const rad_area = array_area * rad_use / 100 / nsat       # m² of the radiator
-const rad_long = deep - body / 2 - 0.4                   # m: the radiator stands up behind the body, and reaches back to the loops
-const rad_high = rad_area / rad_long
+"How small and how big each number can be. A number past these would make a model with no size, or one too big to draw."
+const LIMITS = (span=(2.0, 5000.0), array_area=(1.0, 1e12), nsat=(1.0, 1e9), rad_use=(0.0, 1000.0), loop_d=(0.002, 2.0), loop_out=(0.0, 3.0),
+                sat_kg=(1.0, 1e7), lens=(0.001, 1.0), alt=(1.0e5, 1.0e8))
+
+"""
+The sizes of the satellite that the sums `sums` make. A sum has a name, like
+"span", and a number in SI units. A name that `sums` doesn't have, or has no
+number for, takes the page's first number.
+"""
+sizes(sums=Dict{String,Any}()) = begin
+  given = map(keys(FIRST)) do name
+    x = get(sums, String(name), nothing)
+    x isa Real && isfinite(x) ? clamp(Float64(x), LIMITS[name]...) : FIRST[name]
+  end
+  (; span, array_area, nsat, rad_use, loop_d, loop_out, sat_kg, lens, alt) = NamedTuple{keys(FIRST)}(given)
+  area = array_area / nsat                           # m² of cells on one satellite
+  body = clamp(cbrt(sat_kg / 450), 0.8, 4)           # m, a side of the body, at 450 kg a cubic metre
+  reach = max(1, (span - body) / 2 - 0.6)            # m, how far each wing reaches past its drum
+  chord = area / 2reach                              # m, how tall each wing is
+  loop_r = loop_d / 2                                # m, the radius of a loop's tube
+  tip = body / 2 + 0.6 + reach                       # m from the middle to the tip of each wing
+  deep = max(loop_out * tip, body / 2 + 1.4)         # m from the middle to the front of each loop, and to its back
+  rad_area = array_area * rad_use / 100 / nsat       # m² of the radiator
+  rad_long = deep - body / 2 - 0.4                   # m: the radiator stands up behind the body, and reaches back to the loops
+  rad_high = rad_area / rad_long
+  (; area, body, reach, chord, loop_r, tip, deep, rad_long, rad_high, lens, alt)
+end
+
 const CELL = 0.125                                       # m, one cell
 
 # In a dawn-dusk orbit the Sun is off to one side, and up to about 25° above level. The orbit runs along the
 # line between day and night.
 const SUN = (0.0, 0.42, 1.0) ./ sqrt(1 + 0.42^2)         # the way to the Sun, where y is straight up from the Earth
 const TIP = -asin(SUN[2])                                # radians that the satellite turns about x to face it
-const alt, R_EARTH = 1.0e6, 6.378e6                      # m above the ground, and m from the Earth's middle to the ground
+const R_EARTH = 6.378e6                                  # m from the Earth's middle to the ground
 
 # --- shapes --------------------------------------------------------------------
 
@@ -231,6 +266,8 @@ picture_bytes(colour, w, h; jpeg=false) = begin
   byte(x) = round(UInt32, clamp(x, 0, 255))
   pixels = Vector{UInt32}(undef, w * h)
   Threads.@threads for y in 0:h-1
+    # A row makes nothing for Julia to tidy up. So it says here that it can wait, or it would hold up a window that has to.
+    GC.safepoint()
     for x in 0:w-1
       c = colour(x, y)
       pixels[y*w+x+1] = 0xff000000 | byte(c[1]) << 16 | byte(c[2]) << 8 | byte(c[3])
@@ -320,9 +357,9 @@ const tubes = bumps((x, y) -> (d = abs(mod(x, 64) - 32); d < 6 ? 0.35 * sqrt(1 -
 #
 # The sky is one picture, twice as wide as it's tall. Its top row is straight
 # up, its bottom row straight down, and its middle column is the way that -z
-# points. Most of it is black. The Earth fills it from 30° under the level of
-# the eye down, since the satellite is 1000 km up. The Sun is low over that
-# ground: half of what you see is in daylight and half in the night.
+# points. Most of it is black. From 1000 km up, the Earth fills it from 30°
+# under the level of the eye down. The Sun is low over that ground: half of
+# what you see is in daylight and half in the night.
 
 fract(x) = x - floor(x)
 mix(a, b, t) = a .+ (b .- a) .* t
@@ -374,8 +411,8 @@ ground(n, to_eye) = begin
   day .+ glint .+ night .+ air
 end
 
-"The light that comes from the way `d`, seen from the satellite: the ground, the thin blue line of the air at the Earth's edge, or black space"
-sky_light(d) = begin
+"The light that comes from the way `d`, seen from a satellite `alt` metres up: the ground, the thin blue line of the air at the Earth's edge, or black space"
+sky_light(d, alt) = begin
   middle = (0.0, -(R_EARTH + alt), 0.0)   # of the Earth, from the satellite
   along = dot(d, middle)
   along > 0 || return (0.0, 0.0, 0.0)
@@ -395,10 +432,26 @@ screen(x) = begin
   255 * (x <= 0.0031308 ? 12.92x : 1.055x^(1 / 2.4) - 0.055)
 end
 
-const SKY_WIDE = 4096
-const sky = picture_bytes(SKY_WIDE, SKY_WIDE ÷ 2, jpeg=true) do x, y
-  turn, down = 2π * ((x + 0.5) / SKY_WIDE - 0.5), π * (y + 0.5) / (SKY_WIDE ÷ 2)
-  screen.(sky_light((sin(turn) * sin(down), cos(down), -cos(turn) * sin(down))))
+# A file gets the sky at its full width. A view in a page gets one half as wide, which takes a quarter of the time
+# to paint: under a second. The view paints one for each height that the page's sums give.
+const SKY_WIDE, VIEW_SKY = 4096, 2048
+
+"The bytes of the picture of the sky from `alt` metres up, `wide` pixels wide: a JPEG"
+sky_picture(alt, wide=SKY_WIDE) = picture_bytes(wide, wide ÷ 2, jpeg=true) do x, y
+  turn, down = 2π * ((x + 0.5) / wide - 0.5), π * (y + 0.5) / (wide ÷ 2)
+  screen.(sky_light((sin(turn) * sin(down), cos(down), -cos(turn) * sin(down)), alt))
+end
+
+"The skies that were painted last, by their height and their width. Painting one takes about a second, and the model is made again for each step of a drag."
+const SKIES = Pair{Tuple{Float64,Int},Vector{UInt8}}[]
+
+"The picture of the sky from `alt` metres up, as `sky_picture` gives it. It's painted only the first time."
+sky(alt, wide=SKY_WIDE) = begin
+  i = findfirst(p -> p[1] == (alt, wide), SKIES)
+  i === nothing || return SKIES[i][2]
+  length(SKIES) >= 4 && popfirst!(SKIES)
+  push!(SKIES, (alt, wide) => sky_picture(alt, wide))
+  last(SKIES)[2]
 end
 
 # --- materials -----------------------------------------------------------------
@@ -434,123 +487,132 @@ const MATERIALS = [
 
 # --- the satellite -------------------------------------------------------------
 
-"The parts of the satellite: each has a name, and its shapes by material"
-const parts = Pair{String,Vector{Pair{Symbol,Shape}}}[]
-part!(name, shapes...) = push!(parts, name => collect(Pair{Symbol,Shape}, shapes))
+"""
+The parts of a satellite with the sizes `s`, as `sizes` gives them: each part
+has a name, and its shapes by material.
+"""
+satellite(s) = begin
+  (; body, reach, chord, loop_r, tip, deep, rad_long, rad_high, lens) = s
+  parts = Pair{String,Vector{Pair{Symbol,Shape}}}[]
+  part!(name, shapes...) = push!(parts, name => collect(Pair{Symbol,Shape}, shapes))
 
-# The body, wrapped in gold foil, with a silver deck on top
-const top, back = body / 2, -body / 2
-part!("Body",
-  :gold_foil => block(body, body, body, bevel=0.03, edge=(0.01, 0.01)),
-  :silver_foil => moved(block(0.98body, 0.03, 0.98body, bevel=0.008), (0, top + 0.015, 0)))
+  # The body, wrapped in gold foil, with a silver deck on top
+  top, back = body / 2, -body / 2
+  part!("Body",
+    :gold_foil => block(body, body, body, bevel=0.03, edge=(0.01, 0.01)),
+    :silver_foil => moved(block(0.98body, 0.03, 0.98body, bevel=0.008), (0, top + 0.015, 0)))
 
-for (side, name) in ((-1, "Left wing"), (1, "Right wing"))
-  root = side * (body / 2 + 0.6)   # where the drum stands, which the wing unrolled from
-  x(far) = root + side * far       # a place `far` along the wing from the drum
-  shapes = Pair{Symbol,Shape}[]
-  # A yoke holds the drum: an arm from the middle of the body's side, and a strut to each end of the drum
-  push!(shapes, :dark_metal => moved(block(0.6, 0.12, 0.12, bevel=0.01), (side * (body / 2 + 0.3), 0, 0)))
-  for end_ in (-1, 1)
-    push!(shapes, :dark_metal => rod((side * body / 2, end_ * 0.6body / 2, 0.0), (root, end_ * (chord / 2 - 0.2), 0.0), 0.035, n=12))
-    push!(shapes, :bright_metal => moved(tube(0.26, 0.06), (root, end_ * (chord / 2 + 0.15), 0)))
-  end
-  push!(shapes, :dark_metal => moved(tube(0.22, chord + 0.3), (root, 0, 0)))
-  # The fabric of cells, held taut between the drum and the bar at its tip. It was rolled up in bays. A strip
-  # of bare film is between each two, and no two bays are quite the same blue.
-  bays, strip = 12, 0.05
-  wide = (reach - (bays - 1) * strip) / bays
-  for bay in 0:bays-1
-    middle = x(bay * (wide + strip) + wide / 2)
-    shade = 0.88 + 0.12 * noise(bay, side)
-    push!(shapes, :cells => tinted(moved(tiled(plate(wide, chord), wide / 4CELL, chord / 4CELL), (middle, 0, 0.003)), (shade, shade, shade)))
-    bay < bays - 1 && push!(shapes, :amber_film => moved(plate(strip, chord), (middle + side * (wide + strip) / 2, 0, 0.003)))
-  end
-  # Amber film is behind the cells
-  push!(shapes, :amber_film => moved(turned(plate(reach, chord), :y, 180), (x(reach / 2), 0, -0.003)))
-  # The bar at the tip holds the end of the fabric. A loop of tube passes through a sleeve at each end of it.
-  push!(shapes, :bright_metal => moved(tube(0.06, chord + 0.1), (x(reach), 0, 0)))
-  for y in (-chord / 2, chord / 2)
-    push!(shapes, :dark_metal => rod((x(reach), y, -0.14), (x(reach), y, 0.14), 2.2loop_r, n=12))
-  end
-  part!(name, shapes...)
-end
-
-# The radiator stands up behind the body, edge-on to the Sun. It reaches back to the loops, which pass through
-# sleeves on the bar at its tip.
-let root = back - 0.4, far = -deep
-  panel = tiled(block(0.02, rad_high, rad_long, bevel=0.003), rad_long / 0.1, 1)
-  shapes = Pair{Symbol,Shape}[
-    :dark_metal => moved(block(0.12, 0.12, 0.4, bevel=0.01), (0, 0, back - 0.2)),
-    :white_paint => moved(panel, (0, 0, (root + far) / 2))]
-  for y in (-chord / 2, chord / 2)
-    push!(shapes, :dark_metal => rod((-0.14, y, far), (0.14, y, far), 2.2loop_r, n=12))
-  end
-  # A bar at each end of the panel. The one at the tip is tall enough to reach both loops.
-  for (z, high) in ((root, rad_high), (far, max(rad_high, chord)))
-    push!(shapes, :bright_metal => moved(tube(0.04, high + 0.06), (0, 0, z)))
-  end
-  # The coolant comes from the body to the near bar in one pipe, and goes back in another
-  for side in (-1, 1)
-    push!(shapes, :bright_metal => rod((side * 0.11, 0.0, back), (side * 0.11, 0.0, root + 0.02), 0.02, n=10))
-  end
-  part!("Radiator", shapes...)
-end
-
-# Two loops of tube hold the wings and the radiator out, one level with each edge of the cells. Each goes right
-# round the satellite: through the tip of one wing, behind the body through the tip of the radiator, through
-# the tip of the other wing, and back in front of the body. The three tips can't move apart, so no wing can
-# swing about its drum. The pressure in a loop pushes it towards a circle. The radiator pulls its back in, and
-# two cords from the drums pull its front in. So it pushes the wings' tips apart, as a wheel's rim does on its
-# spokes.
-let shapes = Pair{Symbol,Shape}[]
-  for y in (-chord / 2, chord / 2)
-    push!(shapes, :pale_paint => loop(tip, deep, y, loop_r))
-    # A sleeve at the front, where the two cords meet the loop. The cords are pale too, so they show against the sky.
-    push!(shapes, :dark_metal => rod((-0.14, y, deep), (0.14, y, deep), 2.2loop_r, n=12))
-    for side in (-1, 1)
-      push!(shapes, :pale_paint => rod((side * (body / 2 + 0.6), y, 0.2), (side * 0.1, y, deep), 0.004, n=6))
+  for (side, name) in ((-1, "Left wing"), (1, "Right wing"))
+    root = side * (body / 2 + 0.6)   # where the drum stands, which the wing unrolled from
+    x(far) = root + side * far       # a place `far` along the wing from the drum
+    shapes = Pair{Symbol,Shape}[]
+    # A yoke holds the drum: an arm from the middle of the body's side, and a strut to each end of the drum
+    push!(shapes, :dark_metal => moved(block(0.6, 0.12, 0.12, bevel=0.01), (side * (body / 2 + 0.3), 0, 0)))
+    for end_ in (-1, 1)
+      push!(shapes, :dark_metal => rod((side * body / 2, end_ * 0.6body / 2, 0.0), (root, end_ * (chord / 2 - 0.2), 0.0), 0.035, n=12))
+      push!(shapes, :bright_metal => moved(tube(0.26, 0.06), (root, end_ * (chord / 2 + 0.15), 0)))
     end
+    push!(shapes, :dark_metal => moved(tube(0.22, chord + 0.3), (root, 0, 0)))
+    # The fabric of cells, held taut between the drum and the bar at its tip. It was rolled up in bays. A strip
+    # of bare film is between each two, and no two bays are quite the same blue.
+    bays, strip = 12, 0.05
+    wide = (reach - (bays - 1) * strip) / bays
+    for bay in 0:bays-1
+      middle = x(bay * (wide + strip) + wide / 2)
+      shade = 0.88 + 0.12 * noise(bay, side)
+      push!(shapes, :cells => tinted(moved(tiled(plate(wide, chord), wide / 4CELL, chord / 4CELL), (middle, 0, 0.003)), (shade, shade, shade)))
+      bay < bays - 1 && push!(shapes, :amber_film => moved(plate(strip, chord), (middle + side * (wide + strip) / 2, 0, 0.003)))
+    end
+    # Amber film is behind the cells
+    push!(shapes, :amber_film => moved(turned(plate(reach, chord), :y, 180), (x(reach / 2), 0, -0.003)))
+    # The bar at the tip holds the end of the fabric. A loop of tube passes through a sleeve at each end of it.
+    push!(shapes, :bright_metal => moved(tube(0.06, chord + 0.1), (x(reach), 0, 0)))
+    for y in (-chord / 2, chord / 2)
+      push!(shapes, :dark_metal => rod((x(reach), y, -0.14), (x(reach), y, 0.14), 2.2loop_r, n=12))
+    end
+    part!(name, shapes...)
   end
-  part!("Loops", shapes...)
-end
 
-# The laser to the next satellite, which looks along the orbit. It turns on a fork.
-let scope = max(0.05, 2.5lens), at = (0.25body, top + 0.35, 0.25body)
-  part!("Laser",
-    :dark_metal => moved(tube(0.09, 0.2), (at[1], top + 0.13, at[3])),
-    :dark_metal => moved(block(0.05, 0.2, 0.03, bevel=0.005), (at[1], top + 0.3, at[3] + scope + 0.025)),
-    :dark_metal => moved(block(0.05, 0.2, 0.03, bevel=0.005), (at[1], top + 0.3, at[3] - scope - 0.025)),
-    :black => rod((at[1] - 0.11, at[2], at[3]), (at[1] + 0.21, at[2], at[3]), scope),
-    # A hood keeps the Sun off the lens
-    :black => rod((at[1] + 0.21, at[2], at[3]), (at[1] + 0.3, at[2], at[3]), scope + 0.004, top=scope + 0.02, ends=false),
-    :glass => rod((at[1] + 0.212, at[2], at[3]), (at[1] + 0.215, at[2], at[3]), 0.8scope))
-end
-
-# Two star trackers, looking away from the Sun and the Earth. A baffle keeps stray light out of each.
-let shapes = Pair{Symbol,Shape}[]
-  for side in (-1, 1)
-    foot, up = (side * 0.3body, top + 0.03, -0.3body), unit((0.0, cos(0.5), -sin(0.5)))
-    push!(shapes, :black => rod(foot, foot .+ up .* 0.16, 0.06))
-    push!(shapes, :black => rod(foot .+ up .* 0.16, foot .+ up .* 0.34, 0.06, top=0.1, ends=false))
-    push!(shapes, :glass => rod(foot .+ up .* 0.163, foot .+ up .* 0.166, 0.05))
+  # The radiator stands up behind the body, edge-on to the Sun. It reaches back to the loops, which pass through
+  # sleeves on the bar at its tip.
+  let root = back - 0.4, far = -deep
+    shapes = Pair{Symbol,Shape}[:dark_metal => moved(block(0.12, 0.12, 0.4, bevel=0.01), (0, 0, back - 0.2))]
+    # When the loops shed all of the heat, there's no panel, and only its bars hold the back of the loops
+    if rad_high >= 0.05
+      panel = tiled(block(0.02, rad_high, rad_long, bevel=0.003), rad_long / 0.1, 1)
+      push!(shapes, :white_paint => moved(panel, (0, 0, (root + far) / 2)))
+    end
+    for y in (-chord / 2, chord / 2)
+      push!(shapes, :dark_metal => rod((-0.14, y, far), (0.14, y, far), 2.2loop_r, n=12))
+    end
+    # A bar at each end of the panel. The one at the tip is tall enough to reach both loops.
+    for (z, high) in ((root, rad_high), (far, max(rad_high, chord)))
+      push!(shapes, :bright_metal => moved(tube(0.04, high + 0.06), (0, 0, z)))
+    end
+    # The coolant comes from the body to the near bar in one pipe, and goes back in another
+    for side in (-1, 1)
+      push!(shapes, :bright_metal => rod((side * 0.11, 0.0, back), (side * 0.11, 0.0, root + 0.02), 0.02, n=10))
+    end
+    part!("Radiator", shapes...)
   end
-  part!("Star trackers", shapes...)
-end
 
-# The thruster: a ring of ceramic round a dark centre, for the last burn. The small tube beside it feeds the flame.
-let at = (-0.25body, top + 0.03, 0.2body)
-  part!("Thruster",
-    :dark_metal => moved(tube(0.11, 0.1), at .+ (0, 0.05, 0)),
-    :ceramic => moved(ring(0.075, 0.018), at .+ (0, 0.105, 0)),
-    :bright_metal => moved(tube(0.03, 0.03), at .+ (0, 0.11, 0)),
-    :dark_metal => rod(at .+ (0.13, 0, 0.05), at .+ (0.11, 0.12, 0.03), 0.015, n=10))
-end
+  # Two loops of tube hold the wings and the radiator out, one level with each edge of the cells. Each goes right
+  # round the satellite: through the tip of one wing, behind the body through the tip of the radiator, through
+  # the tip of the other wing, and back in front of the body. The three tips can't move apart, so no wing can
+  # swing about its drum. The pressure in a loop pushes it towards a circle. The radiator pulls its back in, and
+  # two cords from the drums pull its front in. So it pushes the wings' tips apart, as a wheel's rim does on its
+  # spokes.
+  let shapes = Pair{Symbol,Shape}[]
+    for y in (-chord / 2, chord / 2)
+      push!(shapes, :pale_paint => loop(tip, deep, y, loop_r))
+      # A sleeve at the front, where the two cords meet the loop. The cords are pale too, so they show against the sky.
+      push!(shapes, :dark_metal => rod((-0.14, y, deep), (0.14, y, deep), 2.2loop_r, n=12))
+      for side in (-1, 1)
+        push!(shapes, :pale_paint => rod((side * (body / 2 + 0.6), y, 0.2), (side * 0.1, y, deep), 0.004, n=6))
+      end
+    end
+    part!("Loops", shapes...)
+  end
 
-# On the face that looks at the Earth: the radio to the ground, and the ring that held the satellite to its rocket
-part!("Earth face",
-  :ceramic => moved(block(0.3, 0.02, 0.3, bevel=0.004), (0, back - 0.01, 0.2body)),
-  :bright_metal => moved(tube(0.42body, 0.05, n=48, ends=false), (0, back - 0.025, 0)),
-  :bright_metal => moved(ring(0.42body, 0.012, n=48, m=8), (0, back - 0.05, 0)))
+  # The laser to the next satellite, which looks along the orbit. It turns on a fork.
+  let scope = max(0.05, 2.5lens), at = (0.25body, top + 0.35, 0.25body)
+    part!("Laser",
+      :dark_metal => moved(tube(0.09, 0.2), (at[1], top + 0.13, at[3])),
+      :dark_metal => moved(block(0.05, 0.2, 0.03, bevel=0.005), (at[1], top + 0.3, at[3] + scope + 0.025)),
+      :dark_metal => moved(block(0.05, 0.2, 0.03, bevel=0.005), (at[1], top + 0.3, at[3] - scope - 0.025)),
+      :black => rod((at[1] - 0.11, at[2], at[3]), (at[1] + 0.21, at[2], at[3]), scope),
+      # A hood keeps the Sun off the lens
+      :black => rod((at[1] + 0.21, at[2], at[3]), (at[1] + 0.3, at[2], at[3]), scope + 0.004, top=scope + 0.02, ends=false),
+      :glass => rod((at[1] + 0.212, at[2], at[3]), (at[1] + 0.215, at[2], at[3]), 0.8scope))
+  end
+
+  # Two star trackers, looking away from the Sun and the Earth. A baffle keeps stray light out of each.
+  let shapes = Pair{Symbol,Shape}[]
+    for side in (-1, 1)
+      foot, up = (side * 0.3body, top + 0.03, -0.3body), unit((0.0, cos(0.5), -sin(0.5)))
+      push!(shapes, :black => rod(foot, foot .+ up .* 0.16, 0.06))
+      push!(shapes, :black => rod(foot .+ up .* 0.16, foot .+ up .* 0.34, 0.06, top=0.1, ends=false))
+      push!(shapes, :glass => rod(foot .+ up .* 0.163, foot .+ up .* 0.166, 0.05))
+    end
+    part!("Star trackers", shapes...)
+  end
+
+  # The thruster: a ring of ceramic round a dark centre, for the last burn. The small tube beside it feeds the flame.
+  let at = (-0.25body, top + 0.03, 0.2body)
+    part!("Thruster",
+      :dark_metal => moved(tube(0.11, 0.1), at .+ (0, 0.05, 0)),
+      :ceramic => moved(ring(0.075, 0.018), at .+ (0, 0.105, 0)),
+      :bright_metal => moved(tube(0.03, 0.03), at .+ (0, 0.11, 0)),
+      :dark_metal => rod(at .+ (0.13, 0, 0.05), at .+ (0.11, 0.12, 0.03), 0.015, n=10))
+  end
+
+  # On the face that looks at the Earth: the radio to the ground, and the ring that held the satellite to its rocket
+  part!("Earth face",
+    :ceramic => moved(block(0.3, 0.02, 0.3, bevel=0.004), (0, back - 0.01, 0.2body)),
+    :bright_metal => moved(tube(0.42body, 0.05, n=48, ends=false), (0, back - 0.025, 0)),
+    :bright_metal => moved(ring(0.42body, 0.012, n=48, m=8), (0, back - 0.05, 0)))
+  parts
+end
 
 # --- the file ------------------------------------------------------------------
 
@@ -561,8 +623,11 @@ json(x::Bool) = string(x)
 json(x::Integer) = string(x)
 json(x::Real) = string(round(Float64(x), sigdigits=7))
 
-"Write the satellite to the .glb file at `path`"
-write_glb(path) = begin
+"""
+The bytes of a .glb file that holds `parts`, as `satellite` gives them, with
+the picture `sky` of what's round them, and the Sun
+"""
+glb(parts, sky) = begin
   bin, views, accessors = IOBuffer(), [], []
   # Put `bytes` in the file and note where. `target` says what the graphics card uses them for.
   view!(bytes, target=nothing) = begin
@@ -597,7 +662,7 @@ write_glb(path) = begin
   # The satellite is tipped back to face the Sun, and the Sun's light shines along its own -z, turned the same way
   tipped = (sin(TIP / 2), 0.0, 0.0, cos(TIP / 2))
   sun = (name="Sun", type="directional", color=(1.0, 0.965, 0.925), intensity=5.0)
-  text = json((asset=(version="2.0", generator="Ladder app/satellite.jl"),
+  text = json((asset=(version="2.0", generator="Ladder pages/satellite.jl"),
                extensionsUsed=["KHR_lights_punctual"], extensions=(KHR_lights_punctual=(lights=[sun],),),
                scene=0, scenes=[(name="One satellite of the fleet", nodes=[length(nodes), length(nodes) + 1], extras=(sky=(image=length(PICTURES),),))],
                nodes=[nodes..., (name="Satellite", children=collect(0:length(nodes)-1), rotation=tipped),
@@ -607,15 +672,26 @@ write_glb(path) = begin
                images=images, accessors=accessors, bufferViews=views, buffers=[(byteLength=position(bin),)]))
   text *= " "^((4 - sizeof(text) % 4) % 4)
   bytes = take!(bin)
-  open(path, "w") do io
-    write(io, 0x46546c67, UInt32(2), UInt32(12 + 8 + sizeof(text) + 8 + length(bytes)))
-    write(io, UInt32(sizeof(text)), 0x4e4f534a, text)
-    write(io, UInt32(length(bytes)), 0x004e4942, bytes)
-  end
-  path
+  io = IOBuffer()
+  write(io, 0x46546c67, UInt32(2), UInt32(12 + 8 + sizeof(text) + 8 + length(bytes)))
+  write(io, UInt32(sizeof(text)), 0x4e4f534a, text)
+  write(io, UInt32(length(bytes)), 0x004e4942, bytes)
+  take!(io)
 end
 
+"""
+The model of the satellite that the sums `sums` make, as the bytes of a .glb
+file. Ladder calls this for a `view` block that names this file, with the sums
+of the block's page: each name with its number in SI units. With no sums, the
+satellite has the page's first numbers.
+"""
+view(sums) = (s = sizes(sums); glb(satellite(s), sky(s.alt, VIEW_SKY)))
+
+"The model at the page's first numbers, with the sky at its full size, as the file satellite.glb has it"
+view() = (s = sizes(); glb(satellite(s), sky(s.alt)))
+
 if abspath(PROGRAM_FILE) == @__FILE__
-  path = write_glb(joinpath(@__DIR__, "..", "pages", "satellite.glb"))
-  println("Wrote $(relpath(path)): $(sum(length(s.corners) ÷ 3 for (_, shapes) in parts for (_, s) in shapes)) triangles, $(filesize(path) ÷ 1000) KB")
+  path = joinpath(@__DIR__, "satellite.glb")
+  write(path, view())
+  println("Wrote $(relpath(path)): $(sum(length(s.corners) ÷ 3 for (_, shapes) in satellite(sizes()) for (_, s) in shapes)) triangles, $(filesize(path) ÷ 1000) KB")
 end

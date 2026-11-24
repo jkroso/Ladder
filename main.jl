@@ -348,7 +348,7 @@ end
 @use "github.com/jkroso/UI.jl/Interface/Semantic/TextInput" => TextInputs
 @use "github.com/jkroso/UI.jl/Interface/Semantic/Link" Link
 @use "github.com/jkroso/UI.jl/Interface/Semantic/ListTree" => Tree
-@use "github.com/jkroso/UI.jl/Interface/Semantic/STLViewer" STLViewer Mesh load!
+@use "github.com/jkroso/UI.jl/Interface/Semantic/STLViewer" STLViewer Mesh load! show!
 @use "github.com/jkroso/UI.jl/Interface/Semantic/Player" AudioPlayer VideoPlayer pause! card_bottom controls_show
 @use "github.com/jkroso/UI.jl/Interface/Semantic/Recorder" AudioRecorder record! stop! plays
 @use "github.com/jkroso/UI.jl/Interface/Semantic/Mermaid" Mermaid problem
@@ -10922,6 +10922,7 @@ end
 
 const ZOOM_EDGE = 24.0   # px of room round a picture that fits the window
 const BAR_ROOM = 64px    # the bottom of the window, where the bar of buttons is
+const MODEL_FOOT = 34px  # how tall the line under a model is, which says what the model is
 const MOST_ZOOM = 8.0    # the biggest a picture gets: this many times its own size, or the size that fits the window if that's bigger
 const ZOOM_STEP = 1.25   # how much bigger the + button, and ⌘+, make a picture
 "The commands that do what they always do while a picture fills the window. The rest would change the page under it."
@@ -10971,13 +10972,19 @@ its button beside it.
   sizing::Any = ()         # how wide it is
   button::Any = nothing       # its FillButton, once it has shown
   transcript::Any = nothing   # a video's TranscriptButton, once it has shown
+  also::Any = nothing         # what fills the window too, for a `view` block: its first button fills the window with this, and its second goes to its file
+  expand::Any = nothing       # the FillButton for `also`, once it has shown
 end
 
 "The button beside the top right corner of a Fillable that makes it fill the window"
 @def mutable struct FillButton <: SemanticUI
   rect::NTuple{4,px} = (0px, 0px, 0px, 0px)   # where it was last drawn, to put its tooltip under it
   quiet::Bool = false                         # clicked, so no tooltip until the mouse leaves it
+  also::Bool = false                          # it's for its Fillable's `also`, not for its `what`
 end
+
+"What the button `b` does: what it makes fill the window, or `(:go, path)` for the file that it goes to"
+button_what(b::FillButton) = b.also ? b.parent.also : b.parent.what
 
 const FILL_SIDE = 24px   # how wide and how tall the button is that makes a picture fill the window
 const FILL_GAP = 4px     # between that button and the picture, and between it and the window's edge
@@ -11037,7 +11044,7 @@ fillable(owner, what, content; wide=nothing) = begin
   e = editor(owner)
   what[1] == :node && zoomed_node(e, what[2]) && return held_room(e)
   f = get!(() -> own!(owner, Fillable()), fills(e), objectid(owner))
-  f.what, f.content = what, content
+  f.what, f.content, f.also = what, content, nothing
   f.sizing = wide === nothing ? () : wide === :grow ? (width(grow=grow),) : (width(grow=grow, max=wide),)
   f
 end
@@ -11064,7 +11071,7 @@ end
 video_of(f::Fillable) = f.what !== nothing && f.what[1] == :node && f.what[2] isa VideoPlayer ? f.what[2] : nothing
 
 "How tall the buttons beside `f` are: a video has the button that shows what was said in it under the first"
-buttons_tall(f::Fillable) = video_of(f) === nothing ? FILL_SIDE : 2FILL_SIDE + FILL_GAP
+buttons_tall(f::Fillable) = video_of(f) === nothing && f.also === nothing ? FILL_SIDE : 2FILL_SIDE + FILL_GAP
 
 """
 The button that makes the picture under the mouse fill the window, beside it.
@@ -11095,6 +11102,11 @@ fill_over(e) = begin
   best === nothing && return ()
   b = best.button === nothing ? (best.button = own!(best, FillButton())) : best.button
   buttons = Any[b]
+  # A `view` block has two: the first makes what it shows fill the window, and the second goes to its file
+  if best.also !== nothing
+    best.expand === nothing && (best.expand = own!(best, FillButton(also=true)))
+    pushfirst!(buttons, best.expand)
+  end
   if video_of(best) !== nothing
     best.transcript === nothing && (best.transcript = own!(best, TranscriptButton()))
     push!(buttons, best.transcript)
@@ -11120,10 +11132,10 @@ end
 "True when the node `n` has a button beside it that stands for all that's in it. A `view` block's goes to its file."
 own_button(n) = false
 
-# A `view` block's button goes to its file, `(:go, path)`. The rest make what they show fill the window.
+# A `view` block has a button that goes to its file, `(:go, path)`. The rest make what they show fill the window.
 describe(b::FillButton) = begin
   ishovered(b) || (b.quiet = false)
-  square_button(b.parent.what[1] == :go ? "arrow-up-right" : "arrows-fullscreen", ishovered(b))
+  square_button(button_what(b)[1] == :go ? "arrow-up-right" : "arrows-fullscreen", ishovered(b))
 end
 
 cursor(::FillButton) = :hand
@@ -11131,11 +11143,11 @@ draw(ctx, size, ui::ConcreteRect, b::FillButton) = (b.rect = (ui.left, ui.top, u
 
 onmouse(b::FillButton, ev::MouseMove) = begin
   b.quiet && return handled
-  what = b.parent.what
+  what = button_what(b)
   tip = what[1] == :go ? "Go to " * view_name(what[2]) : what[1] == :node ? "Fill the window" : "Fill the window  pinch"
-  # A video's tooltip goes beside the button, so that it doesn't cover the button under it
+  # The tooltip of one of two buttons goes beside it, so that it doesn't cover the other button
   show_tooltip!(ev.window, tip_label(tip), b.rect...,
-                placement=video_of(b.parent) === nothing ? :bottom : :right, gap=6px)
+                placement=video_of(b.parent) === nothing && b.parent.also === nothing ? :bottom : :right, gap=6px)
   handled
 end
 
@@ -11143,7 +11155,7 @@ onkey(b::FillButton, ev::KeyPress{Keys.mouse_left}) = begin
   b.quiet = true
   hide_tooltip!(ev.window)
   f = b.parent
-  fill_window!(editor(b), f.what, f.parent)
+  fill_window!(editor(b), button_what(b), f.parent)
 end
 
 """
@@ -11188,10 +11200,12 @@ zoom_in!(e, what, from=nothing) = begin
     v.page, v.pages = what[3], max(1, pdf_pages(what[2]))
   elseif what[1] == :node
     r = rect(what[2])
-    v.home = what[2].height
-    v.held = r === nothing ? what[2].height : r.height
+    # A model fills the window with no frame, so it has that to get back too. A page of the web is sized by its block.
+    v.home = what[2] isa STLViewer ? (what[2].height, what[2].fill) : what[2] isa Browsers.Browser ? nothing : what[2].height
+    v.held = r !== nothing ? r.height : what[2] isa Browsers.Browser ? what[2].high : what[2].height
   end
-  focus(part!(() -> ZoomArea(of=v), v, :area))
+  # A page of the web has the keyboard, for its fields and its keys. Esc comes back from it when the page doesn't take it.
+  what[1] == :node && what[2] isa Browsers.Browser ? focus(what[2]) : focus(part!(() -> ZoomArea(of=v), v, :area))
   handled
 end
 
@@ -11237,7 +11251,7 @@ zoom_out!(v::ZoomView, refocus=true) = begin
   m = changing(v)
   m === nothing || Diagrams.settle!(m)
   v.what = nothing
-  what[1] == :node && v.home !== nothing && (what[2].height = v.home)
+  what[1] == :node && v.home !== nothing && (v.home isa Tuple ? ((what[2].height, what[2].fill) = v.home) : (what[2].height = v.home))
   # A video of a gallery shows only while it fills the window, so it stops when it leaves
   what[1] == :node && what[2] isa VideoPlayer && v.from isa GalleryView && pause!(what[2])
   v.from isa Pages && (v.from.page = v.page)   # the page in the document goes on from the page you looked at
@@ -11352,11 +11366,26 @@ end
 describe(v::ZoomView) = begin
   e = editor(v)
   what = v.what
-  bar(buttons...) = Column(width(grow=grow), height(grow=grow), Alignment.Center, justify=Alignment.End, padding(0px, 0px, 16px, 0px),
+  bar(buttons...; up=0px) = Column(width(grow=grow), height(grow=grow), Alignment.Center, justify=Alignment.End, padding(0px, 0px, 16px + up, 0px),
     Row(height(36px), padding(4px), child_gap=2px, radius(8px), Alignment.Center, background(colours.float),
         border(1px, :solid, colours.line), lifted, buttons...))
   close = v.bare ? nothing : button!(v, :close, :close, icon="x-lg", tip="Back to the page  esc")
-  if what[1] == :node
+  if what[1] == :node && what[2] isa Browsers.Browser
+    # A page of the web has all of the window under the top bar, as it has a browser's window
+    b = what[2]
+    w, h = window_size(e)
+    b.zoom = round(Float64(e.zoom), digits=2)
+    b.wide, b.high = w, max(40px, h - TOPBAR_H)
+    return Stack(width(grow=grow), height(grow=grow), Alignment.Start, b, bar(close))
+  elseif what[1] == :node && what[2] isa STLViewer
+    # A model has all of the window under the top bar too, with no frame. The bar is over it, above the line that says what it is,
+    # if it has that line.
+    node = what[2]
+    node.fill = true
+    shows = with_theme(() -> geometry(node), component_theme(e.zoom))
+    return Stack(width(grow=grow), height(grow=grow), Alignment.Start, Box(width(grow=grow), height(grow=grow), shows),
+      gallery_edges(v)..., bar(gallery_buttons(v, rest=100)..., close, up=node.foot ? MODEL_FOOT : 0px))
+  elseif what[1] == :node
     # A model or a video is as tall as the window has room for. Its own bar is under its picture.
     node = what[2]
     _, h = window_size(e)
@@ -22315,12 +22344,18 @@ keyboard_part(v::HTMLPage) = html_browser(v)
 #   - A Markdown page shows as it reads, a little smaller than the document.
 #   - A picture, a model, a sound, a video, a PDF file, a CSV file, a zip, a
 #     Word file, a font and a file of text show as they do under a path.
+#   - A Julia file with a function called `view` shows what that function
+#     makes from the document's sums: see "a view of what code makes".
 #   - A folder shows the files and the folders in it. A click on one goes to it.
 #
-# While the mouse is over the block, a button beside its top right corner goes
-# to the file: the window shows it, as a click on a link to it does, and ⌘⌥←
-# comes back. A click on the block with ⌘ held does the same, and one with ⌥
-# held shows the block's line. An HTML file that you go to keeps the sums that
+# While the mouse is over the block, two buttons show beside its top right
+# corner. The first makes what the block shows fill the window, over the
+# document: a page, a model, a video, a picture or a PDF file. The window goes
+# to no other file, and Esc puts the document back. A view that would show no
+# more that way, like a table, has only the second button. That one goes to the
+# file: the window shows it, as a click on a link to it does, and ⌘⌥← comes
+# back. A click on the block with ⌘ held does the same, and one with ⌥ held
+# shows the block's line. An HTML file that you go to keeps the sums that
 # the block gave its page, so the page there looks as it did in the document.
 
 const VIEW_BLOCK = "view"
@@ -22339,6 +22374,7 @@ push!(BLOCK_ICONS, "eye", "arrow-up-right")
   crumb::Any = nothing                     # the Breadcrumb that keeps what shows any other file: its model, its player, its text
   parts::Dict{Any,Any} = Dict{Any,Any}()
   sent::Any = nothing                      # the page that was last given the sums, and what it was given: see `send_sums!`
+  made::Any = nothing                      # what the function `view` of a Julia file made for it: a Made
 end
 
 "True when `name` is the address of a page of the web, or of anything with a scheme, and not a path on the Mac"
@@ -22368,9 +22404,11 @@ view_web(v::ViewBlock) = v.held || !isempty(v.target) && (has_scheme(v.target) |
 """
 True when the page of the `view` block `v` gets `ev`, a click, a turn of the
 wheel or a pinch. A click with ⌘ or ⌥ held is the block's, and the wheel
-scrolls the document unless ⌘ is held, as over a model.
+scrolls the document unless ⌘ is held, as over a model. A page that fills
+the window gets them all.
 """
-page_takes(v::ViewBlock, ev) = ev isa MouseScroll ? only_held(ev, Keys.cmd) :
+page_takes(v::ViewBlock, ev) = zoomed_node(editor(v), v.browser) ? true :
+                               ev isa MouseScroll ? only_held(ev, Keys.cmd) :
                                ev isa KeyPress ? !(only_held(ev, Keys.cmd) || only_held(ev, Keys.opt)) : true
 
 "The Browser of the `view` block `v`, for an HTML file or a page of the web"
@@ -22409,17 +22447,49 @@ describe(v::ViewBlock) = begin
   v.held || has_scheme(v.target) || ispath(v.target) ||
     return Column(block_look()..., name="View", block_note("$(basename(v.target)) isn't there"))
   with_theme(component_theme(e.zoom)) do
-    # A page that the block holds is in no file, so it has no button that goes to one
     content = view_content(v, e)
-    Box(width(grow=grow), Alignment.Start, v.held ? content : fillable(v, (:go, v.target), content, wide=:grow))
+    fills = view_fills(v, e)
+    # A page that the block holds is in no file, so it has no button that goes to one: its one button makes it fill the window
+    f = v.held ? fillable(v, fills, content, wide=:grow) : fillable(v, (:go, v.target), content, wide=:grow)
+    v.held || (f.also = fills)
+    Box(width(grow=grow), Alignment.Start, f)
   end
 end
+
+"""
+What fills the window when you click the first button beside the `view` block
+`v`: its page of the web, its model, its video, its picture or its PDF file.
+The window shows it over the document, and goes to no other file, so Esc puts
+the document back as it was. It's nothing for a view that would show no more
+with the window to itself, like a table, a page of Markdown or a folder: the
+button that goes to the file shows the whole of those.
+"""
+view_fills(v::ViewBlock, e) = begin
+  view_web(v) && return (:node, web_browser(v))
+  if view_made(v)
+    m = v.made
+    return m isa Made && isempty(m.fault) && m.ready && m.node isa SemanticUI ? fill_what(m.node) : nothing
+  end
+  l = v.crumb
+  l === nothing && return nothing
+  # What the file shows under a path has a Fillable of its own, with no button while it's in a view
+  for owner in (l, l.viewer)
+    f = owner === nothing ? nothing : get(fills(e), objectid(owner), nothing)
+    f === nothing || f.what === nothing || return f.what
+  end
+  nothing
+end
+
+"`node`, or the empty room that the page keeps for it while it fills the window"
+in_page(e, node) = node isa SemanticUI && zoomed_node(e, node) ? held_room(e) : node
 
 "What shows in the `view` block `v`: the page that an HTML file makes, the list of a folder, or what any other file shows under a path"
 view_content(v::ViewBlock, e) = begin
   if view_web(v)
     b = web_browser(v)
     send_sums!(v)
+    # While the page fills the window, the window says how big it is
+    zoomed_node(e, b) && return held_room(e)
     b.zoom = round(Float64(e.zoom), digits=2)
     b.wide = e.width - 2px
     p = b.view.page
@@ -22427,6 +22497,7 @@ view_content(v::ViewBlock, e) = begin
     b.high = p === nothing || isempty(b.view.html) ? WEB_HIGH * e.zoom : clamp(px(p.tall), WEB_LEAST * e.zoom, WEB_HIGH * e.zoom)
     return Column(block_look()..., clip=true, name="Web page", b)
   end
+  view_made(v) && return made_content(v, e)
   l = view_crumb(v)
   path = v.target
   if isdir(path)
@@ -22441,6 +22512,11 @@ view_content(v::ViewBlock, e) = begin
   # A player that was made for another file stops when the block names another
   l.viewer !== nothing && l.viewer.path != path && (hush!(l); l.viewer = nothing)
   l.at = path
+  # What could fill the window is found again in each frame, so that a file of another kind leaves none behind: see `view_fills`
+  for owner in (l, l.viewer)
+    inner = owner === nothing ? nothing : get(fills(e), objectid(owner), nothing)
+    inner === nothing || (inner.what = nothing)
+  end
   about = basename(path) * "  ·  Changed " * Libc.strftime("%-d %b %Y, %H:%M", mtime(path))
   content = try
     peek(l, path, lowercase(splitext(path)[2]), words -> (about *= "  ·  " * words))
@@ -22448,8 +22524,17 @@ view_content(v::ViewBlock, e) = begin
     nothing
   end
   content === nothing && (content = label("This file has no preview", 12px, color=colours.dim))
+  # A model in a view has no line under it, as it has under a path: the model is all that shows
+  l.viewer isa STLViewer && (l.viewer.foot = false; return bare_view(content))
   Column(block_look()..., padding(6px), child_gap=8px, name="View", content, Box(padding(4px, 0px), label(about, 12px, color=colours.dim)))
 end
+
+"""
+A `view` block that shows only `content`, the viewer of a model. The viewer
+has a frame of its own, so the block adds none round it. It names no file
+either: the model is all that shows.
+"""
+bare_view(content) = Column(width(grow=grow), Alignment.Start, name="View", content)
 
 "`n` things of a kind, like 3 files or 1 folder, or nothing when there are none"
 how_many(n, thing) = n == 0 ? "" : "$n $thing$(n == 1 ? "" : "s")"
@@ -22518,11 +22603,14 @@ cursor(v::ViewBlock) = :arrow
 # the block, or shows its line with ⌥ held.
 onkey(v::ViewBlock, ::KeyPress{Keys.mouse_left}) = only_held(v, Keys.cmd) ? go_view!(v) : nothing
 
-# Esc gives the keyboard back to the document, once no field of the page has it
+# Esc gives the keyboard back to the document, once no field of the page has it. A page that fills the window goes
+# back into the document.
 onkey(v::ViewBlock, ev::KeyPress{Keys.escape}) = begin
   unmodified(ev) || return nothing
   (v.browser !== nothing && ev.window.focus === v.browser) || return nothing
-  focus(editor(v))
+  e = editor(v)
+  zoomed_node(e, v.browser) && return zoom_out!(zooming(e))
+  focus(e)
   handled
 end
 
@@ -22544,6 +22632,139 @@ end
 BLOCKS[VIEW_BLOCK] = BlockKind("View", "eye", ViewBlock, view_html)
 # A block in the language `web` is a view by the name that it had before. It writes its line back in its own language.
 BLOCKS[WEBVIEW] = BlockKind("View", "eye", (; n) -> ViewBlock(n=n, lang=WEBVIEW), view_html)
+
+# --- a view of what code makes ------------------------------------------------------------------
+#
+# A `view` block can name a Julia file that makes what the block shows:
+#
+#     ```view
+#     satellite.jl
+#     ```
+#
+# The file has a function called `view` that takes one thing: the sums of the
+# block's document, as the scripts of a page of the web get them in
+# `ladder.sums`. Each sum that gives a name is there under that name, as a
+# number in SI units: see `script_value`. Ladder calls the function and shows
+# what it makes:
+#
+#   - The bytes of a .glb file show as a model, in the model viewer.
+#   - A node draws itself, and any other value shows as text, as in a `ui` block.
+#
+# Ladder calls the function again when the sums change, as while a number is
+# dragged, and when the file is saved. A model stays turned as it was, and as
+# big. The function runs in a thread of its own, as the code of a page does, so
+# the window goes on drawing while a slow one runs. What it made last shows
+# until it comes back.
+#
+# A Julia file with no such function shows its code, as any file of text does.
+
+"What the function `view` of a Julia file made for a `view` block, and the run that makes it again"
+@def mutable struct Made
+  file::String = ""          # the file, by its real path
+  saved::Float64 = 0.0       # when the file had last been saved, as the last run found it
+  seen::Int = -1             # `sums_run` when the document's sums were last read
+  now::Any = nothing         # the sums as they were then
+  sums::Any = nothing        # the sums that the function was last called with
+  task::Any = nothing        # the run of the function that hasn't come back yet
+  ready::Bool = false        # a run has come back
+  value::Any = nothing       # what the function made last
+  node::Any = nothing        # the node that shows it, like the viewer of a model, or nothing for a value that shows as text
+  fault::String = ""         # what went wrong in the last run, or ""
+end
+
+"How many seconds a `view` block waits for its file's function, before the window goes on drawing with what the function made last"
+const MADE_WAIT = 0.03
+
+"True when the `view` block `v` names a Julia file whose function `view` makes what the block shows"
+view_made(v::ViewBlock) = !v.held && endswith(v.target, ".jl") && isfile(v.target) && !foreign(editor(v).buf.path) && defines(v.target, VIEW_BLOCK)
+
+"""
+Call the function `view` of the Julia file `file` with `sums`. The file's
+code is loaded first, and with `again` it's loaded once more, since the file
+was saved. This gives true and what the function made, or false and what went
+wrong. It runs in a thread of its own: see `made!`.
+"""
+made_run(file, sums, again) = try
+  m = get(Kip.modules, file, nothing)
+  # The file's new code goes into the module that it has
+  m === nothing ? (m = Base.invokelatest(Kip.require, file)) : again && Base.include(m, file)
+  f = named(m, Symbol(VIEW_BLOCK))
+  # Every module has Base's `view`, which is no function of the file
+  (f === nothing || f === Base.view) && error("$(basename(file)) has no function called $VIEW_BLOCK")
+  (true, Base.invokelatest(f, sums))
+catch err
+  (false, trouble(err))
+end
+
+"Take what the run of `m` made, if the run has come back: a model goes to the viewer of the `view` block `v`, which keeps how it's turned"
+finish!(v::ViewBlock, m::Made) = begin
+  t = m.task
+  (t === nothing || !istaskdone(t)) && return m
+  m.task = nothing
+  ok, value = try fetch(t) catch err; (false, trouble(err)) end
+  m.ready = true
+  m.fault = ok ? "" : String(value)
+  ok || return m
+  m.value = value
+  if value isa Vector{UInt8}
+    m.node isa STLViewer || (m.node = own!(v, STLViewer(path=m.file, height=MODEL_HEIGHT, foot=false)))
+    show!(m.node, value)
+  else
+    node = Base.invokelatest(present, value)
+    m.node = node isa SemanticUI ? own!(v, node) : node
+  end
+  m
+end
+
+"""
+What the function `view` of the file of the `view` block `v` made last. The
+function runs again when the sums of the document `e` have changed since its
+last run, or the file was saved since. It runs in a thread of its own, after
+any code of a page that runs now. The window waits `MADE_WAIT` seconds for it,
+so a quick function shows what it made in the same frame, and a number that
+you drag doesn't run ahead of the model.
+"""
+made!(v::ViewBlock, e) = begin
+  file = realpath(v.target)
+  m = v.made isa Made && v.made.file == file ? v.made : (v.made = Made(file=file))
+  finish!(v, m)
+  # The sums run as their lines are laid out, so `sums_run` says when they may have changed
+  m.seen == sums_run[] || (m.seen = sums_run[]; m.now = script_sums(e)[1])
+  saved = mtime(file)
+  if m.task === nothing && (m.now != m.sums || saved != m.saved)
+    again = get(LOADED, file, saved) != saved
+    LOADED[file] = saved
+    sums, before = m.now, LAST_RUN[]
+    m.sums, m.saved = sums, saved
+    m.task = LAST_RUN[] = Threads.@spawn begin
+      before === nothing || try wait(before) catch end
+      made_run(file, sums, again)
+    end
+    # A test waits for every run, as it does for the code of a page
+    until = time() + (isfinite(RUN_WAIT[]) ? MADE_WAIT : Inf)
+    while !istaskdone(m.task) && time() < until
+      sleep(0.001)
+    end
+    finish!(v, m)
+    # The sums under the block run after it's laid out, so another frame reads those too
+    redraw_in!(v, 0)
+  end
+  m.task === nothing || redraw_in!(v, 0.05)
+  m
+end
+
+"What the `view` block `v` shows of a Julia file that has a function `view`: what the function made, or what went wrong"
+made_content(v::ViewBlock, e) = begin
+  m = made!(v, e)
+  isempty(m.fault) && m.ready && m.node isa STLViewer && return bare_view(in_page(e, m.node))
+  name = basename(v.target)
+  about = name * "  ·  Changed " * Libc.strftime("%-d %b %Y, %H:%M", mtime(v.target))
+  content = !isempty(m.fault) ? note(m.fault, colours.accent) :
+            !m.ready ? Box(padding(4px, 6px), label("Running $name…", 12px, color=colours.dim)) :
+            m.node !== nothing ? in_page(e, m.node) :
+            note(m.value isa AbstractString ? m.value : Base.invokelatest(repr, "text/plain", m.value), colours.ink)
+  Column(block_look()..., padding(6px), child_gap=8px, name="View", content, Box(padding(4px, 0px), label(about, 12px, color=colours.dim)))
+end
 
 # --- one thing in many parts of the page -------------------------------------------------------
 #

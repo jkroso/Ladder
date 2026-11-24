@@ -24,6 +24,7 @@ include("start.jl")
 @use "github.com/jkroso/UI.jl/Interface/Semantic/ListTree" => ListTree
 @use "../pages/widgets" => widgets
 @use "../pages/progress" => progress_block
+@use "../pages/wall" => wall_view
 # The rest of Units.jl, for a page that works out costs in AUD or lengths in feet. Ladder loads only its
 # main file. Money.jl needs FixedPointDecimals, so that package is in Ladder's Project.toml.
 @use "github.com/jkroso/Units.jl/Money.jl" => money_units
@@ -56,7 +57,7 @@ const page = read(WELCOME, String)
 const PAGES = dirname(WELCOME)
 "The text of each of the app's own pages, by the file's place in the folder of pages. The model, the video, the recording, the plan, the table and the pictures that the pages show are here too, as the bytes of their files."
 const pages = Dict(name => read(joinpath(PAGES, name), String)
-                   for name in ("welcome.md", "components.md", "julia.md", "settings/settings.md", "settings/code-editor.md", "settings/key-bindings.md", "schedule.md", "counter.md", "widgets.jl", "progress.jl", "knot.stl", "satellite.glb", "knot.mp4", "hello.m4a", "plan.pdf", "costs.csv", "orders.json",
+                   for name in ("welcome.md", "components.md", "julia.md", "settings/settings.md", "settings/code-editor.md", "settings/key-bindings.md", "schedule.md", "counter.md", "widgets.jl", "progress.jl", "wall.jl", "knot.stl", "satellite.glb", "knot.mp4", "hello.m4a", "plan.pdf", "costs.csv", "orders.json",
                                "photos/1 footings.png", "photos/2 frame.png", "photos/3 roof.png", "photos/4 bricks.png", "photos/5 window.png", "photos/6 finished.png"))
 
 "The `user/repo/file` that a file Kip got from GitHub has there, or nothing for any other file. A file of Ladder's own has a place too, so that the app can show the code that draws a thing."
@@ -84,7 +85,7 @@ const sources = [(path, place(path), read(path, String)) for path in keys(Kip.mo
 "The registered packages that were loaded by a GitHub path, as `user/repo`"
 const packages = [joinpath(m[1], m[2]) for m in (match(r"^github\.com/([^/]+)/([^/@]+)", k) for k in keys(Kip.modules)) if m !== nothing]
 "The Julia files that the pages load, and where each one was when the app was built"
-const code_files = Dict(name => realpath(joinpath(PAGES, name)) for name in ("widgets.jl", "progress.jl"))
+const code_files = Dict(name => realpath(joinpath(PAGES, name)) for name in ("widgets.jl", "progress.jl", "wall.jl"))
 
 "The text of the `ladder` command for the terminal, which shows a file or what a pipe sends: see plugin/bin/ladder"
 const ladder_command = read(joinpath(dirname(@__DIR__), "plugin", "bin", "ladder"), String)

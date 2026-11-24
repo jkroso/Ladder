@@ -550,8 +550,9 @@ What shows depends on the kind of file:
 - A Markdown page shows as it reads.
 - A picture, a model, a sound, a video, a PDF file, a CSV file, a zip and a file of text show as they do under a path.
 - A folder shows its files and folders. Click one to go to it.
+- A Julia file with a function called `view` shows what that function makes: see [A view that code makes](#a-view-that-code-makes).
 
-While the mouse is over the block, a button beside its top right corner goes to the file. The window shows the file, as it does when you click a link to it, and ⌘⌥← comes back to your page. A click on the block with ⌘ held does the same.
+While the mouse is over the block, two buttons show beside its top right corner. The first makes what the block shows fill the window: a page, a model, a video, a picture or a PDF file. Your page is still the file that's open, and Esc puts it back. A view that would show no more that way, like a table or a folder, doesn't have this button. The second button goes to the file. The window shows the file, as it does when you click a link to it, and ⌘⌥← comes back to your page. A click on the block with ⌘ held does the same.
 
 ```view
 costs.csv
@@ -598,6 +599,20 @@ The scripts of the page can read the document's sums. `ladder.sums` has the valu
 The page [space-data-centres.md](space-data-centres.md) draws one of its satellites in 3D this way, with three.js, from the file `satellite.html` beside it. When you go to that file from its block, the satellite there keeps your page's sums.
 
 A block in the language `web` is a `view` block too: `web` is the name that it had before.
+
+## A view that code makes
+
+A `view` block can name a Julia file that makes what the block shows. The file has a function called `view`. Ladder gives that function your page's sums, and shows what it makes. When the function gives the bytes of a .glb file, the block shows them as a 3D model. A node draws itself, and any other value shows as text.
+
+The sums come as they do to a web page's scripts. Each sum that gives a name is there under that name, as a number in SI units, so `sums["l"]` is 16.0 for a wall of 16m. Ladder calls the function again each time the sums change. So the model follows a number while you drag it, and it stays turned as you left it. This block follows the wall in "Sums in a line of text". The blue post beside the wall is as tall as a person.
+
+```view
+wall.jl
+```
+
+The first button beside the block makes the model fill the window, where any scroll brings it nearer. The second goes to [wall.jl](wall.jl), which is about 60 lines of code. When you save a change to the file, the block shows what the new code makes. A slow function doesn't hold the window up: the block shows what the function made last until the new one comes.
+
+The page [space-data-centres.md](space-data-centres.md) shows its satellite this way too, from the file `satellite.jl` beside it, with the Sun and the Earth round it.
 
 ## Takeoffs
 
