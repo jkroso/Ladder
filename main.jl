@@ -1715,6 +1715,15 @@ it's set to, as it's written.
 matter_view(e, d, o, rows) = nothing
 
 """
+What shows in place of the table in lines `from` to `to` of the page `o`,
+which the directory `d` holds, while the caret isn't in it: a node, or
+nothing for the table. A kind of folder has a method of this to show a table
+of its pages its own way, as a blog on a web server shows the table of a
+folder's files as the list that the folder has on the Mac.
+"""
+table_view(e, d, o, from, to) = nothing
+
+"""
 The object of the page of text that shows, or nothing. One that the sidebar
 doesn't list is found again after a second, and not in each frame. A page
 from a web server is a `WebPage`, in the web folders that it's in.
@@ -25781,6 +25790,18 @@ matter_card(e, t) = begin
   Live(card, concrete.height + 2LIVE_GAP)
 end
 
+"The table in lines `from` to `to` as what its page's kind of folder shows in its place, or nothing when the kind shows the table: see `table_view`"
+table_item(e, from, to) = begin
+  o = text_object(e)
+  o === nothing && return nothing
+  node = table_view(e, o.parent, o, from, to)
+  node === nothing && return nothing
+  own!(node!(Document, e, :document), node)
+  # Lay it out once to learn how tall it is
+  concrete = describe(Column(fixed(e.width), Alignment.Start, geometry(node)), (e.width, 9999px))
+  Live(node, concrete.height + 2LIVE_GAP)
+end
+
 describe(c::MatterCard) = begin
   s = c.size
   e = editor(c)
@@ -26332,6 +26353,17 @@ layout!(e, width=text_width(e)) = begin
         push!(items, Item(i, i, top, content.tall, content))
         top += content.tall
         i += 1
+        continue
+      end
+    end
+    # A kind of folder can show a table its own way, unless the caret is in the table: see `table_view`. A page
+    # that you can't change has a caret on its first line, which doesn't count.
+    if j > i && isdivider(b.lines[i+1]) && (caretless(b) || !(i <= b.caret[1] <= j))
+      content = table_item(e, i, j)
+      if content !== nothing
+        push!(items, Item(i, j, top, content.tall, content))
+        top += content.tall
+        i = j + 1
         continue
       end
     end
@@ -53477,19 +53509,33 @@ listing_icon(x::Blogs.Entry) =
   x.icon == :folder ? ("folder-fill", colorant"rgb(192,149,83)") :
   x.icon == :draft ? ("pencil", colorant"rgb(214,112,82)") :
   x.icon == :review ? ("book", colours.dim) :
-  x.icon == :markdown ? ("markdown", colours.dim) : (file_icon(x.path), colours.dim)
+  x.icon == :markdown ? ("markdown", colours.dim) : (file_icon(x.name), colours.dim)
 
 describe(v::SiteListing) = begin
   e = editor(v)
   redraw_in!(e, 2.1)   # a file that's saved or added shows here soon after
   list = site_entries(v.path, v.blog, reviews=v.reviews)
   stale = Set(p.path for p in blog_posts(v.blog) if blog_standing(v.blog, p) in (:new, :changed))
+  # A section's list starts with a line that goes up to the folder above it
+  up = rstrip(v.path, '/') == rstrip(v.blog, '/') ? nothing : dirname(rstrip(v.path, '/'))
+  listing_column(v, e, list; up, stale, go=path -> show_path!(e, path))
+end
+
+"""
+The list of a folder of a blog, as `v`, a `SiteListing` or a `WebListing`,
+shows it: a heading, then a line for each of the entries `list`. `up` is the
+folder above, for a line at the top that goes up to it, or nothing for no
+such line. The entries whose paths are in `stale` have a dot after their
+names. A click on a line calls `go` with the path of the line's entry. With
+`sizes`, the list has a column of how big each entry is.
+"""
+listing_column(v, e, list; up=nothing, stale=Set{String}(), go, sizes=true) = begin
   font = SITE_FONT[]
   s = body(e).size * 0.8   # the list's text is a little smaller than the page's, as the site's is
   small = s * 0.9
   said(t, size; style="", color=colours.ink) = Box(Text(t, size=size, family=font, subfamily=style, color=color, wrap=WrapMode.none))
   # The columns of the size and the days are as wide as they need to be. The names and what each is about share the rest, 3 to 4.
-  size_w = measure(Face(font, "", small, colours.dim, false), "000.00 kB") + s
+  size_w = sizes ? measure(Face(font, "", small, colours.dim, false), "000.00 kB") + s : 0px
   day_w = measure(Face(font, "", small, colours.dim, false), "00/00/00") + s
   rest = max(240px, e.width - size_w - 2day_w)
   name_w, about_w = rest * 3 / 7, rest * 4 / 7
@@ -53499,10 +53545,10 @@ describe(v::SiteListing) = begin
                                 at_end ? right(w, x) : Row(fixed(w), pad, Alignment.Start, x))
   head = Row(width(grow=grow), Alignment.Center, border(1px, :solid, SITE_RULE)[:bottom],
     heading("Name", name_w), heading("Description", about_w),
-    heading("Size", size_w, at_end=true), heading("Created", day_w, at_end=true), heading("Modified", day_w, at_end=true))
+    (sizes ? (heading("Size", size_w, at_end=true),) : ())..., heading("Created", day_w, at_end=true), heading("Modified", day_w, at_end=true))
   line(key, path, cells) = begin
     r = get!(() -> own!(v, ListingRow()), v.rows, key)
-    r.act, r.cells, r.last = _ -> (show_path!(e, path); nothing), cells, false
+    r.act, r.cells, r.last = _ -> (go(path); nothing), cells, false
     r
   end
   name_cell(icon, colour, name, over, dot=false) =
@@ -53512,26 +53558,89 @@ describe(v::SiteListing) = begin
       (dot ? (Box(width(6px), height(6px), radius(3px), background(colours.accent)),) : ())...,
       Box(width(grow=grow)))
   rows = Any[]
-  # A section's list starts with a line that goes up to the folder above it
-  if rstrip(v.path, '/') != rstrip(v.blog, '/')
-    up = dirname(rstrip(v.path, '/'))
-    push!(rows, line((:up, up), up, over -> (name_cell("folder-fill", colorant"rgb(192,149,83)", "..", over), Box(fixed(about_w)))))
-  end
+  up === nothing || push!(rows, line((:up, up), up, over -> (name_cell("folder-fill", colorant"rgb(192,149,83)", "..", over), Box(fixed(about_w)))))
   for x in list
     icon, colour = listing_icon(x)
     push!(rows, line((:entry, x.path), x.path, over -> (
       name_cell(icon, colour, x.name, over, x.path in stale),
       Box(fixed(about_w), padding(s * 0.45, s * 1.1, s * 0.45, 0px), Alignment.Start,
         Text(x.about, size=s, family=font, subfamily="Italic", color=SITE_INK2, wrap=WrapMode.words)),
-      right(size_w, said(Blogs.size_words(x.bytes), small, color=colours.dim)),
-      right(day_w, said(Blogs.short(x.made), small, color=colours.dim)),
-      right(day_w, said(Blogs.short(x.saved), small, color=colours.dim)))))
+      (sizes ? (right(size_w, said(Blogs.size_words(x.bytes), small, color=colours.dim)),) : ())...,
+      right(day_w, said(x.made > 0 ? Blogs.short(x.made) : "", small, color=colours.dim)),
+      right(day_w, said(x.saved > 0 ? Blogs.short(x.saved) : "", small, color=colours.dim)))))
   end
   Column(width(grow=grow), Alignment.Start, padding(s * 1.6, 0px, 0px, 0px), name="Listing",
     head, (isempty(rows) ? () : (last(rows).last = true; rows))...)
 end
 
 cursor(::SiteListing) = :arrow
+
+# --- the list of a folder of a blog on a web server ---------------------------------------------
+#
+# The site of a blog sends the page of a folder as Markdown: the folder's
+# Readme, then a table of what the folder holds, with a line for each file
+# and folder, as the canon tool writes it:
+#
+#     | Name | Description | Created | Modified |
+#     |---|---|---|---|
+#     | [Humans](Humans/) | My take on psychology | 2025-07-17 | 2026-10-04 |
+#     | [Dating.md](Dating.md) (draft) | The problems with dating | 2025-12-12 | 2025-12-13 |
+#
+# When the folder's .ladder page makes it a folder of a blog, Ladder shows
+# that table as the list that the folder has on the Mac: an icon and the name
+# in bold, what each is about in italics, and the days. The server doesn't say
+# how big each is, so the list has no column for that. A section's list
+# starts with a line that goes up to the folder above it. A click on a line
+# asks the server for its page.
+
+"The list of a folder of a blog on a web server, from the table at the end of the folder's page"
+@def mutable struct WebListing <: SemanticUI
+  entries::Vector{Blogs.Entry} = Blogs.Entry[]   # a line for each, with its address as its path
+  up::String = ""   # the address of the folder above, or "" for no line that goes up
+  rows::Dict{Any,Any} = Dict{Any,Any}()
+end
+
+"The headings of the table at the end of the page of a folder of a blog on its site"
+const LISTING_HEADS = ["name", "description", "created", "modified"]
+
+table_view(e, d::WebFolder{<:BlogFolder}, o::WebPage, from, to) = begin
+  lines = e.buf.lines
+  # Only the folder's own page ends in its list
+  rstrip(Remote.bare(o.address), '/') == rstrip(d.address, '/') || return nothing
+  all(i -> isempty(strip(lines[i])), to+1:length(lines)) || return nothing
+  lowercase.(celltexts(lines[from])) == LISTING_HEADS || return nothing
+  v = node!(WebListing, e, (:web_listing, d.address))
+  v.entries = web_entries(d, @view lines[from+2:to])
+  v.up = d isa WebFolder{BlogDirectory} || d.parent === nothing ? "" : d.parent.address
+  v
+end
+
+"The entries of the list of the web folder `d` of a blog, from the `lines` of the table of its page that are under the line of dashes"
+web_entries(d::WebFolder, lines) = begin
+  reviews = d isa WebFolder{BookReviewDirectory}
+  out = Blogs.Entry[]
+  for line in lines
+    cells = celltexts(line)
+    length(cells) >= 4 || continue
+    m = match(r"^\[(.*)\]\(([^)\s]*)\)\s*(\(draft\))?$", cells[1])
+    m === nothing && continue
+    name, link = String(m[1]), String(m[2])
+    folder = endswith(link, "/")
+    ending = Blogs.ending(name, true)
+    icon = folder ? :folder : ending == ".review" || (reviews && ending in Blogs.MARKDOWN) ? :review :
+           ending in Blogs.MARKDOWN ? (m[3] === nothing ? :markdown : :draft) : endswith(lowercase(name), ".jl") ? :julia : :file
+    push!(out, Blogs.Entry(Remote.against(d.address, link), name, folder, icon, Blogs.plain(cells[2]), -1, web_day(cells[3]), web_day(cells[4])))
+  end
+  out
+end
+
+"The day `text`, like 2026-03-12, as a time in seconds since 1970, at noon so that it's that day in any time zone, or 0 when it isn't a day"
+web_day(text) = (day = tryparse(Date, strip(text)); day === nothing ? 0.0 : Dates.datetime2unix(Dates.DateTime(day)) + 12 * 3600)
+
+describe(v::WebListing) = (e = editor(v);
+  listing_column(v, e, v.entries; up=isempty(v.up) ? nothing : v.up, go=url -> follow_remote!(e, url), sizes=false))
+
+cursor(::WebListing) = :arrow
 
 # --- a book review in a blog ------------------------------------------------------------------
 #

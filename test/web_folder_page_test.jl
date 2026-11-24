@@ -162,6 +162,54 @@ end
   @test e.look == :site && runs() == 3   # the code that ran is still loaded
 end
 
+@testset "a folder's page of a blog shows its table as the folder's list on the Mac" begin
+  table = """
+    | Name | Description | Created | Modified |
+    |---|---|---|---|
+    | [essays](essays/) | Things I _think_ | 2025-07-04 | 2026-10-03 |
+    | [Plans.md](Plans.md) (draft) | Not done | 2026-11-18 | 2026-11-21 |
+    | [feed.jl](feed.rss) |  | 2025-07-06 | 2025-07-26 |
+    """
+  page!("https://blog.test/", "# The blog\n\nWords.\n\n" * table)
+  page!("https://blog.test/essays/", table)   # a folder with no Readme has only its list, from the page's first line
+  K.navigate!(e, "https://blog.test/")
+  frames()
+  @test e.buf.path == "https://blog.test/" && e.look == :site
+  v = e.nodes[(:web_listing, "https://blog.test/")]
+  @test v isa K.WebListing && isempty(v.up)
+  @test [x.name for x in v.entries] == ["essays", "Plans.md", "feed.jl"]
+  @test [x.icon for x in v.entries] == [:folder, :draft, :julia]
+  @test [x.path for x in v.entries] == ["https://blog.test/essays/", "https://blog.test/Plans.md", "https://blog.test/feed.rss"]
+  @test v.entries[1].about == "Things I think" && K.Blogs.short(v.entries[1].made) == "04/07/25" && K.Blogs.short(v.entries[1].saved) == "03/10/26"
+  # The list shows in place of the table, at the end of the page
+  @test any(it -> it.content isa K.Live && it.content.node === v, e.layout)
+  @test !any(it -> it.content isa K.Grid, e.layout)
+  # A click on a line asks for its page. A section's list starts with a line that goes up to the blog's page.
+  v.rows[(:entry, "https://blog.test/essays/")].act(w)
+  frames()
+  @test e.buf.path == "https://blog.test/essays/"
+  s = e.nodes[(:web_listing, "https://blog.test/essays/")]
+  @test s.up == "https://blog.test/" && haskey(s.rows, (:up, "https://blog.test/"))
+  @test any(it -> it.content isa K.Live && it.content.node === s, e.layout) && !any(it -> it.content isa K.Grid, e.layout)
+  s.rows[(:up, "https://blog.test/")].act(w)
+  frames()
+  @test e.buf.path == "https://blog.test/"
+  # Each page in a folder of book reviews is a review
+  reviews = K.WebFolder{K.BookReviewDirectory}("https://blog.test/reviews/", K.WebFolder{K.BlogDirectory}("https://blog.test/", nothing))
+  @test [x.icon for x in K.web_entries(reviews, ["| [A book.md](A%20book.html) | Good | 2025-07-20 | 2025-07-20 |"])] == [:review]
+  # A page that isn't a folder's own keeps its table, and so does a table with other headings
+  page!("https://blog.test/essays/post.md", "# A post\n\n" * table)
+  K.navigate!(e, "https://blog.test/essays/post.md")
+  frames()
+  @test e.buf.path == "https://blog.test/essays/post.md" && any(it -> it.content isa K.Grid, e.layout)
+  page!("https://blog.test/", "# The blog\n\n| Name | Age |\n|---|---|\n| Sam | 3 |\n")
+  K.navigate!(e, "https://blog.test/")
+  frames()
+  @test any(it -> it.content isa K.Grid, e.layout)
+  page!("https://blog.test/", "# The blog\n\n[A post](essays/post.md)\n")
+  page!("https://blog.test/essays/post.md", "# A post\n\nSome words.\n")
+end
+
 @testset "a site with no page of code asks nothing" begin
   n = length(asks)
   K.navigate!(e, "https://html.test/a.md")
