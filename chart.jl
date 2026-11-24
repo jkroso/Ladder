@@ -238,9 +238,10 @@ struct Data
   problem::String   # why there's nothing to draw, or ""
   more::Int         # how many columns of numbers it leaves out, because a chart has `MOST` colours
   apart::Union{Nothing,Tuple{String,Float64}}   # a total row, kept out of the bars and the slices: its name, then its number
+  colours::Vector{Int}   # the colour of each name, for a pie: the place of its row in the table, or 0 for Other. None when each column has a colour.
 end
 
-Data(labels, series, before, after, problem, more=0) = Data(labels, series, before, after, problem, more, nothing)
+Data(labels, series, before, after, problem, more=0, apart=nothing) = Data(labels, series, before, after, problem, more, apart, Int[])
 nothing_to_draw(problem) = Data(String[], Series[], "", "", problem)
 
 "The most columns that a chart draws. Each has a colour of its own, and a chart has this many colours."
@@ -333,7 +334,8 @@ without_total(d::Data) = begin
   keep = [k for k in eachindex(d.labels) if k != i]
   isempty(keep) && return d
   apart = length(d.series) == 1 ? (d.labels[i], d.series[1].values[i]) : nothing
-  Data(d.labels[keep], [Series(s.name, s.values[keep]) for s in d.series], d.before, d.after, d.problem, d.more, apart)
+  Data(d.labels[keep], [Series(s.name, s.values[keep]) for s in d.series], d.before, d.after, d.problem, d.more, apart,
+       isempty(d.colours) ? d.colours : d.colours[keep])
 end
 
 """
@@ -374,17 +376,41 @@ end
 The slices of a pie: the first column of numbers, biggest first. A number
 that's nothing or less has no slice. The smallest of more than `SLICES` slices
 are one slice, called Other.
+
+Each slice has the colour of its row's place in the table, not of its place in
+the pie. So two pies of one table, like its costs and its weights, show each
+row in the same colour, though their biggest slices differ. Other is a
+different set of rows in each pie, so it has a colour of no row.
 """
 slices(d::Data) = begin
   s = d.series[1]
-  parts = [(d.labels[i], s.values[i]) for i in eachindex(s.values) if s.values[i] !== nothing && s.values[i] > 0]
+  parts = [(d.labels[i], s.values[i], i) for i in eachindex(s.values) if s.values[i] !== nothing && s.values[i] > 0]
   isempty(parts) && return nothing_to_draw("A pie needs numbers that are more than nothing.")
-  sort!(parts, by=last, rev=true)
+  sort!(parts, by=p -> p[2], rev=true)
   if length(parts) > SLICES
-    rest = sum(last, parts[SLICES:end])
-    parts = [parts[1:SLICES-1]; ("Other", rest)]
+    rest = sum(p -> p[2], parts[SLICES:end])
+    parts = [parts[1:SLICES-1]; ("Other", rest, 0)]
   end
-  Data(first.(parts), [Series(s.name, Union{Nothing,Float64}[last(p) for p in parts])], d.before, d.after, "", 0, d.apart)
+  Data(first.(parts), [Series(s.name, Union{Nothing,Float64}[p[2] for p in parts])], d.before, d.after, "", 0, d.apart, last.(parts))
+end
+
+"""
+Where the colour at place `k` comes from, when a chart has `n` colours: the
+place of one of them, and how far to take it towards white (more than 0) or
+black (less than 0). The first `n` places have the colours as they are. After
+them the colours come round again darker, then lighter, as a spreadsheet's do.
+So the rows of a long table each have a colour of their own.
+"""
+shade(k::Integer, n::Integer) = (mod1(k, n), SHADES[mod1(cld(k, n), length(SHADES))])
+const SHADES = (0.0, -0.35, 0.4)
+
+"The colour at place `k` among `colours`, each as CSS writes a colour like #2a78d6. See `shade`."
+coloured(colours::AbstractVector, k::Integer) = begin
+  place, shift = shade(k, length(colours))
+  c = colours[place]
+  (shift == 0 || !occursin(r"^#[0-9a-fA-F]{6}$", c)) && return c
+  parts = [parse(Int, c[i:i+1], base=16) for i in (2, 4, 6)]
+  "#" * join(string(round(Int, shift > 0 ? x + (255 - x) * shift : x * (1 + shift)), base=16, pad=2) for x in parts)
 end
 
 "A number of the chart `d` in words, with what its table writes before and after each number"
@@ -426,7 +452,8 @@ One part of a chart, and where it goes. What `at` holds depends on its kind:
 - `:swatch`: its left, top, width and height.
 - `:words`: where its text starts, ends or has its middle, as `style` says: `:start`, `:end` or `:middle`. `size` is the size of its text, and `tone` is `:ink` or `:dim`.
 
-`colour` is the place of its colour among the chart's colours, or 0. `label` and
+`colour` is the place of its colour among the chart's colours (see `shade`), or 0
+for the quiet colour of the page's words, as a pie's Other slice has. `label` and
 `series` say which number it stands for, or 0 when it stands for none.
 """
 struct Mark
@@ -565,6 +592,7 @@ percent(v::Real, total::Real) = words(round(100v / total, digits=1)) * "%"
 pie(d::Data, wide::Real, tall::Real, measure) = begin
   marks = Mark[]
   values = Float64[v for v in d.series[1].values]
+  hue(i) = isempty(d.colours) ? i : d.colours[i]
   total = sum(values)
   r = max(min(tall - 24, wide * 0.42) / 2, 10.0)
   cx, cy = 16 + r, tall / 2
@@ -573,7 +601,7 @@ pie(d::Data, wide::Real, tall::Real, measure) = begin
     to = from + 2π * v / total
     steps = max(2, ceil(Int, (to - from) / 0.05))
     outline = [(cx, cy); [(cx + r * cos(a), cy + r * sin(a)) for a in range(from, to, length=steps + 1)]]
-    push!(marks, Mark(:slice, (cx, cy, from, to), points=outline, colour=i, size=r, label=i, series=1))
+    push!(marks, Mark(:slice, (cx, cy, from, to), points=outline, colour=hue(i), size=r, label=i, series=1))
     from = to
   end
   x = cx + r + 28
@@ -593,7 +621,7 @@ pie(d::Data, wide::Real, tall::Real, measure) = begin
   right = sharing ? x + 16 + longest + 40 + widest : x + 16 + maximum(n -> measure(n, 12.0), named)
   y = cy - row * length(labels) / 2
   for i in eachindex(values)
-    push!(marks, Mark(:swatch, (x, y + 7, 10, 10), colour=i))
+    push!(marks, Mark(:swatch, (x, y + 7, 10, 10), colour=hue(i)))
     push!(marks, Mark(:words, (x + 16, y + 16, 0, 0), text=named[i], style=:start, tone=:ink, size=12.0))
     sharing && push!(marks, Mark(:words, (right, y + 16, 0, 0), text=shares[i], style=:end, size=12.0))
     y += row
@@ -656,8 +684,8 @@ bar_path(m::Mark) = begin
 end
 
 """
-The marks of a chart as an SVG picture. `colours` holds the colour of each
-column of numbers, and `ink`, `dim`, `line` and `surface` are the colours of
+The marks of a chart as an SVG picture. `colours` holds the chart's colours,
+which `coloured` takes darker and lighter past the last of them, and `ink`, `dim`, `line` and `surface` are the colours of
 the page's text, its quiet text, its lines and the page itself, each as CSS
 writes a colour.
 """
@@ -667,7 +695,7 @@ svg(marks::Vector{Mark}, wide::Real, tall::Real; colours, ink, dim, line, surfac
   through(points) = join(("$(c(x)),$(c(y))" for (x, y) in points), " ")
   println(out, "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 $(c(wide)) $(c(tall))\" width=\"$(c(wide))\" font-family=\"$(xml(family))\" role=\"img\">")
   for m in marks
-    colour = m.colour == 0 ? dim : colours[m.colour]
+    colour = m.colour == 0 ? dim : coloured(colours, m.colour)
     if m.kind == :rule
       println(out, "<line x1=\"$(c(m.at[1]))\" y1=\"$(c(m.at[2]))\" x2=\"$(c(m.at[3]))\" y2=\"$(c(m.at[4]))\" stroke=\"$(m.style == :strong ? dim : line)\" stroke-width=\"1\"/>")
     elseif m.kind == :bar

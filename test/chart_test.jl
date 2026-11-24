@@ -193,6 +193,33 @@ end
   @test C.fit("A long name of a thing", 60, measure) == "A long na…" && C.fit("Short", 60, measure) == "Short"
 end
 
+@testset "the colours of a pie" begin
+  # Each slice has the colour of its row in the table, so two pies of one table show a row in the same colour
+  parts = [[["Part", "Cost", "Weight"]]; [[string("Part ", k), string(k), string(12 - k)] for k in 1:11]]
+  cost = C.data(C.chart(["kind: pie", "show: Cost"]), parts, headed=true)
+  weight = C.data(C.chart(["kind: pie", "show: Weight"]), parts, headed=true)
+  @test cost.labels[1] == "Part 11" && cost.colours[1] == 11 && weight.labels[1] == "Part 1" && weight.colours[1] == 1
+  # Other is a different set of rows in each pie, so it has the colour of no row
+  @test cost.labels[end] == weight.labels[end] == "Other" && cost.colours[end] == weight.colours[end] == 0
+  both = setdiff(intersect(cost.labels, weight.labels), ["Other"])
+  @test both == ["Part 7", "Part 6", "Part 5"]
+  @test all(l -> cost.colours[findfirst(==(l), cost.labels)] == weight.colours[findfirst(==(l), weight.labels)], both)
+  marks = C.plot(cost, :pie, 600, 240, measure)
+  @test [m.colour for m in marks if m.kind == :slice] == [m.colour for m in marks if m.kind == :swatch] == cost.colours
+  # A total row and an empty row don't move the colours of the rows after them
+  @test C.data(C.chart(["pie"]), [["a", "1"], ["", ""], ["b", "5"], ["Total", "6"]]).colours == [2, 1]
+  # Past the last colour, the colours come round again darker, then lighter
+  @test C.shade(3, 8) == (3, 0.0) && C.shade(11, 8) == (3, -0.35) && C.shade(19, 8) == (3, 0.4) && C.shade(27, 8) == (3, 0.0)
+  two = ["#2a78d6", "#eb6834"]
+  @test C.coloured(two, 2) == "#eb6834" && C.coloured(two, 3) == "#1b4e8b" && C.coloured(two, 5) == "#7faee6"
+  @test C.coloured(["red", "blue"], 3) == "red"
+  eight = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948"]
+  picture = C.svg(marks, 600, 240, colours=eight, ink="#222", dim="#777", line="#ddd", surface="#fff")
+  @test occursin("fill=\"#1b4e8b\"", picture) && occursin("fill=\"#777\"", picture)
+  # Bars and lines still have a colour for each column
+  @test C.data(C.Chart(), TABLE, headed=true).colours == Int[]
+end
+
 @testset "a chart of several tables" begin
   cells = [["Age", "Power"], ["0", "100%"], ["5", "90%"], ["10", "80%"]]
   chips = [["Age", "Working"], ["0", "100%"], ["10", "60%"], ["20", "20%"]]

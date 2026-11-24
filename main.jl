@@ -12116,6 +12116,16 @@ const SERIES_DARK = [colorant"#3987e5", colorant"#d95926", colorant"#199e70", co
                      colorant"#d55181", colorant"#0ca30c", colorant"#9085e9", colorant"#e66767"]
 series_colours() = dark_page() ? SERIES_DARK : SERIES_LIGHT
 
+"The colour at place `k` of a chart. Past the eighth, the colours come round again darker, then lighter: see `Charts.shade`."
+chart_colour(k::Integer) = begin
+  cs = series_colours()
+  place, shift = Charts.shade(k, length(cs))
+  shift == 0 && return cs[place]
+  c = convert(RGBA{Float64}, cs[place])
+  towards(x) = shift > 0 ? x + (1 - x) * shift : x * (1 + shift)
+  RGBA(towards(c.r), towards(c.g), towards(c.b), 1.0)
+end
+
 "What a `chart` block shows: the numbers of a table, drawn"
 @def mutable struct ChartView <: SemanticUI
   n::Int = 0                               # its place among the page's charts
@@ -12510,12 +12520,13 @@ end
 
 "Draw the marks of a chart, with the top left corner of the chart at `(x0, y0)`. The mark `hot` is the one under the mouse."
 draw_marks(ctx, marks, x0, y0, hot=nothing; lit=0) = begin
-  cs, surface = series_colours(), takeoff_back()
+  surface = takeoff_back()
   for m in marks
     # While the mouse is over a bar or a slice, the others are pale. So are the bars of the other rows,
     # while the mouse is on a row of the chart's table: the row at place `lit`.
     pale = m.kind in (:bar, :slice) && (hot !== nothing ? (m.label, m.series) != (hot.label, hot.series) : lit > 0 && m.label != lit)
-    colour = m.colour == 0 ? colours.dim : pale ? RGBA(cs[m.colour], 0.4) : cs[m.colour]
+    colour = m.colour == 0 ? colours.dim : chart_colour(m.colour)
+    pale && (colour = RGBA(colour, 0.4))
     x, y = x0 + m.at[1], y0 + m.at[2]
     if m.kind == :rule
       trace(ctx, [(x, y), (x0 + m.at[3], y0 + m.at[4])], RGBA(colours.ink, m.style == :strong ? 0.3 : 0.08), 1.0)
