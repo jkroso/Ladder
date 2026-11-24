@@ -11,7 +11,7 @@
 
 include("start.jl")
 
-@use ".." build_editor open_editor move_old_folders! run_startup! startup_page STARTUP_FOLDER STARTUP WELCOME restyle! problems pages_dir SIDEBAR_ICONS FILE_ICONS todo_at inbox Agent INSERTS PLAN_ICONS SCHEDULE_ICONS BLOCK_ICONS window! editors settings_editor theme! Update open! level! SOURCE_FILES kinds LAST_RUN
+@use ".." build_editor open_editor move_old_folders! run_startup! startup_page STARTUP_FOLDER STARTUP WELCOME restyle! problems pages_dir SIDEBAR_ICONS FILE_ICONS todo_at inbox Agent INSERTS PLAN_ICONS SCHEDULE_ICONS BLOCK_ICONS window! editors settings_editor theme! Update open! level! SOURCE_FILES kinds LAST_RUN Terms
 @use "github.com/jkroso/MiniFB.jl" Window KeyPress KeyRelease MouseMove Keys onkey onmouse Typed ontype
 @use "github.com/jkroso/Font.jl/units" px
 @use "github.com/jkroso/UI.jl/Interface/abstract" focus window_of
@@ -57,7 +57,7 @@ const page = read(WELCOME, String)
 const PAGES = dirname(WELCOME)
 "The text of each of the app's own pages, by the file's place in the folder of pages. The model, the video, the recording, the plan, the table and the pictures that the pages show are here too, as the bytes of their files."
 const pages = Dict(name => read(joinpath(PAGES, name), String)
-                   for name in ("welcome.md", "components.md", "julia.md", "settings/settings.md", "settings/code-editor.md", "settings/key-bindings.md", "schedule.md", "counter.md", "widgets.jl", "progress.jl", "wall.jl", "knot.stl", "satellite.glb", "bracket.sc", "knot.mp4", "hello.m4a", "plan.pdf", "costs.csv", "orders.json",
+                   for name in ("welcome.md", "components.md", "julia.md", "settings/settings.md", "settings/code-editor.md", "settings/key-bindings.md", "schedule.md", "counter.md", "widgets.jl", "progress.jl", "wall.jl", "knot.stl", "satellite.glb", "bracket.sc", "session.vt", "knot.mp4", "hello.m4a", "plan.pdf", "costs.csv", "orders.json",
                                "photos/1 footings.png", "photos/2 frame.png", "photos/3 roof.png", "photos/4 bricks.png", "photos/5 window.png", "photos/6 finished.png"))
 
 "The `user/repo/file` that a file Kip got from GitHub has there, or nothing for any other file. A file of Ladder's own has a place too, so that the app can show the code that draws a thing."
@@ -405,8 +405,45 @@ warm_up() = begin
   rm(dir, recursive=true)
 end
 
+"""
+Show a terminal's file in a window that isn't on screen. While the app is
+built, the file has text and no shell runs, so this compiles the code that
+reads the text and draws it. With `shell`, the file is empty, so a shell
+starts in it, and this types a line and waits for what the shell writes.
+`--self-test` does that inside the finished app, to check that a program runs
+there and that its output is read.
+"""
+check_terminal(; shell=false) = begin
+  dir = mktempdir()
+  path = joinpath(dir, "work.vt")
+  write(path, shell ? "" : "\e[1;31mred\e[0m \e[4munder\e[0m ╭─╮ ║ ░ 界 é\r\nplain")
+  was = Terms.USUAL[]
+  Terms.USUAL[] = ["/bin/sh"]   # a shell that reads none of the settings of whoever builds the app
+  e = build_editor(path)
+  w = window!(e, title="terminal", size=(700px, 400px))
+  frame(w); frame(w)
+  v = e.nodes[(:term, path)]
+  wrote = !shell
+  if shell
+    foreach(c -> ontype(w, Typed(c, w)), "echo ok-\$((40+2))")
+    onkey(w, KeyPress{Keys.enter}(0, w))
+    began = time()
+    while !wrote && time() - began < 10
+      sleep(0.02)
+      frame(w)
+      wrote = occursin("ok-42", Terms.Screens.words(v.term))
+    end
+  end
+  close(w)
+  Terms.USUAL[] = was
+  rm(dir, recursive=true)
+  wrote || error("A shell in a terminal's file wrote nothing")
+  isempty(editors) || error("A window that closed is still in the list of the windows that are open")
+end
+
 warm_up()
 check_pages(PAGES)
+check_terminal()
 
 if building
   relocate!()
@@ -437,12 +474,13 @@ check_startup(dir) = begin
   said[4] == "1.00 AUD/hr" || error("The code of a startup page gave the wrong wage: ", said[4])
 end
 
-"The app's self-test: the pages as the app writes them out, the code of a startup page, then some typing"
+"The app's self-test: the pages as the app writes them out, the code of a startup page, then some typing, then a shell in a terminal's file"
 self_test() = begin
   dir = mktempdir()
   check_pages(dirname(unpack(dir)))
   check_startup(dir)
   warm_up()
+  check_terminal(shell=true)
   rm(dir, recursive=true)
 end
 

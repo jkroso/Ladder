@@ -564,6 +564,7 @@ What shows depends on the kind of file:
 - A Markdown page shows as it reads.
 - A picture, a model, a sound, a video, a PDF file, a CSV file, a zip and a file of text show as they do under a path.
 - A SolidCraft design shows alone, without its editor: see [SolidCraft designs](#solidcraft-designs).
+- A terminal's file shows its last lines: see [Terminals](#terminals).
 - A folder shows its files and folders. Click one to go to it.
 - A Julia file with a function called `view` shows what that function makes: see [A view that code makes](#a-view-that-code-makes).
 
@@ -1155,6 +1156,25 @@ The command is the file `bin/ladder` in Ladder's own folder, `~/Library/Applicat
 export PATH="$HOME/Library/Application Support/Ladder/bin:$PATH"
 ```
 
+## Terminals
+
+A file whose name ends in `.vt` is a terminal. Open one, and a shell runs in the window, in the folder that the file is in. To make one, right-click a folder in the sidebar and choose New Terminal. Or press ⌘⇧P and run New Terminal.
+
+The file keeps what the terminal shows: its text, with its colours. So when you open the file again, you see what the terminal last showed. No shell runs then until you press Return. Kero keeps each of its sessions in a file of this kind, and Ladder shows those files too.
+
+- **Keys.** While a shell runs, the keys are the shell's. Keys with ⌘ are still Ladder's, but four of them are the terminal's. ⌘C copies the text that's selected, and ⌘V pastes. ⌘A selects everything. ⌘K forgets the lines above the cursor's line.
+- **Going back.** The wheel goes back through the lines that scrolled away. So do ⇧PageUp and ⇧PageDown.
+- **Selecting.** Drag to select text. Two clicks select a word, and three select a line.
+- **Programs that fill the terminal**, like vim, work as they do in a terminal app. A program that asks for the mouse gets the clicks and the wheel. Hold ⇧ to select text there.
+- **The shell runs on** while the window shows other files. It ends when you type `exit`, and when the window closes.
+- **Levels.** ⌘E shows the file's text, with the codes that colour it.
+
+A `view` block shows the last lines of a terminal's file. It starts no shell:
+
+```view
+session.vt
+```
+
 ## Slides
 
 Press ⌃⌘⇧P to show this page as slides, for when you show a plan to someone. The window shows one part of the page at a time, with bigger text and nothing else of the app. A slide starts at each heading of level 1 or 2. A line across the page, which you write as `---`, starts one too. A right-click on the page has Show as Slides in its menu too.
@@ -1236,6 +1256,8 @@ You can write the file `.ladder` yourself too. It ends with a block like the one
 A zip file shows what it holds, without being unpacked: its folders and files, each file with its size and when it changed. Click a folder to open it, and click a file to see that one file. Ladder doesn't change a file that it shows from a zip file. Click Unpack to unpack the whole file beside itself, as two clicks in the Finder do.
 
 A SolidCraft design, a file whose name ends in `.sc`, opens in an editor of its own: see [SolidCraft designs](#solidcraft-designs).
+
+A file whose name ends in `.vt` opens as a terminal: see [Terminals](#terminals).
 
 Right-click the page to cut, copy or paste. The menu's Insert item adds a new block where you clicked: a heading, a list, a to-do item, a table, a sheet, a spreadsheet, a diagram, a takeoff, a schedule, a chart, a board, a calendar, a sketch, a canvas, a live block and more.
 

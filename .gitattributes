@@ -1,0 +1,2 @@
+# A terminal's file has a carriage return in each line end, which the terminal needs
+*.vt -text

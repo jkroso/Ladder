@@ -1,0 +1,8 @@
+[1;32m~/Desktop/kitchen[0m [36mmain[0m $ git status --short
+[31m M[0m plan.md
+[32mA [0m costs.csv
+[31m??[0m photos/
+[1;32m~/Desktop/kitchen[0m [36mmain[0m $ ls
+costs.csv   [1;34mphotos[0m      plan.md
+[1;32m~/Desktop/kitchen[0m [36mmain[0m $ wc -w plan.md
+     412 plan.md

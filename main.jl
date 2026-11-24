@@ -406,6 +406,7 @@ end
 @use "./remote" => Remote
 @use "./slides" => Slides
 @use "./desktop" => Desks
+@use "./term/view" => Terms
 @use "./git" => Git
 @use "./cad/view" => Designs
 @use "./notes" => Notes
@@ -4759,6 +4760,7 @@ const PICTURES = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp")
 const PREVIEW_LINES = 12
 const MODELS = (".stl", ".3mf", ".glb", ".gltf")   # the files of 3D models that the viewer reads
 const MODEL_HEIGHT = 260px
+const TERMINALS = (".vt",)   # the files that keep what a terminal shows: see "a terminal's file"
 # The sound and the video files that macOS plays
 const SOUNDS = (".mp3", ".m4a", ".wav", ".aif", ".aiff", ".aac", ".flac", ".caf")
 const VIDEOS = (".mp4", ".mov", ".m4v")
@@ -4791,6 +4793,24 @@ design(l::Breadcrumb, path) = begin
   (v isa Designs.DesignView && v.path == path) && return v
   hush!(l)
   l.viewer = own!(l, Designs.DesignView(path=path, readonly=true, fill=false, height=MODEL_HEIGHT))
+end
+
+"""
+What shows the terminal's file at `path` under a path and in a `view` block:
+the last lines that the file keeps, in their colours. No shell starts there.
+The file's own page is the terminal: see "a terminal's file".
+"""
+terminal(l::Breadcrumb, path) = begin
+  v = l.viewer
+  (v isa Terms.TerminalView && v.path == path) || (hush!(l); v = l.viewer = own!(l, Terms.TerminalView(path=path, shown=true)))
+  e = editor(l)
+  term_look!(v, e)
+  # As tall as its lines, and no taller than a model
+  t = Terms.terminal(v)
+  lines = something(findlast(!Terms.Screens.isblank, Terms.Screens.everything(t)), 1)
+  v.wide = max(e.width - 12px, 120px)
+  v.high = min(MODEL_HEIGHT, px(lines * Terms.cell(v)[2] + 2Terms.PAD))
+  v
 end
 
 const LINE_H = 18px          # the height of a line of a file's text
@@ -5073,6 +5093,7 @@ file_icon(path) = begin
   ext in SOUNDS ? "file-earmark-music" :
   ext in VIDEOS ? "file-earmark-play" :
   ext in MODELS || ext in DESIGNS ? "box" :
+  ext in TERMINALS ? "terminal" :
   ext == ".pdf" ? "file-earmark-pdf" :
   ext in ZIPS ? "file-earmark-zip" :
   ext in TABLES ? "file-earmark-spreadsheet" :
@@ -5082,7 +5103,7 @@ file_icon(path) = begin
 end
 
 "Every icon that `file_icon` can give, and those of a file that's only shown: of a binary file, and of the button that opens the file in its own app. The built app reads them all when it's made."
-const FILE_ICONS = ("file-earmark", "file-earmark-text", "file-earmark-image", "file-earmark-music", "file-earmark-play", "box",
+const FILE_ICONS = ("file-earmark", "file-earmark-text", "file-earmark-image", "file-earmark-music", "file-earmark-play", "box", "terminal",
                     "file-earmark-pdf", "file-earmark-zip", "file-earmark-spreadsheet", "file-earmark-font", "file-earmark-richtext",
                     "file-earmark-code", "file-earmark-binary", "box-arrow-up-right", "chevron-left", "chevron-right")
 
@@ -5114,6 +5135,8 @@ peek(l::Breadcrumb, path, ext, note) = begin
   elseif ext in DESIGNS
     viewer = design(l, path)
     return fillable(l, (:node, viewer), viewer, wide=:grow)
+  elseif ext in TERMINALS
+    return terminal(l, path)
   elseif mac && ext in SOUNDS
     return player(l, path, AudioPlayer)
   elseif mac && ext in VIDEOS
@@ -5238,6 +5261,8 @@ look(path; tree=true) = begin
     return Buffer(path=path, view=:file)
   elseif tree && ext in HTMLS && text_file(path)
     return Buffer(path=path, view=:file)   # the page that its HTML makes: see "an HTML file as its page"
+  elseif tree && ext in TERMINALS
+    return Buffer(path=path, view=:file)   # the terminal that it keeps: see "a terminal's file"
   elseif !viewed(ext)
     shown = text_look(path)
     shown === nothing || return shown
@@ -5283,7 +5308,7 @@ table of the other. So has an HTML file: the page that its HTML makes.
 file_views(b::Buffer) = begin
   (b.view in FILE_VIEWS && !isdir(b.path)) || return ()   # a folder that shows in the page has one way to show
   served_html(b) && return SERVED_VIEWS   # a page of HTML from a web server has no file of bits and bytes
-  (json_page(b) || html_page(b)) && return FILE_VIEWS
+  (json_page(b) || html_page(b) || term_page(b)) && return FILE_VIEWS
   ext = lowercase(splitext(b.path)[2])
   ext in TABLES ? (text_file(b.path) ? FILE_VIEWS : ()) :
   viewed(ext) || !text_file(b.path) ? () : FILE_VIEWS[1:3]
@@ -5337,7 +5362,8 @@ CSV file. A file that has no text shows as `look` shows it.
 look(path, view::Symbol) = begin
   view == :bits && return Buffer(path=path, view=:bits, lines=bitlines(path), about=bits_about(path))
   view == :hex && return Buffer(path=path, view=:hex, lines=hexlines(path), about=hex_about(path))
-  (view == :text && text_file(path)) || return look(path)
+  # A terminal's file is read each time, since its shell writes it while it shows
+  (view == :text && (text_file(path) || lowercase(splitext(path)[2]) in TERMINALS)) || return look(path)
   something(text_look(path), look(path))
 end
 
@@ -5809,6 +5835,8 @@ file_level!(e, view::Symbol) = begin
   # A page of HTML from a web server has its HTML already, at each of its levels
   served_html(b) && return (b.view = view; b.caret = b.anchor = (1, 0); b.saved = b.version += 1; e.scroll.offset = 0px; focus(e); e)
   at = place_in_file(e)
+  # A terminal writes its file a moment after its shell writes. It writes it now, so that the file's text is what the terminal shows.
+  term_page(b) && (v = get(e.nodes, (:term, b.path), nothing); v === nothing || Terms.save!(v))
   shown = look(b.path, view)
   b.lines, b.about, b.view = shown.lines, shown.about, shown.view
   b.caret = b.anchor = (1, 0)
@@ -6586,7 +6614,7 @@ cursor(::FileView) = :arrow
 file_item(e, b::Buffer) = begin
   v = node!(() -> FileView(path=b.path), e, (:fileview, b.path))
   # What covers the page's whole space isn't one of the page's items, so it has no height to learn
-  b === e.buf && (page_covered(e) || html_shown(e) || file_covers(e)) && return Item(1, 1, 0px, 1px, Live(v, 1px))
+  b === e.buf && (page_covered(e) || html_shown(e) || term_shown(e) || file_covers(e)) && return Item(1, 1, 0px, 1px, Live(v, 1px))
   # Lay it out once to learn how tall it is
   concrete = describe(Column(fixed(e.width), Alignment.Start, geometry(v)), (e.width, 9999px))
   high = concrete.height + 2LIVE_GAP
@@ -23018,6 +23046,132 @@ end
 
 keyboard_part(v::HTMLPage) = html_browser(v)
 
+# --- a terminal's file ------------------------------------------------------------------------
+#
+# A file whose name ends in .vt keeps what a terminal shows: text with the
+# codes that colour it, as Kero writes for each of its sessions. Such a file
+# opens as a terminal, which covers the page's whole space in the window. That's
+# its highest level, over its bits, its bytes in hexadecimal and its text, so
+# ⌘E shows the text with its codes.
+#
+# A file with nothing in it gets a shell at once, in the folder that the file
+# is in: New Terminal in a folder's menu makes such a file. A file with text
+# shows the text, and a line under it says that Return starts a shell. So a
+# file that you only look at, like one of Kero's, runs nothing and isn't
+# changed. What the shell writes goes into the file a moment after it comes,
+# so the file has it the next time.
+#
+# While the terminal shows it has the keyboard, and the keys are the shell's.
+# The keys with ⌘ are still the window's, but ⌘C, ⌘V, ⌘A and ⌘K, which are the
+# terminal's: term/view.jl says what they do. The shell runs on while the
+# window shows other files, and what it wrote is there when the window comes
+# back. It ends when it's told to, with `exit`, and when the window closes.
+# The terminal has the font of code, at the size that code has, and the
+# colours of the window's theme: a program's red is the theme's.
+
+"True when the page shows a terminal's file at one of its levels: as the terminal, its text, its bytes in hexadecimal or its bits"
+term_page(b::Buffer) = b.view in FILE_VIEWS && lowercase(splitext(b.path)[2]) in TERMINALS && isfile(b.path)
+
+"True when the page shows a terminal's file as the terminal"
+term_shown(e) = e.buf.view == :file && hosted(e) === nothing && term_page(e.buf)
+
+"The terminals of the window of `e`: one for each terminal's file that it has shown and that's still there"
+terminals(e) = get!(() -> Any[], e.nodes, :terminals)
+
+"A colour as the terminal's view takes it: its red, green and blue, a byte each"
+term_colour(c::Colorant) = (c = convert(RGBA{Float64}, c); UInt32(round(Int, 255c.r)) << 16 | UInt32(round(Int, 255c.g)) << 8 | UInt32(round(Int, 255c.b)))
+
+"The colour that's `t` of the way from `a` to `b`"
+term_mix(a::UInt32, b::UInt32, t) = begin
+  part(shift) = UInt32(round(Int, ((a >> shift) & 0xff) * (1 - t) + ((b >> shift) & 0xff) * t))
+  part(16) << 16 | part(8) << 8 | part(0)
+end
+
+"""
+The 16 colours that programs name by number, from the theme's colours: black,
+red, green, yellow, blue, magenta, cyan and white, and then a stronger one of
+each. The six hues are the theme's colours for code, so a program's red is
+the red of a line that a diff takes away. Black is the darkest and white the
+lightest that reads on the page, since programs write the one on the other.
+"""
+term_palette() = begin
+  c = colours
+  ink, bg = term_colour(c.ink), term_colour(c.bg)
+  dark = sum(k -> (0.299, 0.587, 0.114)[k] * ((bg >> (24 - 8k)) & 0xff), 1:3) < 128   # how bright the page is
+  hues = map(term_colour, (c.removed, c.added, c.number, c.call, c.keyword, c.type))
+  strong = map(h -> term_mix(h, dark ? 0x00ffffff : ink, 0.25), hues)
+  UInt32[dark ? term_colour(c.line) : ink, hues..., dark ? term_mix(ink, bg, 0.2) : term_colour(c.dim),
+         term_colour(c.comment), strong..., dark ? ink : term_colour(c.line)]
+end
+
+"Give the terminal `v` the font of code and the colours of the theme, as the window of `e` has them now"
+term_look!(v, e) = begin
+  v.family, v.style, v.size = codefont(), codestyle(), Float64(num(code_size(e)))
+  v.ink, v.paper, v.dim = term_colour(colours.ink), term_colour(colours.bg), term_colour(colours.dim)
+  v.select = UInt32(round(Int, 255convert(RGBA{Float64}, colours.select).alpha)) << 24 | term_colour(colours.select)
+  v.palette = term_palette()
+  v
+end
+
+"""
+The terminal of the terminal's file that the page shows, with the room that
+the page has. It has the keyboard while nothing else has taken it: the field
+that finds text, the sidebar and the command palette take it and give it back.
+"""
+term_part(e) = begin
+  b = e.buf
+  v = node!(e, (:term, b.path)) do
+    made = Terms.TerminalView(path=b.path)
+    push!(terminals(e), made)
+    made
+  end
+  v.wide, v.high = page_room(e)
+  term_look!(v, e)
+  w = window_of(e)
+  # The shell's output is read on another thread, which wakes the window to show it. A window that isn't on a screen has nothing to wake.
+  v.wake = () -> (w === nothing || isempty(w.glfw) || GLFW.PostEmptyEvent(); nothing)
+  if w !== nothing
+    (w.focus === e || w.focus === nothing) && e.popup == :none && focus(v)
+    w.focus === v && e.popup != :none && focus(e)   # what floats over the page, like the command palette, has the keys
+  end
+  # The top bar says what the program calls its window, as a terminal app's title does
+  b.about = v.term === nothing ? "" : v.term.title
+  v
+end
+
+"""
+See to the terminals that the window doesn't show now. A shell that writes
+while the window shows another file is read, so that it doesn't wait. A
+terminal that isn't shown gives the keyboard back, as when ⌘E shows its
+file's text. One whose file has gone ends.
+"""
+term_tick!(e) = begin
+  haskey(e.nodes, :terminals) || return
+  shown = term_shown(e) ? get(e.nodes, (:term, e.buf.path), nothing) : nothing
+  w = window_of(e)
+  for v in copy(terminals(e))
+    v === shown && continue
+    w !== nothing && w.focus === v && focus(e)
+    if isfile(v.path)
+      Terms.tick!(v)
+    else
+      delete!(e.nodes, (:term, v.path))
+      Base.filter!(o -> o !== v, terminals(e))
+      v.path = ""   # the file has gone, so nothing writes it again
+      Terms.close!(v)
+    end
+  end
+  nothing
+end
+
+"End the shell of every terminal of the window of `e`, and write its file: the window has closed"
+close_terminals!(e) = begin
+  haskey(e.nodes, :terminals) || return
+  foreach(Terms.close!, terminals(e))
+  empty!(terminals(e))
+  nothing
+end
+
 # --- a view of another file -------------------------------------------------------------------
 #
 # A code block in the language `view` shows another file in the document, as
@@ -26811,6 +26965,8 @@ describe(p::Page) = begin
   cover === nothing || return cover
   # An HTML file at its highest level covers it with the page that its HTML makes, as a browser's window would show it
   html_shown(e) && return Box(width(grow=grow), height(grow=grow), Alignment.Start, html_part(e))
+  # A terminal's file covers it with the terminal
+  term_shown(e) && return Box(width(grow=grow), height(grow=grow), Alignment.Start, term_part(e))
   # A model's file covers it with the model, which is a component, so it gets a live block's colours and text size
   model = model_part(e)
   model === nothing || return with_theme(() -> Box(width(grow=grow), height(grow=grow), Alignment.Start, model), component_theme(e.zoom))
@@ -31194,7 +31350,7 @@ describe(t::TopBar) = begin
       (page_covered(e) || nofile(e) ? right_part(e) :
        readonly(b) && page_object(e) isa BlogFolder ? (more..., mode..., outside...) :
        readonly(b) ? ((isempty(b.about) ? () : (said_part(b.about, side - LOCK_W - (isempty(outside) ? 0px : 40px) - (isempty(mode) ? 0px : MODE_W + grown)),))...,
-                      lock_part(e),
+                      (term_shown(e) ? () : (lock_part(e),))...,   # a terminal is yours to type in
                       mode...,
                       outside...) :
                      (more..., job_part(e)..., agent_part(e)..., checks..., diff_part(e)..., commit_part(e)..., mode...,
@@ -31379,7 +31535,8 @@ levels(d::Document) = begin
   views = file_views(b)
   isempty(views) && return full_block(e) === nothing ? PAGE_LEVELS : BLOCK_LEVELS
   served_html(b) && return SERVED_LEVELS
-  length(views) == 3 ? FILE_LEVELS : (FILE_LEVELS..., json_page(b) ? "the tree of the file's values" : html_page(b) ? "the page that the HTML makes" : "the file's table")
+  length(views) == 3 ? FILE_LEVELS : (FILE_LEVELS..., json_page(b) ? "the tree of the file's values" : html_page(b) ? "the page that the HTML makes" :
+                                                    term_page(b) ? "the terminal that the file keeps" : "the file's table")
 end
 
 level(d::Document) = begin
@@ -33866,7 +34023,7 @@ takes them. "-" is a line between two groups. A file has an item that opens it
 in the app that the Mac uses for it, unless that's Ladder.
 """
 file_menu(path) = begin
-  isdir(path) && return ["New Page", "New Folder", "-", "Open in New Window", favourite_item(path), "-", "Rename", "Duplicate", "-",
+  isdir(path) && return ["New Page", "New Folder", "New Terminal", "-", "Open in New Window", favourite_item(path), "-", "Rename", "Duplicate", "-",
                          "Copy Path", "Show in Finder", "-", "Move to Trash"]
   app = opener(path)
   outside = isempty(app) || app_name(app) == "Ladder" ? String[] : ["Open in $(app_name(app))"]
@@ -33874,7 +34031,7 @@ file_menu(path) = begin
 end
 
 "The menu of the sidebar's own folder, for a right-click under the files that it lists"
-const FOLDER_MENU = ["New Page", "New Folder", "-", "Copy Path", "Show in Finder"]
+const FOLDER_MENU = ["New Page", "New Folder", "New Terminal", "-", "Copy Path", "Show in Finder"]
 
 # A menu's text is 13/12 of its theme's size. This size makes it 13px, the size of a file's name in the sidebar.
 "The colours and the text size of a menu that floats over the window"
@@ -33898,6 +34055,7 @@ end
 file_act!(e, path, name; at=:sidebar) =
   name == "New Page" ? new_page!(e, path) :
   name == "New Folder" ? new_folder!(e, path) :
+  name == "New Terminal" ? new_terminal!(e, path) :
   name == "Open in New Window" ? (show_window!(page_window(path, e), window_of(e)); nothing) :
   startswith(name, "Open in ") ? open_outside(path) :
   name == "Rename" ? rename!(e, path; at) :
@@ -33958,6 +34116,19 @@ new_page!(e, dir) = begin
   list_files!(e)
   rename!(e, path)
   e.nodes[:renaming_new] = :page
+  nothing
+end
+
+"""
+Make a new terminal in the folder `dir` and show it: an empty file called
+Terminal.vt, which gets a shell in that folder as soon as it shows. The file
+keeps what the terminal shows: see "a terminal's file".
+"""
+new_terminal!(e, dir) = begin
+  path = free_path(e, dir, "Terminal", ".vt")
+  try touch(path) catch; return end   # the disk said no
+  open!(e, path)
+  list_files!(e)
   nothing
 end
 
@@ -42703,6 +42874,7 @@ describe_window(e::Editor) = begin
   screen_tick!(e)
   code_tick!(e)
   run_tick!(e)
+  term_tick!(e)
   ask_tick!(e)
   about_tick!(e)
   live_checks_tick!(e)
@@ -42779,7 +42951,7 @@ the screen. A test's window isn't, so the windows that it opens aren't either.
 """
 show_window!(w, by) = (by !== nothing && isopen(by) && open(w); w)
 
-onclose(e::Editor, ::Window) = (Base.filter!(o -> o !== e, editors); close_designs!(e); nothing)
+onclose(e::Editor, ::Window) = (Base.filter!(o -> o !== e, editors); close_designs!(e); close_terminals!(e); nothing)
 
 """
 A window that shows the Markdown file or the folder at `path`, with the
@@ -44599,6 +44771,7 @@ show_in_finder(o::FSObject) = show_in_finder(path_of(o))
 copy_path(o::FSObject) = (clipboard(path_of(o)); nothing)
 new_page!(e, d::AbstractDirectory) = new_page!(e, path_of(d))
 new_folder!(e, d::AbstractDirectory) = new_folder!(e, path_of(d))
+new_terminal!(e, d::AbstractDirectory) = new_terminal!(e, path_of(d))
 
 let group = "The file or the folder in focus"
   add_command!(rename!; group, title="Give the file or the folder another name")
@@ -44608,6 +44781,7 @@ let group = "The file or the folder in focus"
   add_command!(copy_path; group, title="Copy the path of the file or the folder")
   add_command!(new_page!; group, title="Make a new page in the folder")
   add_command!(new_folder!; group, title="Make a new folder in the folder")
+  add_command!(new_terminal!; group, title="Make a new terminal in the folder")
 end
 
 """
