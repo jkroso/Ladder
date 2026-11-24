@@ -348,7 +348,7 @@ end
   # Words that aren't an address ask for nothing
   n = length(asked)
   K.navigate!(e, "notes"); frames()
-  @test length(asked) == n && occursin("isn't a web address", said())
+  @test length(asked) == n && occursin("isn't a file, a folder or a web address", said())
 end
 
 @testset "the page runs no code and shows no file of the Mac" begin
@@ -594,6 +594,61 @@ end
   finally
     K.Eml.CACHE[] = cache
   end
+end
+
+# This test set is last. Once the palette has been used over a page of the Mac, the next hover on the
+# page's name starts its wait a frame late, and "the path in the top bar starts at the server's name" doesn't allow for that.
+@testset "Navigate goes to a file or a folder of the Mac" begin
+  top = realpath(dir)
+  folder = joinpath(top, "Local Notes")
+  mkpath(folder)
+  plan, other = joinpath(folder, "plan.md"), joinpath(folder, "other.md")
+  write(plan, "# Plan\n\nWords.\n")
+  write(other, "# Other\n")
+  K.navigate!(e, "example.com/notes.md"); frames()
+  # A path shows its file, and the page from the server is the one that ⌘⌥← goes back to
+  n = length(asked)
+  K.navigate!(e, plan); frames()
+  @test e.buf.path == plan && e.buf.lines[1] == "# Plan" && e.back[end] == "https://example.com/notes.md" && length(asked) == n
+  # A path from the page's folder, and one with other capitals, which goes to the file as the Finder names it
+  K.navigate!(e, "other.md"); frames()
+  @test e.buf.path == other
+  K.navigate!(e, replace(plan, "Local Notes" => "local notes")); frames()
+  @test e.buf.path == plan
+  # A folder shows as a link to it shows it
+  K.navigate!(e, "../"); frames()
+  @test e.folder == top || e.buf.path == top
+  # ~ is the home folder, and a file:// address is a path with %20 for each space
+  @test K.typed_path(e, "~") == homedir() && K.typed_path(e, " ~/no such file.md ") == joinpath(homedir(), "no such file.md")
+  @test K.typed_path(e, "file://" * replace(plan, " " => "%20")) == plan
+  @test K.typed_path(e, "file://localhost" * replace(plan, " " => "%20")) == plan
+  # A web address isn't a path, even when the page's folder has a folder of its name
+  @test K.typed_path(e, "example.com/notes.md") === nothing && K.typed_path(e, "notes") === nothing
+  # A path where nothing is says so, and the page stays
+  K.open!(e, plan); frames()
+  K.navigate!(e, joinpath(folder, "none.md")); frames()
+  @test e.buf.path == plan && said() == "There's no file or folder at $(K.tilde(joinpath(folder, "none.md")))."
+  # From a page of the web, a name that isn't an address is no path
+  K.navigate!(e, "example.com/notes.md"); frames()
+  K.navigate!(e, "plan.md"); frames()
+  @test e.buf.path == "https://example.com/notes.md" && occursin("isn't a file, a folder or a web address", said())
+  # A path that's typed in the list of commands has Navigate first, and Return goes there
+  rows() = K.palette_rows(e, K.palette(e))
+  press(Keys.p, Keys.cmd, Keys.shft)
+  typed(plan)
+  @test first(rows()).name == "Navigate" && first(rows()).note == "Go to " * K.tilde(plan)
+  press(Keys.enter)
+  @test e.popup == :none && e.buf.path == plan
+  # A name from the page's folder there is no path, so the commands list as they always do
+  press(Keys.p, Keys.cmd, Keys.shft)
+  typed("other.md")
+  @test K.palette_address(e, K.palette(e)) === nothing
+  press(Keys.escape); press(Keys.escape)
+  # ⌘L takes a path, as it takes a web address
+  press(Keys.l, Keys.cmd)
+  typed(folder * "/other.md")
+  press(Keys.enter)
+  @test e.popup == :none && e.buf.path == other
 end
 
 K.PAGE_GETTER[], K.BROWSER[] = was_getter, was_browser

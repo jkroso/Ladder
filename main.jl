@@ -35498,12 +35498,12 @@ palette_rows(e, p::CommandPalette) = begin
     rows = Any[(name=palette_name(c.name), note=c.title, on=palette_target(c, p.focus),
                 keys=(list = get(of, c.name, Shortcut[]); isempty(list) ? nothing : first(list)), value=c)
                for c in best_fits(c -> command_fit(c, q), p.listed, q)]
-    # A web address that's typed here has Navigate first, with where Return goes: see "a page from a web server"
+    # A web address or a path that's typed here has Navigate first, with where Return goes: see "a page from a web server"
     to = palette_address(e, p)
     if to !== nothing
       filter!(r -> r.value.name != :navigate, rows)
       c = p.listed[findfirst(c -> c.name == :navigate, p.listed)]
-      pushfirst!(rows, (name=palette_name(c.name), note="Go to " * Remote.label(to), on="", keys=nothing, value=c))
+      pushfirst!(rows, (name=palette_name(c.name), note="Go to " * place_label(to), on="", keys=nothing, value=c))
     end
     return rows
   end
@@ -36180,7 +36180,7 @@ palette_take!(e, w, p::CommandPalette) = begin
     rows = palette_rows(e, p)
     isempty(rows) && return
     c = rows[clamp(p.pick, 1, length(rows))].value
-    # Navigate goes at once to a web address that's typed in the list of commands
+    # Navigate goes at once to a web address or a path that's typed in the list of commands
     to = c.name == :navigate ? palette_address(e, p) : nothing
     to === nothing ? take_command!(e, w, p, c) : (close_palette!(e); navigate!(e, to))
     return
@@ -43893,27 +43893,70 @@ window may ask the web. Any other address opens in your browser unasked.
 reads_here(e, url) = Remote.isaddress(url) && Remote.named_markdown(url) && page_online(e)
 
 """
-Navigate: go to a web address, like example.com/notes.md. A page of Markdown
-there shows in the window, and anything else opens in your browser.
+Navigate: go to a file or a folder of the Mac, like ~/Desktop, or to a web
+address, like example.com/notes.md. A file or a folder shows as a link to it
+shows it. A page of Markdown on the web shows in the window, and anything
+else there opens in your browser.
 """
 navigate!(e, address::String) = begin
+  path = typed_path(e, address)
+  if path !== nothing
+    ispath(path) || return (say_result!(e, "There's no file or folder at $(tilde(path))."); e)
+    return show_path!(e, path)
+  end
   to = Remote.typed(address)
-  to === nothing && return (say_result!(e, "“$(strip(address))” isn't a web address. Write one like example.com/notes.md."); e)
+  to === nothing && return (say_result!(e, "“$(strip(address))” isn't a file, a folder or a web address. Write one like ~/Desktop or example.com/notes.md."); e)
   get_page!(e, to)
 end
+
+"""
+The path of the Mac that `text` names when it's typed for Navigate, or nothing
+when it names none. A path starts with /, ~ or file://. With `near`, other
+words that aren't a web address are a path from the folder of the page that
+shows, like `notes/plans.md` or `../Canon`, when that's a file or a folder.
+A page from a web server has no such folder. A path that starts as a path's
+does needn't be there. Its capitals are those of the file or the folder that's
+there, so /users/jake is /Users/jake, as the Finder names it.
+"""
+typed_path(e, text::AbstractString; near=true) = begin
+  t = String(strip(text))
+  path = if occursin(r"^file://"i, t)
+    Remote.unescaped(replace(t[8:end], r"^localhost(?=/)"i => ""))
+  elseif startswith(t, '/') || t == "~" || startswith(t, "~/")
+    expanduser(t)
+  elseif near && !isempty(t) && !isremote(e.buf.path) && Remote.typed(t) === nothing
+    from = docdir(e)
+    (isempty(from) || !ispath(joinpath(from, t))) && return nothing
+    joinpath(from, t)
+  else
+    return nothing
+  end
+  path = normpath(path)
+  length(path) > 1 && (path = String(rstrip(path, '/')))
+  # The Mac finds /users/jake as /Users/jake. A link isn't followed: only the capitals change.
+  real = ispath(path) ? realpath(path) : path
+  lowercase(real) == lowercase(path) ? real : path
+end
+
+"Where Navigate goes for `text`: a path of the Mac, a web address, or nothing. See `typed_path` for what `near` does."
+navigate_place(e, text::AbstractString; near=true) = something(typed_path(e, text; near), Remote.typed(text), Some(nothing))
+
+"What the list of commands calls the place that Navigate goes to: a web address without its https://, or a path from ~"
+place_label(to::AbstractString) = isremote(to) ? Remote.label(to) : tilde(to)
 
 # Navigate changes no file, so it goes as soon as it has its address, with no press of Run. Its chip is wide, for a long address.
 runs_at_once(::Val{:navigate}) = true
 wide_words(::Val{:navigate}) = true
 
 """
-The web address that's typed in the palette's list of commands, when the list
-has Navigate to go there, or nothing. Navigate is then the list's first row,
-and Return goes to the address at once.
+The web address or the path of the Mac that's typed in the palette's list of
+commands, when the list has Navigate to go there, or nothing. Navigate is then
+the list's first row, and Return goes there at once. A path here starts with
+/, ~ or file://, so that the name of a command is never one.
 """
 palette_address(e, p::CommandPalette) = begin
   p.command === nothing || return nothing
-  to = Remote.typed(input(e).text)
+  to = navigate_place(e, input(e).text, near=false)
   to !== nothing && any(c -> c.name == :navigate, p.listed) ? to : nothing
 end
 
@@ -43925,7 +43968,7 @@ open_in_browser!(e) = (isremote(e.buf.path) && BROWSER[](e.buf.path); e)
 
 works_here(e, ::Union{Val{:reload_page},Val{:open_in_browser}}) = isremote(e.buf.path)
 
-add_command!(navigate!, title="Go to a web address, like example.com/notes.md: Markdown shows here, and the rest in your browser", keys="cmd+l")
+add_command!(navigate!, title="Go to a file or a folder, like ~/Desktop, or a web address, like example.com/notes.md: Markdown on the web shows here, and the rest in your browser", keys="cmd+l")
 add_command!(reload_page!, title="Ask the server again for the page from the web that shows", kind=:look)
 add_command!(open_in_browser!, title="Show the page from the web that shows in your browser", kind=:look)
 

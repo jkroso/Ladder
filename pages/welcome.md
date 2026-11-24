@@ -534,6 +534,8 @@ An address that ends as a picture's does, like `![Julia](https://julialang.org/l
 
 Ladder shows a page of Markdown that a web server sends, as a browser shows a page of HTML. Press ⌘L, type or paste the page's address, like `example.com/notes.md`, and press Return. ⌘L is the key of the command Navigate. You can also type the address straight after ⌘⇧P, where Navigate is first in the list while you type an address, or after ⌘O. Ladder tells the server that it wants Markdown. So a server that keeps each page as both Markdown and HTML sends Ladder the Markdown, from the same address that gives a browser the HTML.
 
+Navigate goes to a file or a folder of your Mac too. Type its path, like `~/Desktop` or `/Users`, and the window shows it, as a link to it does. A path that doesn't start with `/` or `~` is from the folder of the page that shows.
+
 A server that has no Markdown sends HTML, and Ladder shows the page that the HTML makes, with its own engine, as it shows an HTML file. Its scripts run, and you scroll it, click it and type in it. Press ⌘E to see the HTML that the server sent, and ⌘E again for the page.
 
 The top bar shows the page's address, and a lock, because you can't change the page. The page's links and pictures are from its own address. Click a link, and Ladder asks the server for it. Markdown and HTML show in the window, and anything else, like a PDF file, opens in your browser. ⌘⌥← goes back to the page before. The command Reload Page asks the server for the page again.
