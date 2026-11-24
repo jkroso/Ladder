@@ -1481,7 +1481,7 @@ build_editor(path) = begin
   # An address on the web is asked for once the window is on the screen: see "a page from a web server".
   # A name like `my.notes/new.md` is a file when the folder `my.notes` is there.
   Remote.typed(path) === nothing || ispath(expanduser(path)) || isdir(dirname(abspath(expanduser(path)))) ||
-    return open_address!(blank_editor(), path)
+    return navigate!(blank_editor(), path)
   path = abspath(expanduser(path))
   e = blank_editor()
   isdir(path) ? open_on_folder!(e, path) : open!(e, path)
@@ -34312,9 +34312,17 @@ palette_rows(e, p::CommandPalette) = begin
   if p.command === nothing
     q = lowercase(String(strip(input(e).text)))
     of = keys_now(e).of
-    return Any[(name=palette_name(c.name), note=c.title, on=palette_target(c, p.focus),
+    rows = Any[(name=palette_name(c.name), note=c.title, on=palette_target(c, p.focus),
                 keys=(list = get(of, c.name, Shortcut[]); isempty(list) ? nothing : first(list)), value=c)
                for c in best_fits(c -> command_fit(c, q), p.listed, q)]
+    # A web address that's typed here has Navigate first, with where Return goes: see "a page from a web server"
+    to = palette_address(e, p)
+    if to !== nothing
+      filter!(r -> r.value.name != :navigate, rows)
+      c = p.listed[findfirst(c -> c.name == :navigate, p.listed)]
+      pushfirst!(rows, (name=palette_name(c.name), note="Go to " * Remote.label(to), on="", keys=nothing, value=c))
+    end
+    return rows
   end
   chips = palette_chips(p)
   p.at <= length(chips) || return Any[]
@@ -34987,7 +34995,11 @@ that the keyboard is in does with it, or runs the command.
 palette_take!(e, w, p::CommandPalette) = begin
   if p.command === nothing
     rows = palette_rows(e, p)
-    isempty(rows) || take_command!(e, w, p, rows[clamp(p.pick, 1, length(rows))].value)
+    isempty(rows) && return
+    c = rows[clamp(p.pick, 1, length(rows))].value
+    # Navigate goes at once to a web address that's typed in the list of commands
+    to = c.name == :navigate ? palette_address(e, p) : nothing
+    to === nothing ? take_command!(e, w, p, c) : (close_palette!(e); navigate!(e, to))
     return
   end
   chips = palette_chips(p)
@@ -42138,8 +42150,11 @@ add_command!(copy_link_to_block!, title="Copy a link that shows the block at the
 # a page of HTML. The page's path is its address, like
 # https://example.com/notes.md. There are four ways to ask for one:
 #
+#   - Press ⌘⇧P, type or paste the address, and press Return. The list of
+#     commands has Navigate first while what's typed is an address, with
+#     where it goes under its name. Navigate is in the list by its name too,
+#     and asks for the address.
 #   - Press ⌘O, type or paste the address, and press Return.
-#   - Take Open Address in the command palette.
 #   - Click a link to it in a page.
 #   - Name it when you start Ladder from its code, as in
 #     `julia main.jl example.com/notes.md`. The `ladder` command of the
@@ -42364,12 +42379,28 @@ window may ask the web. Any other address opens in your browser unasked.
 reads_here(e, url) = Remote.isaddress(url) && Remote.named_markdown(url) && page_online(e)
 
 """
-Open Address: show the page of Markdown at a web address, like example.com/notes.md
+Navigate: go to a web address, like example.com/notes.md. A page of Markdown
+there shows in the window, and anything else opens in your browser.
 """
-open_address!(e, address::String) = begin
+navigate!(e, address::String) = begin
   to = Remote.typed(address)
   to === nothing && return (say_result!(e, "“$(strip(address))” isn't a web address. Write one like example.com/notes.md."); e)
   get_page!(e, to)
+end
+
+# Navigate changes no file, so it goes as soon as it has its address, with no press of Run. Its chip is wide, for a long address.
+runs_at_once(::Val{:navigate}) = true
+wide_words(::Val{:navigate}) = true
+
+"""
+The web address that's typed in the palette's list of commands, when the list
+has Navigate to go there, or nothing. Navigate is then the list's first row,
+and Return goes to the address at once.
+"""
+palette_address(e, p::CommandPalette) = begin
+  p.command === nothing || return nothing
+  to = Remote.typed(input(e).text)
+  to !== nothing && any(c -> c.name == :navigate, p.listed) ? to : nothing
 end
 
 "Reload Page: ask the server again for the page from the web that shows"
@@ -42380,7 +42411,7 @@ open_in_browser!(e) = (isremote(e.buf.path) && BROWSER[](e.buf.path); e)
 
 works_here(e, ::Union{Val{:reload_page},Val{:open_in_browser}}) = isremote(e.buf.path)
 
-add_command!(open_address!, title="Show the page of Markdown at a web address, like example.com/notes.md", kind=:look)
+add_command!(navigate!, title="Go to a web address, like example.com/notes.md: Markdown shows here, and the rest in your browser")
 add_command!(reload_page!, title="Ask the server again for the page from the web that shows", kind=:look)
 add_command!(open_in_browser!, title="Show the page from the web that shows in your browser", kind=:look)
 

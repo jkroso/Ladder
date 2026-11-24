@@ -152,7 +152,7 @@ said() = get(e.nodes, :result, ("", 0.0))[1]
 end
 
 @testset "a page of Markdown from a server shows in the window" begin
-  K.open_address!(e, "example.com/notes.md")
+  K.navigate!(e, "example.com/notes.md")
   frames()
   b = e.buf
   @test asked == ["https://example.com/notes.md"]
@@ -210,36 +210,36 @@ end
 
 @testset "what a server can answer" begin
   # A server that keeps a page as Markdown and as HTML sends the Markdown, whatever the address ends in
-  K.open_address!(e, "https://example.com/docs/")
+  K.navigate!(e, "https://example.com/docs/")
   frames()
   @test e.buf.path == "https://example.com/docs/" && e.buf.lines[1] == "# Docs" && K.name(e.buf) == "example.com/docs/"
   # A page that moved shows under the address that it moved to
-  K.open_address!(e, "example.com/old.md")
+  K.navigate!(e, "example.com/old.md")
   frames()
   @test e.buf.path == "https://example.com/new/home.md" && e.buf.lines[1] == "# New home"
   at = e.buf.path
   # Plain text whose name doesn't say Markdown isn't a page: the browser gets it, and words say so
   empty!(browsed)
-  K.open_address!(e, "example.com/plain.txt")
+  K.navigate!(e, "example.com/plain.txt")
   frames()
   @test e.buf.path == at && browsed == ["https://example.com/plain.txt"] && occursin("sent no Markdown", said())
   # No such page, a page that Ladder may not read, and a server that doesn't answer
   empty!(browsed)
-  K.open_address!(e, "example.com/none.md"); frames()
+  K.navigate!(e, "example.com/none.md"); frames()
   @test e.buf.path == at && said() == "example.com has no page at that address." && isempty(browsed)
-  K.open_address!(e, "example.com/secret.md"); frames()
+  K.navigate!(e, "example.com/secret.md"); frames()
   @test e.buf.path == at && said() == "example.com doesn't let Ladder read that page."
-  K.open_address!(e, "down.example.com/a.md"); frames()
+  K.navigate!(e, "down.example.com/a.md"); frames()
   @test e.buf.path == at && said() == "down.example.com didn't answer."
   # Words that aren't an address ask for nothing
   n = length(asked)
-  K.open_address!(e, "notes"); frames()
+  K.navigate!(e, "notes"); frames()
   @test length(asked) == n && occursin("isn't a web address", said())
 end
 
 @testset "the page runs no code and shows no file of the Mac" begin
   errors = length(K.problems)
-  K.open_address!(e, "example.com/code.md")
+  K.navigate!(e, "example.com/code.md")
   K.fetches["https://example.com/pictures/plan.png"] = nothing   # the picture couldn't be had, so `curl` isn't run for it
   frames(5)
   b = e.buf
@@ -276,14 +276,14 @@ end
   photo = first(filter(f -> endswith(lowercase(f), r"\.(jpe?g|png)"), readdir(joinpath(@__DIR__, "..", "pages", "photos"), join=true)))
   page!("https://example.com/album/page.md", "# Album\n\n![A photo](photo.jpg)\n")
   K.fetches["https://example.com/album/photo.jpg"] = photo   # as if `curl` had fetched it
-  K.open_address!(e, "example.com/album/page.md")
+  K.navigate!(e, "example.com/album/page.md")
   frames()
   @test any(it -> it.content isa K.Live && it.content.node isa K.Picture, e.layout)
   shot("remote_picture.png")
 end
 
 @testset "asking again, and the ways to ask" begin
-  K.open_address!(e, "example.com/top.md"); frames()
+  K.navigate!(e, "example.com/top.md"); frames()
   e.scroll.offset = 300px
   page!("https://example.com/top.md", "# Top, changed\n\n" * "Words.\n\n"^60, type="text/markdown")
   n = length(e.back)
@@ -305,6 +305,42 @@ end
   w2 = Window(e2, size=(900px, 700px))
   foreach(_ -> frame(w2), 1:3)
   @test e2.buf.path == "https://example.com/notes.md" && isempty(e2.back)
+end
+
+@testset "Navigate, in the command palette" begin
+  rows() = K.palette_rows(e, K.palette(e))
+  K.navigate!(e, "example.com/notes.md"); frames()
+  # An address that's typed in the list of commands has Navigate first, with where Return goes
+  press(Keys.p, Keys.cmd, Keys.shft)
+  @test e.popup == :commands && "Navigate" in [r.name for r in rows()]
+  typed("example.com/prices.md")
+  @test K.palette_address(e, K.palette(e)) == "https://example.com/prices.md"
+  @test first(rows()).name == "Navigate" && first(rows()).note == "Go to example.com/prices.md"
+  @test count(r -> r.name == "Navigate", rows()) == 1
+  shot("remote_navigate.png")
+  # Return goes there at once, and the palette closes
+  press(Keys.enter)
+  @test e.popup == :none && e.buf.path == "https://example.com/prices.md"
+  # Navigate by its name asks for the address, and goes when Return gives it one, with no press of Run
+  press(Keys.p, Keys.cmd, Keys.shft)
+  typed("navig")
+  @test first(rows()).name == "Navigate" && K.palette_address(e, K.palette(e)) === nothing
+  press(Keys.enter)
+  p = K.palette(e)
+  @test e.popup == :commands && p.command.name == :navigate && [K.chip_name(c) for c in K.palette_chips(p)] == ["Address"]
+  typed("example.com/top.md")
+  shot("remote_navigate_chip.png")
+  press(Keys.enter)
+  @test e.popup == :none && e.buf.path == "https://example.com/top.md"
+  # Letters that are no address list the commands as they always do
+  press(Keys.p, Keys.cmd, Keys.shft)
+  typed("theme")
+  @test first(rows()).name == "Theme" && K.palette_address(e, K.palette(e)) === nothing
+  press(Keys.escape); press(Keys.escape)
+  @test e.popup == :none
+  # The command is there for a page that only shows a file or a folder, too
+  K.open!(e, dir); frames()
+  @test e.buf.view == :file && any(c -> c.name == :navigate, K.palette_commands(e))
 end
 
 @testset "a link in a page of your own" begin
