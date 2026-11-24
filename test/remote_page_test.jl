@@ -332,6 +332,17 @@ end
   shot("remote_navigate_chip.png")
   press(Keys.enter)
   @test e.popup == :none && e.buf.path == "https://example.com/top.md"
+  # ⌘L is Navigate's key: it asks for the address, as taking Navigate from the list does
+  K.navigate!(e, "example.com/notes.md"); frames()
+  press(Keys.l, Keys.cmd)
+  p = K.palette(e)
+  @test e.popup == :commands && p.command !== nothing && p.command.name == :navigate
+  typed("example.com/prices.md")
+  press(Keys.enter)
+  @test e.popup == :none && e.buf.path == "https://example.com/prices.md"
+  # ... and the line is selected with ⌘⇧L now
+  keys = K.keys_now(e).of
+  @test K.caps(first(keys[:navigate])) == "⌘L" && K.caps(first(keys[:select_line])) == "⌘⇧L"
   # Letters that are no address list the commands as they always do
   press(Keys.p, Keys.cmd, Keys.shft)
   typed("theme")

@@ -246,7 +246,7 @@
 #     each of them. Escape leaves the selection that you started with.
 #   - A word that's selected has a line round each other place on the page
 #     that has it. Those are the places that ⌘D goes to.
-#   - ⌘/ makes a comment of a line of code. ⌘L selects a line, ⌘⇧D copies it
+#   - ⌘/ makes a comment of a line of code. ⌘⇧L selects a line, ⌘⇧D copies it
 #     to the line under it, ⌘⇧K deletes it, and ⌘⌥[ and ⌘⌥] move it up and down.
 #   - ⌘N opens a new window on the folder that you're in, with the folder in
 #     its page.
@@ -28728,7 +28728,7 @@ const COMMAND_GROUPS = with_added([
     Command(:run_step, "Run the code at the caret and go to the next line", :type, "shift+enter",
             (e, w, _) -> run_here!(e, step=true) || newline!(e))],
   "Lines" => [
-    Command(:select_line, "Select the line", :look, "cmd+l", (e, w, _) -> select_lines!(e)),
+    Command(:select_line, "Select the line", :look, "cmd+shift+l", (e, w, _) -> select_lines!(e)),
     Command(:line_up, "Move the line up", :edit, "cmd+opt+left_bracket", (e, w, _) -> move_lines!(e, -1)),
     Command(:line_down, "Move the line down", :edit, "cmd+opt+right_bracket", (e, w, _) -> move_lines!(e, 1)),
     Command(:duplicate_line, "Copy the line to the line under it", :edit, "cmd+shift+d", (e, w, _) -> duplicate_lines!(e)),
@@ -42170,8 +42170,10 @@ add_command!(copy_link_to_block!, title="Copy a link that shows the block at the
 #
 # Ladder shows a page of Markdown that a web server sends, as a browser shows
 # a page of HTML. The page's path is its address, like
-# https://example.com/notes.md. There are four ways to ask for one:
+# https://example.com/notes.md. There are five ways to ask for one:
 #
+#   - Press ⌘L, type or paste the address, and press Return. ⌘L is the key
+#     of the command Navigate, as it's the key of a browser's address bar.
 #   - Press ⌘⇧P, type or paste the address, and press Return. The list of
 #     commands has Navigate first while what's typed is an address, with
 #     where it goes under its name. Navigate is in the list by its name too,
@@ -42433,7 +42435,7 @@ open_in_browser!(e) = (isremote(e.buf.path) && BROWSER[](e.buf.path); e)
 
 works_here(e, ::Union{Val{:reload_page},Val{:open_in_browser}}) = isremote(e.buf.path)
 
-add_command!(navigate!, title="Go to a web address, like example.com/notes.md: Markdown shows here, and the rest in your browser")
+add_command!(navigate!, title="Go to a web address, like example.com/notes.md: Markdown shows here, and the rest in your browser", keys="cmd+l")
 add_command!(reload_page!, title="Ask the server again for the page from the web that shows", kind=:look)
 add_command!(open_in_browser!, title="Show the page from the web that shows in your browser", kind=:look)
 

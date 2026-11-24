@@ -528,7 +528,7 @@ An address that ends as a picture's does, like `![Julia](https://julialang.org/l
 
 ## Pages from a web server
 
-Ladder shows a page of Markdown that a web server sends, as a browser shows a page of HTML. Press ⌘⇧P, type or paste the page's address, like `example.com/notes.md`, and press Return. The command Navigate is first in the list while you type an address. ⌘O takes an address the same way. Ladder tells the server that it wants Markdown. So a server that keeps each page as both Markdown and HTML sends Ladder the Markdown, from the same address that gives a browser the HTML.
+Ladder shows a page of Markdown that a web server sends, as a browser shows a page of HTML. Press ⌘L, type or paste the page's address, like `example.com/notes.md`, and press Return. ⌘L is the key of the command Navigate. You can also type the address straight after ⌘⇧P, where Navigate is first in the list while you type an address, or after ⌘O. Ladder tells the server that it wants Markdown. So a server that keeps each page as both Markdown and HTML sends Ladder the Markdown, from the same address that gives a browser the HTML.
 
 The top bar shows the page's address, and says "Read only", because you can't change the page. The page's links and pictures are from its own address. Click a link, and Ladder asks the server for it. Markdown shows in the window, and anything else opens in your browser. ⌘⌥← goes back to the page before. The command Reload Page asks the server for the page again.
 

@@ -151,12 +151,12 @@ end
   @test b.lines == ["b", "b", "a", "c", "d"] && b.caret == (2, 1)
   press(w, Keys.k, cmd, shift)
   @test b.lines == ["b", "a", "c", "d"] && b.caret == (2, 1)
-  # ⌘L selects the line, and again takes the next line too. The lines that are selected move together.
+  # ⌘⇧L selects the line, and again takes the next line too. The lines that are selected move together.
   caret!(e, w, 2, 0)
-  press(w, Keys.l, cmd)
+  press(w, Keys.l, cmd, shift)
   @test (b.anchor, b.caret) == ((2, 0), (3, 0))
   @test K.touched(b) == (2, 2)
-  press(w, Keys.l, cmd)
+  press(w, Keys.l, cmd, shift)
   @test (b.anchor, b.caret) == ((2, 0), (4, 0))
   press(w, Keys.left_bracket, cmd, opt)
   @test b.lines == ["a", "c", "b", "d"]
