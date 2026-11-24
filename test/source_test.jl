@@ -80,8 +80,8 @@ show_block(lang, n) = begin
   e.scroll.offset = max(0px, K.item(e, s[1]).top - 40px); frames(3)
   view(lang, n)
 end
-"Click the button at the top of `v` that says where its rows come from"
-open_list(v) = click(middle(v.parts[:source]))
+"Click the button at the top of `v` that says where its rows come from. A chart shows it only while the mouse is on the chart."
+open_list(v) = (v isa K.ChartView && at(middle(v)); click(middle(v.parts[:source])))
 chooser(v) = v.parts[:sources]
 names(v) = [r.name for r in chooser(v).rows]
 "Click the row of the open list of `v` called `name`"

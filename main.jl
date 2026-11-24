@@ -12429,30 +12429,11 @@ chart_list_open(v::ChartView) = begin
 end
 
 """
-How wide the title of the chart `v` can be beside its three buttons, from its
-width when it was last laid out, or nothing before then. The widths here are
-those that the `describe` of the bar and of each button give.
+True when the chart `v` shows its three buttons: while the mouse is on the
+chart, or one of their lists is open. At other times its bar shows only its
+title, so the title has the whole bar.
 """
-chart_title_room(v::ChartView) = begin
-  r = rect(v)
-  r === nothing && return nothing
-  # A button's edges are as wide as its padding, its icons, the gaps between them and its words, and 2 for its border
-  source = 54 + num(measure(Face(SANS, "Semibold", 12px, colours.ink, false), source_words(v)))
-  # Its two edges, the bar's ends and the gaps between its 7 parts, the two lists of 43 each, the
-  # spaces round the button of the source, the line before the title, and the ends of the title's row
-  num(r.width) - (2 + 12 + 12 + 2 * 43 + source + 8 + 9 + 12)
-end
-
-"""
-True when the chart `v` shows its three buttons. When its title doesn't fit
-beside them, they give way to it, and come back while the mouse is on the
-chart or one of their lists is open.
-"""
-chart_buttons_shown(v::ChartView) = begin
-  (isempty(v.spec.title) || ishovered(v) || chart_list_open(v)) && return true
-  room = chart_title_room(v)
-  room === nothing || num(measure(Face(SANS, "Semibold", 13px, colours.ink, false), v.spec.title)) <= room
-end
+chart_buttons_shown(v::ChartView) = ishovered(v) || chart_list_open(v)
 
 describe(v::ChartView) = begin
   e = editor(v)

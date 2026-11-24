@@ -719,7 +719,7 @@ A code block in the language `chart` draws the numbers of a table. It draws the 
 title: Sales and costs
 ```
 
-The first button at its top makes it bars, lines or a pie. The button after the table's name ticks the columns that it draws. Change a number in the table, and the chart changes with it. Move the mouse over a bar to see its number. When a chart has no room for its whole title beside the buttons, it shows only the title until the mouse is on the chart.
+The first button at its top makes it bars, lines or a pie. The button after the table's name ticks the columns that it draws. Change a number in the table, and the chart changes with it. Move the mouse over a bar to see its number. The buttons show while the mouse is on the chart, and at other times the title has the whole bar.
 
 A line in the block can say more. `show: Sales` draws only that column. `by: Month` names the column whose words go under the bars. `from: Spreadsheets` draws the first table under that heading. A chart can hold its own rows too, with a `|` between the cells. To see the block's lines, hold ⌥ and click the chart.
 

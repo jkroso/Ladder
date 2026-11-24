@@ -95,6 +95,8 @@ press(place) = (at(place); w.keys |= Keys.mouse_left; onkey(w, KeyPress{Keys.mou
 release() = (w.keys ⊻= Keys.mouse_left; onkey(w, KeyRelease{Keys.mouse_left}(0, w)); frames())
 click(place) = (press(place); release())
 middle(r) = (K.num(r.left + r.width / 2), K.num(r.top + r.height / 2))
+"Put the mouse on the chart `v`, so that it shows its buttons"
+hover(v) = at(middle(rect(v)))
 block(n) = (s = K.block_lines(e.buf, K.CHART, n); e.buf.lines[s[1]+1:s[2]-1])
 "Scroll the page until the `n`th chart has been laid out and drawn"
 show_chart(n) = (K.show_line!(e, K.block_lines(e.buf, K.CHART, n)[2] + 1); frames(3); chart(n))
@@ -116,6 +118,7 @@ end
 
 @testset "the drop-down chooses the kind of chart" begin
   v = chart(1)
+  hover(v)
   b = v.parts[:kind]
   # The button shows only the icon of the chart's kind, so it's narrow
   @test K.CHART_KINDS[K.chart_kind_place(v)][3] == "Bars" && rect(b).width < 50px
@@ -129,12 +132,12 @@ end
   @test v.spec.kind == :lines && block(1) == ["kind: lines", "title: Sales and costs"] && !b.open
   @test count(m -> m.kind == :line, v.marks) == 2 && K.dirty(e.buf)
   # The arrows pick a kind, and Return takes it
-  click(middle(rect(b)))
+  hover(v); click(middle(rect(b)))
   @test v.parts[(:menu, :kind)].pick == 2
   onkey(w, KeyPress{Keys.down}(0, w)); onkey(w, KeyPress{Keys.enter}(0, w)); frames()
   @test block(1)[1] == "kind: pie" && count(m -> m.kind == :slice, v.marks) == 3 && !b.open
   # Esc closes the list and changes nothing
-  click(middle(rect(b)))
+  hover(v); click(middle(rect(b)))
   onkey(w, KeyPress{Keys.up}(0, w)); onkey(w, KeyPress{Keys.escape}(0, w)); frames()
   @test !b.open && block(1)[1] == "kind: pie"
   # ⌘Z takes the change back
@@ -146,6 +149,7 @@ end
 
 @testset "the list of columns ticks the columns that the chart draws" begin
   v = chart(1)
+  hover(v)
   b = v.parts[:columns]
   @test rect(b).width < 50px
   click(middle(rect(b)))
@@ -214,7 +218,7 @@ end
 @testset "⌘-click in a chart's list of tables adds a table" begin
   K.show_line!(e, 1); frames(3)   # from below, show_chart would leave the chart's top over the window
   v = chart(1)
-  click(middle(rect(v.parts[:source])))
+  hover(v); click(middle(rect(v.parts[:source])))
   c = v.parts[:sources]
   @test c.asking == :source
   row(name) = c.parts[(:choice_row, findfirst(r -> r.name == name, c.rows))]
@@ -243,17 +247,11 @@ end
   @test K.chart_columns(show_chart(6)) == ["Power", "Working"]
 end
 
-@testset "a title with no room beside the buttons hides them while the mouse is off the chart" begin
+@testset "a chart shows its buttons only while the mouse is on it" begin
   K.show_line!(e, 1); frames(3)
   v = chart(1)
-  title = "The sales and the costs of each month of the first three months of the year, before tax"
-  K.write_block!(v, K.CHART, ["title: $title"]); frames()
   r = rect(v)
   off, on = (K.num(r.left) - 60, K.num(r.top) + 100), (K.num(r.left) + 60, K.num(r.top) + 100)
-  # The room that the bar leaves for the title is what chart_title_room says
-  at(on); frames()
-  columns = rect(v.parts[:columns])
-  @test abs(K.num(r.left + r.width) - 13 - (K.num(columns.left + columns.width) + 19) - K.chart_title_room(v)) <= 1
   # Off the chart, the title has the whole bar
   at(off); frames()
   @test all(k -> rect(v.parts[k]) === nothing, (:kind, :source, :columns))
@@ -269,7 +267,11 @@ end
   onkey(w, KeyPress{Keys.escape}(0, w)); frames()
   at(off); frames()
   @test rect(v.parts[:kind]) === nothing
-  # A short title leaves room for the buttons
+  # A chart with no title keeps its bar while the mouse is off it, so the page doesn't move when the mouse comes
+  K.write_block!(v, K.CHART, String[]); frames()
+  top = rect(v.parts[:area]).top
+  @test rect(v.parts[:kind]) === nothing
+  at(on); frames()
+  @test rect(v.parts[:kind]) !== nothing && rect(v.parts[:area]).top == top
   K.write_block!(v, K.CHART, ["title: Sales and costs"]); frames()
-  @test rect(v.parts[:kind]) !== nothing
 end
