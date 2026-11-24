@@ -266,7 +266,10 @@ matrices(e::Eye, w, h, reach) = begin
     near = e.distance - reach
     proj = [2/(e.distance*aspect) 0 0 0; 0 -2/e.distance 0 0; 0 0 -2/(far-near) -(far+near)/(far-near); 0 0 0 1.0]
   end
-  (Float32.(vec(proj * view)), Float32[right[1], up[1], back[1], right[2], up[2], back[2], right[3], up[3], back[3]],
+  # A loop of its own multiplies the two. `*` would call BLAS, which isn't there while the app is built, so
+  # the build crashed as it drew the welcome page's design.
+  both = [sum(proj[i, k] * view[k, j] for k in 1:4) for i in 1:4, j in 1:4]
+  (Float32.(vec(both)), Float32[right[1], up[1], back[1], right[2], up[2], back[2], right[3], up[3], back[3]],
    (LIFT, e.wide > 0 ? 1f0 : 0f0, Float32(proj[3, 4])))
 end
 
