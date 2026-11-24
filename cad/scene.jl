@@ -365,8 +365,15 @@ end
 
 "Bring the eye `by` times nearer to the point `about` of the design, which stays where it shows"
 nearer(e::Eye, size, by, about::Vec3) = begin
+  distance = clamp(e.distance / by, 1e-3, 1e7)
+  if e.wide > 0
+    # The eye and its target both go towards `about`, so `about` shows where it did, `by` times nearer. When only the
+    # target moved, and only sideways, the eye came up to the plane through the target and no further: a part behind
+    # that plane stopped growing, however much the wheel turned.
+    return Eye(about .+ (e.target .- about) .* (distance / e.distance), e.turn, e.tilt, distance, e.wide)
+  end
   was = at(e, size, about)
-  new = Eye(e.target, e.turn, e.tilt, clamp(e.distance / by, 1e-3, 1e7), e.wide)
+  new = Eye(e.target, e.turn, e.tilt, distance, e.wide)
   now = at(new, size, about)
   moved(new, size, (was[1] - now[1], was[2] - now[2]), about)
 end

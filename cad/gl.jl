@@ -98,12 +98,27 @@ uniform mat4 mvp;
 uniform mat3 look;
 out vec3 facing;
 out vec3 world;
+out float away;
 flat out float of;
 void main() {
   gl_Position = mvp * vec4(p, 1.0);
   facing = look * n;
   world = p;
+  away = gl_Position.w;
   of = face;
+}
+"""
+
+# How far a point is in the depth buffer. When far things look smaller, it's the logarithm of the point's distance from the eye:
+# the usual depth is fine just in front of the eye and coarse far away, so faces 2 mm apart (the satellite's cells and the
+# film behind them) took turns to show once the eye came close to part of a big design. `away` is the distance, along the
+# eye's line of sight, and `depth.x` is 1 / log2(1 + the farthest distance), or 0 for the usual depth.
+# `depth.yz` moves the depth back as `glPolygonOffset` does, which has no effect on a depth that a shader writes:
+# by `depth.y` times how fast the depth changes across the pixel, and by `depth.z` of the smallest step.
+const DEPTH = """
+float depth_of(float away, vec3 depth) {
+  float d = depth.x > 0.0 ? log2(1.0 + max(away, 0.0)) * depth.x : gl_FragCoord.z;
+  return d + depth.y * max(abs(dFdx(d)), abs(dFdy(d))) + depth.z * 1.2e-7;
 }
 """
 
@@ -111,13 +126,18 @@ const SOLID_F = """
 #version 410 core
 in vec3 facing;
 in vec3 world;
+in float away;
 flat in float of;
 uniform vec4 tint;
 uniform float only;
 uniform float plain;
 uniform vec4 cut;
+uniform vec3 depth;
 out vec4 colour;
+$DEPTH
 void main() {
+  // Before any discard, since the slope needs the pixels round this one
+  gl_FragDepth = depth_of(away, depth);
   if (only >= 0.0 && abs(of - only) > 0.5) discard;
   // What's on the eye's side of the plane that cuts the picture doesn't show. With no cut, the plane is (0, 0, 0, -1).
   if (dot(world, cut.xyz) + cut.w > 0.0) discard;
@@ -139,10 +159,11 @@ uniform vec2 view;
 uniform float width;
 uniform vec3 lift;
 out vec3 world;
+out float away;
 void main() {
   vec4 ca = mvp * vec4(a, 1.0), cb = mvp * vec4(b, 1.0);
   float eps = 1e-4;
-  if (ca.w < eps && cb.w < eps) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); world = a; return; }
+  if (ca.w < eps && cb.w < eps) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); world = a; away = 1.0; return; }
   if (ca.w < eps) ca = mix(cb, ca, (cb.w - eps) / (cb.w - ca.w));
   if (cb.w < eps) cb = mix(ca, cb, (ca.w - eps) / (ca.w - cb.w));
   vec2 sa = ca.xy / ca.w * view * 0.5, sb = cb.xy / cb.w * view * 0.5;
@@ -157,6 +178,7 @@ void main() {
   if (lift.y > 0.5) { c.z = (c.z - lift.z) * (1.0 - lift.x) + lift.z; c.xyw *= 1.0 - lift.x; }
   else c.z -= lift.x * 2.0;
   gl_Position = c;
+  away = c.w;
   world = corner.x < 0.5 ? a : b;
 }
 """
@@ -164,12 +186,16 @@ void main() {
 const LINES_F = """
 #version 410 core
 in vec3 world;
+in float away;
 uniform vec4 tint;
 uniform vec3 fade_at;
 uniform vec2 fade;
 uniform vec4 cut;
+uniform vec3 depth;
 out vec4 colour;
+$DEPTH
 void main() {
+  gl_FragDepth = depth_of(away, depth);
   if (dot(world, cut.xyz) + cut.w > 0.0) discard;
   colour = tint;
   if (fade.y > 0.0) colour.a *= 1.0 - smoothstep(fade.x, fade.y, distance(world, fade_at));
@@ -278,7 +304,8 @@ matrices(e::Eye, w, h, reach) = begin
   aspect = w / h
   far = e.distance + reach
   if e.wide > 0
-    near = max(e.distance - reach, e.distance * 0.02, far * 1e-4)
+    # The depth is a logarithm (see DEPTH), so a near plane close to the eye costs nothing far away
+    near = max(e.distance - reach, e.distance * 0.02, far * 1e-7)
     f = 1 / tand(e.wide / 2)
     proj = [f/aspect 0 0 0; 0 -f 0 0; 0 0 (far+near)/(near-far) 2far*near/(near-far); 0 0 -1 0]
   else
@@ -289,8 +316,11 @@ matrices(e::Eye, w, h, reach) = begin
   # the build crashed as it drew the welcome page's design.
   both = [sum(proj[i, k] * view[k, j] for k in 1:4) for i in 1:4, j in 1:4]
   (Float32.(vec(both)), Float32[right[1], up[1], back[1], right[2], up[2], back[2], right[3], up[3], back[3]],
-   (LIFT, e.wide > 0 ? 1f0 : 0f0, Float32(proj[3, 4])))
+   (LIFT, e.wide > 0 ? 1f0 : 0f0, Float32(proj[3, 4]), e.wide > 0 ? Float32(1 / log2(1 + far)) : 0f0))
 end
+
+"Give the program `p` its depth: `lift[4]` from `matrices`, then how far back it goes, as `glPolygonOffset` takes it"
+depth!(p, lift, slope=0f0, steps=0f0) = glUniform3f(uniform(p, "depth"), lift[4], slope, steps)
 
 const LIFT = 4f-4   # how much nearer than it is a line is drawn, as a part of its distance from the eye
 
@@ -364,9 +394,8 @@ draw!(s::Stage, t::Solid, mvp, look, lift, cut=NO_CUT) = begin
   glBindVertexArray(k.vao)
   glEnable(GL_DEPTH_TEST)
   glDepthFunc(GL_LEQUAL)
-  glEnable(GL_POLYGON_OFFSET_FILL)
   # A body that shows through goes a little further back, so that a solid on its surface, like a piece that a fillet takes away, shows in front of it
-  glPolygonOffset(t.through ? 3f0 : 1f0, t.through ? 4f0 : 1f0)
+  depth!(p, lift, t.through ? 3f0 : 1f0, t.through ? 4f0 : 1f0)
   glDepthMask(t.through ? GL_FALSE : GL_TRUE)
   glUniform1f(uniform(p, "plain"), 0f0)
   if !t.bare
@@ -374,7 +403,7 @@ draw!(s::Stage, t::Solid, mvp, look, lift, cut=NO_CUT) = begin
     glUniform1f(uniform(p, "only"), -1f0)
     glDrawArrays(GL_TRIANGLES, 0, k.count)
     # A face with a colour of its own is drawn again in that colour, just in front of the body's
-    glPolygonOffset(0.5f0, 0.5f0)
+    depth!(p, lift, 0.5f0, 0.5f0)
     for (face, colour) in t.painted
       glUniform4f(uniform(p, "tint"), colour...)
       glUniform1f(uniform(p, "only"), Float32(face))
@@ -383,7 +412,7 @@ draw!(s::Stage, t::Solid, mvp, look, lift, cut=NO_CUT) = begin
   end
   # A face with a colour over its own is drawn once more, in front of both
   glDepthMask(GL_FALSE)
-  glPolygonOffset(0f0, 0f0)
+  depth!(p, lift)
   for (face, colour) in t.lit
     glUniform4f(uniform(p, "tint"), colour...)
     glUniform1f(uniform(p, "only"), Float32(face))
@@ -391,7 +420,6 @@ draw!(s::Stage, t::Solid, mvp, look, lift, cut=NO_CUT) = begin
     glDrawArrays(GL_TRIANGLES, 0, k.count)
   end
   glDepthMask(GL_TRUE)
-  glDisable(GL_POLYGON_OFFSET_FILL)
 end
 
 draw!(s::Stage, t::Sheet, mvp, look, lift, cut=NO_CUT) = begin
@@ -402,6 +430,7 @@ draw!(s::Stage, t::Sheet, mvp, look, lift, cut=NO_CUT) = begin
   glUniform4f(uniform(p, "cut"), NO_CUT...)
   glUniformMatrix4fv(uniform(p, "mvp"), 1, GL_FALSE, mvp)
   glUniformMatrix3fv(uniform(p, "look"), 1, GL_FALSE, look)
+  depth!(p, lift)
   glBindVertexArray(k.vao)
   glEnable(GL_DEPTH_TEST)
   glDepthFunc(GL_LEQUAL)
@@ -422,7 +451,8 @@ draw!(s::Stage, t::Lines, mvp, look, lift, cut=NO_CUT) = begin
   glUniformMatrix4fv(uniform(p, "mvp"), 1, GL_FALSE, mvp)
   glUniform2f(uniform(p, "view"), Float32(s.wide), Float32(s.high))
   glUniform1f(uniform(p, "width"), t.width)
-  glUniform3f(uniform(p, "lift"), lift...)
+  glUniform3f(uniform(p, "lift"), lift[1], lift[2], lift[3])
+  depth!(p, lift)
   glUniform4f(uniform(p, "tint"), t.colour...)
   glUniform3f(uniform(p, "fade_at"), t.fade[1], t.fade[2], t.fade[3])
   glUniform2f(uniform(p, "fade"), t.fade[4], t.fade[5])
