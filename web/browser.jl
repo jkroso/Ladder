@@ -49,7 +49,9 @@
 #     `input`, `change`, `focus`, `blur`, `scroll` and `submit`. A script that
 #     says to do no more with a click, a key or the wheel is obeyed. A key says
 #     where it is (`code`, like "KeyW"), so a game can move with W, A, S and D,
-#     and ⇧, ⌃, ⌥ and ⌘ go down and up too.
+#     and ⇧, ⌃, ⌥ and ⌘ go down and up too. The middle button of the mouse
+#     goes down and up for the scripts only, so a 3D view can move what it
+#     shows across while the button is held.
 #   - A script can have the mouse to itself (`requestPointerLock`), as a game
 #     does to turn its view with the mouse. The pointer hides, and each move
 #     of the mouse says only how far it went. Esc gives the pointer back, and
@@ -846,8 +848,8 @@ key_name(K, shift) = haskey(NAMES, K) ? NAMES[K] : haskey(LETTERS, K) ? (shift ?
 "The code that a script knows the key `K` by, which says where the key is and not what it types: \"KeyW\", \"Digit1\", \"Space\", \"ShiftLeft\""
 key_code(K) = (name = key_name(K, false); name === nothing ? "" : Live.code_of(name))
 
-"The buttons of the mouse that are down in the window `w`, as a script counts them: 1 for the left one"
-buttons(w) = Keys.mouse_left in w.keys ? 1 : 0
+"The buttons of the mouse that are down in the window `w`, as a script counts them: 1 for the left one and 4 for the middle one"
+buttons(w) = (Keys.mouse_left in w.keys ? 1 : 0) | (Keys.mouse_middle in w.keys ? 4 : 0)
 
 """
 While a script of the page has the mouse to itself (`requestPointerLock`),
@@ -1051,11 +1053,32 @@ choose!(b::Browser, list::Element) = begin
   b
 end
 
+# The middle button goes to the page's scripts and does nothing else: it selects no words and follows no link. A 3D
+# view moves what it shows across with it, as a CAD program does.
+onkey(b::Browser, ev::KeyPress{Keys.mouse_middle}) = begin
+  (b.active && b.takes(ev)) || return nothing
+  l, at = live(b), point(b, b.locked)
+  (l === nothing || at === nothing) && return nothing
+  focus(b)   # so that the button coming up comes here too
+  Live.press!(l, at...; button=1, buttons=buttons(ev.window))
+  l.scripts.changed && wake!(b)
+  handled
+end
+
+onkey(b::Browser, ev::KeyRelease{Keys.mouse_middle}) = begin
+  b.active || return nothing
+  l, at = live(b), point(b, b.locked)
+  (l === nothing || at === nothing) && return nothing
+  Live.release!(l, at...; button=1, buttons=buttons(ev.window))
+  l.scripts.changed && wake!(b)
+  handled
+end
+
 onkey(b::Browser, ev::KeyPress{K}) where K = begin
   b.active || return nothing
   w = ev.window
   # The other buttons of the mouse do nothing here
-  K in (Keys.mouse_right, Keys.mouse_middle, Keys.mouse_back, Keys.mouse_forward) && return nothing
+  K in (Keys.mouse_right, Keys.mouse_back, Keys.mouse_forward) && return nothing
   cmd, shift = Keys.cmd in w.keys, Keys.shft in w.keys
   l, name = live(b), key_name(K, shift)
   # Esc takes the mouse back from a script that has it to itself, and the page doesn't hear that Esc

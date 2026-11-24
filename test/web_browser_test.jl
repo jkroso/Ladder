@@ -559,3 +559,27 @@ end
   @test b.locked === nothing && !Live.locked(l)
   close(w)
 end
+
+@testset "the middle button of the mouse" begin
+  # A 3D view moves what it shows across while the middle button is held. The scripts hear the button, and the
+  # page's words aren't selected by it.
+  b = Browser(html="""<body style="margin:0"><p>Some words to select</p><script>
+    var heard = []
+    addEventListener('mousedown', e => heard.push('down ' + e.button + ' ' + e.buttons))
+    addEventListener('mousemove', e => heard.push('move ' + e.buttons))
+    addEventListener('mouseup', e => heard.push('up ' + e.button + ' ' + e.buttons))
+    </script></body>""", wide=400px, high=300px)
+  w = Window(b, size=(400px, 300px))
+  frame(w); frame(w)
+  l = b.view.live
+  move!(w, (20px, 10px))
+  Live.evaluate(l, "heard.length = 0")
+  w.keys |= Keys.mouse_middle
+  onkey(w, KeyPress{Keys.mouse_middle}(0, w))
+  move!(w, (120px, 10px))
+  w.keys ⊻= Keys.mouse_middle
+  onkey(w, KeyRelease{Keys.mouse_middle}(0, w))
+  @test Live.evaluate(l, "heard.join('|')") == "down 1 4|move 4|up 1 0"
+  @test Browsers.selected_words(b) == ""
+  close(w)
+end

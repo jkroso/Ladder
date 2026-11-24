@@ -371,16 +371,18 @@ const build = () => {
   return { span: s.span };
 };
 
-// ------------------------------------------------------------------ the view: drag to turn it, and the wheel or a pinch to come nearer
+// ------------------------------------------------------------------ the view: drag to turn it, the wheel or a pinch to come nearer,
+// and a drag with the middle button to move it across
 let turn = -0.55, tilt = 0.5, far = 1.0;
+const target = new THREE.Vector3();   // the point that the view looks at, and turns round
 let made = build();
 const draw = () => {
   const w = innerWidth, h = innerHeight;
   renderer.setSize(w, h);
   camera.aspect = earthCamera.aspect = w / h;
   const d = far * made.span * 1.05;
-  camera.position.set(d * Math.cos(tilt) * Math.sin(turn), d * Math.sin(tilt), d * Math.cos(tilt) * Math.cos(turn));
-  camera.lookAt(0, 0, 0);
+  camera.position.set(d * Math.cos(tilt) * Math.sin(turn), d * Math.sin(tilt), d * Math.cos(tilt) * Math.cos(turn)).add(target);
+  camera.lookAt(target);
   camera.near = Math.max(0.05, d / 400); camera.far = d * 20;
   camera.updateProjectionMatrix();
   earthCamera.position.copy(camera.position);
@@ -392,15 +394,29 @@ const draw = () => {
   renderer.render(scene, camera);
 };
 
-let down = null;
-addEventListener('mousedown', e => { down = [e.clientX, e.clientY, turn, tilt] });
+let down = null, across = null;
+addEventListener('mousedown', e => {
+  if (e.button === 1) { across = [e.clientX, e.clientY]; e.preventDefault(); return }
+  down = [e.clientX, e.clientY, turn, tilt];
+});
 addEventListener('mousemove', e => {
+  if (across) {
+    if (!(e.buttons & 4)) { across = null; return }
+    // The satellite moves as far as the mouse does, at the distance of the point that the view looks at. That point
+    // stays within a wing's span of the satellite's middle, so the satellite can't be lost.
+    const metres = 2 * far * made.span * 1.05 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) / innerHeight;
+    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion), up = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
+    target.addScaledVector(right, -(e.clientX - across[0]) * metres).addScaledVector(up, (e.clientY - across[1]) * metres).clampLength(0, made.span);
+    across = [e.clientX, e.clientY];
+    draw();
+    return;
+  }
   if (!down) return;
   turn = down[2] - (e.clientX - down[0]) * 0.008;
   tilt = THREE.MathUtils.clamp(down[3] + (e.clientY - down[1]) * 0.006, -1.2, 1.4);
   draw();
 });
-addEventListener('mouseup', () => { down = null });
+addEventListener('mouseup', e => { if (e.button === 1) across = null; else down = null });
 // A pinch comes as the wheel with Ctrl held, where each 100 px is a factor of e, so it brings the satellite as near as the fingers spread
 addEventListener('wheel', e => { far = THREE.MathUtils.clamp(far * Math.exp(e.deltaY * (e.ctrlKey ? 0.01 : 0.0015)), 0.04, 6); draw(); e.preventDefault() }, { passive: false });
 addEventListener('resize', draw);

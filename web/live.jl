@@ -213,10 +213,10 @@ What an event of the mouse says to a script: where the mouse is in the
 window, how far it moved since the last event (`dx` and `dy`, in px of the
 page as it's drawn), and which buttons are down: 1 for the left one.
 """
-mouse(l::Live, x, y; dx=0.0, dy=0.0, buttons=0) = begin
+mouse(l::Live, x, y; dx=0.0, dy=0.0, button=0, buttons=0) = begin
   z = l.options.zoom
   Dict{String,Any}("bubbles" => true, "cancelable" => true, "clientX" => x / z, "clientY" => y / z - l.scroll,
-                   "movementX" => dx / z, "movementY" => dy / z, "buttons" => buttons)
+                   "movementX" => dx / z, "movementY" => dy / z, "button" => button, "buttons" => buttons)
 end
 
 """
@@ -239,10 +239,15 @@ move!(l::Live, x, y; dx=0.0, dy=0.0, buttons=0) = begin
 end
 move!(l::Live) = (l.over === nothing || (JS.fire!(l.scripts, l.over, "mouseout"); l.over = nothing); l)
 
-"The mouse button goes down at the point `(x, y)` of the page. False when a script said to do no more with it."
-press!(l::Live, x, y) = (z = l.options.zoom; JS.fire!(l.scripts, at(l, x / z, y / z; fresh=false), "mousedown", mouse(l, x, y; buttons=1)))
-"The mouse button comes up at the point `(x, y)` of the page"
-release!(l::Live, x, y) = (z = l.options.zoom; JS.fire!(l.scripts, at(l, x / z, y / z; fresh=false), "mouseup", mouse(l, x, y)))
+"""
+A mouse button goes down at the point `(x, y)` of the page. False when a script
+said to do no more with it. `button` is which one, as a script counts them: 0
+the left, 1 the middle. `buttons` is all that are down now: 1 the left, 4 the
+middle.
+"""
+press!(l::Live, x, y; button=0, buttons=1) = (z = l.options.zoom; JS.fire!(l.scripts, at(l, x / z, y / z; fresh=false), "mousedown", mouse(l, x, y; button, buttons)))
+"A mouse button comes up at the point `(x, y)` of the page. `button` and `buttons` are as for `press!`."
+release!(l::Live, x, y; button=0, buttons=0) = (z = l.options.zoom; JS.fire!(l.scripts, at(l, x / z, y / z; fresh=false), "mouseup", mouse(l, x, y; button, buttons)))
 
 """
 The wheel or the trackpad scrolls by `(dx, dy)` px, as the page is drawn,
