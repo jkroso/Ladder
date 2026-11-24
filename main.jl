@@ -26915,12 +26915,15 @@ locate(e, (x, y)) = begin
   (it.first, min(colat(f, line_at(f, dy - it.top), dx), length(e.buf.lines[it.first])))
 end
 
-"The link under a point in the window, or nothing"
+"The link under a point in the window, or nothing. A link in a cell of a table counts too."
 link_at(e, pos) = begin
   line, col = locate(e, pos)
   it = item(e, line)
-  it.content isa Flow || return nothing
-  for vl in it.content.lines, seg in vl.segs
+  c = it.content
+  # Each cell of a table has its own lines of text. Their columns are the columns of the row's line.
+  r = c isa Grid ? findfirst(==(line), c.rows) : nothing
+  flows = c isa Flow ? [c] : r === nothing ? Flow[] : c.flows[r]
+  for f in flows, vl in f.lines, seg in vl.segs
     seg.col <= col < seg.col + seg.n && !isempty(seg.link) && return seg.link
   end
   nothing
@@ -26930,16 +26933,29 @@ end
 The link that's drawn under a point in the window, or nothing. `link_at` gives
 the link nearest to a point, which is right for a click with ⌘ held. A point
 beside a line, or between two lines, is on no link here, so a click with no
-key held opens a link only when the click is on its words.
+key held opens a link only when the click is on its words. A link in a cell
+of a table counts too.
 """
 link_on(e, (x, y)) = begin
   dx, dy = x - e.origin[1], y - e.origin[2]
   (dy >= 0px && !isempty(e.layout)) || return nothing
   it = e.layout[item_under(e, dx, dy)]
-  f = it.content
-  f isa Flow || return nothing
+  c = it.content
+  c isa Flow && return link_on(c, dx, dy - it.top)
+  c isa Grid || return nothing
+  # Each cell of a table has its own lines of text, from the top left of the cell
+  for r in eachindex(c.rows), col in eachindex(c.flows[r])
+    cx, cy = cell_origin(c, r, col)
+    found = link_on(c.flows[r][col], dx - cx, dy - it.top - cy)
+    found === nothing || return found
+  end
+  nothing
+end
+
+"The link that's drawn at `dx` across and `dy` down from the top left of `f`, or nothing"
+link_on(f::Flow, dx::px, dy::px) = begin
   for vl in f.lines
-    top = it.top + f.above + vl.top
+    top = f.above + vl.top
     top <= dy < top + vl.high || continue
     for seg in vl.segs
       !isempty(seg.link) && seg.x <= dx < seg.x + seg.w && return seg.link

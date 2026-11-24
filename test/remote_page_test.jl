@@ -52,6 +52,7 @@ page!("https://example.com/notes.md", """
   | Item | Price |
   |------|-------|
   | Tea  | 4     |
+  | [Milk](prices.md) | 2 |
 
   ## Lower
 
@@ -206,6 +207,37 @@ end
   # A path is from the top of the site, which has no such page. The browser shows what the site says of it.
   @test asked[n+1:end] == ["https://example.com/etc/hosts"] && browsed[m+1:end] == ["https://example.com/etc/hosts"]
   @test e.buf.path == "https://example.com/notes.md"
+end
+
+@testset "a click on a link opens it, in a paragraph and in a table" begin
+  K.navigate!(e, "example.com/notes.md")
+  frames()
+  @test e.buf.path == "https://example.com/notes.md"
+  # The page has no caret, so a click with no key held opens the link that it's on
+  i = findfirst(l -> occursin("[link beside]", l), e.buf.lines)
+  it = K.item(e, i)
+  line = it.content.lines[1]
+  seg = line.segs[findfirst(s -> s.link == "prices.md", line.segs)]
+  y = e.origin[2] + it.top + it.content.above + line.top + line.high / 2
+  @test K.link_on(e, (e.origin[1] + seg.x + seg.w / 2, y)) == "prices.md"
+  K.press!(e, (e.origin[1] + seg.x + seg.w / 2, y)); frames()
+  @test e.buf.path == "https://example.com/prices.md"
+  K.go_back!(e); frames()
+  # A link in a cell of a table has its own lines of text, and opens as one in a paragraph does
+  t = only(it for it in e.layout if it.content isa K.Grid)
+  g = t.content
+  r = findfirst(==(findfirst(l -> occursin("[Milk]", l), e.buf.lines)), g.rows)
+  f = g.flows[r][1]
+  seg = f.lines[1].segs[findfirst(s -> !isempty(s.link), f.lines[1].segs)]
+  cx, cy = K.cell_origin(g, r, 1)
+  x = e.origin[1] + cx + seg.x + seg.w / 2
+  y = e.origin[2] + t.top + cy + f.above + f.lines[1].top + f.lines[1].high / 2
+  @test K.link_on(e, (x, y)) == "prices.md" && K.link_at(e, (x, y)) == "prices.md"
+  # The cell's other words, and the cell beside it, are on no link
+  @test K.link_on(e, (x + seg.w, y)) === nothing && K.link_on(e, (e.origin[1] + K.cell_origin(g, r, 2)[1] + 20px, y)) === nothing
+  K.press!(e, (x, y)); frames()
+  @test e.buf.path == "https://example.com/prices.md"
+  K.go_back!(e); frames()
 end
 
 @testset "what a server can answer" begin
