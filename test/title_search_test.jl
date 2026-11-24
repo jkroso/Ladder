@@ -313,6 +313,41 @@ end
   @test !showing(K.TS_KEY) && w.focus === e
 end
 
+@testset "⌘F shows the path, with the search of the whole file under the › after its name" begin
+  # The mouse is away from the file's name, so only ⌘F shows the path
+  caret!(11)
+  @test !showing(:title_trail)
+  key(Keys.f, Keys.cmd)
+  @test showing(:title_trail) && showing(K.TS_KEY)
+  s = search()
+  @test s.arrow === drop(0) && s.under == 0 && s.folder == ""
+  @test w.focus === K.search_field(s) && K.search_field(s).text == ""
+  @test found() == ["part Plan", "part   Costs", "part     Sheet"]
+  shot("cmd-f")
+  # ⌘F again selects the words in the field, and the search stays
+  typed("sheet")
+  key(Keys.f, Keys.cmd)
+  f = K.search_field(search())
+  @test search() === s && showing(K.TS_KEY) && w.focus === f && (f.anchor, f.cursor) == (0, 5)
+  key(Keys.escape)
+  @test !showing(K.TS_KEY) && !showing(:title_trail) && w.focus === e
+  # The words that are selected on one line go into the field
+  b = e.buf
+  b.anchor, b.caret = (11, 10), (11, 15)
+  frames()
+  key(Keys.f, Keys.cmd)
+  @test K.search_field(search()).text == "sheet" && found() == ["After the sheet."]
+  key(Keys.escape)
+  # A file of code has no search in its path, so ⌘F opens the bar that finds text in it
+  code = made(joinpath(dir, "sum.jl"), "x = 1\ny = x + 1\n")
+  K.open!(e, code); frames()
+  key(Keys.f, Keys.cmd)
+  @test K.finding(e) && !showing(K.TS_KEY)
+  key(Keys.escape)
+  @test !K.finding(e)
+  K.open!(e, plan); frames()
+end
+
 @testset "in inline code, a link or bold words, the path ends with that run, by its kind" begin
   runs = made(joinpath(dir, "runs.md"), """
   # Runs

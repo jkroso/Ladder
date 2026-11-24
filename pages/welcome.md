@@ -47,7 +47,7 @@ A comment stays out of the page's HTML, its word count and the spelling check.
 
 A comment can show beside the text too, as one does in Word or Google Docs. Write it as CriticMarkup does: the words that it's about between `{==` and `==}`, and the comment after them between `{>>` and `<<}`, like `{==these words==}{>>Is this right?<<}`. The words get a highlighter's colour, and the comment shows as a card at the right of the text, level with them. When the window is narrow, the text gets narrower to make room for the cards. Move the mouse over a card to mark its words. Click a card to change its comment, and press ⌘E when you're done. To add a comment, select some words and press ⌘⌥M. The page [space-data-centres.md](space-data-centres.md) has eight comments, each an idea for Ladder.
 
-A word that the Mac's dictionary doesn't have, like teh, gets a line of red dots under it. Right-click the word to choose the word you meant. Press ⌘F to find text in the page.
+A word that the Mac's dictionary doesn't have, like teh, gets a line of red dots under it. Right-click the word to choose the word you meant. Press ⌘F to search the page.
 
 A line can point to a footnote[^note]. The footnote is a line of its own, anywhere in the file, and the page gives each footnote a number. Hold ⌘ and click the number to go to the footnote. To read it without going there, rest the mouse on the number: a card under it shows the footnote.
 
@@ -114,7 +114,7 @@ On a page with a `schedule` block, an item that repeats has a bar for each time 
 | ⌘P | Finds a project by name and opens it in the window. A project is a folder that you made a favourite, or a git repository in your home folder. The one that git last wrote in comes first, after your favourites. |
 | ⌘⇧P | Opens the command palette. It lists the commands that have a use where you are. Type a command's name and press Return to run it. While you choose a Theme or a Text Size with ↑ or ↓, the page shows each choice at once, and Esc puts it back. |
 | ⌘⌥← and ⌘⌥→ | Go back to the line or the file that showed before, and forward again |
-| ⌘F | Finds text in the page. Return goes to the next place that has it. |
+| ⌘F | Searches the page from the top bar, with the words you selected. In a file of code, it opens a bar that finds text, and Return goes to the next place that has it. |
 | ⌘E | Shows the markup of the part of the page that the caret is in, or hides it again |
 | ⌘⌥P | Prints the page, or saves it as a PDF |
 | ⌘⇧E | Saves the page as a page of HTML, for a website |
@@ -1177,7 +1177,7 @@ Hold the mouse over the file's name at the top of the window, and the name grows
 
 After the file's name, the top bar shows where the caret is: the headings over it, and the component that it's on, like `welcome.md › H2 › Sheet`. When the caret is in inline code, a link or bold words, the bar ends with that too, like `welcome.md › H2 › Code`. A heading shows as its mark, like H2, to keep the bar short. Click a heading in the path to go to it.
 
-In the path, click the › after the file's name, or after a heading, to search what's in the file or under the heading. At first the search lists the headings and the components there. Click one to go to it. Type words, choose kinds of thing with the Kinds button, or do both. With kinds and no words, the search lists every thing of those kinds, like every to-do item that isn't ticked, or every sketch. Each kind that you choose shows as a chip in the search. Click a chip to take it away.
+In the path, click the › after the file's name, or after a heading, to search what's in the file or under the heading. ⌘F opens the search of the whole file, with the words you selected in it. At first the search lists the headings and the components there. Click one to go to it. Type words, choose kinds of thing with the Kinds button, or do both. With kinds and no words, the search lists every thing of those kinds, like every to-do item that isn't ticked, or every sketch. Each kind that you choose shows as a chip in the search. Click a chip to take it away.
 
 The button at the right of the search chooses where to look: a heading of the path, the whole file, or a folder on the way to the file, with the folders in it. In a folder, the kind Pages finds a page by its name. ↑ and ↓ pick a row, and Return or a click shows it. Tab opens the list of kinds, and Esc closes the search.
 

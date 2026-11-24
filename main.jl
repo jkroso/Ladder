@@ -109,7 +109,8 @@
 #   - ⌘B and ⌘I make the selection bold or italic. ⌘Z and ⌘⇧Z undo and redo.
 #   - Double-click selects a word, triple-click a line. ⌘-click opens a link. In a page
 #     that's read-only, like an email, a click opens it with no key held.
-#   - ⌘F finds text in the page. Return goes to the next place that has it.
+#   - ⌘F shows the search under the › after the file's name in the top bar. In a
+#     file with no such ›, like a file of code, it opens a bar that finds text.
 #   - Write ![name](picture.png) on a line of its own to show a picture, or drop
 #     a file on the page from the Finder. ⌘V pastes a file that you copied in
 #     the Finder the same way, and a picture that you copied, like a screenshot.
@@ -29991,7 +29992,7 @@ const COMMAND_GROUPS = with_added([
     Command(:paste, "Paste", :edit, "cmd+v", (e, w, _) -> paste!(e)),
     Command(:select_all, "Select all", :look, "cmd+a", (e, w, _) -> select_all!(e)),
     Command(:select_word, "Select the word at the caret", :look, "cmd+d", (e, w, _) -> select_word!(e)),
-    Command(:find, "Find in the page", :look, "cmd+f", (e, w, _) -> open_find!(e)),
+    Command(:find, "Find in the page", :look, "cmd+f", (e, w, _) -> find!(e, w)),
     Command(:find_next, "Go to the next place that's found", :look, "cmd+g", (e, w, _) -> find_step!(e, 1)),
     Command(:find_last, "Go to the place that's found before", :look, "cmd+shift+g", (e, w, _) -> find_step!(e, -1)),
     Command(:bold, "Make the selection bold", :edit, "cmd+b", (e, w, _) -> e.buf.view == :markdown && surround!(e, "**")),
@@ -32423,9 +32424,21 @@ title_steps(all, room) = begin
 end
 
 """
+True when the path of the file can show over the top bar: the window has a
+file, of the Mac or of a web server, whose name isn't being changed, and no
+list like the file finder covers the page.
+"""
+trail_can_show(e) = begin
+  path = e.buf.path
+  # A page from a web server has a path too, from the server's name
+  !nofile(e) && (isremote(path) || (isabspath(path) && isdir(dirname(path)))) && renaming(e, :title) != path && e.popup == :none
+end
+
+"""
 Show the path of the file over the top bar while the mouse is over the file's
 name, once it has been there for a moment, and take it away when the mouse
-leaves the name and the path.
+leaves the name and the path. ⌘F shows it too, with the search under the ›
+after the file's name: see `find!`.
 """
 title_trail!(e, t) = begin
   w = window_of(t)
@@ -32437,23 +32450,25 @@ title_trail!(e, t) = begin
   listing = searching || any(p -> p.content isa FolderList, popups(w))
   # A pinned path shows while the bar shows the file's name, with the mouse anywhere
   pinned = trail_pinned(e) && slideshow(e) === nothing && !as_app(e) && !screening(e)
-  # A page from a web server has a path too, from the server's name
-  if !((ishovered(t) || listing || pinned) && !nofile(e) && (isremote(path) || (isabspath(path) && isdir(dirname(path)))) &&
-       renaming(e, :title) != path && e.popup == :none)
+  # ⌘F asked for the search, which opens once the path is in place
+  asked = haskey(e.nodes, :search_asked)
+  if !((ishovered(t) || listing || pinned || asked) && trail_can_show(e))
     delete!(e.nodes, :title_hover)
+    delete!(e.nodes, :search_asked)
     listing && (close_folder_lists!(e, w); close_title_search!(e, w))
     open && close_popup!(w, :title_trail)
     return
   end
   searching && search_tick!(e, w)
   since = get!(e.nodes, :title_hover, time())
-  !pinned && time() - since < TT_WAIT && return redraw_in!(e, TT_WAIT)
+  !pinned && !asked && time() - since < TT_WAIT && return redraw_in!(e, TT_WAIT)
   kept = get(e.nodes, :title_trail, nothing)
   # The path follows the file's name when the name moves, as it does while a sidebar or git's panel slides open.
   # The name's place is from the last frame, so one more frame checks that the path is where the name is now.
-  (open && kept isa TitleTrail && kept.path == path && kept.size == window_size(e) && kept.parts == focus_parts(e) &&
-   (kept.centred || !pinned) && kept.title_at == title_place(e, t)) ||
-    (show_title_trail!(e, t, w, path); redraw_in!(e, 0))
+  placed = open && kept isa TitleTrail && kept.path == path && kept.size == window_size(e) && kept.parts == focus_parts(e) &&
+           (kept.centred || !pinned) && kept.title_at == title_place(e, t)
+  placed || (show_title_trail!(e, t, w, path); redraw_in!(e, 0))
+  asked && placed && ask_search!(e, w, kept)
   # A window hears nothing when the mouse leaves it, so the path looks for itself. A pinned path stays, so it looks only while the mouse is on it.
   isempty(w.glfw) || (pinned && !ishovered(t)) || (sync_mouse!(w); redraw_in!(e, 0.2))
   nothing
@@ -33043,6 +33058,46 @@ left_search!(e, w) = begin
 end
 
 """
+⌘F, and Find… in the page's menu. On a page of Markdown, the path shows over
+the top bar with the search under the › after the file's name, which looks
+through the whole page. What's selected goes into its field, if that's part of
+one line. While the search shows, ⌘F selects the words in its field. A file
+with no › to search from, like a file of code, gets the bar that finds text in
+the page instead: see `open_find!`.
+"""
+find!(e, w=window_of(e)) = begin
+  w === nothing && return open_find!(e)
+  s = get(e.nodes, :title_search, nothing)
+  if s isa TitleSearch && any(p -> p.key == TS_KEY, popups(w))
+    f = search_field(s)
+    f.anchor, f.cursor = 0, length(f.text)
+    focus(f)
+    return nothing
+  end
+  (searchable(e) && trail_can_show(e) && slideshow(e) === nothing && !as_app(e) && !screening(e)) || return open_find!(e)
+  b = e.buf
+  lo, hi = selection(b)
+  e.nodes[:search_asked] = selecting(b) && lo[1] == hi[1] ? rest(head(b.lines[lo[1]], hi[2]), lo[2]) : ""
+  redraw_in!(e, 0)
+  nothing
+end
+
+"Open the search that ⌘F asked for, under the › after the file's name of the path `v`, once the › has a place"
+ask_search!(e, w, v::TitleTrail) = begin
+  a = get(v.drops, 0, nothing)
+  (a !== nothing && rect(a) !== nothing) || return redraw_in!(e, 0)
+  words = pop!(e.nodes, :search_asked)
+  open_title_search!(e, w, a)
+  s = get(e.nodes, :title_search, nothing)
+  if s isa TitleSearch && s.arrow === a
+    f = search_field(s)
+    f.text = words
+    f.anchor, f.cursor = 0, length(words)
+  end
+  nothing
+end
+
+"""
 What happens to the search in each frame, before the window is laid out: the
 list under one of its buttons goes when a click somewhere else took the
 keyboard from the list's field.
@@ -33269,6 +33324,9 @@ onkey(s::TitleSearch, ev::KeyPress{Keys.tab}) = unmodified(ev) ? open_search_men
 # Backspace in an empty field takes the last kind away
 onkey(s::TitleSearch, ev::KeyPress{Keys.backspace}) =
   unmodified(ev) && isempty(search_field(s).text) && !isempty(s.wants) ? (pop!(s.wants); handled) : nothing
+# The key that finds, like ⌘F, selects the words in the field. The page never sees it, since the search has no parent there.
+onkey(s::TitleSearch, ev::KeyPress{K}) where K =
+  get(keys_now(s.of).commands, (Stroke(ev.window.keys & HELD, K),), nothing) == :find ? (find!(s.of, ev.window); handled) : nothing
 
 # --- the list under a button of the search ---
 
@@ -34742,7 +34800,7 @@ page_act!(e, i::Int, j::Int=0) = begin
     a = sent_keys(e)
     a === nothing || a.of.shown === nothing ? select_all!(e) : sent_select_all!(a)
   elseif name == "Find…"
-    open_find!(e)
+    find!(e)
   elseif name == "Export as HTML…"
     w = window_of(e)
     w === nothing || export_html!(e, w)
@@ -38421,9 +38479,11 @@ end
 
 # --- find in the page ----------------------------------------------------------------------
 #
-# ⌘F opens a bar at the top right of the page. Each place in the document that
-# has the bar's text gets a mark, and the selection goes to the first one after
-# the caret. Return and ⌘G go to the next place, ⇧Return and ⌘⇧G go to the one
+# In a file with no search under a › of the path in the top bar, like a file of
+# code, ⌘F opens a bar at the top right of the page. (In a page of Markdown, ⌘F
+# shows that search: see `find!`.) Each place in the document that has the
+# bar's text gets a mark, and the selection goes to the first one after the
+# caret. Return and ⌘G go to the next place, ⇧Return and ⌘⇧G go to the one
 # before, and esc closes the bar. Capitals don't matter.
 
 "The bar that finds text in the page"

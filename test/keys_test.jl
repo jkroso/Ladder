@@ -409,10 +409,12 @@ end
   @test K.dirty(b)
   press(w, Keys.x, ctrl); press(w, Keys.s, ctrl)
   @test !K.dirty(b)
-  press(w, Keys.s, ctrl)                          # ⌃S by itself finds
-  @test K.finding(e)
+  press(w, Keys.s, ctrl)                          # ⌃S by itself finds: on a page, with the search in the top bar
+  frame(w); frame(w)
+  searching() = any(p -> p.key == K.TS_KEY, K.popups(w))
+  @test searching()
   press(w, Keys.escape)
-  @test !K.finding(e)
+  @test !searching()
   # A letter with no key held still types
   K.focus(e)
   caret!(e, w, 1, 0)
