@@ -1016,17 +1016,28 @@ The line under the top of the block says what a click will do. After a click, it
 
 A code block in the language `form` shows a field for each column of the table above it. Type in the fields and press Return, or click Add, and the form adds a row to the table.
 
-| Client | Due | Status |
-|---|---|---|
-| Smith | 2026-11-25 | Quote |
-| Jones | 2026-12-02 | Booked |
-| Brown | 2026-12-09 | Quote |
+| Client | Due | Status | Price | Paid |
+|---|---|---|---|---|
+| Smith | 2026-11-25 | Quote | $4,200 | No |
+| Jones | 2026-12-02 | Booked | $950 | Yes |
+| Brown | 2026-12-09 | Quote | $1,300 | No |
+| Lee | 2026-12-16 | Booked | $2,150 | No |
+| Jake | 2026-11-25 | Booked | $200 | Yes |
 
 ```form
 title: New job
 ```
 
-Tab goes to the next field, and ⇧Tab to the one before. A field for a column of numbers, or of days, says so while it's empty. A column with a few words that come again, like Quote and Booked, has a button for each of them beside its field. A line like `title: New job` is the words at the top of the form. A line like `to: Jobs` adds the rows to the first table under the heading Jobs. One ⌘Z takes a row away again.
+Each field is what its column holds:
+
+- Due holds days, so its field has a month under it while you type there. Click a day, or press ↓ and ↑ for the day after and the day before. With ⌥ they go a week. Words like `fri`, `25 nov` and `tomorrow` name a day too, and the words beside the field say which day that is.
+- Price holds dollars, so `700` goes in the row as `$700`. A column of times, like 14:30, takes `2pm` the same way.
+- Paid holds Yes and No, so its field is a box to tick. Space ticks it too.
+- Status holds two words that come again and again, so its field is a chooser with those words. Click a word, or press ← and →. A chooser has no more than six words, and its column has two cells or more for each of them.
+
+A field takes only what its column holds. When Due has words that name no day, the form says so and adds no row.
+
+A line of the block with a column's name says what the field takes, when the cells don't: `Due: day`, `Start: time`, `Price: number`, `Paid: yes/no`, or `Status: Quote, Booked, Done` for the words of a chooser. `Client: words` makes a field to type in, when a column of names has got a chooser. A line like `title: New job` is the words at the top of the form. A line like `to: Jobs` adds the rows to the first table under the heading Jobs. Tab goes to the next field, and ⇧Tab to the one before. One ⌘Z takes a row away again.
 
 ## Loading rows
 
