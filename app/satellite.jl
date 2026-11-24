@@ -9,8 +9,13 @@
 # coolant's pipes, baffles on the star trackers. A .glb file is fixed, so change
 # the numbers under "the sizes" and run this again when the page's sums change.
 #
-# Lengths are in metres. y is up, the wings run along x, and the cells face z,
-# where the Sun is.
+# The file also has what's round the satellite: the Sun as a light, and a
+# picture of the whole sky with the Earth in it, 1000 km below. Ladder's viewer
+# shows the sky behind the model and lights the model with it.
+#
+# Lengths are in metres. The satellite is built with y up, its wings along x and
+# its cells facing z. Then it's tipped back to face the Sun, which is off to one
+# side of the orbit and a little above level.
 @use Skia
 
 const Vec = NTuple{3,Float64}
@@ -31,6 +36,12 @@ const rad_area = array_area * rad_use / 100 / nsat       # m² of the radiator
 const rad_high = chord                                   # m: the radiator stands up behind the body, as tall as the cells
 const rad_long = rad_area / rad_high
 const CELL = 0.125                                       # m, one cell
+
+# In a dawn-dusk orbit the Sun is off to one side, and up to about 25° above level. The orbit runs along the
+# line between day and night.
+const SUN = (0.0, 0.42, 1.0) ./ sqrt(1 + 0.42^2)         # the way to the Sun, where y is straight up from the Earth
+const TIP = -asin(SUN[2])                                # radians that the satellite turns about x to face it
+const alt, R_EARTH = 1.0e6, 6.378e6                      # m above the ground, and m from the Earth's middle to the ground
 
 # --- shapes --------------------------------------------------------------------
 
@@ -213,20 +224,33 @@ end
 # other files. Each one tiles: its right edge meets its left, and its bottom
 # its top.
 
-"The PNG bytes of a picture `n` pixels square, with the red, green and blue that `colour(x, y)` gives for each pixel, from 0 to 255"
-png(colour, n) = begin
+"""
+The bytes of a picture `w` pixels wide and `h` tall, with the red, green and
+blue that `colour(x, y)` gives for each pixel, from 0 to 255. It's a PNG, which
+keeps every pixel as it is, or a JPEG, which is far smaller for a photograph.
+"""
+picture_bytes(colour, w, h; jpeg=false) = begin
   byte(x) = round(UInt32, clamp(x, 0, 255))
-  pixels = UInt32[(c = colour(x, y); 0xff000000 | byte(c[1]) << 16 | byte(c[2]) << 8 | byte(c[3])) for y in 0:n-1 for x in 0:n-1]
-  info = Ref(Skia.sk_image_info_t(C_NULL, Skia.SK_COLOR_TYPE_BGRA_8888, Skia.SK_ALPHA_TYPE_OPAQUE, n, n))
+  pixels = Vector{UInt32}(undef, w * h)
+  Threads.@threads for y in 0:h-1
+    for x in 0:w-1
+      c = colour(x, y)
+      pixels[y*w+x+1] = 0xff000000 | byte(c[1]) << 16 | byte(c[2]) << 8 | byte(c[3])
+    end
+  end
+  info = Ref(Skia.sk_image_info_t(C_NULL, Skia.SK_COLOR_TYPE_BGRA_8888, Skia.SK_ALPHA_TYPE_OPAQUE, w, h))
   GC.@preserve info pixels begin
-    data = Skia.sk_data_new_with_copy(pointer(pixels), UInt64(4n * n))
-    image = Skia.sk_image_new_raster_data(info, data, Csize_t(4n))
-    encoded = Skia.sk_encode_png(C_NULL, image, Int32(9))
+    data = Skia.sk_data_new_with_copy(pointer(pixels), UInt64(4w * h))
+    image = Skia.sk_image_new_raster_data(info, data, Csize_t(4w))
+    encoded = jpeg ? Skia.sk_encode_jpeg(C_NULL, image, Int32(88)) : Skia.sk_encode_png(C_NULL, image, Int32(9))
     out = copy(unsafe_wrap(Array, Ptr{UInt8}(Skia.sk_data_get_data(encoded)), Skia.sk_data_get_size(encoded)))
     Skia.sk_data_unref(encoded); Skia.sk_image_unref(image); Skia.sk_data_unref(data)
     out
   end
 end
+
+"The PNG bytes of a picture `n` pixels square"
+png(colour, n) = picture_bytes(colour, n, n)
 
 "A number from 0 to 1 that looks random, and is the same each time for the same `x` and `y`"
 noise(x, y) = (s = sin(x * 127.1 + y * 311.7) * 43758.5453; s - floor(s))
@@ -294,6 +318,91 @@ end
 # The radiator's white paint, with a tube under it every 10 cm. The tubes run up it, from one loop to the other.
 const tubes = bumps((x, y) -> (d = abs(mod(x, 64) - 32); d < 6 ? 0.35 * sqrt(1 - (d / 6)^2) : 0.0), 64, 4.0)
 
+# --- the sky -------------------------------------------------------------------
+#
+# The sky is one picture, twice as wide as it's tall. Its top row is straight
+# up, its bottom row straight down, and its middle column is the way that -z
+# points. Most of it is black. The Earth fills it from 30° under the level of
+# the eye down, since the satellite is 1000 km up. The Sun is low over that
+# ground: half of what you see is in daylight and half in the night.
+
+fract(x) = x - floor(x)
+mix(a, b, t) = a .+ (b .- a) .* t
+smoothstep(lo, hi, x) = (t = clamp((x - lo) / (hi - lo), 0.0, 1.0); t * t * (3 - 2t))
+
+"A number from 0 to 1 that looks random, for a point in space with whole coordinates"
+speck(p) = begin
+  x, y, z = fract(p[1] * 0.3183099 + 0.1) * 17, fract(p[2] * 0.3183099 + 0.1) * 17, fract(p[3] * 0.3183099 + 0.1) * 17
+  fract(x * y * z * (x + y + z))
+end
+
+"Soft random lumps in space, from 0 to 1"
+lumps(p) = begin
+  i = floor.(p)
+  f = p .- i
+  u = f .* f .* (3 .- 2 .* f)
+  at(a, b, c) = speck(i .+ (a, b, c))
+  mix(mix(mix(at(0, 0, 0), at(1, 0, 0), u[1]), mix(at(0, 1, 0), at(1, 1, 0), u[1]), u[2]),
+      mix(mix(at(0, 0, 1), at(1, 0, 1), u[1]), mix(at(0, 1, 1), at(1, 1, 1), u[1]), u[2]), u[3])
+end
+
+"Lumps on lumps: big ones with smaller ones on them, six sizes in all, as coasts and clouds have"
+rough_lumps(p) = begin
+  total, strength = 0.0, 0.5
+  for _ in 1:6
+    total += strength * lumps(p)
+    p = p .* 2.03
+    strength /= 2
+  end
+  total
+end
+
+"The colour of the ground at the place `n` on the Earth (the way to it from the Earth's middle), seen from the way `to_eye`"
+ground(n, to_eye) = begin
+  light = dot(n, SUN)
+  land = smoothstep(0.52, 0.56, rough_lumps(n .* 2.2 .+ 3.0))
+  desert = smoothstep(0.5, 0.7, rough_lumps(n .* 5.0 .+ 11.0))
+  soil = mix((0.02, 0.06, 0.15), mix((0.07, 0.11, 0.04), (0.32, 0.25, 0.14), desert), land)
+  cloud = smoothstep(0.42, 0.68, 0.6 * rough_lumps(n .* 6.0 .+ (0.0, 4.0, 0.0)) + 0.27 * rough_lumps(n .* 40.0) + 0.13 * rough_lumps(n .* 160.0))
+  day = mix(soil, (0.95, 0.95, 0.95), cloud) .* (max(light, 0.0) * 2.6) .+ (0.04, 0.09, 0.22) .* max(light, 0.0)
+  # Sunlight that glints off the sea
+  glint = light > 0 ? (1 - land) * (1 - cloud) * max(dot(n, unit(SUN .+ to_eye)), 0.0)^120 * 3 : 0.0
+  # The lights of towns, on the night side
+  towns = land * smoothstep(0.62, 0.8, rough_lumps(n .* 90.0)) * (1 - 0.8cloud)
+  night = (1.0, 0.62, 0.25) .* (towns * 0.25 * smoothstep(0.05, -0.15, light))
+  # The air: blue at the edge, and red where the day ends
+  rim = (1 - max(dot(n, to_eye), 0.0))^4
+  air = mix((0.25, 0.45, 1.0), (1.0, 0.45, 0.2), 0.3 * smoothstep(0.2, 0.0, abs(light))) .* (rim * smoothstep(-0.25, 0.25, light) * 1.6)
+  day .+ glint .+ night .+ air
+end
+
+"The light that comes from the way `d`, seen from the satellite: the ground, the thin blue line of the air at the Earth's edge, or black space"
+sky_light(d) = begin
+  middle = (0.0, -(R_EARTH + alt), 0.0)   # of the Earth, from the satellite
+  along = dot(d, middle)
+  along > 0 || return (0.0, 0.0, 0.0)
+  nearest = sqrt(max(0.0, dot(middle, middle) - along^2))   # how near the ray comes to the Earth's middle
+  if nearest < R_EARTH
+    hit = d .* (along - sqrt(R_EARTH^2 - nearest^2))
+    return ground(unit(hit .- middle), d .* -1)
+  end
+  # The air glows for some tens of kilometres over the edge, where the Sun is on it
+  over = unit(d .* along .- middle)
+  (0.3, 0.55, 1.0) .* (1.2 * exp(-(nearest - R_EARTH) / 22e3) * smoothstep(-0.3, 0.4, dot(over, SUN)))
+end
+
+"A screen's number, from 0 to 255, for an amount of light. Bright light is pressed under the most that a screen shows, as film does."
+screen(x) = begin
+  x = clamp(x * (2.51x + 0.03) / (x * (2.43x + 0.59) + 0.14), 0.0, 1.0)
+  255 * (x <= 0.0031308 ? 12.92x : 1.055x^(1 / 2.4) - 0.055)
+end
+
+const SKY_WIDE = 4096
+const sky = picture_bytes(SKY_WIDE, SKY_WIDE ÷ 2, jpeg=true) do x, y
+  turn, down = 2π * ((x + 0.5) / SKY_WIDE - 0.5), π * (y + 0.5) / (SKY_WIDE ÷ 2)
+  screen.(sky_light((sin(turn) * sin(down), cos(down), -cos(turn) * sin(down))))
+end
+
 # --- materials -----------------------------------------------------------------
 
 "The amounts of light that a screen's colour stands for, as a material's colour is given"
@@ -318,6 +427,8 @@ const MATERIALS = [
   material(:amber_film, 0xb58a3a, 0.1, 0.45),
   material(:white_paint, 0xf2f2ee, 0.0, 0.55, bump=:tubes, depth=0.5),
   material(:bright_metal, 0xdfe3e8, 0.9, 0.22),
+  # The loops shed heat, so they're painted pale. Bare metal would show only the black sky that it reflects.
+  material(:pale_paint, 0xdfe2e6, 0.0, 0.5),
   material(:dark_metal, 0x2b2e33, 0.7, 0.4),
   material(:black, 0x0c0c0e, 0.2, 0.6),
   material(:glass, 0x0a1422, 0.0, 0.03),
@@ -362,7 +473,7 @@ for (side, name) in ((-1, "Left wing"), (1, "Right wing"))
   # sunny side, sweeps out to the tip, and comes back on the shaded side. The pressure in it pushes the tip
   # out, as a bow does. A sleeve joins it to the drum, and another to the bar at the tip.
   for y in (-chord / 2, chord / 2)
-    push!(shapes, :bright_metal => loop(x(0), x(reach), y, loop_out * reach, loop_r))
+    push!(shapes, :pale_paint => loop(x(0), x(reach), y, loop_out * reach, loop_r))
     for (far, long) in ((0, 0.32), (reach, 0.14))
       push!(shapes, :dark_metal => rod((x(far), y, -long), (x(far), y, long), 2.2loop_r, n=12))
     end
@@ -380,7 +491,7 @@ let root = back - 0.4, far = back - 0.4 - rad_long
     :dark_metal => moved(block(0.12, 0.12, 0.4, bevel=0.01), (0, 0, back - 0.2)),
     :white_paint => moved(panel, (0, 0, (root + far) / 2))]
   for y in (-rad_high / 2, rad_high / 2)
-    push!(shapes, :bright_metal => loop(root, far, y, loop_out * rad_long, loop_r, :z))
+    push!(shapes, :pale_paint => loop(root, far, y, loop_out * rad_long, loop_r, :z))
     for z in (root, far)
       push!(shapes, :dark_metal => rod((-0.12, y, z), (0.12, y, z), 2.2loop_r, n=12))
     end
@@ -474,12 +585,18 @@ write_glb(path) = begin
     push!(meshes, (name=name, primitives=primitives))
     push!(nodes, (name=name, mesh=length(meshes) - 1))
   end
-  images = [(name=String(name), mimeType="image/png", bufferView=view!(bytes)) for (name, bytes) in PICTURES]
+  images = Any[(name=String(name), mimeType="image/png", bufferView=view!(bytes)) for (name, bytes) in PICTURES]
+  push!(images, (name="sky", mimeType="image/jpeg", bufferView=view!(sky)))
+  # The satellite is tipped back to face the Sun, and the Sun's light shines along its own -z, turned the same way
+  tipped = (sin(TIP / 2), 0.0, 0.0, cos(TIP / 2))
+  sun = (name="Sun", type="directional", color=(1.0, 0.965, 0.925), intensity=5.0)
   text = json((asset=(version="2.0", generator="Ladder app/satellite.jl"),
-               scene=0, scenes=[(name="One satellite of the fleet", nodes=[length(nodes)],)],
-               nodes=[nodes..., (name="Satellite", children=collect(0:length(nodes)-1))],
+               extensionsUsed=["KHR_lights_punctual"], extensions=(KHR_lights_punctual=(lights=[sun],),),
+               scene=0, scenes=[(name="One satellite of the fleet", nodes=[length(nodes), length(nodes) + 1], extras=(sky=(image=length(PICTURES),),))],
+               nodes=[nodes..., (name="Satellite", children=collect(0:length(nodes)-1), rotation=tipped),
+                      (name="Sun", rotation=tipped, extensions=(KHR_lights_punctual=(light=0,),))],
                meshes=meshes, materials=last.(MATERIALS),
-               textures=[(source=i - 1, sampler=0) for i in eachindex(images)], samplers=[(magFilter=9729, minFilter=9987, wrapS=10497, wrapT=10497)],
+               textures=[(source=i - 1, sampler=0) for i in eachindex(PICTURES)], samplers=[(magFilter=9729, minFilter=9987, wrapS=10497, wrapT=10497)],
                images=images, accessors=accessors, bufferViews=views, buffers=[(byteLength=position(bin),)]))
   text *= " "^((4 - sizeof(text) % 4) % 4)
   bytes = take!(bin)

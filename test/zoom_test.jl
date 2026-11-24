@@ -259,8 +259,10 @@ end
   frames(3)
   m = only(n for n in values(e.nodes) if n isa K.STLViewer && n.path == joinpath(dir, "satellite.glb"))
   @test m.model isa K.Mesh && rect(m).top == K.TOPBAR_H
-  # The satellite has ten materials, and the file's first is for a part that names none
-  @test m.model.look !== nothing && length(m.model.look.materials) == 11
+  # The satellite has eleven materials, and the file's first is for a part that names none
+  @test m.model.look !== nothing && length(m.model.look.materials) == 12
+  # Its file has the sky round it, with the Earth below, and the Sun
+  @test m.model.look.sky !== nothing && m.model.look.sky.sunlight[1] > 0
   # Its wings span 70 metres
   @test 69 < m.model.size[1] < 71
   shot("8-satellite")
