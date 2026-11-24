@@ -405,6 +405,7 @@ end
 @use "./slides" => Slides
 @use "./desktop" => Desks
 @use "./git" => Git
+@use "./cad/view" => Designs
 @use "./notes" => Notes
 @use "./zip" => Zips
 @use "./macfolders" => Mac
@@ -1781,6 +1782,7 @@ leave_page!(e, path; record=true) = begin
   from = e.buf.path
   from == path || forget_ticked!(e)   # an item that was ticked in a list of what's found leaves that list
   from == path || delete!(e.nodes, (:html, from))   # the page of an HTML file ends, with its scripts
+  from == path || leave_design!(e, from)            # and a design with no changes gives up SolidCraft's program
   # A new file ends the list of files to go forward to, as a new address does in a web browser
   record && !isempty(from) && from != path && (push!(e.back, from); empty!(e.ahead))
   e
@@ -4998,7 +5000,7 @@ file_icon(path) = begin
   ext in PICTURES || ext in MAC_PICTURES ? "file-earmark-image" :
   ext in SOUNDS ? "file-earmark-music" :
   ext in VIDEOS ? "file-earmark-play" :
-  ext in MODELS ? "box" :
+  ext in MODELS || ext in DESIGNS ? "box" :
   ext == ".pdf" ? "file-earmark-pdf" :
   ext in ZIPS ? "file-earmark-zip" :
   ext in TABLES ? "file-earmark-spreadsheet" :
@@ -46444,6 +46446,45 @@ folder_pages_tick!(e) = begin
   list_files!(e)
   delete!(e.nodes, :page_object)   # the folder that the page shows is found again too
   show_opened!(e)   # a window that was opened on a folder shows it in the page, if its page said that its kind does
+  nothing
+end
+
+# --- a SolidCraft design -------------------------------------------------------------------
+#
+# A file whose name ends in .sc is a design of SolidCraft, a program for
+# drawing solid parts. It opens in an editor that's laid out as SolidCraft's
+# own window is: the design in 3D, a toolbar of commands, a browser of its
+# bodies and sketches, and the history of its steps. cad/view.jl is the
+# editor, and says how it's used.
+#
+# Ladder has no code of its own that works out a solid shape. SolidCraft.app
+# has a program inside it that does that with no window, and Ladder starts it
+# for each design that's open: see cad/engine.jl. On a Mac without SolidCraft,
+# the page shows the picture that SolidCraft saved in the file.
+#
+# A change is in that program only, until ⌘S writes the file. A design with
+# changes that aren't saved keeps its program while the window shows other
+# files, as a page keeps its changes. A design with no changes gives its
+# program up when the window leaves it.
+
+const DESIGNS = (".sc", ".solidcraft")
+const DesignFile = Union{FS.File{:sc},FS.File{:SC},FS.File{:solidcraft}}
+push!(BLOCK_ICONS, "arrow-counterclockwise", "arrow-clockwise", "save", "x-lg", "x", "check-lg", "chevron-down", "chevron-right", "eye", "eye-slash",
+      "house", "skip-start-fill", "caret-left-fill", "caret-right-fill", "skip-end-fill")
+
+"What shows the SolidCraft design at `path` in the window of `e`"
+design_part(e, path) = node!(() -> Designs.DesignView(path=path), e, (:design, path))
+
+page_view(e, o::DesignFile) = design_part(e, string(o.path))
+page_fills(e, ::DesignFile) = true
+page_covers(e, ::DesignFile) = true
+
+"End SolidCraft's program for the design at `path` when the window leaves it, unless the design has changes that aren't saved"
+leave_design!(e, path) = begin
+  v = get(e.nodes, (:design, path), nothing)
+  (v === nothing || Designs.edited(v)) && return
+  Designs.close!(v)
+  delete!(e.nodes, (:design, path))
   nothing
 end
 

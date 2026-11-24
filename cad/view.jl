@@ -1,0 +1,1962 @@
+# The editor of a SolidCraft design: what the page shows of a `.sc` file.
+#
+#     DesignView(path="bracket.sc")
+#
+# It's laid out as SolidCraft's own window is. The design fills the page, in
+# 3D. Over it are a toolbar with tabs, a browser of the design's bodies and
+# sketches at the left, the history of its steps along the bottom, and at the
+# right the form of the command that's being filled in.
+#
+# The view:
+#   - Drag to turn the design. Drag with ⇧ held, or with the middle button, to
+#     move it. Two fingers on the trackpad move it too. The wheel, a pinch, or
+#     two fingers with ⌘ held bring it nearer.
+#   - The mouse lights the face or the edge that it's over. A click selects
+#     it, and ⇧ with a click selects one more.
+#   - The three balls at the top right show the design's axes. A click on one
+#     looks along that axis.
+#
+# A command, like Extrude or Fillet, opens its form. A length is typed in the
+# form. A face, an edge or a region of a sketch is clicked in the design
+# while its line of the form is lit. OK runs the command, and SolidCraft's
+# hidden program works out the new shape: see engine.jl.
+#
+# Two clicks on a sketch, in the browser or the history, open it. The toolbar
+# then has the sketch's tools. A tool takes clicks in the sketch, and snaps to
+# the points and curves that are near. With no tool, a drag moves a point or a
+# curve as far as its constraints allow, and two clicks on a dimension change
+# its length.
+#
+# ⌘Z takes back the last change and ⇧⌘Z does it again. ⌘S writes the file.
+# Until then, every change is only in the hidden program.
+
+@use "github.com/jkroso/Prospects.jl" @def
+@use "github.com/jkroso/MiniFB.jl" Keys KeyPress KeyRelease MouseMove Typed onkey onmouse ontype onscroll flt
+@use "github.com/jkroso/Font.jl" ["units" px]
+@use "github.com/jkroso/UI.jl/Interface/Geometric"...
+@use "github.com/jkroso/UI.jl/Interface/Specific"...
+@use "github.com/jkroso/UI.jl/Interface/abstract" SemanticUI WrapMode describe focus theme handled window_of
+@use "github.com/jkroso/UI.jl/Interface/draw" draw cursor rect redraw_in! MouseScroll Pinch onpinch ishovered popup! close_popup! show_menu! show_tooltip! hide_tooltip! hittest
+@use "github.com/jkroso/UI.jl/Interface/image" register_image has_image
+@use "github.com/jkroso/UI.jl/Interface/Semantic/TextInput" TextInput
+@use Colors: Colorant, RGBA, RGB, @colorant_str, red, green, blue
+@use Skia
+@use "./json" => JSON
+@use "./design" => Designs
+@use "./scene" => Scenes
+@use "./gl" => GLs
+@use "./sketch" => Sketching
+@use "./ink" => Ink
+@use "./ink" Glyph
+@use "./commands" => Commands
+@use "../zip" => Zips
+
+const grow = GrowType.Grow
+const clear = RGBA(0.0, 0.0, 0.0, 0.0)
+const Spot = NTuple{2,Float64}
+
+num(x) = Float64(hasproperty(x, :value) ? x.value : x)
+
+# --- small parts ---------------------------------------------------------------------
+
+"Something to click. `look(hovered)` gives how it shows."
+@def mutable struct Press <: SemanticUI
+  look::Any = nothing
+  act::Any = nothing      # what a click does, a function of the click
+  twice::Any = nothing    # what two clicks do
+  other::Any = nothing    # what a click with the right button does
+  tip::String = ""
+  clicked::Float64 = 0.0
+  quiet::Bool = false     # it was clicked, so its tip stays away until the mouse leaves
+end
+
+describe(p::Press) = (ishovered(p) || (p.quiet = false); p.look(ishovered(p)))
+cursor(::Press) = :hand
+
+onkey(p::Press, e::KeyPress{Keys.mouse_left}) = begin
+  now = time()
+  twice = p.twice !== nothing && now - p.clicked < 0.4
+  p.clicked = twice ? 0.0 : now
+  p.quiet = true
+  hide_tooltip!(e.window)
+  twice ? p.twice(e) : p.act === nothing || p.act(e)
+  handled
+end
+onkey(p::Press, e::KeyPress{Keys.mouse_right}) = (p.other === nothing || (hide_tooltip!(e.window); p.other(e)); handled)
+onkey(::Press, ::KeyRelease{Keys.mouse_left}) = handled
+
+const TIP_INK = colorant"rgb(236,236,238)"
+tip_label(words) = Box(padding(10px, 7px), Text(words, size=12px, color=TIP_INK, wrap=WrapMode.none))
+
+onmouse(p::Press, e::MouseMove) = begin
+  (p.quiet || isempty(p.tip) || rect(p) === nothing) || show_tooltip!(e.window, tip_label(p.tip), p, placement=:bottom, gap=6px)
+  handled
+end
+
+"A panel over the design. A click on it, or the wheel over it, isn't the design's."
+@def mutable struct Card <: SemanticUI
+  look::Any = nothing
+end
+describe(c::Card) = c.look()
+onkey(::Card, ::KeyPress{Keys.mouse_left}) = handled
+onkey(::Card, ::KeyPress{Keys.mouse_right}) = handled
+onkey(::Card, ::KeyRelease{Keys.mouse_left}) = handled
+onmouse(::Card, ::MouseMove) = handled
+
+"The picture of the design, which fills the editor under its panels"
+@def mutable struct Scene <: SemanticUI
+  of::Any = nothing
+end
+describe(::Scene) = Box(width(grow=grow), height(grow=grow))
+
+"A command's form while it's filled in"
+mutable struct Form
+  spec::Commands.Spec
+  values::Dict{String,Any}           # each field's choice or flag, and for a field that's clicked, what each click sends
+  shows::Dict{String,Vector{Any}}    # for a field that's clicked: what each click lights in the design
+  active::String                     # the field that the next click in the design fills
+  step::Any                          # the number of the step that's being changed, or nothing for a new one
+  inputs::Vector{Any}                # for a step that's being changed: its named lengths and angles
+  problem::String
+  extra::JSON.Object                 # parameters that go with the form's own, like what's selected in a sketch
+end
+
+"What the page shows of a SolidCraft design"
+@def mutable struct DesignView <: SemanticUI
+  path::String = ""
+  model::Any = nothing
+  parts::Dict{Any,Any} = Dict{Any,Any}()
+  eye::Scenes.Eye = Scenes.Eye()
+  fitted::Bool = false
+  area::NTuple{4,Float64} = (0.0, 0.0, 1.0, 1.0)   # where the picture is in the window: left, top, width and height in px
+  tab::String = "Model"
+  hover::Any = nothing                # what the mouse is over in the design
+  picked::Vector{Any} = Any[]         # what's selected
+  form::Any = nothing                 # the Form that's being filled in
+  tool::Any = nothing                 # the sketch tool in use: a Commands.Tool, or :dimension, :trim, :extend, :project
+  clicks::Vector{Any} = Any[]         # the places that the tool was clicked at
+  drag::Any = nothing                 # what a held button is doing
+  mouse::Spot = (0.0, 0.0)            # where the mouse is in the picture
+  panel::Symbol = :none               # :params while the parameters show
+  stage::Any = nothing                # the OpenGL place the design is drawn at, or false when macOS gives none
+  image::Any = nothing                # the last picture, and what it's a picture of
+  data::IdDict{Any,Any} = IdDict{Any,Any}()        # each body's triangles and edges, as the graphics card takes them
+  regions::Dict{Int,Any} = Dict{Int,Any}()         # the closed regions of each sketch that shows
+  described::Dict{String,Any} = Dict{String,Any}() # what SolidCraft says of the parameters of a command
+  spots::Vector{Any} = Any[]          # where the last frame drew things to click in the picture: each a box and what it is
+  closed::Set{String} = Set{String}() # the folders of the browser that are closed
+  clicked::Float64 = 0.0              # when the picture was last clicked, to tell two clicks
+  marks::Bool = true                  # the marks of a sketch's constraints show
+  sizes::Bool = true                  # and its dimensions
+  along::Float64 = 0.0                # how far the history has moved left
+  seen::Int = -1                      # the model's version when it was last drawn
+end
+
+"The node of `v` with `key`, made by `make` when it's first asked for. It stays the same node from frame to frame."
+part!(make, v::DesignView, key) = get!(v.parts, key) do
+  n = make()
+  n.parent === nothing && setfield!(n, :parent, v)
+  n
+end
+
+"Something to click, kept under `key`. `look(hovered)` gives how it shows now."
+press!(look, v::DesignView, key; act=nothing, twice=nothing, other=nothing, tip="") = begin
+  p = part!(Press, v, key)
+  p.look, p.act, p.twice, p.other, p.tip = look, act, twice, other, tip
+  p
+end
+
+card!(look, v::DesignView, key) = (c = part!(Card, v, key); c.look = look; c)
+
+"A field to type in, kept under `key`. `text` is what it holds when it's first shown."
+input!(v::DesignView, key; text="", placeholder="") =
+  part!(() -> TextInput(text=String(text), cursor=length(text), anchor=length(text), placeholder=placeholder, font_size=12px), v, key)
+
+"Forget the fields to type in whose key starts with `kind`, so that they show their first text again"
+forget!(v::DesignView, kind) = filter!(p -> !(p.first isa Tuple && !isempty(p.first) && p.first[1] == kind), v.parts)
+
+words(s, size=12px; color=theme().text, weight="") = Text(String(s), size=size, subfamily=weight, color=color, wrap=WrapMode.none)
+
+"Is the page dark?"
+dark(t) = Ink.bright(t.surface) < 0.5
+
+# --- the design ----------------------------------------------------------------------
+
+"Open the design of `v`, if it isn't open"
+load!(v::DesignView) = begin
+  v.model === nothing || return v.model
+  v.model = Designs.open_design(v.path)
+end
+
+"End SolidCraft's program for `v`. What wasn't saved is lost."
+close!(v::DesignView) = (v.model === nothing || Designs.close!(v.model); v.model = nothing; nothing)
+
+"True when the design has changes that aren't in its file"
+edited(v::DesignView) = v.model !== nothing && Designs.edited(v.model)
+
+"Write the design to its file"
+save!(v::DesignView) = (v.model === nothing || Designs.save!(v.model); v)
+undo!(v::DesignView) = (v.model === nothing || (leave!(v); Designs.undo!(v.model)); v)
+redo!(v::DesignView) = (v.model === nothing || (leave!(v); Designs.redo!(v.model)); v)
+
+"Stop the tool and the form that are in use"
+leave!(v::DesignView) = begin
+  v.tool = nothing
+  empty!(v.clicks)
+  v.form = nothing
+  v.drag = nothing
+  v
+end
+
+"The sketch that's being edited, as SolidCraft describes it, or nothing"
+sketch(v::DesignView) = begin
+  m = v.model
+  m === nothing && return nothing
+  id = Designs.editing(m)
+  id === nothing ? nothing : get(m.sketches, id, nothing)
+end
+
+"The saved picture of the design, from inside its file, as something to draw: the key of an image, or nothing"
+saved_picture(v::DesignView) = begin
+  key = "design-picture:" * v.path
+  has_image(key) && return key
+  try
+    z = Zips.contents(v.path)
+    i = findfirst(en -> en.name == "cache/thumbnail.png", z.entries)
+    i === nothing ? nothing : register_image(key, Zips.bytes(v.path, z.entries[i]))
+  catch
+    nothing
+  end
+end
+
+describe(v::DesignView) = begin
+  m = load!(v)
+  t = theme(v)
+  if !isempty(m.problem)
+    picture = saved_picture(v)
+    return Column(width(grow=grow), height(grow=grow), padding(40px), child_gap=18px, background(t.surface),
+      (picture === nothing ? () : (Image(picture, width(max=420px)),))...,
+      Box(width(max=460px), Text(m.problem, size=13px, color=t.dim)))
+  end
+  Designs.tick!(m)
+  # While SolidCraft works, the editor looks for its answer in each frame
+  Designs.busy(m) && redraw_in!(v, 0.016)
+  # A design shows whole when its bodies first come
+  if !v.fitted && (!isempty(m.shapes) || (!isempty(m.doc) && isempty(Designs.bodies(m))))
+    v.eye = Scenes.fit(Scenes.Eye(), Scenes.box(m.shapes), (max(v.area[3], 100.0), max(v.area[4], 100.0)))
+    v.fitted = true
+  end
+  # A sketch that was just opened is seen flat
+  wait, now = get(v.parts, :look_at, nothing), Designs.editing(m)
+  if wait !== nothing && now !== nothing && (wait === :new || wait == now) && haskey(m.sketches, now)
+    delete!(v.parts, :look_at)
+    look_at!(v, m.sketches[now])
+  end
+  # A design that's first shown takes the keyboard, so that ⌘S and ⌘Z are its own
+  if !haskey(v.parts, :met) && window_of(v) !== nothing
+    v.parts[:met] = true
+    focus(v)
+  end
+  # A dimension that was just made asks for its length, once it has been drawn
+  new = get(v.parts, :new_size, nothing)
+  if new !== nothing
+    i = findfirst(s -> s.what.kind == :size && s.what.of == new, v.spots)
+    w = window_of(v)
+    i === nothing || w === nothing || (delete!(v.parts, :new_size); edit_size!(v, w, v.spots[i].what))
+  end
+  editing = Designs.editing(m) !== nothing
+  editing ? (v.tab = "Sketch") : v.tab == "Sketch" && (v.tab = "Model"; v.tool = nothing; empty!(v.clicks))
+  scene = part!(() -> Scene(of=v), v, :scene)
+  Stack(width(grow=grow), height(grow=grow), Alignment.Start,
+    scene,
+    Column(width(grow=grow), height(grow=grow), padding(8px), child_gap=8px, Alignment.Start,
+      ribbon(v),
+      said(v)...,
+      Row(width(grow=grow), height(grow=grow), Alignment.Start, child_gap=8px,
+        browser(v),
+        Box(width(grow=grow)),
+        side(v)...),
+      Row(width(grow=grow), justify=Alignment.Center, views(v)),
+      history(v)))
+end
+
+# --- the look of the panels ----------------------------------------------------------
+
+panel_look(t) = (background(Ink.faded(t.surface, 0.97)), radius(9px), border(1px, :solid, t.line), shadow(0, 3, 14, RGBA(0, 0, 0, dark(t) ? 0.35 : 0.12)))
+
+"A small button with only an icon"
+icon_button(v, key, icon, tip; act, on=false, size=16px, off=false) = begin
+  t = theme(v)
+  press!(v, key; act=off ? nothing : act, tip) do hovered
+    Box(width(28px), height(28px), radius(6px), background(on ? t.select : hovered && !off ? t.hover : clear),
+      Glyph(icon, size=size, color=off ? Ink.faded(t.dim, 0.5) : on ? t.accent : t.dim))
+  end
+end
+
+"A button with words"
+word_button(v, key, label; act, strong=false, tip="") = begin
+  t = theme(v)
+  press!(v, key; act, tip) do hovered
+    Box(height(28px), padding(14px, 0px), radius(6px),
+        background(strong ? (hovered ? Ink.mixed(t.accent, t.text, 0.12) : t.accent) : hovered ? t.select : t.hover),
+      words(label, 12px, color=strong ? t.on_accent : t.text, weight="Medium"))
+  end
+end
+
+# --- the toolbar ---------------------------------------------------------------------
+
+"What the toolbar calls the command `id`"
+command_label(v::DesignView, id) = begin
+  haskey(Commands.SHORT, id) && return Commands.SHORT[id]
+  c = get(v.model.commands, id, nothing)
+  c === nothing ? Commands.words(String(last(split(id, '.')))) : String(c["label"])
+end
+
+"The icon of the command `id`"
+command_icon(v::DesignView, id) = begin
+  haskey(Commands.BUTTON_ICONS, id) && return Commands.BUTTON_ICONS[id]
+  haskey(Commands.SPECS, id) && return Commands.SPECS[id].icon
+  c = get(v.model.commands, id, nothing)
+  icon = c === nothing ? nothing : get(c, "icon", nothing)
+  icon isa String && Ink.own(icon) !== nothing ? icon : "feature"
+end
+
+"What a command's tip says: its name, and the key that starts it"
+command_tip(v::DesignView, id) = begin
+  c = get(v.model.commands, id, nothing)
+  name = c === nothing ? command_label(v, id) : String(c["label"])
+  key = get(KEYS_OF, id, "")
+  isempty(key) ? name : "$name ($key)"
+end
+
+"Is the command `id` the one in use?"
+in_use(v::DesignView, id) =
+  (v.form !== nothing && v.form.spec.command == id) || (v.tool isa Commands.Tool && v.tool.command == id) ||
+  (v.tool isa Symbol && id == "sketch." * String(v.tool)) || (id == "parameters" && v.panel == :params)
+
+tool_button(v::DesignView, id) = begin
+  t = theme(v)
+  on = in_use(v, id)
+  green = id == "sketch.finish"
+  press!(v, (:tool, id); act=e -> start!(v, id, e.window), tip=command_tip(v, id)) do hovered
+    Column(width(min=56px), height(60px), padding(7px, 5px), radius(7px), child_gap=5px, background(on ? t.select : hovered ? t.hover : clear),
+      Glyph(command_icon(v, id), size=25px, color=green ? colorant"rgb(60,180,90)" : t.text),
+      Box(words(command_label(v, id), 11.5px, color=t.text)))
+  end
+end
+
+"The buttons of the constraints, which go on what's selected in the sketch"
+constraint_grid(v::DesignView) = begin
+  t = theme(v)
+  cell(id) = begin
+    c = get(v.model.commands, id, nothing)
+    icon = c === nothing ? "feature" : String(c["icon"])
+    press!(v, (:tool, id); act=e -> start!(v, id, e.window), tip=c === nothing ? id : String(c["label"])) do hovered
+      Box(width(26px), height(26px), radius(5px), background(hovered ? t.hover : clear), border(1px, :solid, Ink.faded(t.line, 0.8)),
+        Glyph(icon, size=17px, color=colorant"rgb(226,138,96)"))
+    end
+  end
+  ids = first.(Commands.CONSTRAINTS)
+  Column(height(60px), child_gap=4px, padding(4px, 2px),
+    Row(child_gap=4px, cell.(ids[1:6])...),
+    Row(child_gap=4px, cell.(ids[7:end])...))
+end
+
+group(v::DesignView, g::Commands.Group) = begin
+  t = theme(v)
+  known(id) = id in ("parameters", "constraints") || haskey(v.model.commands, id)
+  main = filter(known, g.main)
+  more = filter(known, g.more)
+  name = isempty(more) ? Box(height(18px), words(g.name, 11px, color=t.dim)) :
+    press!(v, (:group, v.tab, g.name); act=e -> more_menu(v, g, more, e.window)) do hovered
+      Row(height(18px), padding(6px, 0px), radius(4px), child_gap=4px, background(hovered ? t.hover : clear),
+        Box(words(g.name, 11px, color=t.dim)), Glyph("chevron-down", size=9px, color=t.dim))
+    end
+  Column(padding(4px, 0px), child_gap=2px,
+    Row(child_gap=2px, (id == "constraints" ? constraint_grid(v) : tool_button(v, id) for id in main)...),
+    name)
+end
+
+"The menu of the commands of a group that have no button"
+more_menu(v::DesignView, g::Commands.Group, more, window) = begin
+  under = get(v.parts, (:group, v.tab, g.name), nothing)
+  show_menu!(window, String[command_label(v, id) for id in more], 0px, 0px, 230px; under, gap=4px, item_height=28px,
+             onselect=i -> i > 0 && start!(v, more[i], window))
+end
+
+ribbon(v::DesignView) = begin
+  t = theme(v)
+  m = v.model
+  editing = Designs.editing(m) !== nothing
+  tabs = [name for (name, _) in Commands.TABS if editing || name != "Sketch"]
+  tab(name) = begin
+    on = v.tab == name
+    live = name == "Sketch"
+    press!(v, (:tab, name); act=e -> editing && !live ? nothing : (v.tab = name)) do hovered
+      Box(height(26px), padding(11px, 0px), radius(6px),
+          background(on ? (live ? colorant"rgb(42,150,80)" : t.select) : hovered && !editing ? t.hover : clear),
+        words(name, 12.5px, color=on && live ? colorant"white" : editing && !live ? Ink.faded(t.dim, 0.6) : t.text, weight=on ? "Semibold" : ""))
+    end
+  end
+  groups = last(Commands.TABS[findfirst(p -> p.first == v.tab, Commands.TABS)])
+  shown = Any[]
+  for (i, g) in enumerate(groups)
+    # A line between each two groups. Each is a box of its own: a box can be in a layout only once.
+    i > 1 && push!(shown, Box(width(1px), height(66px), background(Ink.faded(t.line, 0.8))))
+    push!(shown, group(v, g))
+  end
+  name = String(get(m.doc, "name", splitext(basename(v.path))[1]))
+  doc = get(m.doc, "undo", 0) isa Number ? m.doc : JSON.Object()
+  card!(v, :ribbon) do
+    Column(width(grow=grow), panel_look(t)..., padding(8px, 6px), child_gap=6px, Alignment.Start,
+      Row(width(grow=grow), child_gap=2px,
+        tab.(tabs)...,
+        Box(width(grow=grow)),
+        (Designs.busy(m) ? (Box(padding(8px, 0px), words("Working…", 11.5px, color=t.dim)),) : ())...,
+        Box(padding(8px, 0px), words(Designs.edited(m) ? name * " — edited" : name, 12px, color=t.dim)),
+        icon_button(v, :undo, "arrow-counterclockwise", "Undo (⌘Z)"; act=e -> undo!(v), off=get(doc, "undo", 0) == 0),
+        icon_button(v, :redo, "arrow-clockwise", "Redo (⇧⌘Z)"; act=e -> redo!(v), off=get(doc, "redo", 0) == 0),
+        icon_button(v, :save, "save", "Save (⌘S)"; act=e -> save!(v), off=!Designs.edited(m))),
+      Row(width(grow=grow), Alignment.Start, child_gap=8px, clip_x=true, shown...))
+  end
+end
+
+"What went wrong with the last change, in a bar under the toolbar"
+said(v::DesignView) = begin
+  m = v.model
+  words_ = Designs.stopped(m) ? "SolidCraft's program stopped. Close the design and open it again." : m.said
+  isempty(words_) && return ()
+  t = theme(v)
+  bar = card!(v, :said) do
+    Row(width(grow=grow), padding(12px, 8px), child_gap=10px, radius(8px), background(dark(t) ? colorant"rgb(92,44,44)" : colorant"rgb(253,232,230)"),
+        border(1px, :solid, dark(t) ? colorant"rgb(140,66,66)" : colorant"rgb(240,170,160)"), Alignment.Start,
+      Box(width(grow=grow), Alignment.Start, Text(words_, size=12px, color=t.text)),
+      icon_button(v, :said_close, "x-lg", "Close"; act=e -> (m.said = ""), size=12px))
+  end
+  (Row(width(grow=grow), justify=Alignment.Center, Box(width(max=720px), bar)),)
+end
+
+# --- the browser ---------------------------------------------------------------------
+
+const ROW_H = 26px
+
+"A line of the browser"
+browser_row(v::DesignView, key, depth, icon, name; on=false, dim=false, eye=nothing, act=nothing, twice=nothing, other=nothing, note="") = begin
+  t = theme(v)
+  press!(v, key; act, twice, other) do hovered
+    Row(width(grow=grow), height(ROW_H), padding(0px, 6px, 0px, 8px + 14px * depth), radius(5px), child_gap=7px,
+        background(on ? t.select : hovered ? t.hover : clear),
+      Glyph(icon, size=15px, color=dim ? Ink.faded(t.dim, 0.7) : t.dim),
+      Box(words(name, 12.5px, color=dim ? t.dim : t.text)),
+      (isempty(note) ? () : (Box(words(note, 11.5px, color=colorant"rgb(60,180,90)")),))...,
+      Box(width(grow=grow)),
+      (eye === nothing ? () : (eye,))...)
+  end
+end
+
+"The eye at the end of a line of the browser, which shows and hides what the line names"
+eye(v::DesignView, key, visible, items) = begin
+  t = theme(v)
+  press!(v, key; act=e -> Designs.change!(v.model, "browser.visibility", JSON.Object("items" => items, "visible" => !visible)),
+         tip=visible ? "Hide" : "Show") do hovered
+    Box(width(22px), height(22px), radius(5px), background(hovered ? t.select : clear),
+      Glyph(visible ? "eye" : "eye-slash", size=14px, color=visible ? t.text : Ink.faded(t.dim, 0.7)))
+  end
+end
+
+folder(v::DesignView, name, count) = begin
+  open = !(name in v.closed)
+  browser_row(v, (:folder, name), 0, open ? "chevron-down" : "chevron-right", "$name ($count)";
+              act=e -> (open ? push!(v.closed, name) : delete!(v.closed, name)))
+end
+
+browser(v::DesignView) = begin
+  t = theme(v)
+  m = v.model
+  active = Designs.editing(m)
+  rows = Any[]
+  bodies = Designs.bodies(m)
+  if !isempty(bodies)
+    push!(rows, folder(v, "Bodies", length(bodies)))
+    "Bodies" in v.closed || for b in bodies
+      name = String(b["name"])
+      shown = get(b, "visible", true) === true
+      push!(rows, browser_row(v, (:body, name), 1, "body", name; dim=!shown, on=any(p -> p.kind == :body && p.of == name, v.picked),
+        eye=eye(v, (:eye, :body, name), shown, Any[name]),
+        act=e -> pick!(v, (kind=:body, of=name, n=0, at=(0.0, 0.0, 0.0)), Keys.shft in e.window.keys),
+        twice=e -> rename!(v, e.window, (:body, name), name, new -> Designs.change!(m, "body.rename", JSON.Object("body" => name, "name" => new)))))
+    end
+  end
+  sketches = Designs.sketch_list(m)
+  if !isempty(sketches)
+    push!(rows, folder(v, "Sketches", length(sketches)))
+    "Sketches" in v.closed || for s in sketches
+      id, name = Int(s["id"]), String(s["name"])
+      shown = get(s, "visible", false) === true
+      push!(rows, browser_row(v, (:sketch, id), 1, "sketch", name; dim=!shown && id != active, on=id == active, note=id == active ? "editing" : "",
+        eye=eye(v, (:eye, :sketch, id), shown, Any[id]),
+        act=e -> nothing, twice=e -> edit_step!(v, id, e.window)))
+    end
+  end
+  isempty(rows) && push!(rows, Box(padding(10px, 8px), Alignment.Start, Text("This design is empty. Start with New Sketch, or with a box from Create.", size=12px, color=t.dim)))
+  room = max(120.0, v.area[4] - 300)
+  tall = min(room, length(rows) * num(ROW_H) + 8)
+  card!(v, :browser) do
+    Column(width(244px), panel_look(t)..., Alignment.Start,
+      Row(width(grow=grow), height(36px), padding(12px, 0px), border(1px, :solid, Ink.faded(t.line, 0.7))[:bottom],
+        Box(words("Browser", 13px, weight="Semibold")), Box(width(grow=grow))),
+      Scroll(width(grow=grow), height(px(tall)), key=:browser,
+        Column(width(grow=grow), padding(4px), Alignment.Start, rows...)))
+  end
+end
+
+"Ask for a new name of something, in a field over its line of the browser or its step of the history"
+rename!(v::DesignView, window, key, name, done) = ask!(v, window, get(v.parts, key, nothing), name, done)
+
+"""
+Show a field to type in under the node `under`, or at the place `under` of the
+window. Return gives `done` what was typed, and Escape or a click elsewhere
+gives it nothing.
+"""
+ask!(v::DesignView, window, under, text, done; width=200px) = begin
+  forget!(v, :ask)
+  field = input!(v, (:ask, time()); text)
+  field.anchor, field.cursor = 0, length(text)
+  t = theme(v)
+  asker = Asker(field=field, done=done, of=v)
+  popup!(window, asker, anchor=under === nothing ? window.mouse : under, gap=4px, width=width, key=:ask, theme=t)
+  focus(field)
+  nothing
+end
+
+"The field that `ask!` shows"
+@def mutable struct Asker <: SemanticUI
+  field::Any = nothing
+  done::Any = nothing
+  of::Any = nothing
+end
+describe(a::Asker) = begin
+  t = theme(a)
+  Box(width(grow=grow), padding(6px), radius(8px), background(t.surface), border(1px, :solid, t.accent), shadow(0, 4, 14, RGBA(0, 0, 0, 0.3)), a.field)
+end
+onkey(a::Asker, e::KeyPress{Keys.enter}) = begin
+  close_popup!(e.window, :ask)
+  text = strip(a.field.text)
+  isempty(text) || a.done(String(text))
+  focus(a.of)
+  handled
+end
+onkey(::Asker, ::KeyPress{Keys.mouse_left}) = handled
+
+# --- the history ---------------------------------------------------------------------
+
+const STEP_W = 30.0
+
+"The menu of a step of the history"
+step_menu(v::DesignView, f, window) = begin
+  m = v.model
+  id, name = Int(f["id"]), String(f["name"])
+  off = get(f, "suppressed", false) === true
+  items = ["Edit", "Rename", off ? "Unsuppress" : "Suppress", "Roll the history to here", "Delete"]
+  show_menu!(window, items, window.mouse[1], window.mouse[2], 200px; item_height=28px, onselect=i -> begin
+    i == 1 ? edit_step!(v, id, window) :
+    i == 2 ? rename!(v, window, (:step, id), name, new -> Designs.change!(m, "timeline.rename", JSON.Object("feature" => id, "name" => new))) :
+    i == 3 ? Designs.change!(m, "timeline.suppress", JSON.Object("feature" => id)) :
+    i == 4 ? Designs.change!(m, "timeline.roll_to", JSON.Object("feature" => id)) :
+    i == 5 ? Designs.change!(m, "timeline.delete", JSON.Object("feature" => id)) : nothing
+  end)
+end
+
+history(v::DesignView) = begin
+  t = theme(v)
+  m = v.model
+  steps = Designs.timeline(m)
+  marker = Designs.marker(m)
+  roll(to) = Designs.change!(m, "timeline.roll_to", JSON.Object("position" => to isa Number ? clamp(to, 0, length(steps)) : to))
+  item(i, f) = begin
+    id, name = Int(f["id"]), String(f["name"])
+    back = i > marker || get(f, "rolled_back", false) === true
+    off = get(f, "suppressed", false) === true
+    bad = get(f, "error", nothing) isa String
+    warned = get(f, "warning", nothing) isa String
+    on = any(p -> p.kind == :step && p.n == id, v.picked)
+    tip = bad ? name * ": " * String(f["error"]) : off ? name * " (suppressed)" : name
+    press!(v, (:step, id); tip, act=e -> pick!(v, (kind=:step, of=name, n=id, at=(0.0, 0.0, 0.0)), false),
+           twice=e -> edit_step!(v, id, e.window), other=e -> step_menu(v, f, e.window)) do hovered
+      Box(width(26px), height(26px), radius(5px),
+          background(on ? t.select : hovered ? t.hover : Ink.faded(t.hover, 0.6)),
+          border(1px, :solid, bad ? colorant"rgb(220,80,70)" : warned ? colorant"rgb(220,160,50)" : on ? t.accent : Ink.faded(t.line, 0.9)),
+        Glyph(Ink.step_icon(String(f["type"])), size=17px, color=Ink.faded(t.text, back || off ? 0.35 : 1.0),
+              accent=Ink.faded(t.accent, back || off ? 0.3 : 1.0)))
+    end
+  end
+  mark = Box(width(3px), height(30px), radius(2px), background(t.accent))
+  shown = Any[]
+  for (i, f) in enumerate(steps)
+    i == marker + 1 && push!(shown, mark)
+    push!(shown, item(i, f))
+  end
+  marker >= length(steps) && push!(shown, mark)
+  # A history that's wider than the window moves left with the wheel
+  room = max(100.0, v.area[3] - 290)
+  v.along = clamp(v.along, 0.0, max(0.0, length(steps) * STEP_W + 20 - room))
+  card!(v, :history) do
+    Row(width(grow=grow), height(44px), panel_look(t)..., padding(12px, 0px), child_gap=10px,
+      Box(words("History", 13px, weight="Semibold")),
+      Row(child_gap=0px,
+        icon_button(v, :first, "skip-start-fill", "Roll back to the start"; act=e -> roll(0), size=13px),
+        icon_button(v, :back, "caret-left-fill", "Roll back one step"; act=e -> roll(marker - 1), size=12px),
+        icon_button(v, :on, "caret-right-fill", "Roll on one step"; act=e -> roll(marker + 1), size=12px),
+        icon_button(v, :last, "skip-end-fill", "Roll on to the end"; act=e -> roll("end"), size=13px)),
+      Row(width(grow=grow), height(44px), Alignment.Center, justify=Alignment.Start, clip=true,
+        Row(child_gap=4px, offset_x=px(-v.along), shown...)))
+  end
+end
+
+"The buttons under the design that choose how it's seen"
+views(v::DesignView) = begin
+  t = theme(v)
+  look(turn, tilt) = e -> (v.eye = Scenes.fit(Scenes.Eye(v.eye.target, turn, tilt, v.eye.distance, v.eye.wide), Scenes.box(showing(v)), (v.area[3], v.area[4])))
+  card!(v, :views) do
+    Row(height(38px), panel_look(t)..., padding(6px, 0px), child_gap=2px,
+      icon_button(v, :fit, "fit", "Show all of the design"; act=e -> fit!(v)),
+      icon_button(v, :home, "house", "The first view"; act=look(-35.0, 28.0)),
+      Box(width(1px), height(20px), background(t.line)),
+      word_view(v, "Front", look(-90.0, 0.0)), word_view(v, "Top", look(-90.0, 90.0)), word_view(v, "Right", look(0.0, 0.0)),
+      Box(width(1px), height(20px), background(t.line)),
+      icon_button(v, :wide, "perspective", v.eye.wide > 0 ? "Draw far things as big as near ones" : "Draw far things smaller"; on=v.eye.wide > 0,
+                  act=e -> (v.eye = flat_or_deep(v.eye, (v.area[3], v.area[4])))))
+  end
+end
+
+word_view(v, name, act) = begin
+  t = theme(v)
+  press!(v, (:view, name); act, tip="Look from the " * lowercase(name)) do hovered
+    Box(height(28px), padding(8px, 0px), radius(6px), background(hovered ? t.hover : clear), words(name, 11.5px, color=t.dim))
+  end
+end
+
+"The same view with far things as big as near ones, or the other way round"
+flat_or_deep(e::Scenes.Eye, size) = begin
+  # What's at the target stays as big as it was
+  e.wide > 0 ? Scenes.Eye(e.target, e.turn, e.tilt, 2e.distance * tand(e.wide / 2), 0.0) :
+               Scenes.Eye(e.target, e.turn, e.tilt, e.distance / (2tand(16.0)), 32.0)
+end
+
+"The bodies that show"
+showing(v::DesignView) = [s for s in v.model.shapes if Designs.shown(v.model, s.name)]
+
+"Show all of the design, as it's turned now"
+fit!(v::DesignView) = begin
+  s = sketch(v)
+  if s !== nothing && isempty(showing(v))
+    b = Sketching.bounds(s)
+    f = Sketching.Frame(s["plane"])
+    b === nothing || (v.eye = Scenes.fit(v.eye, (min.(Sketching.world(f, b[1]), Sketching.world(f, b[2])), max.(Sketching.world(f, b[1]), Sketching.world(f, b[2]))), (v.area[3], v.area[4])))
+  else
+    v.eye = Scenes.fit(v.eye, Scenes.box(showing(v)), (v.area[3], v.area[4]))
+  end
+  v
+end
+
+# --- commands ------------------------------------------------------------------------
+
+"The letter that starts a command, while the design has the keyboard: in a sketch, and out of one"
+const SKETCH_KEYS = Dict('l' => "sketch.line", 'r' => "sketch.rectangle.two_point", 'c' => "sketch.circle.center", 'd' => "sketch.dimension",
+                         't' => "sketch.trim", 'x' => "sketch.construction", 'p' => "sketch.project", 'o' => "sketch.offset")
+const MODEL_KEYS = Dict('e' => "solid.extrude", 'f' => "solid.fillet", 'h' => "solid.hole", 'q' => "solid.press_pull", 'm' => "solid.move")
+const KEYS_OF = Dict{String,String}(id => uppercase(string(k)) for (k, id) in merge(SKETCH_KEYS, MODEL_KEYS))
+
+same(a, b) = a.kind == b.kind && a.of == b.of && a.n == b.n
+
+"Select `what`. With `more`, it's selected with what's selected already, or no longer selected if it was."
+pick!(v::DesignView, what, more=false) = begin
+  i = findfirst(p -> same(p, what), v.picked)
+  if more
+    i === nothing ? push!(v.picked, what) : deleteat!(v.picked, i)
+  else
+    only = length(v.picked) == 1 && i !== nothing
+    empty!(v.picked)
+    only || push!(v.picked, what)
+  end
+  v
+end
+
+"The ids of the points and curves of the sketch that are selected, in the order they were clicked"
+chosen(v::DesignView, kinds=(:point, :curve)) = String[p.of for p in v.picked if p.kind in kinds]
+
+"Start the command `id`: a button of the toolbar or a key does"
+start!(v::DesignView, id, window=nothing) = begin
+  m = v.model
+  id == "parameters" && return (v.panel = v.panel == :params ? :none : :params; v)
+  if id in ("sketch.finish", "sketch.cancel")
+    leave!(v)
+    empty!(v.picked)
+    # The design is seen again as it was before the sketch was opened
+    haskey(v.parts, :eye_before) && (v.eye = pop!(v.parts, :eye_before))
+    return Designs.change!(m, id)
+  end
+  if haskey(Commands.TOOLS, id)
+    leave!(v)
+    forget!(v, :toolfield)
+    v.tool = Commands.TOOLS[id]
+    return v
+  end
+  if id == "sketch.dimension"
+    leave!(v)
+    # What's selected gets its dimension at once. With nothing selected, the next clicks choose what to measure.
+    isempty(chosen(v)) ? (v.tool = :dimension) : dimension!(v, nothing)
+    return v
+  end
+  id in ("sketch.trim", "sketch.extend", "sketch.project") && return (leave!(v); empty!(v.picked); v.tool = Symbol(last(split(id, '.'))); v)
+  if id == "sketch.construction"
+    curves = chosen(v, (:curve,))
+    isempty(curves) ? (m.said = "Select the lines to change first.") : Designs.change!(m, id, JSON.Object("curves" => curves))
+    return v
+  end
+  startswith(id, "sketch.constraint.") && return constrain!(v, id)
+  id == "sketch.auto_constrain" && return Designs.change!(m, id)
+  open_form!(v, id)
+end
+
+"Put the constraint of the command `id` on what's selected in the sketch"
+constrain!(v::DesignView, id) = begin
+  m = v.model
+  ids = chosen(v)
+  kind = last(split(id, '.'))
+  need = something(get(Dict(Commands.CONSTRAINTS), id, nothing), 2)
+  if length(ids) < need
+    m.said = need == 1 ? "Select a line or a point of the sketch first, then click the constraint." :
+             "Select $(need == 2 ? "two" : "three") things of the sketch first, then click the constraint. Hold ⇧ to select one more."
+    return v
+  end
+  lines = chosen(v, (:curve,))
+  params = kind == "horizontal_vertical" ? (length(lines) >= 1 ? nothing : JSON.Object("points" => ids[1:2])) :
+           kind == "fix" ? JSON.Object("entities" => ids) :
+           kind == "symmetry" ? JSON.Object("a" => ids[1], "b" => ids[2], "line" => ids[3]) :
+           kind == "equal" && length(ids) > 2 ? JSON.Object("curves" => ids) : JSON.Object("a" => ids[1], "b" => ids[2])
+  if params === nothing
+    # Each selected line is made level or upright, whichever it's nearer to
+    Designs.batch!(m, [id => JSON.Object("line" => l) for l in lines])
+  else
+    Designs.change!(m, id, params)
+  end
+  empty!(v.picked)
+  v
+end
+
+"""
+Give what's selected in the sketch a dimension. `at` is where its words go in
+the sketch, or nothing for where SolidCraft puts them. A field to type its
+length in opens when it's made.
+"""
+dimension!(v::DesignView, at) = begin
+  m = v.model
+  ids = chosen(v)
+  isempty(ids) && return v
+  params = JSON.Object("entities" => ids[1:min(2, end)])
+  at === nothing || (params["text_at"] = Any[at[1], at[2]])
+  Designs.change!(m, "sketch.dimension", params; then=(answer, problem) -> begin
+    made = answer isa AbstractDict ? get(get(answer, "created", JSON.Object()), "dimensions", Any[]) : Any[]
+    isempty(made) || (v.parts[:new_size] = String(made[1]))
+  end)
+  empty!(v.picked)
+  v
+end
+
+"Open the form of the command `id`"
+open_form!(v::DesignView, id) = begin
+  m = v.model
+  c = get(m.commands, id, nothing)
+  c === nothing && !haskey(Commands.SPECS, id) && return v
+  # A command with no form of its own gets one from what SolidCraft says of its parameters
+  if !haskey(Commands.SPECS, id) && !haskey(v.described, id)
+    v.described[id] = nothing
+    Designs.Engines.call!(m.engine, "describe_command", JSON.Object("id" => id)) do answer, problem
+      v.described[id] = answer isa AbstractDict ? answer : false
+      v.form !== nothing && v.form.spec.command == id && isempty(v.form.shows) && open_form!(v, id)
+    end
+  end
+  spec = c === nothing ? Commands.SPECS[id] : Commands.spec(c, get(v.described, id, nothing))
+  keep = v.picked
+  leave!(v)
+  forget!(v, :field)
+  f = Form(spec, Dict{String,Any}(), Dict{String,Vector{Any}}(), "", nothing, Any[], "", JSON.Object())
+  for field in spec.fields
+    Commands.picks(field) || (f.values[field.key] = field.default; continue)
+    f.values[field.key] = field.kind == :plane ? field.default : Any[]
+    f.shows[field.key] = Any[]
+  end
+  # What's selected fills the fields that it suits
+  for p in keep, field in spec.fields
+    suits = (field.kind == :edges && p.kind == :edge) || (field.kind in (:faces, :face) && p.kind == :face) || (field.kind in (:bodies, :body) && p.kind == :body)
+    suits || continue
+    (Commands.many(field) || isempty(f.values[field.key])) && take!(f, field, p)
+    break
+  end
+  # In a sketch, a command like Fillet goes on what's selected there
+  if startswith(id, "sketch.")
+    points, curves = chosen(v, (:point,)), chosen(v, (:curve,))
+    id == "sketch.offset" ? (f.extra["curves"] = curves) :
+    !isempty(points) ? (f.extra[length(points) == 1 ? "point" : "points"] = length(points) == 1 ? points[1] : points) :
+    length(curves) >= 2 && (f.extra["a"] = curves[1]; f.extra["b"] = curves[2])
+  end
+  i = findfirst(field -> Commands.picks(field) && field.kind != :plane && isempty(f.values[field.key]), spec.fields)
+  i === nothing && (i = findfirst(Commands.picks, spec.fields))
+  f.active = i === nothing ? "" : spec.fields[i].key
+  empty!(v.picked)
+  v.form = f
+  v
+end
+
+"What a click on `p` sends for the field `field`"
+sent(field::Commands.Field, p) =
+  field.kind in (:bodies, :body) ? p.of :
+  field.kind == :profiles ? JSON.Object("point" => Any[p.at[1], p.at[2]]) :
+  field.kind == :plane ? JSON.Object("face" => Any[p.at...]) : Any[p.at...]
+
+"Put the click on `p` in the field `field` of the form `f`. A second click on the same thing takes it out again."
+take!(f::Form, field::Commands.Field, p) = begin
+  shows = f.shows[field.key]
+  i = findfirst(q -> same(q, p), shows)
+  if field.kind == :plane
+    f.values[field.key] = sent(field, p)
+    empty!(shows)
+    push!(shows, p)
+  elseif i !== nothing && Commands.many(field)
+    deleteat!(shows, i)
+    deleteat!(f.values[field.key], i)
+  else
+    Commands.many(field) || (empty!(shows); empty!(f.values[field.key]))
+    push!(shows, p)
+    push!(f.values[field.key], sent(field, p))
+  end
+  f.problem = ""
+  f
+end
+
+"What the form `f` holds now: its choices, its clicks, and what's typed in its fields"
+held(v::DesignView, f::Form) = begin
+  values = copy(f.values)
+  for field in f.spec.fields
+    (Commands.picks(field) || field.kind in (:flag, :choice)) && continue
+    box = get(v.parts, (:field, f.spec.command, field.key), nothing)
+    values[field.key] = box === nothing ? field.default : box.text
+  end
+  values
+end
+
+"Run the command of the form that's open"
+apply!(v::DesignView) = begin
+  f, m = v.form, v.model
+  f === nothing && return v
+  done(answer, problem) = problem === nothing ? (v.form === f && (v.form = nothing); empty!(v.picked)) : (f.problem = problem)
+  if f.step !== nothing
+    # A step that's changed gets each of its lengths and angles as it's typed now
+    changes = JSON.Object()
+    for input in f.inputs
+      box = get(v.parts, (:field, "step", String(input["param"])), nothing)
+      box === nothing || strip(box.text) == input["expression"] || (changes[String(input["param"])] = Commands.value(box.text))
+    end
+    isempty(changes) ? (v.form = nothing) : Designs.change!(m, "parameters.change", JSON.Object("changes" => changes); quiet=true, then=done)
+    return v
+  end
+  params = Commands.params(f.spec, held(v, f))
+  params isa String && return (f.problem = params; v)
+  merge!(params, f.extra)
+  # SolidCraft finds each region of a sketch from a place inside it, and needs to know which sketch
+  regions = get(f.shows, "profiles", Any[])
+  isempty(regions) || (params["sketch"] = regions[1].n)
+  # A new sketch is opened to draw in, and seen flat
+  f.spec.command == "sketch.create" && (v.parts[:eye_before] = v.eye; v.parts[:look_at] = :new)
+  Designs.change!(m, f.spec.command, params; quiet=true, then=(answer, problem) -> begin
+    problem === nothing || f.spec.command != "sketch.create" || (delete!(v.parts, :look_at); delete!(v.parts, :eye_before))
+    done(answer, problem)
+  end)
+  v
+end
+
+"Open the step `id` of the history to change it: a sketch to draw in, and any other step as a form of its lengths"
+edit_step!(v::DesignView, id, window=nothing) = begin
+  m = v.model
+  i = findfirst(f -> Int(f["id"]) == id, Designs.timeline(m))
+  i === nothing && return v
+  step = Designs.timeline(m)[i]
+  leave!(v)
+  empty!(v.picked)
+  if step["type"] == "Sketch"
+    Designs.editing(m) === nothing ? (v.parts[:eye_before] = v.eye) : Designs.change!(m, "sketch.finish")
+    v.parts[:look_at] = id
+    return Designs.change!(m, "sketch.edit", JSON.Object("sketch" => id))
+  end
+  Designs.ask!(m, "timeline.inspect", JSON.Object("feature" => id)) do answer, problem
+    answer isa AbstractDict || return (m.said = something(problem, "SolidCraft said nothing of that step."))
+    inputs = Any[i for i in get(answer, "inputs", Any[]) if i isa AbstractDict && get(i, "param", nothing) isa String]
+    forget!(v, :field)
+    spec = Commands.Spec("", String(step["name"]), Ink.step_icon(String(step["type"])), Commands.Field[], "")
+    v.form = Form(spec, Dict{String,Any}(), Dict{String,Vector{Any}}(), "", id, inputs, "", JSON.Object())
+  end
+  v
+end
+
+"Turn the eye to look straight at the plane of the sketch `s`, with all of the sketch in view"
+look_at!(v::DesignView, s) = begin
+  f = Sketching.Frame(s["plane"])
+  n = Sketching.normal(f)
+  tilt = asind(clamp(n[3], -1.0, 1.0))
+  turn = abs(n[3]) > 0.999 ? atand(-f.x[1] * sign(n[3]), f.x[2] * sign(n[3])) : atand(n[2], n[1])
+  size = (v.area[3], v.area[4])
+  b = Sketching.bounds(s)
+  low, high = b === nothing ? ((-30.0, -30.0), (30.0, 30.0)) : b
+  corners = [Sketching.world(f, p) for p in ((low[1], low[2]), (high[1], low[2]), (low[1], high[2]), (high[1], high[2]))]
+  box = (reduce((a, b) -> min.(a, b), corners), reduce((a, b) -> max.(a, b), corners))
+  shapes = showing(v)
+  isempty(shapes) || (box = (min.(box[1], Scenes.box(shapes)[1]), max.(box[2], Scenes.box(shapes)[2])))
+  v.eye = Scenes.fit(Scenes.Eye(v.eye.target, turn, tilt, v.eye.distance, v.eye.wide), box, size)
+  v
+end
+
+# --- the panel at the right ----------------------------------------------------------
+
+const SIDE_W = 286px
+const LABEL_W = 112px
+
+side(v::DesignView) = v.panel == :params ? (params_card(v),) : v.form !== nothing ? (form_card(v),) : sketch(v) !== nothing ? (sketch_card(v),) : ()
+
+side_card(v::DesignView, key, icon, title, close, rows...; foot=()) = begin
+  t = theme(v)
+  card!(v, key) do
+    Column(width(SIDE_W), panel_look(t)..., Alignment.Start,
+      Row(width(grow=grow), height(38px), padding(0px, 6px, 0px, 12px), child_gap=8px, border(1px, :solid, Ink.faded(t.line, 0.7))[:bottom],
+        Glyph(icon, size=17px), Box(words(title, 13px, weight="Semibold")), Box(width(grow=grow)),
+        (close === nothing ? () : (icon_button(v, (key, :close), "x-lg", "Close"; act=close, size=12px),))...),
+      # A form that's taller than the room under the toolbar scrolls
+      Scroll(width(grow=grow), height(max=px(max(160.0, v.area[4] - 250))), key=(key, :rows),
+        Column(width(grow=grow), padding(12px, 10px), child_gap=8px, Alignment.Start, rows...)),
+      # What's under the rows stays in sight while they scroll: the buttons of a form
+      (isempty(foot) ? () : (Column(width(grow=grow), padding(12px, 0px, 10px, 12px), child_gap=8px, Alignment.Start, foot...),))...)
+  end
+end
+
+labelled(v, label, thing) = begin
+  t = theme(v)
+  Row(width(grow=grow), child_gap=8px, Row(width(LABEL_W), justify=Alignment.Start, words(label, 12px, color=t.dim)), Box(width(grow=grow), Alignment.Start, thing))
+end
+
+"The buttons of a choice, side by side, or a menu when there are many"
+choice(v::DesignView, key, options, now, set) = begin
+  t = theme(v)
+  # A few short names go side by side. More of them, or longer ones, go in a menu.
+  if length(options) <= 3 && sum(o -> length(o.second), options) <= 18
+    Row(width(grow=grow), height(26px), radius(6px), border(1px, :solid, t.line), clip=true,
+      (press!(v, (key, i); act=e -> set(value)) do hovered
+        Box(width(grow=grow), height(26px), background(value == now ? t.select : hovered ? t.hover : clear), Box(words(label, 11.5px, color=value == now ? t.text : t.dim)))
+      end for (i, (value, label)) in enumerate(options))...)
+  else
+    i = findfirst(o -> o.first == now, options)
+    press!(v, (key, :menu); act=e -> show_menu!(e.window, String[o.second for o in options], 0px, 0px, 160px; under=v.parts[(key, :menu)], gap=3px,
+                                                item_height=28px, onselect=n -> n > 0 && set(options[n].first))) do hovered
+      Row(width(grow=grow), height(26px), padding(8px, 0px), radius(6px), border(1px, :solid, t.line), background(hovered ? t.hover : clear),
+        Box(words(i === nothing ? "" : options[i].second, 12px)), Box(width(grow=grow)), Glyph("chevron-down", size=10px, color=t.dim))
+    end
+  end
+end
+
+tick(v::DesignView, key, label, on, set) = begin
+  t = theme(v)
+  press!(v, key; act=e -> set(!on)) do hovered
+    Row(width(grow=grow), height(24px), child_gap=8px, justify=Alignment.Start,
+      Box(width(16px), height(16px), radius(4px), background(on ? t.accent : clear), border(1.5px, :solid, on ? t.accent : t.dim),
+        (on ? (Glyph("check-lg", size=11px, color=t.on_accent),) : ())...),
+      Box(words(label, 12px)))
+  end
+end
+
+"What a field that's clicked says of its clicks"
+count_words(field::Commands.Field, n) = begin
+  one = field.kind in (:faces, :face) ? "face" : field.kind == :edges ? "edge" : field.kind in (:bodies, :body) ? "body" :
+        field.kind == :profiles ? "region" : field.kind == :plane ? "face" : "place"
+  n == 0 ? "Click $(one in ("edge",) ? "an" : "a") $one in the design" : n == 1 ? "1 $one" : "$n $(one == "body" ? "bodies" : one * "s")"
+end
+
+field_row(v::DesignView, f::Form, field::Commands.Field) = begin
+  t = theme(v)
+  key = (:field, f.spec.command, field.key)
+  if field.kind == :flag
+    return tick(v, key, field.label, f.values[field.key] === true, on -> (f.values[field.key] = on))
+  elseif field.kind == :choice
+    return labelled(v, field.label, choice(v, key, field.options, f.values[field.key], value -> (f.values[field.key] = value)))
+  elseif Commands.picks(field)
+    active = f.active == field.key
+    n = length(f.shows[field.key])
+    clicked = press!(v, key; act=e -> (f.active = field.key)) do hovered
+      Row(width(grow=grow), height(26px), padding(0px, 4px, 0px, 8px), radius(6px), border(1px, :solid, active ? t.accent : t.line),
+          background(active ? Ink.faded(t.accent, 0.14) : hovered ? t.hover : clear),
+        Box(words(count_words(field, n), 11.5px, color=n == 0 ? t.dim : t.text)), Box(width(grow=grow)),
+        (n == 0 ? () : (icon_button(v, (key, :clear), "x", "Clear"; size=12px, act=e -> begin
+          empty!(f.shows[field.key])
+          f.values[field.key] = field.kind == :plane ? field.default : Any[]
+          f.active = field.key
+        end),))...)
+    end
+    field.kind == :plane || return labelled(v, field.label, clicked)
+    # A plane is one of the three through the origin, or a flat face that's clicked
+    now = f.values[field.key]
+    return Column(width(grow=grow), child_gap=6px,
+      labelled(v, field.label, choice(v, (key, :plane), Commands.PLANES, now isa String ? now : nothing, value -> (f.values[field.key] = value; empty!(f.shows[field.key])))),
+      labelled(v, "or a flat face", clicked))
+  end
+  box = input!(v, key; text=field.default isa AbstractString ? field.default : "", placeholder=field.optional ? "optional" : "")
+  field.kind == :json ? Column(width(grow=grow), child_gap=4px, Alignment.Start, Box(words(field.label, 12px, color=t.dim)), Box(width(grow=grow), box)) :
+                        labelled(v, field.label, box)
+end
+
+form_card(v::DesignView) = begin
+  t = theme(v)
+  f = v.form
+  rows = Any[]
+  if f.step === nothing
+    append!(rows, [field_row(v, f, field) for field in f.spec.fields])
+    regions = any(field -> field.kind == :profiles, f.spec.fields)
+    regions && isempty(v.model.sketches) &&
+      push!(rows, Box(width(grow=grow), Alignment.Start, Text("No sketch shows. Click the eye beside a sketch in the browser, then click a region of it.", size=11.5px, color=t.dim)))
+    isempty(f.spec.help) || isempty(f.spec.fields) || haskey(Commands.SPECS, f.spec.command) ||
+      push!(rows, Box(width(grow=grow), height(max=110px), clip=true, Alignment.Start, Text(first(f.spec.help, 420), size=10.5px, color=t.dim)))
+  else
+    isempty(f.inputs) && push!(rows, Box(width(grow=grow), Alignment.Start, Text("This step has no lengths or angles to change.", size=12px, color=t.dim)))
+    for input in f.inputs
+      param = String(input["param"])
+      push!(rows, labelled(v, String(get(input, "label", param)), input!(v, (:field, "step", param); text=String(input["expression"]))))
+    end
+  end
+  foot = Any[]
+  isempty(f.problem) || push!(foot, Box(width(grow=grow), Alignment.Start, Text(f.problem, size=11.5px, color=colorant"rgb(226,96,84)")))
+  push!(foot, Row(width(grow=grow), justify=Alignment.End, child_gap=8px,
+    word_button(v, (:form, :cancel), "Cancel"; act=e -> (v.form = nothing)),
+    word_button(v, (:form, :ok), "OK"; act=e -> apply!(v), strong=true, tip="Return")))
+  side_card(v, :form, f.spec.icon, f.spec.title, e -> (v.form = nothing), rows...; foot)
+end
+
+"What the panel says of how far the sketch is held by its constraints"
+held_words(s) = begin
+  get(s, "status", "") in ("solved", "") || return ("The constraints can't all hold", colorant"rgb(226,96,84)")
+  dof = Int(get(s, "dof", 0))
+  dof == 0 ? ("Fully constrained", colorant"rgb(60,160,230)") : ("$dof $(dof == 1 ? "way" : "ways") left to move", colorant"rgb(226,160,60)")
+end
+
+sketch_card(v::DesignView) = begin
+  t = theme(v)
+  s = sketch(v)
+  says, colour = held_words(s)
+  rows = Any[
+    Column(width(grow=grow), child_gap=5px, Alignment.Start, Box(words(says, 12px)), Box(width(grow=grow), height(4px), radius(2px), background(colour)))]
+  tool = v.tool
+  if tool isa Commands.Tool
+    push!(rows, Box(words(command_label(v, tool.command) * ": " * tool_hint(v, tool), 11.5px, color=t.dim)))
+    for field in tool.fields
+      push!(rows, labelled(v, field.label, input!(v, (:toolfield, tool.command, field.key); text=String(field.default))))
+    end
+  elseif tool isa Symbol
+    hint = tool == :dimension ? "click what to measure, then where its length goes" : tool == :trim ? "click the piece of a line to cut away" :
+           tool == :extend ? "click the end of a line to make it longer" : "click an edge or a face of a body"
+    push!(rows, Box(width(grow=grow), Alignment.Start, Text(uppercasefirst(String(tool)) * ": " * hint, size=11.5px, color=t.dim)))
+  end
+  push!(rows, tick(v, (:show, :marks), "Constraints", v.marks, on -> (v.marks = on)))
+  push!(rows, tick(v, (:show, :sizes), "Dimensions", v.sizes, on -> (v.sizes = on)))
+  push!(rows, Row(width(grow=grow), child_gap=8px, padding(4px, 0px, 0px, 0px),
+    word_button(v, (:sketch, :look), "Look At"; act=e -> look_at!(v, s)),
+    Box(width(grow=grow)),
+    word_button(v, (:sketch, :finish), "Finish Sketch"; act=e -> start!(v, "sketch.finish"), strong=true)))
+  side_card(v, :sketch_card, "sketch", String(get(s, "name", "Sketch")), nothing, rows...)
+end
+
+"What a tool asks for next"
+tool_hint(v::DesignView, tool::Commands.Tool) = begin
+  n = length(v.clicks)
+  tool.clicks == ["points"] && return n == 0 ? "click its first point" : "click the next point. Return ends it"
+  n >= length(tool.clicks) ? "" : "click " * (n == 0 ? "its first point" : n == length(tool.clicks) - 1 ? "its last point" : "its next point")
+end
+
+"The parameters of the design: each with its name, what it's set to, and what that comes to"
+params_card(v::DesignView) = begin
+  t = theme(v)
+  m = v.model
+  list = sort(Designs.params(m), by=p -> get(p, "model", false) === true)
+  rows = Any[]
+  for p in list
+    name = String(p["name"])
+    box = input!(v, (:param, name); text=String(p["expression"]))
+    # A field that isn't being typed in follows the design
+    w = part_window(v)
+    (w === nothing || w.focus !== box) && get(v.parts, (:param_at, name), "") != p["expression"] &&
+      (box.text = String(p["expression"]); box.cursor = box.anchor = length(box.text); v.parts[(:param_at, name)] = p["expression"])
+    wrong = get(p, "error", nothing) isa String
+    value = p["value"] isa Number ? Sketching.fixed(p["value"]) * " " * String(get(p, "unit", "")) : ""
+    push!(rows, Row(width(grow=grow), height(28px), child_gap=6px,
+      Row(width(74px), justify=Alignment.Start, clip_x=true, words(name, 12px, color=get(p, "model", false) === true ? t.dim : t.text)),
+      Box(width(grow=grow), box),
+      Row(width(64px), justify=Alignment.End, clip_x=true, words(wrong ? "error" : value, 11px, color=wrong ? colorant"rgb(226,96,84)" : t.dim))))
+  end
+  tall = min(max(120.0, v.area[4] - 360), length(rows) * 30.0 + 4)
+  side_card(v, :params, "params", "Parameters", e -> (v.panel = :none),
+    Scroll(width(grow=grow), height(px(tall)), key=:params, Column(width(grow=grow), child_gap=2px, Alignment.Start, rows...)),
+    Row(width(grow=grow), child_gap=6px, padding(4px, 0px, 0px, 0px),
+      Box(width(86px), input!(v, (:newparam, :name); placeholder="name")),
+      Box(width(grow=grow), input!(v, (:newparam, :value); placeholder="10 mm")),
+      word_button(v, (:newparam, :add), "Add"; act=e -> add_param!(v))))
+end
+
+"The window that `v` is in, or nothing"
+part_window(v::DesignView) = window_of(v)
+
+"Add the parameter that's typed under the list"
+add_param!(v::DesignView) = begin
+  name, value = v.parts[(:newparam, :name)], v.parts[(:newparam, :value)]
+  (isempty(strip(name.text)) || isempty(strip(value.text))) && return v
+  Designs.change!(v.model, "parameters.add", JSON.Object("name" => String(strip(name.text)), "expression" => String(strip(value.text))))
+  name.text = value.text = ""
+  name.cursor = name.anchor = value.cursor = value.anchor = 0
+  v
+end
+
+"Set a parameter to what's typed in its field, when Return is pressed there"
+commit!(v::DesignView, box) = begin
+  for (key, node) in v.parts
+    node === box || continue
+    key isa Tuple || continue
+    key[1] == :param && return Designs.change!(v.model, "parameters.change", JSON.Object("name" => key[2], "expression" => Commands.value(box.text)))
+    key[1] == :newparam && return add_param!(v)
+    key[1] == :field && return apply!(v)
+  end
+  nothing
+end
+
+# --- the picture ---------------------------------------------------------------------
+
+"The last picture of the design, kept so that a frame in which nothing changed draws it again"
+mutable struct Shot
+  image::Ptr{Skia.sk_image_t}
+  of::Any
+  Shot() = finalizer(s -> (s.image == C_NULL || Skia.sk_image_unref(s.image); s.image = C_NULL), new(C_NULL, nothing))
+end
+
+"How many of the screen's pixels a px is wide on the canvas `ctx`"
+density(ctx) = begin
+  m = Ref(Skia.sk_matrix_t(1f0, 0f0, 0f0, 0f0, 1f0, 0f0, 0f0, 0f0, 1f0))
+  Skia.sk_canvas_get_total_matrix(ctx, m)
+  sqrt(abs(m[].scaleX * m[].scaleY - m[].skewX * m[].skewY))
+end
+
+"The triangles and the edges of a body, as the graphics card takes them"
+arrays(v::DesignView, s::Scenes.Shape) = get!(v.data, s) do
+  solid = Vector{Float32}(undef, 21 * length(s.triangles))
+  for (i, t) in enumerate(s.triangles), k in 1:3
+    p, n = s.points[t[k]], s.normals[3i-3+k]
+    at = 21(i - 1) + 7(k - 1)
+    solid[at+1], solid[at+2], solid[at+3] = p
+    solid[at+4], solid[at+5], solid[at+6] = n
+    solid[at+7] = s.face[i]
+  end
+  lines = Float32[]
+  for e in s.edges, i in 1:length(e.points)-1
+    append!(lines, e.points[i])
+    append!(lines, e.points[i+1])
+  end
+  (solid=solid, lines=lines)
+end
+
+rgba(c::Colorant, a=1.0) = (Float32(red(c)), Float32(green(c)), Float32(blue(c)), Float32(a))
+
+"The colours of the picture, for a dark page or a light one"
+palette(t) = dark(t) ?
+  (back=(0.165f0, 0.18f0, 0.22f0), body=(0.62f0, 0.64f0, 0.67f0, 1f0), edge=(0.06f0, 0.07f0, 0.09f0, 1f0), grid=(0.62f0, 0.68f0, 0.8f0)) :
+  (back=(0.93f0, 0.94f0, 0.955f0), body=(0.80f0, 0.82f0, 0.85f0, 1f0), edge=(0.15f0, 0.17f0, 0.21f0, 1f0), grid=(0.3f0, 0.36f0, 0.5f0))
+
+"The plane that the grid is on: the sketch's while one is edited, and the ground if not"
+ground(v::DesignView) = (s = sketch(v); s === nothing ? Sketching.Frame((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)) : Sketching.Frame(s["plane"]))
+
+"The lines of the grid: the thin ones, and each tenth one, which is stronger. Its squares are at least 7 px wide."
+grid(v::DesignView, frame, size) = begin
+  mm = 1 / Scenes.scale(v.eye, size)
+  minor = 10.0^ceil(log10(max(7mm, 1e-6)))
+  reach = max(v.eye.distance * 1.8, 20minor)
+  n = clamp(ceil(Int, reach / minor), 10, 160)
+  at = Sketching.flat(frame, v.eye.target)
+  centre = (round(at[1] / 10minor) * 10minor, round(at[2] / 10minor) * 10minor)
+  key = (minor, centre, n, frame)
+  kept = get(v.parts, :grid, nothing)
+  kept !== nothing && kept.key == key && return kept
+  thin, strong = Float32[], Float32[]
+  far = n * minor
+  for i in -n:n
+    to = i % 10 == 0 ? strong : thin
+    for (a, b) in (((centre[1] + i * minor, centre[2] - far), (centre[1] + i * minor, centre[2] + far)),
+                   ((centre[1] - far, centre[2] + i * minor), (centre[1] + far, centre[2] + i * minor)))
+      append!(to, Sketching.world(frame, a))
+      append!(to, Sketching.world(frame, b))
+    end
+  end
+  v.parts[:grid] = (key=key, thin=thin, strong=strong, centre=Sketching.world(frame, centre), far=far)
+end
+
+"Is `p` one of `list`?"
+among(list, p) = any(q -> same(q, p), list)
+
+"What the form that's open has in the fields that were clicked"
+form_picks(v::DesignView) = v.form === nothing ? Any[] : reduce(vcat, values(v.form.shows), init=Any[])
+
+"Everything that the graphics card draws: the grid, the bodies and their edges, and what's lit"
+things(v::DesignView, size, dense, t) = begin
+  m = v.model
+  c = palette(t)
+  out = Any[]
+  g = grid(v, ground(v), size)
+  fade = (Float32.(g.centre)..., Float32(0.35g.far), Float32(0.95g.far))
+  push!(out, GLs.Lines((:thin, g.key), g.thin, (c.grid..., 0.10f0), dense; fade))
+  push!(out, GLs.Lines((:strong, g.key), g.strong, (c.grid..., 0.22f0), dense; fade))
+  lit = rgba(t.accent, 0.42)
+  chosen_ = rgba(t.accent, 0.78)
+  marked = vcat(v.picked, form_picks(v))
+  for s in m.shapes
+    Designs.shown(m, s.name) || continue
+    a = arrays(v, s)
+    faces = Pair{Int,GLs.Colour}[]
+    whole = among(marked, (kind=:body, of=s.name, n=0))
+    for p in marked
+      p.kind == :face && p.of == s.name && push!(faces, p.n => chosen_)
+    end
+    h = v.hover
+    h !== nothing && h.kind == :face && h.of == s.name && !any(f -> f.first == h.n, faces) && push!(faces, h.n => lit)
+    over = h !== nothing && h.kind == :body && h.of == s.name
+    body = whole ? rgba(Ink.mixed(RGB(c.body[1:3]...), t.accent, 0.45)) : over ? rgba(Ink.mixed(RGB(c.body[1:3]...), t.accent, 0.2)) : c.body
+    push!(out, GLs.Solid((:solid, objectid(s)), a.solid, body; lit=faces))
+    push!(out, GLs.Lines((:edges, objectid(s)), a.lines, c.edge, 1.5dense))
+    edge(p, wide, hidden) = begin
+      (p !== nothing && p.kind == :edge && p.of == s.name && 1 <= p.n <= length(s.edges)) || return
+      data = Float32[]
+      e = s.edges[p.n]
+      for i in 1:length(e.points)-1
+        append!(data, e.points[i])
+        append!(data, e.points[i+1])
+      end
+      push!(out, GLs.Lines((:edge, objectid(s), p.n), data, rgba(t.accent), wide * dense; hidden))
+    end
+    foreach(p -> edge(p, 4.0, false), marked)
+    h === nothing || among(marked, h) || edge(h, 3.5, true)
+  end
+  out
+end
+
+"How far from the eye's target the things of the picture go"
+far(v::DesignView) = begin
+  low, high = Scenes.box(v.model.shapes)
+  g = get(v.parts, :grid, nothing)
+  max(Scenes.len(high .- v.eye.target), Scenes.len(low .- v.eye.target), g === nothing ? 0.0 : 1.5g.far, 1.0) * 1.05
+end
+
+"Where the point `p` of the design shows in the window, or nothing when it's behind the eye"
+shown_at(v::DesignView, p) = begin
+  x, y, depth = Scenes.at(v.eye, (v.area[3], v.area[4]), p)
+  depth > 1e-6 ? (v.area[1] + x, v.area[2] + y) : nothing
+end
+
+const SKETCH_BLUE = colorant"rgb(96,160,236)"
+const BUILT_ORANGE = colorant"rgb(232,150,72)"
+const SIZE_PINK = colorant"rgb(226,160,222)"
+const MARK_RED = colorant"rgb(226,138,96)"
+
+draw(ctx, size, ui::ConcreteRect, scene::Scene) = begin
+  v = scene.of
+  m = v.model
+  (m === nothing || !isempty(m.problem)) && return
+  t = theme(scene)
+  v.area = (num(ui.left), num(ui.top), max(num(ui.width), 1.0), max(num(ui.height), 1.0))
+  empty!(v.spots)
+  area = (v.area[3], v.area[4])
+  # The picture has as many pixels as the screen shows it with, and no more than 9 million
+  dense = clamp(density(ctx), 1.0, 3.0)
+  dense = min(dense, sqrt(9e6 / (area[1] * area[2])))
+  w, h = max(round(Int, area[1] * dense), 1), max(round(Int, area[2] * dense), 1)
+  v.stage === nothing && (v.stage = something(GLs.Stage(), false))
+  shot = v.image === nothing ? (v.image = Shot()) : v.image
+  c = palette(t)
+  if v.stage !== false
+    of = (m.version, v.eye, w, h, v.hover, hash(v.picked), v.form === nothing ? UInt(0) : hash(v.form.shows), dark(t), Designs.editing(m))
+    if shot.of != of
+      list = things(v, area, dense, t)
+      pixels = GLs.picture!(v.stage, w, h, v.eye, list, c.back; reach=far(v))
+      shot.image == C_NULL || Skia.sk_image_unref(shot.image)
+      info = Ref(Skia.sk_image_info_t(C_NULL, Skia.SK_COLOR_TYPE_RGBA_8888, Skia.SK_ALPHA_TYPE_OPAQUE, w, h))
+      GC.@preserve info pixels begin
+        data = Skia.sk_data_new_with_copy(pointer(pixels), UInt64(4w * h))
+        shot.image = Skia.sk_image_new_raster_data(info, data, Csize_t(4w))
+        Skia.sk_data_unref(data)
+      end
+      shot.of = of
+    end
+  end
+  if shot.image == C_NULL
+    Ink.box(ctx, v.area..., RGB(c.back...))
+  else
+    from = Ref(Skia.sk_rect_t(0f0, 0f0, Float32(w), Float32(h)))
+    to = Ref(Skia.sk_rect_t(Float32(v.area[1]), Float32(v.area[2]), Float32(v.area[1] + v.area[3]), Float32(v.area[2] + v.area[4])))
+    sampling = Ref(Skia.sk_sampling_options_t(0, false, Skia.sk_cubic_resampler_t(0f0, 0f0), Skia.SK_FILTER_MODE_LINEAR, Skia.SK_MIPMAP_MODE_NONE))
+    Ink.painted(p -> Skia.sk_canvas_draw_image_rect(ctx, shot.image, from, to, sampling, p, Skia.SRC_RECT_CONSTRAINT_FAST), colorant"white")
+  end
+  active = Designs.editing(m)
+  # The regions that a form has, and the one under the mouse
+  for p in form_picks(v)
+    p.kind == :region && haskey(m.sketches, p.n) && fill_region(ctx, v, m.sketches[p.n], p.of, Ink.faded(t.accent, 0.45))
+  end
+  h = v.hover
+  h !== nothing && h.kind == :region && haskey(m.sketches, h.n) && !among(form_picks(v), h) && fill_region(ctx, v, m.sketches[h.n], h.of, Ink.faded(t.accent, 0.22))
+  for (id, s) in m.sketches
+    id == active || draw_sketch(ctx, v, s, false, t)
+  end
+  active !== nothing && haskey(m.sketches, active) && draw_sketch(ctx, v, m.sketches[active], true, t)
+  draw_tool(ctx, v, t)
+  draw_axes(ctx, v, t)
+  nothing
+end
+
+"The closed regions of the sketch `s`, worked out when the sketch changes"
+regions(v::DesignView, s) = begin
+  id = Int(s["id"])
+  kept = get(v.regions, id, nothing)
+  kept !== nothing && kept[1] === s && return kept[2]
+  r = Sketching.Regions(s)
+  v.regions[id] = (s, r)
+  r
+end
+
+"Fill the region `n` of the sketch `s` with `colour`"
+fill_region(ctx, v::DesignView, s, n, colour) = begin
+  f = Sketching.Frame(s["plane"])
+  shape = Skia.sk_path_new()
+  for (x1, x2, y1, y2) in Sketching.strips(regions(v, s), n)
+    corners = (shown_at(v, Sketching.world(f, (x1, y1))), shown_at(v, Sketching.world(f, (x2, y1))),
+               shown_at(v, Sketching.world(f, (x2, y2))), shown_at(v, Sketching.world(f, (x1, y2))))
+    any(isnothing, corners) && continue
+    Skia.sk_path_move_to(shape, Float32(corners[1][1]), Float32(corners[1][2]))
+    for k in 2:4
+      Skia.sk_path_line_to(shape, Float32(corners[k][1]), Float32(corners[k][2]))
+    end
+    Skia.sk_path_close(shape)
+  end
+  # Strips that touch would show a faint line between them if their edges were smoothed
+  p = Ink.paint(colour)
+  Skia.sk_paint_set_antialias(p, false)
+  Skia.sk_canvas_draw_path(ctx, shape, p)
+  Skia.sk_paint_delete(p)
+  Skia.sk_path_delete(shape)
+end
+
+const MARK_ICONS = Dict("Horizontal" => "c_hv", "Vertical" => "c_hv", "Tangent" => "c_tangent", "Equal" => "c_equal", "Parallel" => "c_parallel",
+  "Perpendicular" => "c_perpendicular", "MidPoint" => "c_midpoint", "Concentric" => "c_concentric", "Collinear" => "c_collinear",
+  "Symmetry" => "c_symmetry", "Fix" => "c_fix", "Fixed" => "c_fix", "PointOnCurve" => "c_coincident", "Coincident" => "c_coincident")
+
+"Draw the sketch `s` over the picture. The one that's edited shows its points, its dimensions and the marks of its constraints."
+draw_sketch(ctx, v::DesignView, s, active, t) = begin
+  f = Sketching.Frame(s["plane"])
+  id = Int(s["id"])
+  to(p) = shown_at(v, Sketching.world(f, p))
+  ink = dark(t) ? colorant"rgb(244,244,246)" : colorant"rgb(24,26,32)"
+  lit(kind, of) = (h = v.hover; h !== nothing && h.kind == kind && h.of == of && h.n == id)
+  chosen_(kind, of) = any(p -> p.kind == kind && p.of == of && p.n == id, v.picked)
+  for c in get(s, "curves", Any[])
+    line = Sketching.outline(c)
+    places = [to(p) for p in line]
+    (length(places) < 2 || any(isnothing, places)) && continue
+    built = get(c, "construction", false) === true
+    name = String(c["id"])
+    colour = chosen_(:curve, name) ? t.accent : !active ? Ink.faded(SKETCH_BLUE, 0.85) : built ? BUILT_ORANGE :
+             get(c, "fully_constrained", true) === true ? ink : SKETCH_BLUE
+    Ink.through(ctx, places, colour, active ? (lit(:curve, name) || chosen_(:curve, name) ? 2.6 : 1.5) : 1.2; dash=built ? (5.0, 4.0) : nothing)
+  end
+  active || return
+  for q in get(s, "points", Any[])
+    at = to(Sketching.spot(q["at"]))
+    at === nothing && continue
+    name = String(q["id"])
+    on = chosen_(:point, name) || lit(:point, name)
+    r = on ? 4.0 : 2.6
+    Ink.box(ctx, at[1] - r, at[2] - r, 2r, 2r, on ? t.accent : ink)
+    Ink.box(ctx, at[1] - r, at[2] - r, 2r, 2r, dark(t) ? colorant"rgb(20,22,28)" : colorant"white"; width=1.0)
+  end
+  kinds = Dict{String,Any}(String(k["id"]) => k for k in get(s, "constraints", Any[]))
+  around = Sketching.bounds(s)
+  middle = around === nothing ? (0.0, 0.0) : ((around[1][1] + around[2][1]) / 2, (around[1][2] + around[2][2]) / 2)
+  stacked = Dict{NTuple{2,Int},Int}()
+  for g in v.model.glyphs
+    g isa AbstractDict && haskey(kinds, get(g, "id", "")) && get(g, "at", nothing) isa Vector || continue
+    name = String(g["id"])
+    spot = Sketching.spot(g["at"])
+    at = to(spot)
+    at === nothing && continue
+    if get(g, "dimension", false) === true
+      v.sizes || continue
+      d = Sketching.dimension(s, kinds[name], spot; placed=haskey(kinds[name], "text"), gap=30 / Scenes.scale(v.eye, (v.area[3], v.area[4])), middle)
+      d === nothing && continue
+      spot = d.at
+      at = to(spot)
+      at === nothing && continue
+      colour = chosen_(:size, name) || lit(:size, name) ? t.accent : get(g, "failing", false) === true ? colorant"rgb(226,96,84)" : SIZE_PINK
+      for (a, b) in d.lines
+        pa, pb = to(a), to(b)
+        pa === nothing || pb === nothing || Ink.line(ctx, pa, pb, Ink.faded(colour, 0.7), 1.0)
+      end
+      for (a, b) in d.arrows
+        pa, pb = to(a), to(b)
+        (pa === nothing || pb === nothing) && continue
+        Ink.line(ctx, pa, pb, colour, 1.1)
+        arrow(ctx, pa, pb, colour)
+        arrow(ctx, pb, pa, colour)
+      end
+      wide = Ink.wide(d.words, 11.5; family=t.mono)
+      Ink.box(ctx, at[1] - wide / 2 - 4, at[2] - 9, wide + 8, 18, Ink.faded(RGB(palette(t).back...), 0.86); radius=3.0)
+      Ink.words(ctx, d.words, at[1], at[2], 11.5, colour; at=:middle, family=t.mono)
+      push!(v.spots, (box=(at[1] - wide / 2 - 4 - v.area[1], at[2] - 9 - v.area[2], wide + 8, 18.0), what=(kind=:size, of=name, n=id, at=Sketching.world(f, spot))))
+    else
+      v.marks || continue
+      kind = String(get(g, "name", ""))
+      # A point that's on another point is marked by the point itself
+      kind == "Coincident" && continue
+      cell = (round(Int, at[1] / 6), round(Int, at[2] / 6))
+      k = get(stacked, cell, 0)
+      stacked[cell] = k + 1
+      x, y = at[1] + 10 + 19k, at[2] - 20
+      on = chosen_(:mark, name) || lit(:mark, name)
+      colour = on ? t.accent : get(g, "failing", false) === true ? colorant"rgb(226,96,84)" : MARK_RED
+      Ink.box(ctx, x, y, 16, 16, Ink.faded(RGB(palette(t).back...), 0.8); radius=3.5)
+      Ink.box(ctx, x, y, 16, 16, colour; radius=3.5, width=1.0)
+      Ink.icon(ctx, get(MARK_ICONS, kind, "point"), x + 2, y + 2, 12, colour, colour)
+      push!(v.spots, (box=(x - v.area[1], y - v.area[2], 16.0, 16.0), what=(kind=:mark, of=name, n=id, at=Sketching.world(f, spot))))
+    end
+  end
+end
+
+"An arrow's head at `tip`, on a line that comes from `from`"
+arrow(ctx, tip, from, colour) = begin
+  dx, dy = from[1] - tip[1], from[2] - tip[2]
+  l = hypot(dx, dy)
+  l < 14 && return
+  ux, uy = dx / l, dy / l
+  Ink.through(ctx, [tip, (tip[1] + 9ux - 3.2uy, tip[2] + 9uy + 3.2ux), (tip[1] + 9ux + 3.2uy, tip[2] + 9uy - 3.2ux)], colour; fill=true)
+end
+
+"The circle through three places of a sketch: its middle and its radius, or nothing when they're in a line"
+circle_through(a, b, c) = begin
+  d = 2(a[1] * (b[2] - c[2]) + b[1] * (c[2] - a[2]) + c[1] * (a[2] - b[2]))
+  abs(d) < 1e-9 && return nothing
+  x = ((a[1]^2 + a[2]^2) * (b[2] - c[2]) + (b[1]^2 + b[2]^2) * (c[2] - a[2]) + (c[1]^2 + c[2]^2) * (a[2] - b[2])) / d
+  y = ((a[1]^2 + a[2]^2) * (c[1] - b[1]) + (b[1]^2 + b[2]^2) * (a[1] - c[1]) + (c[1]^2 + c[2]^2) * (b[1] - a[1])) / d
+  ((x, y), hypot(a[1] - x, a[2] - y))
+end
+
+"Draw what the tool in use would make if the mouse were clicked where it is"
+draw_tool(ctx, v::DesignView, t) = begin
+  s = sketch(v)
+  tool = v.tool
+  (s === nothing || !(tool isa Commands.Tool)) && return
+  f = Sketching.Frame(s["plane"])
+  to(p) = shown_at(v, Sketching.world(f, p))
+  aimed = aim(v, s, v.mouse)
+  spot = aimed.spot
+  here = to(spot)
+  here === nothing && return
+  colour = t.accent
+  path(points) = (places = [to(p) for p in points]; any(isnothing, places) || Ink.through(ctx, places, colour, 1.6))
+  given = Spot[c.spot for c in v.clicks]
+  if !isempty(given)
+    first_ = given[1]
+    if tool.shape == :box
+      path([first_, (spot[1], first_[2]), spot, (first_[1], spot[2]), first_])
+    elseif tool.shape == :centred
+      dx, dy = spot[1] - first_[1], spot[2] - first_[2]
+      path([(first_[1] - dx, first_[2] - dy), (first_[1] + dx, first_[2] - dy), (first_[1] + dx, first_[2] + dy), (first_[1] - dx, first_[2] + dy), (first_[1] - dx, first_[2] - dy)])
+    elseif tool.shape == :circle
+      path(Sketching.sweep(first_, hypot(spot[1] - first_[1], spot[2] - first_[2]), 0.0, 2π))
+    elseif tool.shape == :arc && length(given) == 2
+      found = circle_through(given[1], given[2], spot)
+      if found === nothing
+        path([given[1], given[2]])
+      else
+        o, r = found
+        a, b, mid = Sketching.angle(o, given[1]), Sketching.angle(o, given[2]), Sketching.angle(o, spot)
+        # The arc from the first click to the second that goes through the mouse
+        path(mod(mid - a, 2π) <= mod(b - a, 2π) ? Sketching.sweep(o, r, a, b) : Sketching.sweep(o, r, b, a))
+      end
+    else
+      path(vcat(given, [spot]))
+    end
+  end
+  # A square shows the place that a click would take: bigger on a point that it snaps to
+  r = aimed.ref === nothing ? 3.0 : 5.0
+  Ink.box(ctx, here[1] - r, here[2] - r, 2r, 2r, colour; width=1.4)
+  aimed.level && !isempty(given) && Ink.words(ctx, abs(spot[1] - given[end][1]) < 1e-9 ? "upright" : "level", here[1] + 12, here[2] - 12, 10.5, colour)
+end
+
+"The three balls that show which way the design's axes point. A click on one looks along it."
+draw_axes(ctx, v::DesignView, t) = begin
+  right, up, back = Scenes.axes(v.eye)
+  # They go under the toolbar, left of the panel at the right
+  bar = get(v.parts, :ribbon, nothing)
+  r = bar === nothing ? nothing : rect(bar)
+  top = r === nothing ? v.area[2] + 150 : num(r.top) + num(r.height) + 64
+  beside = isempty(side(v)) ? 0.0 : num(SIDE_W) + 8
+  cx, cy = v.area[1] + v.area[3] - 70 - beside, top
+  reach = 34.0
+  Ink.circle(ctx, (cx, cy), reach + 18, Ink.faded(t.surface, 0.35))
+  ends = Any[]
+  for (i, (axis, colour, name)) in enumerate((((1.0, 0.0, 0.0), colorant"rgb(226,72,72)", "X"), ((0.0, 1.0, 0.0), colorant"rgb(70,176,84)", "Y"), ((0.0, 0.0, 1.0), colorant"rgb(72,116,232)", "Z")))
+    for way in (1, -1)
+      a = axis .* way
+      push!(ends, (x=cx + Scenes.dot(a, right) * reach, y=cy - Scenes.dot(a, up) * reach, near=Scenes.dot(a, back), colour=colour, name=name, i=i, way=way))
+    end
+  end
+  for e in sort(ends, by=e -> e.near)
+    if e.way == 1
+      Ink.line(ctx, (cx, cy), (e.x, e.y), e.colour, 2.0)
+      Ink.circle(ctx, (e.x, e.y), 9.5, e.colour)
+      Ink.words(ctx, e.name, e.x, e.y, 11, colorant"white"; at=:middle, style="Bold")
+    else
+      Ink.circle(ctx, (e.x, e.y), 6.5, Ink.faded(t.surface, 0.9))
+      Ink.circle(ctx, (e.x, e.y), 6.5, e.colour, 1.6)
+    end
+    push!(v.spots, (box=(e.x - 10 - v.area[1], e.y - 10 - v.area[2], 20.0, 20.0), what=(kind=:look, of=e.i, n=e.way, at=(0.0, 0.0, 0.0))))
+  end
+end
+
+# --- the mouse -----------------------------------------------------------------------
+
+"What a held button is doing"
+mutable struct Drag
+  kind::Symbol          # :press until the mouse moves, then :turn, :move or :pull
+  at::Spot              # where the mouse was on the last move
+  what::Any             # what was pressed
+  more::Bool            # ⇧ was held
+  pivot::Scenes.Vec3    # the point of the design that a turn goes round
+  from::Spot            # for a pull: the place of the sketch that's held
+  busy::Bool            # SolidCraft is still working on the last pull
+end
+
+"Where the place `pos` of the window is in the picture"
+local_spot(v::DesignView, pos) = (num(pos[1]) - v.area[1], num(pos[2]) - v.area[2])
+
+"The panel that the mouse is over, as its key, or nothing when it's over the design"
+panel_at(v::DesignView, window, pos=window.mouse) = begin
+  x, y = num(pos[1]), num(pos[2])
+  for (key, node) in v.parts
+    node isa Card || continue
+    r = rect(node)
+    r === nothing && continue
+    num(r.left) <= x <= num(r.left + r.width) && num(r.top) <= y <= num(r.top + r.height) && return key
+  end
+  nothing
+end
+
+"The point of the design under the place `at` of the picture: on a body, on the sketch that's edited, or as far away as the eye's target"
+point_at(v::DesignView, at) = begin
+  size = (v.area[3], v.area[4])
+  line = Scenes.ray(v.eye, size, at)
+  hit = Scenes.hit(v.model.shapes, line; shown=s -> Designs.shown(v.model, s.name))
+  hit === nothing || return hit.point
+  s = sketch(v)
+  if s !== nothing
+    f = Sketching.Frame(s["plane"])
+    spot = Sketching.on_plane(f, line)
+    spot === nothing || return Sketching.world(f, spot)
+  end
+  back = Scenes.axes(v.eye)[3]
+  along = -Scenes.dot(line[2], back)
+  line[1] .+ line[2] .* (v.eye.wide > 0 ? v.eye.distance / max(along, 1e-6) : v.eye.distance)
+end
+
+"The field of the open form that the next click in the design fills, or nothing"
+wanted(v::DesignView) = begin
+  f = v.form
+  (f === nothing || isempty(f.active)) && return nothing
+  i = findfirst(field -> field.key == f.active, f.spec.fields)
+  i === nothing ? nothing : f.spec.fields[i]
+end
+
+"What of the sketch `s` shows at the place `at` of the picture: a point, or a curve, or nothing"
+sketch_under(v::DesignView, s, at) = begin
+  f = Sketching.Frame(s["plane"])
+  id = Int(s["id"])
+  size = (v.area[3], v.area[4])
+  seen(p) = Scenes.at(v.eye, size, Sketching.world(f, p))
+  best, found = 8.0, nothing
+  for q in get(s, "points", Any[])
+    spot = Sketching.spot(q["at"])
+    x, y, depth = seen(spot)
+    depth > 0 || continue
+    d = hypot(x - at[1], y - at[2])
+    d < best && ((best, found) = (d, (kind=:point, of=String(q["id"]), n=id, at=Sketching.world(f, spot))))
+  end
+  found === nothing || return found
+  best = 6.0
+  for c in get(s, "curves", Any[])
+    line = [seen(p) for p in Sketching.outline(c)]
+    any(p -> p[3] <= 0, line) && continue
+    for i in 1:length(line)-1
+      d, _ = Scenes.off(at, line[i], line[i+1])
+      d < best && ((best, found) = (d, (kind=:curve, of=String(c["id"]), n=id, at=point_at(v, at))))
+    end
+  end
+  found
+end
+
+"The region of a sketch that shows at the place `at` of the picture, or nothing"
+region_under(v::DesignView, at) = begin
+  line = Scenes.ray(v.eye, (v.area[3], v.area[4]), at)
+  for (id, s) in v.model.sketches
+    f = Sketching.Frame(s["plane"])
+    spot = Sketching.on_plane(f, line)
+    spot === nothing && continue
+    r = regions(v, s)
+    n = Sketching.region(r, spot)
+    n >= 2 || continue
+    inside = Sketching.inside(r, n)
+    return (kind=:region, of=n, n=id, at=(inside[1], inside[2], 0.0))
+  end
+  nothing
+end
+
+"What shows at the place `at` of the picture, of the kinds that a click there would take"
+under(v::DesignView, at) = begin
+  m = v.model
+  for s in Iterators.reverse(v.spots)
+    x, y, w, h = s.box
+    x <= at[1] <= x + w && y <= at[2] <= y + h && return s.what
+  end
+  s = sketch(v)
+  if s !== nothing && v.tool !== :project
+    return sketch_under(v, s, at)
+  end
+  field = wanted(v)
+  kind = field === nothing ? :any : field.kind
+  kind == :profiles && return region_under(v, at)
+  size = (v.area[3], v.area[4])
+  shown = b -> Designs.shown(m, b.name)
+  hit = Scenes.hit(m.shapes, Scenes.ray(v.eye, size, at); shown)
+  if kind in (:any, :edges)
+    e = Scenes.edge_at(m.shapes, v.eye, size, at, hit; shown)
+    e === nothing || return (kind=:edge, of=m.shapes[e[1]].name, n=e[2], at=e[3])
+    kind == :edges && return nothing
+  end
+  hit === nothing && return nothing
+  shape = m.shapes[hit.shape]
+  kind in (:bodies, :body) && return (kind=:body, of=shape.name, n=0, at=hit.point)
+  kind == :plane && !shape.flat[hit.face] && return nothing
+  (kind=:face, of=shape.name, n=hit.face, at=hit.point)
+end
+
+"""
+The place of the sketch `s` that a click at `at` in the picture takes: `spot`.
+It snaps to a point of the sketch that's near, whose id is then `ref`, and
+after a first click to level or upright with that click (`level`).
+"""
+aim(v::DesignView, s, at) = begin
+  f = Sketching.Frame(s["plane"])
+  size = (v.area[3], v.area[4])
+  spot = Sketching.on_plane(f, Scenes.ray(v.eye, size, at))
+  spot === nothing && return (spot=(0.0, 0.0), ref=nothing, level=false)
+  for q in get(s, "points", Any[])
+    p = Sketching.spot(q["at"])
+    x, y, depth = Scenes.at(v.eye, size, Sketching.world(f, p))
+    depth > 0 && hypot(x - at[1], y - at[2]) <= 8 && return (spot=p, ref=String(q["id"]), level=false)
+  end
+  level = false
+  if !isempty(v.clicks)
+    last = v.clicks[end].spot
+    near = 6 / Scenes.scale(v.eye, size)
+    abs(spot[1] - last[1]) < near && ((spot, level) = ((last[1], spot[2]), true))
+    abs(spot[2] - last[2]) < near && ((spot, level) = ((spot[1], last[2]), true))
+  end
+  (spot=spot, ref=nothing, level=level)
+end
+
+"How a click is sent to SolidCraft: the id of the point that it snapped to, or its place"
+place(c) = c.ref === nothing ? Any[c.spot[1], c.spot[2]] : c.ref
+
+"Run the tool's command with the clicks that it has"
+finish_tool!(v::DesignView) = begin
+  tool = v.tool
+  tool isa Commands.Tool || return v
+  clicks = v.clicks
+  params = JSON.Object()
+  if tool.clicks == ["points"]
+    length(clicks) < 2 && return (empty!(v.clicks); v)
+    params["points"] = Any[place(c) for c in clicks]
+    tool.command == "sketch.line" && any(c -> c.level, clicks) && (params["infer"] = true)
+  else
+    length(clicks) < length(tool.clicks) && return v
+    for (name, c) in zip(tool.clicks, clicks)
+      isempty(name) || (params[name] = place(c))
+    end
+    isempty(tool.measure) || (params[tool.measure] = hypot((clicks[end].spot .- clicks[end-1].spot)...))
+  end
+  for field in tool.fields
+    box = get(v.parts, (:toolfield, tool.command, field.key), nothing)
+    params[field.key] = Commands.value(box === nothing ? String(field.default) : box.text)
+  end
+  # A line goes on from where it ended, until Return or Escape
+  last = clicks[end]
+  empty!(v.clicks)
+  tool.command == "sketch.line" && push!(v.clicks, (spot=last.spot, ref=last.ref, level=false))
+  Designs.change!(v.model, tool.command, params)
+  v
+end
+
+"A click in the sketch `s` while a tool is in use"
+tool_click!(v::DesignView, s, at, what, twice) = begin
+  tool, m = v.tool, v.model
+  f = Sketching.Frame(s["plane"])
+  spot = Sketching.on_plane(f, Scenes.ray(v.eye, (v.area[3], v.area[4]), at))
+  spot === nothing && return v
+  here = Any[spot[1], spot[2]]
+  if tool == :dimension
+    # A click on a point or a curve chooses it. A click beside them puts the dimension there.
+    what !== nothing && what.kind in (:point, :curve) ? pick!(v, what, true) : isempty(chosen(v)) || dimension!(v, spot)
+  elseif tool in (:trim, :extend)
+    what !== nothing && what.kind == :curve && Designs.change!(m, "sketch." * String(tool), JSON.Object("curve" => what.of, "at" => here))
+  elseif tool == :project
+    what === nothing || what.kind in (:edge, :face) && Designs.change!(m, "sketch.project", JSON.Object("refs" => Any[JSON.Object(String(what.kind) => Any[what.at...])]))
+  elseif tool isa Commands.Tool
+    # Two clicks at one place end a line or a curve through many points
+    if twice && tool.clicks == ["points"]
+      tool.command == "sketch.line" ? empty!(v.clicks) : finish_tool!(v)
+      return v
+    end
+    push!(v.clicks, aim(v, s, at))
+    (tool.clicks == ["points"] ? tool.command == "sketch.line" && length(v.clicks) >= 2 : length(v.clicks) >= length(tool.clicks)) && finish_tool!(v)
+  end
+  v
+end
+
+"Look along the axis of the ball that was clicked"
+look_along!(v::DesignView, what) = begin
+  turn, tilt = what.of == 1 ? (what.n == 1 ? 0.0 : 180.0, 0.0) : what.of == 2 ? (what.n == 1 ? 90.0 : -90.0, 0.0) : (-90.0, 90.0 * what.n)
+  v.eye = Scenes.fit(Scenes.Eye(v.eye.target, turn, tilt, v.eye.distance, v.eye.wide), Scenes.box(showing(v)), (v.area[3], v.area[4]))
+  v
+end
+
+"Open a field to type the length of the dimension `what` in"
+edit_size!(v::DesignView, window, what) = begin
+  s = sketch(v)
+  s === nothing && return v
+  i = findfirst(k -> get(k, "id", "") == what.of, get(s, "constraints", Any[]))
+  i === nothing && return v
+  k = s["constraints"][i]
+  param = get(k, "param", nothing)
+  param isa String || return v
+  now = get(k, "expression", nothing)
+  now isa String || (now = string(get(k, "value", "")))
+  at = shown_at(v, what.at)
+  at === nothing && return v
+  ask!(v, window, (px(at[1] - 50), px(at[2] - 10), 100px, 20px), now, new -> Designs.change!(v.model, "parameters.change", JSON.Object("name" => param, "expression" => Commands.value(new))); width=130px)
+  v
+end
+
+"A click that didn't move: it selects, or fills the field of the form that's lit"
+click!(v::DesignView, what, more) = begin
+  field = wanted(v)
+  if field !== nothing && sketch(v) === nothing
+    what === nothing && return v
+    suits = field.kind == :edges ? what.kind == :edge : field.kind == :profiles ? what.kind == :region :
+            field.kind in (:bodies, :body) ? what.kind == :body : what.kind == :face
+    suits && take!(v.form, field, what)
+    return v
+  end
+  what === nothing ? (more || empty!(v.picked)) : pick!(v, what, more)
+  v
+end
+
+onkey(v::DesignView, e::KeyPress{Keys.mouse_left}) = begin
+  v.model === nothing && return
+  focus(v)
+  hide_tooltip!(e.window)
+  at = local_spot(v, e.window.mouse)
+  v.mouse = at
+  what = under(v, at)
+  # Two clicks are one after the other at one place. Two quick clicks at two places are two points of a line.
+  now = time()
+  last = get(v.parts, :clicked_at, (-99.0, -99.0))
+  twice = now - v.clicked < 0.4 && hypot(at[1] - last[1], at[2] - last[2]) < 5
+  v.clicked = twice ? 0.0 : now
+  v.parts[:clicked_at] = at
+  what !== nothing && what.kind == :look && return (look_along!(v, what); handled)
+  s = sketch(v)
+  if s !== nothing
+    v.tool === nothing || return (tool_click!(v, s, at, what, twice); handled)
+    twice && what !== nothing && what.kind == :size && return (edit_size!(v, e.window, what); handled)
+  end
+  v.drag = Drag(:press, at, what, Keys.shft in e.window.keys, what === nothing ? point_at(v, at) : what.at, (0.0, 0.0), false)
+  handled
+end
+
+onkey(v::DesignView, e::KeyRelease{Keys.mouse_left}) = begin
+  d = v.drag
+  v.drag = nothing
+  d === nothing && return handled
+  d.kind == :press && click!(v, d.what, d.more)
+  d.kind == :pull && v.model !== nothing && Designs.change!(v.model, "sketch.drag_end")
+  handled
+end
+
+# The right button turns the design, and the middle one moves it
+onkey(v::DesignView, e::KeyPress{Keys.mouse_right}) = (at = local_spot(v, e.window.mouse); focus(v); v.drag = Drag(:turn, at, nothing, false, point_at(v, at), (0.0, 0.0), false); handled)
+onkey(v::DesignView, e::KeyPress{Keys.mouse_middle}) = (at = local_spot(v, e.window.mouse); focus(v); v.drag = Drag(:move, at, nothing, false, point_at(v, at), (0.0, 0.0), false); handled)
+onkey(v::DesignView, ::KeyRelease{Keys.mouse_right}) = (v.drag = nothing; handled)
+onkey(v::DesignView, ::KeyRelease{Keys.mouse_middle}) = (v.drag = nothing; handled)
+
+"Move what's held in the sketch towards the place `at` of the picture, as far as its constraints let it go"
+pull!(v::DesignView, d::Drag, at) = begin
+  s, m = sketch(v), v.model
+  (s === nothing || d.busy) && return
+  spot = Sketching.on_plane(Sketching.Frame(s["plane"]), Scenes.ray(v.eye, (v.area[3], v.area[4]), at))
+  spot === nothing && return
+  d.busy = true
+  Designs.change!(m, "sketch.drag", JSON.Object("entity" => d.what.of, "from" => Any[d.from...], "to" => Any[spot...], "live" => true); quiet=true,
+    then=(answer, problem) -> begin
+      d.busy = false
+      now = answer isa AbstractDict ? get(answer, "at", nothing) : nothing
+      now isa Vector && length(now) == 2 && (d.from = Sketching.spot(now))
+    end)
+end
+
+onmouse(v::DesignView, e::MouseMove) = begin
+  v.model === nothing && return
+  at = local_spot(v, e.position)
+  d = v.drag
+  size = (v.area[3], v.area[4])
+  # A button that was let go outside the window ends what it was doing
+  held_ = Keys.mouse_left in e.window.keys || Keys.mouse_right in e.window.keys || Keys.mouse_middle in e.window.keys
+  d === nothing || held_ || (v.drag = d = nothing)
+  if d === nothing
+    v.mouse = at
+    v.hover = panel_at(v, e.window, e.position) === nothing ? under(v, at) : nothing
+    return handled
+  end
+  by = (at[1] - d.at[1], at[2] - d.at[2])
+  if d.kind == :press
+    hypot(by...) < 4 && return handled
+    s = sketch(v)
+    if s !== nothing && d.what !== nothing && d.what.kind in (:point, :curve)
+      d.kind = :pull
+      spot = Sketching.on_plane(Sketching.Frame(s["plane"]), Scenes.ray(v.eye, size, d.at))
+      d.from = spot === nothing ? (0.0, 0.0) : spot
+    else
+      # In a sketch a drag moves the view, since it's seen flat. Out of one it turns the design, and ⇧ moves it.
+      d.kind = d.more || s !== nothing ? :move : :turn
+    end
+    v.hover = nothing
+  end
+  d.kind == :turn && (v.eye = Scenes.turned(v.eye, size, -0.4by[1], 0.4by[2], d.pivot))
+  d.kind == :move && (v.eye = Scenes.moved(v.eye, size, by, d.pivot))
+  d.kind == :pull && pull!(v, d, at)
+  d.at = at
+  v.mouse = at
+  handled
+end
+
+# Two fingers on the trackpad move the design, and with ⇧ turn it. The wheel of a mouse, and two fingers with ⌘, bring it nearer.
+onscroll(v::DesignView, e::MouseScroll) = begin
+  v.model === nothing && return
+  over = panel_at(v, e.window)
+  dx, dy = num(e.delta[1]), num(e.delta[2])
+  if over == :history
+    v.along -= (abs(dx) > abs(dy) ? dx : dy) * (e.wheel ? 30 : 1)
+    return handled
+  end
+  over === nothing || return
+  at = local_spot(v, e.window.mouse)
+  size = (v.area[3], v.area[4])
+  about = point_at(v, at)
+  if e.wheel || Keys.cmd in e.window.keys || Keys.ctrl in e.window.keys
+    v.eye = Scenes.nearer(v.eye, size, exp(dy / (e.wheel ? 6 : 60)), about)
+  elseif Keys.shft in e.window.keys
+    v.eye = Scenes.turned(v.eye, size, -0.4dx, 0.4dy, about)
+  else
+    v.eye = Scenes.moved(v.eye, size, (dx, dy), about)
+  end
+  handled
+end
+
+onpinch(v::DesignView, e::Pinch) = begin
+  (v.model === nothing || panel_at(v, e.window) !== nothing) && return
+  at = local_spot(v, e.window.mouse)
+  v.eye = Scenes.nearer(v.eye, (v.area[3], v.area[4]), e.scale, point_at(v, at))
+  handled
+end
+
+cursor(v::DesignView) = v.tool !== nothing ? :crosshair : nothing
+
+# --- the keys ------------------------------------------------------------------------
+
+onkey(v::DesignView, e::KeyPress{Keys.escape}) = begin
+  if !isempty(v.clicks)
+    empty!(v.clicks)
+  elseif v.tool !== nothing
+    v.tool = nothing
+  elseif v.form !== nothing
+    v.form = nothing
+  elseif v.panel != :none
+    v.panel = :none
+  else
+    empty!(v.picked)
+  end
+  focus(v)
+  handled
+end
+
+onkey(v::DesignView, e::KeyPress{Keys.enter}) = begin
+  box = e.window.focus
+  box isa TextInput && commit!(v, box) !== nothing && return (focus(v); handled)
+  if v.tool isa Commands.Tool && v.tool.clicks == ["points"] && !isempty(v.clicks)
+    v.tool.command == "sketch.line" ? empty!(v.clicks) : finish_tool!(v)
+  elseif v.form !== nothing
+    apply!(v)
+  end
+  handled
+end
+
+"Take what's selected out of the design: the points, curves and constraints of a sketch, or steps and bodies"
+delete_picked!(v::DesignView) = begin
+  m = v.model
+  if sketch(v) !== nothing
+    ids = String[p.of for p in v.picked if p.kind in (:point, :curve, :mark, :size)]
+    isempty(ids) || Designs.change!(m, "sketch.delete", JSON.Object("entities" => ids))
+  else
+    steps = Int[p.n for p in v.picked if p.kind == :step]
+    bodies = String[p.of for p in v.picked if p.kind == :body]
+    isempty(steps) || Designs.change!(m, "timeline.delete", JSON.Object("features" => steps))
+    isempty(bodies) || Designs.change!(m, "solid.remove", JSON.Object("bodies" => bodies))
+  end
+  empty!(v.picked)
+  v
+end
+
+onkey(v::DesignView, e::KeyPress{Keys.backspace}) = e.window.focus === v ? (delete_picked!(v); handled) : nothing
+onkey(v::DesignView, e::KeyPress{Keys.delete}) = e.window.focus === v ? (delete_picked!(v); handled) : nothing
+
+"Which of ⌘, ⇧, ⌥ and ⌃ are held"
+held_keys(w) = (Keys.cmd in w.keys, Keys.shft in w.keys, Keys.opt in w.keys, Keys.ctrl in w.keys)
+
+# ⌘S writes the file. ⌘Z takes back the last change, and ⇧⌘Z does it again.
+onkey(v::DesignView, e::KeyPress{Keys.s}) = held_keys(e.window) == (true, false, false, false) ? (save!(v); handled) : nothing
+onkey(v::DesignView, e::KeyPress{Keys.z}) = begin
+  keys = held_keys(e.window)
+  keys == (true, false, false, false) ? (undo!(v); handled) : keys == (true, true, false, false) ? (redo!(v); handled) : nothing
+end
+
+# A letter starts a command while the design has the keyboard, and not while a field is typed in
+ontype(v::DesignView, e::Typed) = begin
+  (v.model === nothing || e.window.focus !== v) && return
+  (Keys.cmd in e.window.keys || Keys.ctrl in e.window.keys) && return
+  id = get(sketch(v) === nothing ? MODEL_KEYS : SKETCH_KEYS, lowercase(e.char), nothing)
+  id === nothing && return
+  start!(v, id, e.window)
+  handled
+end

@@ -1164,6 +1164,8 @@ You can write the file `.ladder` yourself too. It ends with a block like the one
 
 A zip file shows what it holds, without being unpacked: its folders and files, each file with its size and when it changed. Click a folder to open it, and click a file to see that one file. Ladder doesn't change a file that it shows from a zip file. Click Unpack to unpack the whole file beside itself, as two clicks in the Finder do.
 
+A SolidCraft design, a file whose name ends in `.sc`, opens in an editor that's laid out as SolidCraft's own window is. The design shows in 3D. Drag to turn it, and click a face or an edge to select it. The toolbar has SolidCraft's commands, like Extrude and Fillet. A command opens a form: you type its lengths there, and click the faces, the edges or the regions of a sketch that it takes. Two clicks on a sketch open it, so that you can draw in it and change its dimensions. ⌘Z takes back a change, and ⌘S writes the file. Ladder works out no shapes by itself. It uses the program that's inside SolidCraft.app, so this needs SolidCraft on your Mac.
+
 Right-click the page to cut, copy or paste. The menu's Insert item adds a new block where you clicked: a heading, a list, a to-do item, a table, a sheet, a spreadsheet, a diagram, a takeoff, a schedule, a chart, a board, a calendar, a sketch, a canvas, a live block and more.
 
 A file can start with front matter: lines like `title: Notes` between two lines of `---`. Ladder shows it as a block of its own, as at the top of this page. To see how many words a page has, press ⌘⇧P and run Word Count. It leaves out the front matter and the comments, and it also says how many characters the page has and how long it takes to read.
