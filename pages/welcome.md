@@ -1215,7 +1215,7 @@ A folder that shows as a **Blog** puts itself on the web, and its pages look as 
 
 Click the blog or one of its sections in the sidebar, and the page shows it as its site does. At the top is the folder's `Readme.md`, or the blog's `index.md`. Under it is a list of the folder's files and folders: what each is about, how big it is, and when it was made and last saved. The list leaves out hidden files, and the names that the folder's `.gitignore` or `.canonignore` lists. A section with its own `index.md` shows only that page, with no list, as its site does. A Readme isn't a post. The front page's front matter can say where the site is, like `site: https://me.example.com`.
 
-Every page in a blog is set in Literata, on the site's cream paper, as wide as the site's text. A book review, a file that ends in `.review`, shows its title, its stars and its year at the top.
+Every page in a blog is set in Literata, on the site's cream paper, as wide as the site's text. A book review shows its title, its stars and its year at the top. A book review is a page in a folder of reviews: a folder whose `.ladder` page has `Ladder.BookReviewDirectory` in a julia block. A file that ends in `.review` is a review too.
 
 The top bar of a page in a blog has three buttons:
 

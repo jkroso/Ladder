@@ -53025,8 +53025,19 @@ end
 "A folder inside a blog: a section of the blog, whose page shows as the site shows it"
 @def struct BlogSection <: AbstractDirectory end
 
+"""
+A section of a blog that holds book reviews: each Markdown page in it is a
+review, whose top shows as the site shows it. Its own page, `.ladder`, gives
+it this kind with `Ladder.BookReviewDirectory` in a julia block. canon, which
+makes the site, looks for that name in the page. See "a book review in a blog".
+"""
+@def struct BookReviewDirectory <: AbstractDirectory end
+
+"A folder inside a blog: a section of it, or a section of book reviews"
+const SectionFolder = Union{BlogSection,BookReviewDirectory}
+
 "A folder of a blog: the blog's own folder, or a section of it"
-const BlogFolder = Union{BlogDirectory,BlogSection}
+const BlogFolder = Union{BlogDirectory,SectionFolder}
 
 entry_icon(::BlogDirectory) = "rss"
 entry_marks(e, o::BlogFolder) = git_marks(e, o)
@@ -53039,7 +53050,7 @@ push!(BLOCK_ICONS, "rss", "globe", "cloud-upload", "pencil-square", "folder-fill
 
 "The blog's own folder, of the folder `d` of a blog"
 blog_root(d::BlogDirectory) = d
-blog_root(d::BlogSection) = d.parent isa BlogFolder ? blog_root(d.parent) : d
+blog_root(d::SectionFolder) = d.parent isa BlogFolder ? blog_root(d.parent) : d
 
 "The folder of a blog that the page that shows is, or that holds it, or nothing for a page that's in no blog"
 page_blog_folder(e) = begin
@@ -53321,7 +53332,7 @@ it: the blog's index.md or Readme, or a section's own index.md or else its
 Readme. It's "" for a folder that has none.
 """
 front_page(d::BlogDirectory) = Blogs.front(path_of(d))
-front_page(d::BlogSection) = begin
+front_page(d::SectionFolder) = begin
   folder = path_of(d)
   names = try readdir(folder) catch; String[] end
   k = findfirst(Blogs.isindex, names)
@@ -53330,7 +53341,7 @@ front_page(d::BlogSection) = begin
 end
 
 "True for a section of a blog with its own index.md, which its site shows alone, with no list"
-section_index(d::BlogSection) = Blogs.isindex(basename(front_page(d)))
+section_index(d::SectionFolder) = Blogs.isindex(basename(front_page(d)))
 section_index(::BlogDirectory) = false
 
 # A click on a folder of a blog shows its page as the site does: its Readme, with the list of the folder under
@@ -53403,6 +53414,7 @@ end
 @def mutable struct SiteListing <: SemanticUI
   path::String = ""   # the folder
   blog::String = ""   # the blog's own folder
+  reviews::Bool = false   # the folder holds book reviews, so each page in it has a book in the list
   rows::Dict{Any,Any} = Dict{Any,Any}()
 end
 
@@ -53423,17 +53435,18 @@ site_listing(e, d::BlogFolder) = begin
   folder = path_of(d)
   v = node!(() -> SiteListing(path=folder), e, (:listing, folder))
   v.blog = path_of(blog_root(d))
+  v.reviews = d isa BookReviewDirectory
   v
 end
 
 "What each folder of a blog holds, as its list has it, by the folder. Each is read again after 2 seconds."
 const SITE_LISTS = Dict{String,Tuple{Float64,Vector{Blogs.Entry}}}()
 
-"The entries of the list of `folder`, of the blog in `blog`"
-site_entries(folder, blog) = begin
+"The entries of the list of `folder`, of the blog in `blog`. With `reviews`, each page in the folder is a book review."
+site_entries(folder, blog; reviews=false) = begin
   kept = get(SITE_LISTS, folder, nothing)
   kept !== nothing && time() - kept[1] < 2 && return kept[2]
-  list = try Blogs.listing(folder, blog, itself=Blogs.itself(blog)) catch; Blogs.Entry[] end
+  list = try Blogs.listing(folder, blog, itself=Blogs.itself(blog), reviews=reviews) catch; Blogs.Entry[] end
   SITE_LISTS[folder] = (time(), list)
   list
 end
@@ -53448,7 +53461,7 @@ listing_icon(x::Blogs.Entry) =
 describe(v::SiteListing) = begin
   e = editor(v)
   redraw_in!(e, 2.1)   # a file that's saved or added shows here soon after
-  list = site_entries(v.path, v.blog)
+  list = site_entries(v.path, v.blog, reviews=v.reviews)
   stale = Set(p.path for p in blog_posts(v.blog) if blog_standing(v.blog, p) in (:new, :changed))
   font = SITE_FONT[]
   s = body(e).size * 0.8   # the list's text is a little smaller than the page's, as the site's is
@@ -53516,6 +53529,16 @@ cursor(::SiteListing) = :arrow
 # In a blog, the top of the review shows those as the site does: the title in
 # the middle, then the address's site, the stars and the year, then the line
 # in italics. The header's own lines show while the caret is in them.
+#
+# A review is a page in a section of book reviews: a folder whose page
+# `.ladder` makes it a `BookReviewDirectory`, as Canon's Book Reviews is:
+#
+#     ```julia
+#     Ladder.BookReviewDirectory
+#     ```
+#
+# A file that ends in `.review` is a review too, anywhere in a blog. That's how
+# reviews were written before.
 
 "The top of a book review in a blog, in place of the card of its front matter"
 @def mutable struct ReviewHead <: SemanticUI
@@ -53536,6 +53559,7 @@ cursor(::SiteLink) = :hand
 onkey(l::SiteLink, ::KeyPress{Keys.mouse_left}) = (isempty(l.url) || BROWSER[](l.url); handled)
 
 matter_view(e, ::BlogFolder, ::FS.File{:review}, rows) = review_head(e, rows)
+matter_view(e, ::BookReviewDirectory, ::FS.File{:md}, rows) = review_head(e, rows)
 
 # A page of a blog on a web server has no .review at the end of its address, so its front matter says that it's a
 # book review: it has a rating, as each .review file has

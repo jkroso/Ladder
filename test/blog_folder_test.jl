@@ -303,4 +303,31 @@ end
   @test dirname(e.buf.path) == humans && startswith(basename(e.buf.path), "Untitled")
 end
 
+@testset "each page of a folder of book reviews is a review" begin
+  reviews = joinpath(canon, "Book Reviews")
+  mkpath(reviews)
+  write(joinpath(reviews, ".ladder"), "A folder of book reviews.\n\n```julia\nLadder.BookReviewDirectory\n```\n")
+  write(joinpath(reviews, "Readme.md"), "+++\ndescription = \"Books\"\n+++\n")
+  red = joinpath(reviews, "Red Plenty.md")
+  write(red, "+++\ntitle = \"Red Plenty\"\nlink = \"https://en.wikipedia.org/wiki/Red_Plenty\"\nrating = 4\npubDate = 2010-01-01\n+++\n\nPlans.\n")
+  # The folder's own page gives it its kind, once the page has run
+  K.folder_pages!(reviews)
+  @test Base.invokelatest(K.FS.get, FSPath(reviews)) isa K.BookReviewDirectory
+  @test Base.invokelatest(K.FS.get, FSPath(humans)) isa K.BlogSection
+  empty!(K.SITE_LISTS)
+  Base.invokelatest(K.open!, e, Base.invokelatest(K.FS.get, FSPath(reviews))); frames()
+  @test e.buf.path == joinpath(reviews, "Readme.md") && Base.invokelatest(K.page_blog_folder, e) isa K.BookReviewDirectory
+  # The list of the folder has a book for each review, as the site has
+  l = e.nodes[(:listing, reviews)]
+  @test l.reviews && [(x.name, x.icon) for x in K.site_entries(reviews, canon, reviews=true)] == [("Red Plenty.md", :review)]
+  # A page of the folder has the top of a review
+  Base.invokelatest(K.show_path!, e, red); frames()
+  h = e.nodes[:review_head]
+  @test e.layout[1].content isa K.Live && e.layout[1].content.node === h && h.said["title"] == "Red Plenty" && h.said["rating"] == "4"
+  @test K.site_address(canon, red) == "https://canon.example.com/Book%20Reviews/Red%20Plenty.html"
+  # A page of a plain section has no such top
+  Base.invokelatest(K.show_path!, e, joinpath(humans, "Dating.md")); frames()
+  @test !(e.layout[1].content isa K.Live && e.layout[1].content.node isa K.ReviewHead)
+end
+
 close(w)

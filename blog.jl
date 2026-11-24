@@ -393,12 +393,12 @@ end
 "`text` with its Markdown taken out: a link shows its words, and the marks of bold, italic and code go"
 plain(text::AbstractString) = String(strip(replace(replace(text, r"\[([^\]]*)\]\([^)]*\)" => s"\1"), r"[*_`]" => "")))
 
-"The entry of the list for the file or the folder at `path`"
-entry(path::AbstractString) = begin
+"The entry of the list for the file or the folder at `path`. With `review`, a page is a book review, as each page in a folder of reviews is."
+entry(path::AbstractString; review::Bool=false) = begin
   name = basename(path)
   folder = isdir(path)
   e = ending(name, true)
-  icon = folder ? :folder : e == ".review" ? :review : e in MARKDOWN ? :markdown : endswith(lowercase(name), ".jl") ? :julia : :file
+  icon = folder ? :folder : e == ".review" || (review && e in MARKDOWN) ? :review : e in MARKDOWN ? :markdown : endswith(lowercase(name), ".jl") ? :julia : :file
   if icon == :markdown
     lines = try open(io -> collect(Iterators.take(eachline(io), 40)), path) catch; String[] end
     said = matter(lines)
@@ -410,13 +410,14 @@ end
 """
 The list of the folder `folder` of the blog in `blog`, as the site lists it:
 an entry for each file and folder that it doesn't leave out, in the order of
-their names. `itself` says that the blog publishes itself.
+their names. `itself` says that the blog publishes itself, and `reviews`
+that the folder holds book reviews, so that each page in it is one.
 """
-listing(folder::AbstractString, blog::AbstractString=folder; itself::Bool=true) = begin
+listing(folder::AbstractString, blog::AbstractString=folder; itself::Bool=true, reviews::Bool=false) = begin
   patterns = ignored(folder)
   top = rstrip(folder, '/') == rstrip(blog, '/')
   names = try readdir(folder) catch; String[] end
-  [entry(joinpath(folder, name)) for name in names if !hidden(name, patterns; top, itself)]
+  [entry(joinpath(folder, name); review=reviews) for name in names if !hidden(name, patterns; top, itself)]
 end
 
 "How many bytes `n` is, as the site says it, like 614 B, 3.78 kB or 1.95 MB"
