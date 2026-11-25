@@ -38,7 +38,7 @@ show: Power of the cells
 
 ### The chips
 
-Chips break too, and nobody can swap them. Once the early failures are past, data centres replace about !`fail = 0.6Percent/yr` of their GPUs, each year.[^2] It's hard to find info on how that failure rate changes over time, but lets say it increases by !`ageing = 3Percent` each year. The share of the chips that still work after $t$ years is then
+Chips break too, and nobody can swap them. Once the early failures are past, data centres replace about !`fail = 0.6Percent/yr` of their GPUs, each year.[^2] It's hard to find info on how that failure rate changes over time, but let's say it increases by !`ageing = 3Percent` each year. The share of the chips that still work after $t$ years is then
 
 $$
 \text{working}(t) = \exp\!\left(-\frac{a}{b}\left(e^{b t} - 1\right)\right)
@@ -59,15 +59,15 @@ show: Chips that work
 
 ### The work that the fleet does
 
-A chip with no power does no work, and power with no chip does none either. So each year the fleet does the work that the lower of the two lines allows. Added up until nothing is left, that's as much work as !`years = let d = float(fade * 1yr), a = float(fail * 1yr), g = float(ageing); round(0.05 * sum(min(exp(-d * t), g == 0 ? exp(-a * t) : exp(-a / log(1 + g) * ((1 + g)^t - 1))) for t in 0.025:0.05:2000), digits=1) end` years at full size:
+A chip with no power does no work, and power with no chip does none either. So each year the fleet does the work that the lower of the two lines allows. The fleet carries no battery, so its computers also stop while it's in the Earth's shadow. They run only the !`sun` of the time that it's in the sun. Added up until nothing is left, that's as much work as !`years = let d = float(fade * 1yr), a = float(fail * 1yr), g = float(ageing); round(float(sun) * 0.05 * sum(min(exp(-d * t), g == 0 ? exp(-a * t) : exp(-a / log(1 + g) * ((1 + g)^t - 1))) for t in 0.025:0.05:2000), digits=1) end` years at full size:
 
 $$
-\text{years at full size} = \int_0^{\infty} \min\big(\text{power}(t),\ \text{working}(t)\big)\,dt
+\text{years at full size} = \text{sun} \int_0^{\infty} \min\big(\text{power}(t),\ \text{working}(t)\big)\,dt
 $$
 
-So before the fleet is gone, its computers use !`energy = convert(TWh, compute * years * yr)` of electricity. Say a token is !`token = 16` bits, about 2 bytes of text, and the computers write !`bits = 16` bits each second for each watt.[^19] That electricity is !`tokens = round(convert(J, energy) / 1J * bits / token, sigdigits=3)` tokens. That's the work that the fleet does.
+So before the fleet is gone, its computers use !`energy = convert(TWh, compute * years * yr)` of electricity. There's no standard rate to convert energy into tokens. Say each token takes !`joules = 0.6J`.[^20] That electricity is then !`tokens = round(convert(J, energy) / joules, sigdigits=3)` tokens. That's the work that the fleet does.
 
-The solar panels are just big enough to run every computer on the first day, so they make !`panels = round(convert(MW, compute / sun) / 1MW) * 1MW`. Smaller panels would leave some new chips with no power. Bigger panels would waste power at first, but later they'd make up for the cells' fade. That pays only while the line of the cells is under the line of the chips. !`crossover = let d = float(fade * 1yr), a = float(fail * 1yr), b = log(1 + float(ageing)); y = findfirst(t -> (b == 0 ? a * t : a / b * expm1(b * t)) >= d * t, 1:2000); a >= d ? 0 : y === nothing ? Inf : y end; crossover == 0 ? "The chips wear out at least as fast from the first day, so a bigger panel never pays." : crossover == Inf ? "The cells stay the limit for as far as these sums look." : string("With these numbers, the cells are the limit until year ", crossover, ". After that, dead chips hold the fleet back, and more power does nothing.")` So whether bigger panels are worth their launch depends on which line falls faster.
+The solar panels are just big enough to run every computer on the first day, so they make !`panels = round(convert(MW, compute) / 1MW) * 1MW`. Smaller panels would leave some new chips with no power. Bigger panels would waste power at first, but later they'd make up for the cells' fade. That pays only while the line of the cells is under the line of the chips. !`crossover = let d = float(fade * 1yr), a = float(fail * 1yr), b = log(1 + float(ageing)); y = findfirst(t -> (b == 0 ? a * t : a / b * expm1(b * t)) >= d * t, 1:2000); a >= d ? 0 : y === nothing ? Inf : y end; crossover == 0 ? "The chips wear out at least as fast from the first day, so a bigger panel never pays." : crossover == Inf ? "The cells stay the limit for as far as these sums look." : string("With these numbers, the cells are the limit until year ", crossover, ". After that, dead chips hold the fleet back, and more power does nothing.")` So whether bigger panels are worth their launch depends on which line falls faster.
 
 ```chart
 kind: lines
@@ -88,7 +88,7 @@ flowchart LR
   Back -->|infrared light| Space
 ```
 
-Every watt that a panel takes in must leave again, and in space it can only leave as light. The front of the panel takes in !`absorb = 0.92` of the sunlight that hits it, which is !`heat = round(Int, sunlight / (1W/m^2) * absorb)` watts on each square metre. The glass reflects the other !`round(Int, 100 * (1 - absorb))`% straight back into space. That light never turns into heat, so the sums leave it out. Of the light that the panel takes in, it turns !`eff = 22Percent` into electricity. The computers turn the electricity back into heat, and pipes take that heat to the back of the panel. So the panel must shed all of what it took in.
+Every watt that a panel takes in must leave again, and in space it can only leave as light. The front of the panel takes in !`absorb = 0.92` of the sunlight that hits it, which is !`heat = round(Int, sunlight / (1W/m^2) * absorb)` watts on each square metre. The glass reflects the other !`round(Int, 100 * (1 - absorb))`% straight back into space. That light never turns into heat, so the sums leave it out. Of all the sunlight that hits the panel, it turns !`eff = 22Percent` into electricity. That's how a cell's efficiency is measured. The computers turn the electricity back into heat, and pipes take that heat to the back of the panel. So the panel must shed all of what it took in.
 
 A surface sheds heat as infrared light. How much it sheds depends on its temperature T, and on its emissivity ε, a number from 0 to 1 that says how well it glows:
 
@@ -104,7 +104,7 @@ Chips can run at up to !`chip_max = 90`°C. Heat flows only from a hotter thing 
 
 Most satellites don't cool their computers through the backs of their panels. They have a separate radiator, turned edge-on to the Sun, so that no sunlight falls on it. That changes the sums:
 
-- The radiator sheds only the computers' heat. That's !`chip_heat = round(Int, heat * float(eff))` watts for each square metre of solar panel.
+- The radiator sheds only the computers' heat. That's !`chip_heat = round(Int, sunlight / (1W/m^2) * float(eff))` watts for each square metre of solar panel.
 - No sunlight warms it, so it can be as hot as the chips allow, !`edge_c = limit`°C. Both of its faces shed heat, so each square metre sheds !`edge_w = round(Int, 2 * e_back * 5.670e-8 * (edge_c + 273.15)^4)` watts.
 - So the radiator needs only !`edge_area = round(Int, 100 * chip_heat / edge_w)`% of the panels' area.
 - The panel no longer takes the computers' heat, so it settles at !`round(Int, ((heat - chip_heat) / (5.670e-8 * (e_front + e_back)))^(1/4) - 273.15)`°C, not !`panel_c`°C. Cooler cells make a little more electricity.
@@ -122,6 +122,10 @@ The fleet's panels cover !`array_area = round(panels / (sunlight * float(eff)) /
 Starmind AI1 is a satellite of about this power. Its wings span 70 metres, and it has 110 square metres of radiators for 150 kilowatts.[^4]
 
 Here is a model, drawn from the parameters on this page. It changes as you change them: the span of the wings, the pipes, the radiator, the height. Drag it to turn it. Pinch it, or scroll with ⌘ held, to come nearer.
+
+```columns
+2
+```
 
 ```view
 satellite.sc
@@ -160,7 +164,7 @@ The fleet's weight comes from five parts. The panels cover !`array_area` square 
 - **Computers.** A rack of 72 Nvidia GPUs weighs about 1,470 kg and uses about 132 kilowatts. That's 11 kg for each kilowatt, with its steel cabinet, fans and power supplies. A satellite needs no cabinet or fans, so say !`computers = 6` kg for each kilowatt.
 - **The body.** This holds the computers. It is the frame, the converters, the pumps, the thrusters, the attitude control, and the radios. The shadow is a small part of the year, so the sums add no battery. The JPL study puts the body at 7 to 30 kg for each kilowatt, and that range includes a battery.[^5] On one satellite that is !`round(Int, 7 * one / 1kW)` to !`round(Int, 30 * one / 1kW)` kg.
 
-The fleet flies at !`alt = 1000km`. At the end, one burn lowers the near point of the orbit to !`peri = 80km`. That burn takes !`deorbit = let r1 = (6378 + alt / 1km) * 1000, rp = (6378 + peri / 1km) * 1000, μ = 3.986e14, a = (r1 + rp) / 2, vc = sqrt(μ / r1), va = sqrt(μ * (2 / r1 - 1 / a)); round(vc - va, digits=1) end` metres a second. The thrusters give !`isp = 2000` seconds of push from each second of their fuel.
+The fleet flies at !`alt = 1000km`. At the end, the thrusters push against the flight for months, and each satellite spirals down to !`spiral_to = 400km`. A slow spiral needs more speed than one short burn would. It takes !`deorbit = let μ = 3.986e14, r1 = (6378 + alt / 1km) * 1000, r2 = (6378 + spiral_to / 1km) * 1000; round(sqrt(μ / r2) - sqrt(μ / r1), digits=1) end` metres a second. The thrusters give !`isp = 2000` seconds of push from each second of their fuel.
 
 On one satellite, say:
 
@@ -168,8 +172,8 @@ On one satellite, say:
 - The converters are !`converters = 1.2kg/kW * one`. They turn the cells' electricity into the voltage the chips take. On the ground, the same job sits in the building's electrical gear, further down. A commercial converter sells for well under a dollar a watt. Say !`conv_price = 0.50USD/W` for each watt of the computers. On one satellite the converters cost !`cost_conv = conv_price * one`.
 - The pumps are !`pumps = 0.5kg/kW * one`. They push the cooling liquid from the chips to the radiator. The pump costs !`cost_pumps = 400USD`.
 - The attitude control keeps the wings facing the Sun and the radiator edge-on to it. The wings span !`span`. On one satellite the cells and the loops weigh !`wing = (cells + booms / 1kg) * array_area / nsat` kg. Spread along that span, their moment about the middle is !`inertia = round(Int, wing * (span / 1m)^2 / 12)` kg·m². Gravity pulls a long wing toward the Earth. The strongest pull at this height is !`gg = let R = (6378 + alt / 1km) * 1000; round(1.5 * 3.986e14 / R^3 * inertia, digits=3) end` newton-metres. The pull reverses twice in each orbit, so the wheels hold it and then give it back. The hold is !`momentum = let R = (6378 + alt / 1km) * 1000, P = 2 * 3.1416 * sqrt(R^3 / 3.986e14); round(gg * P / (4 * 3.1416), digits=1) end` newton-metre-seconds. A large flown wheel stores about 6 of those units a kilogram. A Bradford W45E stores 45 and weighs 7.45 kg. Say !`store = 6`. The satellite carries !`n_wheels = 4` wheels, one for each axis and a spare, and each wheel can hold the whole amount. The wheels weigh !`wheel_kg = round(n_wheels * momentum / store, digits=1)` kg. A star tracker, a gyro and the sun sensors weigh !`sensors = 4kg`. The attitude control weighs !`pointing = wheel_kg * 1kg + sensors`. The air and the sunlight push far less than gravity at this height, so these calculations leave them out. Say a wheel costs !`wheel_price = 500USD/kg`. That is a commercial motor and rotor. A space catalog charges more. The tracker and the other sensors cost !`tracker = 25000USD`. The set costs !`cost_point = wheel_price * wheel_kg * 1kg + tracker`.
-- Each satellite has a laser to the next one, and a small radio to the ground. It has no big antenna. A Starlink satellite carries one, to reach a dish. The fleet flies in !`planes = 1` ring. The next satellite is !`gap = round(2 * 3.1416 * (6378 + alt / 1km) / (nsat / planes), digits=1)` km away. The laser's lens is !`lens = 20mm` across. At that range its beam is !`spot = let L = gap * 1000, D = lens / 1m; round(1.22 * 1550e-9 / D * L, digits=2) end` metres across. The computers write !`bits` bits each second for each watt. The fleet's results are then !`traffic = round(bits * compute / 1W / 1e9, digits=1)` gigabits a second, and this laser carries all of them along the ring. Say !`photons = 20` photons land in each bit, and a quarter of the light gets through. The laser must then shine !`need_mw = let D = lens / 1m, frac = min(1, (D / spot)^2), E = 6.626e-34 * 2.998e8 / 1550e-9; round(traffic * 1e9 * photons * E / frac / 0.25 * 1000, digits=2) end` milliwatts. That is less than a small diode. The terminal is the lens, a mirror and a detector. Say that bench weighs !`laser_box = 1.5kg`. Above 1 watt it adds !`sink = 20g` for each watt. The laser weighs !`laser_kg = round(laser_box / 1kg + max(0, need_mw / 1000 - 1) * (sink / 1kg), digits=2)` kg. The radio carries this satellite's share, !`own_mbps = round(traffic / nsat * 1000, digits=2)` megabits a second. Say it weighs !`ground_radio = 1kg`. The radios weigh !`radios = laser_kg * 1kg + ground_radio`. Say the bench costs !`bench = 8000USD`. The diode costs !`diode = 100USD/W`, and the smallest one is 50 milliwatts. The radio costs !`radio_price = 2000USD`. The set costs !`cost_radios = bench + diode * max(need_mw / 1000, 0.05) * 1W + radio_price`. A catalog terminal is built to cross thousands of kilometres. This hop does not need one.
-- The thrusters fly the last burn, the one that drops the near point of the orbit. That burn is !`deorbit` metres a second. At !`isp` seconds of push, the fuel on one satellite is !`fuel_kg = let rest = (cells * array_area + booms / 1kg * array_area + radiator * array_area * rad_use / 100) / nsat + computers * one / 1kW + (frame + converters + pumps + pointing + radios) / 1kg; round(rest * (exp(deorbit / (isp * 9.80665)) - 1), digits=1) end` kg. A thruster of this push cannot throw that burn in one minute. It runs for months. Say it draws !`thrust_kw = 1` kilowatt, and half of that becomes the speed of the exhaust. The burn then takes !`burn_days = round(fuel_kg * (isp * 9.80665)^2 / (thrust_kw * 1000) / 86400, digits=0)` days. The head is a ceramic channel, magnets and a cathode. Say it weighs !`head = 3kg` and costs !`head_price = 2000USD`. That is the metal and the ceramic at a mass-produced price. A catalog thruster costs far more. Its power supply weighs !`ppu_kg = 1 * thrust_kw` kg and costs the same !`ppu_price = 0.50USD/W` a watt as the converters. The tank weighs !`tank_of_fuel = 20Percent` of the fuel. That is !`tank_kg = round(float(tank_of_fuel) * fuel_kg, digits=1)` kg, at !`tank_price = 200USD/kg`. The thrusters weigh !`thrusters = head + ppu_kg * 1kg + tank_kg * 1kg`. The set costs !`cost_thrust = head_price + ppu_price * thrust_kw * 1kW + tank_price * tank_kg * 1kg`.
+- Each satellite has a laser to the next one, and a small radio to the ground. It has no big antenna. A Starlink satellite carries one, to reach a dish. The fleet flies in !`planes = 1` ring. The next satellite is !`gap = round(2 * 3.1416 * (6378 + alt / 1km) / (nsat / planes), digits=1)` km away. The laser's lens is !`lens = 20mm` across. At that range its beam is !`spot = let L = gap * 1000, D = lens / 1m; round(1.22 * 1550e-9 / D * L, digits=2) end` metres across. A token is about !`token = 16` bits of text, 2 bytes.[^19] At !`joules` a token, the computers write !`bits = round(token / float(joules / 1J), digits=1)` bits each second for each watt. The fleet's results are then !`traffic = round(bits * compute / 1W / 1e9, digits=1)` gigabits a second, and this laser carries all of them along the ring. Say !`photons = 20` photons land in each bit, and a quarter of the light gets through. The laser must then shine !`need_mw = let D = lens / 1m, frac = min(1, (D / spot)^2), E = 6.626e-34 * 2.998e8 / 1550e-9; round(traffic * 1e9 * photons * E / frac / 0.25 * 1000, digits=2) end` milliwatts. That is less than a small diode. The terminal is the lens, a mirror and a detector. Say that bench weighs !`laser_box = 1.5kg`. Above 1 watt it adds !`sink = 20g` for each watt. The laser weighs !`laser_kg = round(laser_box / 1kg + max(0, need_mw / 1000 - 1) * (sink / 1kg), digits=2)` kg. The radio carries this satellite's share, !`own_mbps = round(traffic / nsat * 1000, digits=2)` megabits a second. Say it weighs !`ground_radio = 1kg`. The radios weigh !`radios = laser_kg * 1kg + ground_radio`. Say the bench costs !`bench = 8000USD`. The diode costs !`diode = 100USD/W`, and the smallest one is 50 milliwatts. The radio costs !`radio_price = 2000USD`. The set costs !`cost_radios = bench + diode * max(need_mw / 1000, 0.05) * 1W + radio_price`. A catalog terminal is built to cross thousands of kilometres. This hop does not need one.
+- The thrusters fly the last spiral, down to !`spiral_to`. It takes !`deorbit` metres a second. At !`isp` seconds of push, the fuel on one satellite is !`fuel_kg = let rest = (cells * array_area + booms / 1kg * array_area + radiator * array_area * rad_use / 100) / nsat + computers * one / 1kW + (frame + converters + pumps + pointing + radios) / 1kg; round(rest * (exp(deorbit / (isp * 9.80665)) - 1), digits=1) end` kg. A thruster of this push can't do that in one short burn. It runs for months. Say it draws !`thrust_kw = 1` kilowatt, and half of that becomes the speed of the exhaust. The burn then takes !`burn_days = round(fuel_kg * (isp * 9.80665)^2 / (thrust_kw * 1000) / 86400, digits=0)` days. The head is a ceramic channel, magnets and a cathode. Say it weighs !`head = 3kg` and costs !`head_price = 2000USD`. That is the metal and the ceramic at a mass-produced price. A catalog thruster costs far more. Its power supply weighs !`ppu_kg = 1 * thrust_kw` kg and costs the same !`ppu_price = 0.50USD/W` a watt as the converters. The tank weighs !`tank_of_fuel = 20Percent` of the fuel. That is !`tank_kg = round(float(tank_of_fuel) * fuel_kg, digits=1)` kg, at !`tank_price = 200USD/kg`. The thrusters weigh !`thrusters = head + ppu_kg * 1kg + tank_kg * 1kg`. The set costs !`cost_thrust = head_price + ppu_price * thrust_kw * 1kW + tank_price * tank_kg * 1kg`.
 
 Together the body weighs !`bus = frame + converters + pumps + thrusters + pointing + radios`. The split is a guess.
 
@@ -186,11 +190,6 @@ One satellite costs !`sat_cost = hardware + cost_fit`. The !`nsat` copies cost !
 | Radiators | !`round(Int, radiator * array_area * rad_use / 100 / 1000)` |
 | Computers | !`round(Int, computers * compute / 1kW / 1000)` |
 | The body | !`round(Int, bus / 1kg * nsat / 1000)` |
-
-```chart
-kind: pie
-title: Where the fleet's weight goes
-```
 
 In all, the fleet weighs !`fleet = round((array_area * (cells + booms / 1kg + radiator * rad_use / 100) + computers * compute / 1kW + bus / 1kg * nsat) / 1000, sigdigits=3)` tonnes. That's !`round(panels / (fleet * 1ton) / (1W/kg), digits=1)` watts for each kilogram. One copy weighs !`sat_kg = round(Int, (cells * array_area + booms / 1kg * array_area + radiator * array_area * rad_use / 100) / nsat + computers * one / 1kW + bus / 1kg)` kg. The computers are !`round(Int, computers * one / 1kW)` kg of that.
 
@@ -212,12 +211,21 @@ Musk now says a later Starship will carry more than !`ship = 200` tonnes to a lo
 | Radios | !`round(Int, radios / 1kg)` | !`cost_radios` |
 | Joining and testing |  | !`cost_fit` |
 
+```columns
+2
+```
+
 ```chart
 kind: pie
 title: What one satellite costs
 show: Cost on one satellite
 ```
 
+```chart
+kind: pie
+title: Where the fleet's weight goes
+show: Kilograms on one satellite
+```
 This comes to !`round(convert(USD/W, build / panels), digits=2)` a watt. Philip Johnston, who runs Starcloud, says an AI satellite can cost less than $5 a watt, once the chips are left out.[^9] A big antenna is the main thing his satellite also leaves out.
 
 ## Keeping the height
@@ -230,11 +238,9 @@ Say the air in a busy solar year weighs !`thick = 1` times what it weighs in an 
 
 About 1% of the chips are left after !`life = let a = float(fail * 1yr), g = float(ageing), b = log(1 + g); round(g == 0 ? log(100) / a : log(1 + b / a * log(100)) / b, digits=1) end` years. By then the air has taken !`loss = let ρ = air / (1kg/m^3), A = array_area * float(ram), m = fleet * 1000, a_m = (6378 + alt / 1km) * 1000, v = sqrt(3.986e14 / a_m), acc = 0.5 * 2.2 * ρ * v^2 * A / m; round(acc * life * 365.25 * 86400, digits=1) end` metres a second, and the height has fallen !`fall = let a_m = (6378 + alt / 1km) * 1000, v = sqrt(3.986e14 / a_m); round(2 * a_m / v * loss / 1000, digits=1) end` km. !`fall < 100 ? "That is too little to need a reboost before the chips are gone." : "The fleet needs a reboost, or it leaves this height while chips are still working. The air thickens as it falls, so the real drop is larger than this."`
 
-At the end, one burn lowers the near point of the orbit to !`peri`, and the air does the rest. That burn takes !`deorbit` metres a second.
+At the end, the thrusters lower the fleet to !`spiral_to`, as the part on the satellite says. The air there takes about !`sink_rate = let h = spiral_to / 1km; xs = [400.0, 500.0, 600.0, 800.0, 1000.0, 1200.0, 1400.0]; ys = [-11.6, -12.3, -13.0, -14.0, -14.7, -15.4, -16.0]; h2 = min(xs[end], max(xs[1], h)); i = findfirst(x -> x >= h2, xs); y = i == 1 ? ys[1] : ys[i - 1] + (ys[i] - ys[i - 1]) * (h2 - xs[i - 1]) / (xs[i] - xs[i - 1]); ρ = thick * 10.0^y; A = array_area * float(ram); mass = fleet * 1000; a_m = (6378 + h) * 1000; v = sqrt(3.986e14 / a_m); acc = 0.5 * 2.2 * ρ * v^2 * A / mass; round(2 * a_m / v * acc * 86400 / 1000, digits=2) end` km a day off the height, and more as the fleet falls. The fuel for that spiral weighs !`fuel_kg` kg on each satellite. For the fleet that's !`propellant = round(fuel_kg * nsat / 1000, digits=1)` tonnes.
 
-The thrusters give !`isp` seconds of push from each second of their fuel. The fuel for the deorbit burn weighs !`propellant = round(fleet * (exp(deorbit / (isp * 9.80665)) - 1), digits=1)` tonnes.
-
-A lower orbit can fall on its own. Near 830 km the sun is about 97.5%, a little under the 98% above, and in an average year the fleet would reach the air in about 90 years. That is about when 1% of the chips are left. If the busy year above is 10 times as thick, that same orbit falls in about 9 years, while the chips are still working. One height cannot both last the full life of the chips and come down on its own in a reasonable amount of time, so the fleet needs a deorbit burn.
+A lower orbit can fall on its own. Near 830 km the sun is about 97.5%, a little under the 98% above, and in an average year the fleet would reach the air in about 90 years. By then, !`at_90 = let a = float(fail * 1yr), g = float(ageing); round(Int, 100 * (g == 0 ? exp(-a * 90) : exp(-a / log(1 + g) * ((1 + g)^90 - 1)))) end`% of the chips still work. If the busy year above is 10 times as thick, that same orbit falls in about 9 years, while the chips are still working. One height cannot both last the full life of the chips and come down on its own in a reasonable amount of time, so the fleet needs a deorbit burn.
 
 ## What orbit costs
 
@@ -242,7 +248,7 @@ Five amounts, added once. The prices are in US dollars.
 
 - **The satellites.** The !`nsat` copies cost !`build`. That is !`round(convert(USD/W, build / panels), digits=2)` for each watt the panels make. McCalip's Starlink figure is !`per_watt = 22USD/W` a watt.[^9]
 - **The computers.** They cost !`chip_bill` on this side, and the same on the ground.
-- **The launches.** A Falcon 9 costs a customer roughly $3,000 a kilogram. Say a Starship costs !`per_kg = 100USD/kg`. The fleet weighs !`fleet` tonnes. The launches cost !`launch = per_kg * fleet * ton`.
+- **The launches.** A Falcon 9 costs a customer roughly $3,000 a kilogram. Say a Starship costs !`per_kg = 200USD/kg`. The fleet weighs !`fleet` tonnes. The launches cost !`launch = per_kg * fleet * ton`.
 - **Keeping it running.** The fleet has two bills. The link is paid for the !`years` years of work at full size, because a chip that has failed sends nothing. The people are paid for !`life` years, until 1% of the chips are left.
 
   - **The link.** SpaceX already runs Starlink, so the fleet builds no ground stations. The radios are already in the body. Say the results average !`traffic` gigabit a second, which is !`round(traffic * 86400 / 8 / 1000, digits=1)` terabytes a day. Starlink's price for extra data is !`per_gb = 0.25USD` for each gigabyte.[^8] A customer would pay !`list = traffic * 365.25 * 86400 / 8 * per_gb / 1yr` a year for that stream. This fleet buys no dish and no share of the constellation. Say the extra cost on the network that already runs is !`own = 10Percent` of that price. At 100% the fleet pays the customer's price. The link costs !`link = list * own * years * yr`.
@@ -310,7 +316,7 @@ Southaven, across the state line from Memphis, feeds Colossus. Its permit is 41 
 
 Gas at !`gas` dollars for a million BTU is McCalip's 2025 forecast. Henry Hub is the US spot price for gas. It was $3.03 on 13 November 2026.[^18]
 
-Price that plant at $1,800 a kilowatt, with gas at $3.20 and 9,400 BTU for each kilowatt-hour. It costs !`alt_ground = plant + building + (9400 * 3.20 / 1000) * 1USD/MWh * station * ground_life * uptime`. That is !`round((float(alt_ground / ground) - 1) / float(1Percent), digits=0)`% !`alt_ground > ground ? "more" : "less"` than the plant in the sums. The two changes nearly cancel. The building is the large part of the cost, and the surveys support it.
+Price that plant at $1,800 a kilowatt, with gas at $3.20 and 9,400 BTU for each kilowatt-hour. It costs !`alt_ground = 1800USD/kW * (station + spares * 430MW) + building + chip_bill + (9400 * 3.20 / 1000) * 1USD/MWh * station * ground_life * uptime`. That is !`round((float(alt_ground / ground) - 1) / float(1Percent), digits=0)`% !`alt_ground > ground ? "more" : "less"` than the plant in the sums. Gas at $3.20 in those turbines costs $!`round(9400 * 3.20 / 1000, digits=2)` a megawatt-hour, against $!`fuel_mwh` in the sums. The building is the large part of the cost, and the surveys support it.
 
 Johnsen said SpaceX is cheaper because it does the engineering, the building and the power itself. A supplier had quoted 18 to 24 months for turbine blades, so SpaceX is casting its own.[^11] The sums have no line for that wait.
 
@@ -318,7 +324,7 @@ One reading of his gap does not fit the surveys. From about $55 a watt down to a
 
 ## Side by side
 
-The two don't do the same work. The fleet does !`energy` of work before it's gone. On the ground, the computers stop !`100Percent - uptime` of the time, when more turbines are down than the spares can cover. Over its !`round(Int, ground_life / 1yr)` years the station gives them !`energy_ground = convert(TWh, compute * ground_life * uptime)`. It's interesting to convert that to $/token though there is no standard energy to token conversion rate. Here we use !`joules = 0.6J` for each token.[^20]
+The two don't do the same work. The fleet does !`energy` of work before it's gone. On the ground, the computers stop !`100Percent - uptime` of the time, when more turbines are down than the spares can cover. Over its !`round(Int, ground_life / 1yr)` years the station gives them !`energy_ground = convert(TWh, compute * ground_life * uptime)`. It's interesting to convert that to $/token. Here we use the !`joules` for each token from the first section.
 
 | | What it costs | The work it does | Each billion tokens |
 |---|---|---|---|
@@ -345,7 +351,7 @@ Both sides buy the chips once, at the same price. The station on the ground last
 
 In orbit a dead chip stays dead, and the cells fade. Each year the fleet does only as much as the weaker of the cells and the chips. That still adds up to !`years` years at full size, which is !`work_ratio = round(years / full_ground, digits=1)` times the work on the ground.
 
-The computers on the ground stop because their gas station stops. The price includes one station, and that station lasts !`ground_life`. When it stops, the computers stop with it. After those years, !`still = let a = float(fail * 1yr), g = float(ageing), t = float(ground_life / 1yr); round(Int, 100 * (g == 0 ? exp(-a * t) : exp(-a / log(1 + g) * ((1 + g)^t - 1)))) end`% of the chips are still working.
+The computers on the ground stop because their power station stops. The price includes one station, and that station lasts !`ground_life`. When it stops, the computers stop with it. After those years, !`still = let a = float(fail * 1yr), g = float(ageing), t = float(ground_life / 1yr); round(Int, 100 * (g == 0 ? exp(-a * t) : exp(-a / log(1 + g) * ((1 + g)^t - 1)))) end`% of the chips are still working.
 
 The panels are already big enough to run every computer on the first day. The extra work comes from counting the fleet past this station.
 
@@ -356,10 +362,10 @@ Most of the fleet's work comes long after launch. Money spent at launch could ea
 Say the owner wants !`discount = 9.6Percent` a year back on its money.[^22] A token that comes $t$ years after launch is then worth $(1 + \text{discount})^{-t}$ of a token today. So the work, counted today, is
 
 $$
-\text{years today} = \int_0^{\infty} (1 + \text{discount})^{-t}\,\min\big(\text{power}(t),\ \text{working}(t)\big)\,dt
+\text{years today} = \text{sun} \int_0^{\infty} (1 + \text{discount})^{-t}\,\min\big(\text{power}(t),\ \text{working}(t)\big)\,dt
 $$
 
-The fleet's !`years` years at full size are worth !`years_now = let d = float(fade * 1yr), a = float(fail * 1yr), g = float(ageing), ρ = log(1 + float(discount)); round(0.05 * sum(exp(-ρ * t) * min(exp(-d * t), g == 0 ? exp(-a * t) : exp(-a / log(1 + g) * ((1 + g)^t - 1))) for t in 0.025:0.05:2000), digits=1) end` years today. The station's !`full_ground` years are worth !`ground_years_now = let ρ = log(1 + float(discount)), L = float(ground_life / 1yr); round(float(uptime) * (ρ == 0 ? L : (1 - exp(-ρ * L)) / ρ), digits=1) end` years today. So the fleet does !`round(years_now / ground_years_now, digits=1)` times the work of the ground, not !`work_ratio` times.
+The fleet's !`years` years at full size are worth !`years_now = let d = float(fade * 1yr), a = float(fail * 1yr), g = float(ageing), ρ = log(1 + float(discount)); round(float(sun) * 0.05 * sum(exp(-ρ * t) * min(exp(-d * t), g == 0 ? exp(-a * t) : exp(-a / log(1 + g) * ((1 + g)^t - 1))) for t in 0.025:0.05:2000), digits=1) end` years today. The station's !`full_ground` years are worth !`ground_years_now = let ρ = log(1 + float(discount)), L = float(ground_life / 1yr); round(float(uptime) * (ρ == 0 ? L : (1 - exp(-ρ * L)) / ρ), digits=1) end` years today. So the fleet does !`round(years_now / ground_years_now, digits=1)` times the work of the ground, not !`work_ratio` times.
 
 The bills move less, because most of them come first. Orbit pays for the satellites, the computers, the launches and the design before it starts. It pays for the link as the work is done, for the people each year, and for the deorbit fuel at the end. Counted today, orbit costs !`orbit_now = let ρ = log(1 + float(discount)); build + chip_bill + launch + design + link * years_now / years + people * (ρ == 0 ? 1 : (1 - exp(-ρ * life)) / (ρ * life)) + deorbit_cost * exp(-ρ * life) end`, not !`orbit`. The ground pays for its gas each year for !`round(Int, ground_life / 1yr)` years. Counted today, it costs !`ground_cost_now = let ρ = log(1 + float(discount)), L = float(ground_life / 1yr); plant + building + chip_bill + fuel * (ρ == 0 ? 1 : (1 - exp(-ρ * L)) / (ρ * L)) end`, not !`ground`.
 
@@ -375,6 +381,8 @@ kind: bars
 title: The net present value of each option
 show: Net present value
 ```
+
+## Footnotes
 
 > [!NOTE] Where these sums differ from McCalip's
 > His calculator keeps the fleet at full size for a set number of years. It pays each year to build again the hardware that breaks. This page launches the fleet once, lets it wear down, and counts the work that it does before it's gone.
@@ -415,7 +423,7 @@ show: Net present value
 
 [^20]: Measured figures differ by more than ten times. The first ones here count only the GPU, not the building. [Lead Green](https://leadgreen.ai/compare/) lines up the ML.ENERGY Leaderboard v3.0 for text chats, at each model's lowest measured energy, as of 19 October 2026. Llama 3.1 8B on one B200 used 13.0 watt-hours for a million tokens, about 0.05 joules a token. Llama 3.1 405B in FP8 on eight H100s used 572.9 watt-hours for a million tokens, about 2 joules a token. [ML.ENERGY](https://ml.energy/blog/measurement/energy/diagnosing-inference-energy-consumption-with-the-mlenergy-leaderboard-v30/) measured Qwen 3 32B on one B200: 0.151 joules a token for a chat at the largest batch, and 0.312 for a problem. On that problem, their 30-billion-parameter mixture-of-experts model used 3.56 times less energy for each token than the dense 32-billion-parameter model, which is about 28%. The models that people use most are bigger. Most of them are mixtures of experts too, so only part of the model runs for each token. DeepSeek R1 has 671 billion parameters, and 37 billion of them run for each token. SemiAnalysis's InferenceX compares it on a GB200 NVL72 rack and on H200 GPUs ([InferenceX](https://inferencex.semianalysis.com/compare/deepseek-r1-gb200-vs-h200)). The GB200 NVL72 writes about 3.2 million tokens a second for each megawatt when each user gets 65 tokens a second, and about 1.57 million at 133. A megawatt is a million joules a second, so those are about 0.31 and 0.64 joules a token. These two figures count the whole building. InferenceX counts the megawatts that the utility supplies, so the cooling and the power supply are in them ([its definition](https://inferencex.semianalysis.com/glossary/tokens-per-megawatt)). The site's figures change when it runs the tests again. Kimi K2 has 1.04 trillion parameters, and 32 billion of them run for each token. Nobody has published how much energy it uses.
 
-[^19]: One token of text is about 2 bytes, which is 16 bits. A busy H100 uses about 1 to 2 joules to write a token once the building's power is counted, and a well-packed run can be near 0.2 joules. SemiAnalysis, as collected by [SAVRN](https://savrn.com/blog/tokens-per-watt-per-dollar): about 540,000 tokens a second for each megawatt is 1.85 joules a token. [ML.ENERGY](https://ml.energy/blog/measurement/energy/diagnosing-inference-energy-consumption-with-the-mlenergy-leaderboard-v30/) measured 0.15 to 0.3 joules a token for one 32-billion-parameter model at a large batch. Sixteen bits in one joule is 16 bits each second for each watt.
+[^19]: One token of text is about 2 bytes, which is 16 bits. A busy H100 uses about 1 to 2 joules to write a token once the building's power is counted, and a well-packed run can be near 0.2 joules. SemiAnalysis, as collected by [SAVRN](https://savrn.com/blog/tokens-per-watt-per-dollar): about 540,000 tokens a second for each megawatt is 1.85 joules a token. [ML.ENERGY](https://ml.energy/blog/measurement/energy/diagnosing-inference-energy-consumption-with-the-mlenergy-leaderboard-v30/) measured 0.15 to 0.3 joules a token for one 32-billion-parameter model at a large batch.
 
 [^18]: Henry Hub spot price, weekly, from the US Energy Information Administration, as [FRED](https://fred.stlouisfed.org/series/WHHNGSP) publishes it. The reading for 13 November 2026 is $3.03 a million BTU. Front-month futures in the week of 23 November 2026 traded around $3.20 to $3.50. A data centre in Memphis pays a local pipeline price on top of Henry Hub. The sums do not add that.
 
