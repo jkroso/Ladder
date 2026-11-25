@@ -15,6 +15,10 @@ const px = K.px
 
 const dir = mktempdir()
 @eval K settings_file() = $(joinpath(dir, "settings"))
+# Each page from the web goes in the browser folder, which is the test's own: see "the browser folder" in main.jl
+K.BROWSER_FOLDER[] = joinpath(dir, "Browser")
+"The web address of the page that the window shows, or of the file at `path` of the browser folder"
+address(path=e.buf.path) = K.web_address(path)
 const ran = joinpath(dir, "ran")   # a file that the code of a page would make, if it ran
 
 # What the stand-in for a server has at each address: the kind of file, the number it answers with, the text, and where the address moved to
@@ -174,10 +178,13 @@ end
   frames()
   b = e.buf
   @test asked == ["https://example.com/notes.md"]
-  @test b.path == "https://example.com/notes.md" && b.view == :markdown
+  @test address(b.path) == "https://example.com/notes.md" && b.view == :markdown
   @test b.lines[5] == "# Notes" && b.lines[end-1] == "The end."
-  # It has no caret until a click puts one in it, and it's never written to the server
-  @test !b.fixed && K.caretless(b) && !K.writes(b) && !K.dirty(b)
+  # It's a file of the browser folder, at its place on its site, marked with its address and what the server sent
+  @test b.path == joinpath(dir, "Browser", "example.com", "notes.md") && read(b.path, String) == join(b.lines, "\n")
+  @test K.copied_from(b.path) == "https://example.com/notes.md" && !K.changed_here(b.path)
+  # It has no caret until a click puts one in it. ⌘S writes it to its file, and never to the server.
+  @test !b.fixed && K.caretless(b) && K.writes(b) && !K.dirty(b)
   # The top bar calls it by its address, and the sidebar's folder is as it was
   @test K.name(b) == "example.com/notes.md" && e.folder == ""
   # The front matter shows as a card, and the table as a table
@@ -190,17 +197,17 @@ end
   # A link to a page beside it: the server sends it as plain text, and its name says that it's Markdown
   K.follow!(e, "prices.md")
   frames()
-  @test e.buf.path == "https://example.com/prices.md" && e.buf.lines[1] == "# Prices"
-  @test asked[end] == "https://example.com/prices.md" && e.back == ["https://example.com/notes.md"]
+  @test address() == "https://example.com/prices.md" && e.buf.lines[1] == "# Prices"
+  @test asked[end] == "https://example.com/prices.md" && address.(e.back) == ["https://example.com/notes.md"]
   # Going back shows the page as it was, and asks the server for nothing
   n = length(asked)
-  @test K.go_back!(e) && e.buf.path == "https://example.com/notes.md" && length(asked) == n
-  @test K.go_forward!(e) && e.buf.path == "https://example.com/prices.md" && length(asked) == n
+  @test K.go_back!(e) && address() == "https://example.com/notes.md" && length(asked) == n
+  @test K.go_forward!(e) && address() == "https://example.com/prices.md" && length(asked) == n
   K.go_back!(e)
   # A link to a heading of another page, in the folder over the page's
   K.follow!(e, "../top.md#second")
   frames()
-  @test e.buf.path == "https://example.com/top.md" && asked[end] == "https://example.com/top.md"
+  @test address() == "https://example.com/top.md" && asked[end] == "https://example.com/top.md"
   i = findfirst(==("## Second"), e.buf.lines)
   @test e.scroll.offset > 0px && K.item(e, i).top - e.scroll.offset < 200px
   K.go_back!(e)
@@ -209,13 +216,13 @@ end
   n = length(asked)
   K.follow!(e, "#lower")
   frames()
-  @test e.buf.path == "https://example.com/notes.md" && length(asked) == n
+  @test address() == "https://example.com/notes.md" && length(asked) == n
   # A page of HTML shows the page that it makes, in the window, and ⌘⌥← comes back
   K.follow!(e, "https://julialang.org/")
   frames()
-  @test isempty(browsed) && e.buf.path == "https://julialang.org/" && K.html_shown(e) && said() == ""
+  @test isempty(browsed) && address() == "https://julialang.org/" && K.html_shown(e) && said() == ""
   K.go_back!(e); frames()
-  @test e.buf.path == "https://example.com/notes.md"
+  @test address() == "https://example.com/notes.md"
   # An address for email goes to the app for email
   K.follow!(e, "mailto:sam@example.com")
   @test browsed[end] == "mailto:sam@example.com"
@@ -223,15 +230,15 @@ end
   n, m = length(asked), length(browsed)
   K.follow!(e, "[[Ideas]]"); K.follow!(e, "file:///etc/hosts"); K.follow!(e, "/etc/hosts")
   frames()
-  # A path is from the top of the site, which has no such page. The browser shows what the site says of it.
-  @test asked[n+1:end] == ["https://example.com/etc/hosts"] && browsed[m+1:end] == ["https://example.com/etc/hosts"]
-  @test e.buf.path == "https://example.com/notes.md"
+  # A path is from the top of the site, which has no such page, and words say so
+  @test asked[n+1:end] == ["https://example.com/etc/hosts"] && browsed[m+1:end] == [] && said() == "example.com has no page at that address."
+  @test address() == "https://example.com/notes.md"
 end
 
 @testset "a click on a link opens it, in a paragraph and in a table" begin
   K.navigate!(e, "example.com/notes.md")
   frames()
-  @test e.buf.path == "https://example.com/notes.md"
+  @test address() == "https://example.com/notes.md"
   # The page has no caret, so a click with no key held opens the link that it's on
   i = findfirst(l -> occursin("[link beside]", l), e.buf.lines)
   it = K.item(e, i)
@@ -240,7 +247,7 @@ end
   y = e.origin[2] + it.top + it.content.above + line.top + line.high / 2
   @test K.link_on(e, (e.origin[1] + seg.x + seg.w / 2, y)) == "prices.md"
   K.press!(e, (e.origin[1] + seg.x + seg.w / 2, y)); frames()
-  @test e.buf.path == "https://example.com/prices.md"
+  @test address() == "https://example.com/prices.md"
   K.go_back!(e); frames()
   # A link in a cell of a table has its own lines of text, and opens as one in a paragraph does
   t = only(it for it in e.layout if it.content isa K.Grid)
@@ -255,7 +262,7 @@ end
   # The cell's other words, and the cell beside it, are on no link
   @test K.link_on(e, (x + seg.w, y)) === nothing && K.link_on(e, (e.origin[1] + K.cell_origin(g, r, 2)[1] + 20px, y)) === nothing
   K.press!(e, (x, y)); frames()
-  @test e.buf.path == "https://example.com/prices.md"
+  @test address() == "https://example.com/prices.md"
   K.go_back!(e); frames()
 end
 
@@ -264,19 +271,19 @@ end
   K.navigate!(e, "example.com/site/")
   frames()
   b = e.buf
-  @test b.path == "https://example.com/site/" && K.html_shown(e) && b.fixed && K.readonly(b) && K.name(b) == "example.com/site/"
-  # Ladder's own engine shows it, from the HTML that came, with no second request
+  # It's an HTML file of the browser folder: the page of the folder's address is its index.html
+  @test b.path == joinpath(dir, "Browser", "example.com", "site", "index.html") && read(b.path, String) == SITE["https://example.com/site/"].text
+  @test address(b.path) == "https://example.com/site/" && K.html_shown(e) && K.name(b) == "example.com/site/"
+  # Ladder's own engine shows it, from the HTML of the file, with its links and pictures from its address, and no second request
   v = e.nodes[(:html, b.path)]
-  @test v.browser.html == SITE["https://example.com/site/"].text && v.browser.base == b.path && asked[end] == b.path
+  @test v.browser.html == SITE["https://example.com/site/"].text && v.browser.base == "https://example.com/site/" && asked[end] == "https://example.com/site/"
   @test K.Browsers.title_of(v.browser.html) == "A site"
-  # It has two levels: the HTML that the server sent, and the page. ⌘E goes between them.
-  @test K.levels(e) == K.SERVED_LEVELS && K.level(e) == 2
+  # It has the levels of an HTML file, the page at the top. ⌘E goes to its HTML and back.
+  @test K.levels(e)[end] == "the page that the HTML makes" && K.level(e) == length(K.levels(e))
   press(Keys.e, Keys.cmd)
-  @test b.view == :text && K.level(e) == 1 && b.lines[1] == "<!DOCTYPE html><title>A site</title>" && !K.html_shown(e)
-  # A very long line of the HTML stops with an … at that level, and the page has all of it
-  i = findfirst(l -> startswith(l, "<p "), b.lines)
-  @test endswith(b.lines[i], "…") && length(b.lines[i]) == K.MOST_LINE + 1
+  @test e.buf.view == :text && e.buf.lines[1] == "<!DOCTYPE html><title>A site</title>" && !K.html_shown(e)
   press(Keys.e, Keys.cmd)
+  b = e.buf
   @test b.view == :file && K.html_shown(e)
   # A click on a link of the page goes where Ladder goes: a page of Markdown shows, and ⌘⌥← comes back
   frames(); v = e.nodes[(:html, b.path)]
@@ -287,31 +294,31 @@ end
   w.keys |= Keys.mouse_left; onkey(w, KeyPress{Keys.mouse_left}(0, w))
   w.keys ⊻= Keys.mouse_left; onkey(w, KeyRelease{Keys.mouse_left}(0, w))
   frames()
-  @test e.buf.path == "https://example.com/prices.md" && e.back[end] == "https://example.com/site/"
-  @test K.go_back!(e) && e.buf.path == "https://example.com/site/" && K.html_shown(e)
+  @test address() == "https://example.com/prices.md" && address(e.back[end]) == "https://example.com/site/"
+  @test K.go_back!(e) && address() == "https://example.com/site/" && K.html_shown(e)
   frames()
   # A page that the server doesn't name, whose name says HTML, shows too
   K.Browsers.follow!(e.nodes[(:html, e.buf.path)].browser, "https://example.com/site/more.html")
   frames()
-  @test e.buf.path == "https://example.com/site/more.html" && K.html_shown(e)
+  @test address() == "https://example.com/site/more.html" && K.html_shown(e)
   # A link to a place of the page scrolls there, and asks for nothing
   K.go_back!(e); frames()
   n = length(asked)
   K.Browsers.follow!(e.nodes[(:html, e.buf.path)].browser, "https://example.com/site/#low")
   frames()
-  @test e.buf.path == "https://example.com/site/" && length(asked) == n
-  # What the server says of a link that it has nothing for shows, as a browser shows it
+  @test address() == "https://example.com/site/" && length(asked) == n
+  # A link that the server has nothing for says so, and the window keeps its page. The browser folder keeps no page of it.
   K.Browsers.follow!(e.nodes[(:html, e.buf.path)].browser, "https://example.com/site/gone.html")
   frames()
-  @test e.buf.path == "https://example.com/site/gone.html" && K.html_shown(e) && isempty(browsed)
-  # A typed address that the server has nothing for says so, and the window keeps its page
+  @test address() == "https://example.com/site/" && said() == "example.com has no page at that address." && isempty(browsed)
+  @test !ispath(joinpath(dir, "Browser", "example.com", "site", "gone.html"))
+  # So does a typed address
   K.navigate!(e, "example.com/site/gone.html"); frames()
-  @test said() == "example.com has no page at that address."
+  @test said() == "example.com has no page at that address." && address() == "https://example.com/site/"
   # A PDF file opens in the browser, and the window keeps its page
-  K.go_back!(e); frames()
   K.Browsers.follow!(e.nodes[(:html, e.buf.path)].browser, "https://example.com/site/report.pdf")
   frames()
-  @test browsed == ["https://example.com/site/report.pdf"] && e.buf.path == "https://example.com/site/"
+  @test browsed == ["https://example.com/site/report.pdf"] && address() == "https://example.com/site/"
   empty!(browsed)
   # Reload Page asks again, and the page shows what came, at the level that showed
   press(Keys.e, Keys.cmd)
@@ -326,11 +333,11 @@ end
   # A server that keeps a page as Markdown and as HTML sends the Markdown, whatever the address ends in
   K.navigate!(e, "https://example.com/docs/")
   frames()
-  @test e.buf.path == "https://example.com/docs/" && e.buf.lines[1] == "# Docs" && K.name(e.buf) == "example.com/docs/"
+  @test address() == "https://example.com/docs/" && e.buf.lines[1] == "# Docs" && K.name(e.buf) == "example.com/docs/"
   # A page that moved shows under the address that it moved to
   K.navigate!(e, "example.com/old.md")
   frames()
-  @test e.buf.path == "https://example.com/new/home.md" && e.buf.lines[1] == "# New home"
+  @test address() == "https://example.com/new/home.md" && e.buf.lines[1] == "# New home"
   at = e.buf.path
   # Plain text whose name doesn't say Markdown isn't a page: the browser gets it, and words say so
   empty!(browsed)
@@ -357,7 +364,7 @@ end
   K.fetches["https://example.com/pictures/plan.png"] = nothing   # the picture couldn't be had, so `curl` isn't run for it
   frames(5)
   b = e.buf
-  @test b.path == "https://example.com/code.md"
+  @test address(b.path) == "https://example.com/code.md"
   @test !ispath(ran) && length(K.problems) == errors
   ks = K.kinds(b)
   lang(open) = ks[findfirst(==(open), b.lines)].lang
@@ -413,12 +420,12 @@ end
   typed("example.com/prices.md")
   @test K.finder_address(e) == "https://example.com/prices.md" && K.picker_none(e) == "Press Return to open example.com/prices.md"
   press(Keys.enter)
-  @test e.popup == :none && e.buf.path == "https://example.com/prices.md"
+  @test e.popup == :none && address() == "https://example.com/prices.md"
   # A window that's opened on an address shows its page
   e2 = K.build_editor("https://example.com/notes.md")
   w2 = Window(e2, size=(900px, 700px))
   foreach(_ -> frame(w2), 1:3)
-  @test e2.buf.path == "https://example.com/notes.md" && isempty(e2.back)
+  @test address(e2.buf.path) == "https://example.com/notes.md" && isempty(e2.back)
 end
 
 @testset "Navigate, in the command palette" begin
@@ -434,7 +441,7 @@ end
   shot("remote_navigate.png")
   # Return goes there at once, and the palette closes
   press(Keys.enter)
-  @test e.popup == :none && e.buf.path == "https://example.com/prices.md"
+  @test e.popup == :none && address() == "https://example.com/prices.md"
   # Navigate by its name asks for the address, and goes when Return gives it one, with no press of Run
   press(Keys.p, Keys.cmd, Keys.shft)
   typed("navig")
@@ -445,7 +452,7 @@ end
   typed("example.com/top.md")
   shot("remote_navigate_chip.png")
   press(Keys.enter)
-  @test e.popup == :none && e.buf.path == "https://example.com/top.md"
+  @test e.popup == :none && address() == "https://example.com/top.md"
   # ⌘L is Navigate's key: it asks for the address, as taking Navigate from the list does
   K.navigate!(e, "example.com/notes.md"); frames()
   press(Keys.l, Keys.cmd)
@@ -453,7 +460,7 @@ end
   @test e.popup == :commands && p.command !== nothing && p.command.name == :navigate
   typed("example.com/prices.md")
   press(Keys.enter)
-  @test e.popup == :none && e.buf.path == "https://example.com/prices.md"
+  @test e.popup == :none && address() == "https://example.com/prices.md"
   # ... and the line is selected with ⌘⇧L now
   keys = K.keys_now(e).of
   @test K.caps(first(keys[:navigate])) == "⌘L" && K.caps(first(keys[:select_line])) == "⌘⇧L"
@@ -477,7 +484,7 @@ end
   @test Remote.trail("https://example.com/") == [("example.com", "https://example.com/")]
   @test Remote.trail("https://example.com") == [("example.com", "https://example.com")]
   K.navigate!(e, "example.com/docs/my guide/start.md"); frames()
-  @test e.buf.path == "https://example.com/docs/my%20guide/start.md"
+  @test address() == "https://example.com/docs/my%20guide/start.md"
   # The bar shows the page's own name, as it shows a file's name, and the path has the rest
   @test K.bar_name(e) == "start.md"
   at((x, y)) = (w.mouse = typeof(w.mouse)(px(x), px(y)); onmouse(w, MouseMove(Vec2{px}(px(x), px(y)), w)); frames(1))
@@ -487,7 +494,7 @@ end
   @test showing()
   v = e.nodes[:title_trail]
   @test v.steps == [("example.com", "https://example.com/"), ("docs", "https://example.com/docs/"),
-                    ("my guide", "https://example.com/docs/my%20guide/"), ("start.md", "https://example.com/docs/my%20guide/start.md")]
+                    ("my guide", "https://example.com/docs/my%20guide/"), ("start.md", e.buf.path)]
   # A server doesn't say what's in a folder, so a › there lists nothing
   @test isempty(v.arrows)
   shot("remote_path.png")
@@ -501,15 +508,15 @@ end
   w.keys |= Keys.mouse_left; onkey(w, KeyPress{Keys.mouse_left}(0, w)); frames(1)
   w.keys ⊻= Keys.mouse_left; onkey(w, KeyRelease{Keys.mouse_left}(0, w)); frames(3)
   @test asked[n+1:end] == ["https://example.com/docs/"]
-  @test e.buf.path == "https://example.com/docs/" && K.bar_name(e) == "docs"
-  @test e.back[end] == "https://example.com/docs/my%20guide/start.md"
+  @test address() == "https://example.com/docs/" && K.bar_name(e) == "docs"
+  @test address(e.back[end]) == "https://example.com/docs/my%20guide/start.md"
   at((5, 400))
 end
 
 @testset "the › after a server's page searches the page" begin
   page!("https://example.com/guide.md", "# Guide\n\nIntro.\n\n## Tea\n\n" * "Words.\n\n"^60 * "## Milk\n\nThe milk is cold.\n\n- [ ] Buy milk\n")
   K.navigate!(e, "example.com/guide.md"); frames()
-  @test e.buf.path == "https://example.com/guide.md" && K.searchable(e)
+  @test address() == "https://example.com/guide.md" && K.searchable(e)
   at((x, y)) = (w.mouse = typeof(w.mouse)(px(x), px(y)); onmouse(w, MouseMove(Vec2{px}(px(x), px(y)), w)); frames(1))
   middle(node) = (r = rect(node); (K.num(r.left) + K.num(r.width) / 2, K.num(r.top) + K.num(r.height) / 2))
   mouse_click() = (w.keys |= Keys.mouse_left; onkey(w, KeyPress{Keys.mouse_left}(0, w)); frames(1); w.keys ⊻= Keys.mouse_left; onkey(w, KeyRelease{Keys.mouse_left}(0, w)); frames(2))
@@ -530,7 +537,7 @@ end
   @test [r.m.text for r in s.rows if r.kind == :thing] == ["The milk is cold."]
   press(Keys.enter)
   @test !any(p -> p.key == K.TS_KEY, popups(w))
-  @test e.buf.path == "https://example.com/guide.md" && e.buf.caret[1] == findfirst(==("The milk is cold."), e.buf.lines)
+  @test address() == "https://example.com/guide.md" && e.buf.caret[1] == findfirst(==("The milk is cold."), e.buf.lines)
   shot("remote_search_found.png")
   # The page has no caret to show, so it scrolls to bring the line in sight
   @test e.scroll.offset > 0px
@@ -554,7 +561,7 @@ end
   # An address that ends as Markdown's does is asked for, and shows in the window
   @test K.reads_here(e, "https://example.com/notes.md") && !K.reads_here(e, "https://julialang.org/") && !K.reads_here(e, "notes.md")
   K.follow!(e, "https://example.com/notes.md"); frames()
-  @test e.buf.path == "https://example.com/notes.md" && e.back[end] == mine
+  @test address() == "https://example.com/notes.md" && e.back[end] == mine
   # The sidebar goes on listing your folder, and going back shows your page
   @test e.folder == dir
   @test K.go_back!(e) && e.buf.path == mine
@@ -617,7 +624,7 @@ end
     # You haven't said whether the site may run code, so the page shows its code, and Ladder asks you once
     K.navigate!(e, "sums.example.com/page.md"); frames(5)
     b = e.buf
-    @test b.path == "$site/page.md"
+    @test address(b.path) == "$site/page.md"
     @test asks == [site] && K.site_runs(site) === false
     @test K.foreign(b.path) && sheets() == 0 && K.made(e, "twice", 3) == ("twice", false)
     out = K.run_code(e, "1 + 1")
@@ -670,10 +677,10 @@ end
   K.site_runs!(site, true)
   try
     K.navigate!(e, "views.example.com/a/page.md"); frames(8)
-    @test e.buf.path == "$site/a/page.md" && length(views()) == 2
+    @test address() == "$site/a/page.md" && length(views()) == 2
     v, gone = views()
     # The copy has the file's own name, and it's marked as a copy of the file at its address
-    @test v.target == K.VIEW_COPIES[url] && basename(v.target) == "model.jl" && startswith(v.target, K.view_copies_dir())
+    @test v.target == K.VIEW_COPIES[url] && v.target == joinpath(dir, "Browser", "views.example.com", "a", "model.jl")
     @test read(v.target, String) == SITE[url].text && K.copied_from(v.target) == url
     @test K.view_made(v) && v.made.value == "n is 6"
     # A file that the server hasn't got says so in its block
@@ -686,7 +693,7 @@ end
     @test e.buf.path == v.target && K.web_address(e.buf.path) == url && e.folder == folder
     @test K.trail_steps(e.buf.path) == [("views.example.com", "$site/"), ("a", "$site/a/"), ("model.jl", url)]
     @test K.web_address(joinpath(dir, "mine.md")) == "" && K.trail_steps("$site/a/page.md")[end] == ("page.md", "$site/a/page.md")
-    @test K.go_back!(e) && e.buf.path == "$site/a/page.md"
+    @test K.go_back!(e) && address() == "$site/a/page.md"
     frames()
     # Reload Page asks for the file again
     n = count(==(url), asked)
@@ -704,43 +711,61 @@ end
   end
 end
 
-# You can change a page from a web server, as a page of your own, but Ladder never writes it to the server.
-# A click on a link still opens it.
-@testset "you can change a page from a server, and the window keeps the changes" begin
-  K.navigate!(e, "example.com/notes.md"); frames()
-  b = e.buf
-  @test b.path == "https://example.com/notes.md" && !K.dirty(b) && K.caretless(b)
-  was = copy(b.lines)
-  # A click on words that aren't a link puts the caret there, and the keys type
-  i = findfirst(l -> occursin("[link beside]", l), b.lines)
-  it = K.item(e, i)
-  line = it.content.lines[1]
-  seg = line.segs[1]
-  K.press!(e, (e.origin[1] + seg.x + 1px, e.origin[2] + it.top + it.content.above + line.top + line.high / 2)); frames()
-  @test !K.caretless(b) && b.caret[1] == i && e.buf === b
-  b.caret = b.anchor = (i, 0)
-  typed("Mine. ")
-  @test b.lines[i] == "Mine. " * was[i] && K.dirty(b)
-  # Nothing writes it anywhere: not ⌘S in a window that has no panel, and not leaving the window with autosave on
-  autosave = e.autosave
-  e.autosave = true
+# You can change a page from a web server, as a page of your own: it's a file of the browser folder. ⌘S writes your
+# changes there, and never to the server. A click on a link still opens it. See "the browser folder" in main.jl.
+@testset "you can change a page from a server, and it stays as you changed it" begin
+  url = "https://example.com/notes.md"
+  first = SITE[url].text
+  asks = Tuple{String,String}[]
+  answer = Ref(false)
+  was_asker = K.RELOAD_ASKER[]
+  K.RELOAD_ASKER[] = (path, address) -> (push!(asks, (path, address)); answer[])
   try
-    K.left!(e); K.save!(b); K.save_page!(e); frames()
+    K.navigate!(e, "example.com/notes.md"); frames()
+    b = e.buf
+    path = b.path
+    @test address() == url && !K.changed_here(path)
+    was = copy(b.lines)
+    # A click on words that aren't a link puts the caret there, and the keys type
+    b.reading = true
+    i = findfirst(l -> occursin("[link beside]", l), b.lines)
+    it = K.item(e, i)
+    line = it.content.lines[1]
+    seg = line.segs[1]
+    K.press!(e, (e.origin[1] + seg.x + 1px, e.origin[2] + it.top + it.content.above + line.top + line.high / 2)); frames()
+    @test !K.caretless(b) && b.caret[1] == i && e.buf === b
+    b.caret = b.anchor = (i, 0)
+    typed("Mine. ")
+    mine = "Mine. " * was[i]
+    @test b.lines[i] == mine && K.dirty(b)
+    # ⌘S writes it to its file, and asks the server nothing
+    n = length(asked)
+    K.save_page!(e); frames()
+    @test !K.dirty(b) && read(path, String) == join(b.lines, "\n") && K.changed_here(path) && length(asked) == n
+    # Another page and back: the page shows as you changed it. The server has nothing new, so Ladder asks you nothing.
+    K.follow!(e, "prices.md"); frames()
+    K.get_page!(e, url); frames()
+    @test e.buf.path == path && e.buf.lines[i] == mine && length(asked) == n + 2 && isempty(asks)
+    # The server has something new: Ladder asks you whether to show it. No keeps your changes, and the same new
+    # page isn't asked about again.
+    page!(url, replace(first, "The end." => "The new end."))
+    K.get_page!(e, url); frames()
+    @test asks == [(path, url)] && e.buf.lines[i] == mine && K.changed_here(path)
+    K.get_page!(e, url); frames()
+    @test length(asks) == 1 && e.buf.lines[i] == mine
+    # Reload Page asks whenever you changed it. Yes shows what the site has, in the file and in the window.
+    answer[] = true
+    K.reload_page!(e); frames()
+    @test length(asks) == 2 && e.buf.path == path && e.buf.lines[i] == was[i] && "The new end." in e.buf.lines
+    @test !K.dirty(e.buf) && !K.changed_here(path)
+    # A page that you didn't change takes what the server sends, and nothing asks
+    page!(url, first)
+    K.get_page!(e, url); frames()
+    @test e.buf.lines == was && length(asks) == 2 && !K.changed_here(path)
   finally
-    e.autosave = autosave
+    K.RELOAD_ASKER[] = was_asker
+    page!(url, first)
   end
-  @test K.dirty(b) && !ispath("https:") && !ispath(joinpath(dir, "https:")) && K.copying(e) === nothing
-  # Another page and back, by a link or by ⌘⌥←, shows the page as you changed it, and asks the server for nothing
-  K.follow!(e, "prices.md"); frames()
-  @test e.buf.path == "https://example.com/prices.md"
-  n = length(asked)
-  K.get_page!(e, "https://example.com/notes.md"); frames()
-  @test e.buf === b && b.lines[i] == "Mine. " * was[i] && length(asked) == n
-  K.follow!(e, "prices.md"); frames()
-  @test K.go_back!(e) && e.buf === b && length(asked) == n + 1
-  # Reload Page asks again, and the page is as the server has it
-  K.reload_page!(e); frames()
-  @test e.buf.path == "https://example.com/notes.md" && e.buf.lines == was && !K.dirty(e.buf) && length(asked) == n + 2
 end
 
 # This test set is last. Once the palette has been used over a page of the Mac, the next hover on the
@@ -756,7 +781,7 @@ end
   # A path shows its file, and the page from the server is the one that ⌘⌥← goes back to
   n = length(asked)
   K.navigate!(e, plan); frames()
-  @test e.buf.path == plan && e.buf.lines[1] == "# Plan" && e.back[end] == "https://example.com/notes.md" && length(asked) == n
+  @test e.buf.path == plan && e.buf.lines[1] == "# Plan" && address(e.back[end]) == "https://example.com/notes.md" && length(asked) == n
   # A path from the page's folder, and one with other capitals, which goes to the file as the Finder names it
   K.navigate!(e, "other.md"); frames()
   @test e.buf.path == other
@@ -778,7 +803,7 @@ end
   # From a page of the web, a name that isn't an address is no path
   K.navigate!(e, "example.com/notes.md"); frames()
   K.navigate!(e, "plan.md"); frames()
-  @test e.buf.path == "https://example.com/notes.md" && occursin("isn't a file, a folder or a web address", said())
+  @test address() == "https://example.com/notes.md" && occursin("isn't a file, a folder or a web address", said())
   # A path that's typed in the list of commands has Navigate first, and Return goes there
   rows() = K.palette_rows(e, K.palette(e))
   press(Keys.p, Keys.cmd, Keys.shft)
@@ -799,4 +824,5 @@ end
 end
 
 K.PAGE_GETTER[], K.BROWSER[] = was_getter, was_browser
+K.BROWSER_FOLDER[] = ""
 foreach(url -> delete!(K.fetches, url), filter(startswith("https://example.com/"), collect(keys(K.fetches))))

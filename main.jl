@@ -924,16 +924,17 @@ you let the page's site run code. A block that would run code, like a `ui`
 block or a sum in a line of text, shows as its code. See "a copy of a page
 from a web server" and "a web folder's own page".
 """
-foreign(path::AbstractString) = Eml.isemail(path) || ((isremote(path) || !isempty(copied_from(path))) && site_runs(page_site(path)) !== true)
+foreign(path::AbstractString) = Eml.isemail(path) ||
+  ((isremote(path) || in_browser(path) || !isempty(copied_from(path))) && site_runs(page_site(path)) !== true)
 
 "The site that the page at `path` is from, like https://example.com: the site of a page from a web server or of a copy of one, or \"\""
-page_site(path::AbstractString) = isremote(path) ? web_site(path) : (from = copied_from(path); isempty(from) ? "" : web_site(from))
+page_site(path::AbstractString) = (at = web_address(path); isempty(at) && (at = copied_from(path)); isempty(at) ? "" : web_site(at))
 
 "True when the page shows no caret and no key changes it: after Escape, and all the time in a page that's never changed"
 caretless(b::Buffer) = b.reading || b.fixed
 
 "True when a click with no key held on a link of the page `b` opens the link: in a page that's never changed, and in a page from a web server"
-follows_links(b::Buffer) = b.fixed || isremote(b.path)
+follows_links(b::Buffer) = b.fixed || in_browser(b.path)
 
 const stamp = Ref(0)
 
@@ -1109,7 +1110,7 @@ string_open(b::Buffer, i::Int, text::AbstractString) =
   1 <= i <= length(b.lines) && same_text(b.lines[i], String(text)) ? string_opens(b)[i] : '\0'
 
 dirty(b::Buffer) = b.version != b.saved
-name(b::Buffer) = isempty(b.path) ? "Untitled" : isremote(b.path) ? Remote.label(b.path) : basename(b.path)
+name(b::Buffer) = isempty(b.path) ? "Untitled" : (at = web_address(b.path); isempty(at) ? basename(b.path) : Remote.label(at))
 selecting(b::Buffer) = b.caret != b.anchor
 """
 The two ends of the selection, first end first. A selection that covers several
@@ -1198,8 +1199,8 @@ redo!(b::Buffer) = isempty(b.redo) || (push!(b.undo, snapshot(b)); restore!(b, p
 True when the lines of `b` are what its file holds, so they can be written to
 it. The lines of a file that's only shown can be a part of the file, or its
 bytes. The lines of an email are the email as a page, which isn't what its file holds.
-A page from a web server has no file: you can change it, but Ladder never writes
-it to the server. ⌘S saves a copy of it on the Mac instead: see `save_copy!`.
+A page from a web server is a file of the browser folder: ⌘S writes your changes
+there, and never to the server. See "the browser folder".
 """
 writes(b::Buffer) = !(isempty(b.path) || readonly(b) || b.fixed || Eml.isemail(b.path) || isremote(b.path))
 
@@ -1750,7 +1751,7 @@ from a web server is a `WebPage`, in the web folders that it's in.
 """
 text_object(e) = begin
   path = e.buf.path
-  isremote(path) && return web_page(path)
+  (at = web_address(path); isempty(at)) || return web_page(at)
   haskey(e.entries, path) && return e.entries[path]
   kept = get(e.nodes, :text_object, nothing)
   kept !== nothing && kept[1] == path && time() - kept[2] < 1 && return kept[3]
@@ -1806,7 +1807,7 @@ open!(e, path; record=true) = begin
   isremote(path) && !haskey(e.buffers, path) && return get_page!(e, path; record)
   leave_page!(e, path; record)
   e.buf = get!(e.buffers, path) do
-    isfile(path) ? load(path) : isdir(path) ? Buffer(path=path, view=:file) : Buffer(path=path)
+    isfile(path) ? (in_browser(path) ? web_buffer(path) : load(path)) : isdir(path) ? Buffer(path=path, view=:file) : Buffer(path=path)
   end
   add_tab!(e)   # the file stays open as a tab in the sidebar until ⌘W closes it
   delete!(e.nodes, :new_tab)   # a file that shows in a new tab takes the tab's place
@@ -5375,7 +5376,6 @@ table of the other. So has an HTML file: the page that its HTML makes.
 """
 file_views(b::Buffer) = begin
   (b.view in FILE_VIEWS && !isdir(b.path)) || return ()   # a folder that shows in the page has one way to show
-  served_html(b) && return SERVED_VIEWS   # a page of HTML from a web server has no file of bits and bytes
   (json_page(b) || html_page(b) || term_page(b)) && return FILE_VIEWS
   ext = lowercase(splitext(b.path)[2])
   ext in TABLES ? (text_file(b.path) ? FILE_VIEWS : ()) :
@@ -5900,8 +5900,6 @@ end
 "Show the file of the page at the level `view`: :bits, :hex, :text, or :file for the tree of a JSON file and the table of a CSV file"
 file_level!(e, view::Symbol) = begin
   b = e.buf
-  # A page of HTML from a web server has its HTML already, at each of its levels
-  served_html(b) && return (b.view = view; b.caret = b.anchor = (1, 0); b.saved = b.version += 1; e.scroll.offset = 0px; focus(e); e)
   at = place_in_file(e)
   # A terminal writes its file a moment after its shell writes. It writes it now, so that the file's text is what the terminal shows.
   term_page(b) && (v = get(e.nodes, (:term, b.path), nothing); v === nothing || Terms.save!(v))
@@ -10154,10 +10152,9 @@ chart_h(v::ScheduleView) = (rows = DATES_H + TASK_H * length(v.tasks); px(v.full
 Write the page to its file. A task that was renamed in the page since its
 schedule was last written gets its new name in the schedule first, so that the
 file's schedule names the tasks as the file's to-do items do. A page from a web
-server has no file: it's saved as a copy that you can change, with `save_copy!`.
+server is a file in the browser folder, so it's written there and never to the server.
 """
 save_page!(e) = begin
-  isremote(e.buf.path) && return save_copy!(e)   # a page from a web server is saved as a copy that you can change
   write_blocks!(e)   # what a block that a file defines holds now goes into its lines
   for (key, node) in collect(e.nodes)
     (node isa ScheduleView && key[2] == e.buf.path) || continue
@@ -23090,7 +23087,7 @@ True when the page shows an HTML file at one of its levels: as its page, its
 text, its bytes in hexadecimal or its bits. A page of HTML from a web server
 counts too: see "a page from a web server".
 """
-html_page(b::Buffer) = b.view in FILE_VIEWS && (served_html(b) || lowercase(splitext(b.path)[2]) in HTMLS && isfile(b.path) && text_file(b.path))
+html_page(b::Buffer) = b.view in FILE_VIEWS && lowercase(splitext(b.path)[2]) in HTMLS && isfile(b.path) && text_file(b.path)
 
 "True when the page shows an HTML file as the page that its HTML makes"
 html_shown(e) = e.buf.view == :file && html_page(e.buf)
@@ -23107,25 +23104,27 @@ html_part(e) = node!(() -> HTMLPage(path=e.buf.path), e, (:html, e.buf.path))
 
 """
 The Browser of `v`, which gets the file and the files that it names, and shows
-the page. A page from a web server came already: the Browser gets the files
-that it names, and a link of the page goes where Ladder goes, so ⌘⌥← comes back.
+the page. A page of the browser folder is from its web address: the Browser
+gets the files that it names from there, and a link of the page goes where
+Ladder goes, so ⌘⌥← comes back.
 """
 html_browser(v::HTMLPage) = begin
   v.browser === nothing || return v.browser
   e = editor(v)
   files = Webfiles.Files(getter=(a...) -> WEB_GETTER[](a...), online=() -> web_online(e))
-  isremote(v.path) && return v.browser = own!(v, Browsers.Browser(html=get(SERVED_HTML, v.path, ""), base=v.path, files=files,
-                                                                  open=url -> BROWSER[](url), leads=url -> follow_remote!(e, url)))
   v.read = mtime(v.path)
+  in_browser(v.path) && return v.browser = own!(v, Browsers.Browser(html=read(v.path, String), base=web_address(v.path), files=files,
+                                                                    open=url -> BROWSER[](url), leads=url -> follow_remote!(e, url)))
   v.browser = own!(v, Browsers.Browser(address=v.path, files=files, open=url -> BROWSER[](url)))
 end
 
 describe(v::HTMLPage) = begin
   e = editor(v)
   b = html_browser(v)
-  # A file that changed on the disk shows afresh, as after a browser's reload
-  at = isremote(v.path) ? v.read : mtime(v.path)
-  at == v.read || (v.read = at; Browsers.reload!(b))
+  # A file that changed on the disk shows afresh, as after a browser's reload. A page of the browser folder has its HTML
+  # from the file, so it gets a new Browser.
+  at = mtime(v.path)
+  at == v.read || (v.read = at; in_browser(v.path) ? (v.browser = nothing; b = html_browser(v)) : Browsers.reload!(b))
   carry_sums!(v, b)
   b.zoom = round(Float64(e.zoom), digits=2)
   b.wide, b.high = page_room(e)
@@ -23367,7 +23366,7 @@ address, and the block shows a copy of it: see `view_copy`.
 view_target(e, lines) = begin
   name = view_named(lines)
   isempty(name) && return ""
-  isremote(e.buf.path) && return view_copy(e, name)
+  in_browser(e.buf.path) && return view_copy(e, name)
   has_scheme(name) && return name
   path = abspath(docdir(e), expanduser(name))
   length(path) > 1 ? String(rstrip(path, '/')) : path
@@ -23384,29 +23383,17 @@ for each file once while it's open, and again when you reload its page.
 """
 const VIEW_COPIES = Dict{String,Any}()
 
-"The folder of the copies of the files that the `view` blocks of pages from web servers show"
-view_copies_dir() = joinpath(homedir(), "Library", "Caches", "Ladder", "views")
-
-"""
-The web address that the file at `path` is, for the window: the address of a
-page from a web server, and the address of the file that a view's copy is a
-copy of. The window shows such a copy as part of its site: its path in the top
-bar starts with the server's name, and the window's folder doesn't change.
-It's "" for any other file, a copy of a page that you saved too.
-"""
-web_address(path::AbstractString) = isremote(path) ? String(path) : startswith(path, view_copies_dir() * "/") ? copied_from(path) : ""
 
 "The names in the path to `path` in the top bar, each with where it goes, from the home folder or from a server's name"
 trail_steps(path::AbstractString) = (at = web_address(path); isempty(at) ? steps(path, home_folder()) : Remote.trail(at))
 
 """
-What a `view` block of the page from a web server that `e` shows names, when
-the block names `name`: the path of a copy on this Mac of the file `name`
-beside the page's address. The copy has the file's own name, so it shows as
-the file would. Until the file has come, `view_coming` says why the copy isn't
-there. A page of HTML and a folder are the address itself, which the block
-shows as a page of the web. It's "" for a name that's no address on the web,
-like a path of the Mac, and for a page that runs no code.
+What a `view` block of a page of the browser folder that `e` shows names, when
+the block names `name`: the file of the browser folder that keeps the file
+`name` beside the page's web address. Until the file has come, `view_coming`
+says why it isn't there. A page of HTML and a folder are the address itself,
+which the block shows as a page of the web. It's "" for a name that's no
+address on the web, like a path of the Mac, and for a page that runs no code.
 """
 view_copy(e, name::AbstractString) = begin
   foreign(e.buf.path) && return ""
@@ -23414,38 +23401,36 @@ view_copy(e, name::AbstractString) = begin
   url === nothing && return ""
   named = basename(Remote.unescaped(Remote.path(url)))
   (isempty(named) || lowercase(splitext(named)[2]) in HTMLS) && return url
-  file = joinpath(view_copies_dir(), string(hash(url), base=16), named)
+  file = browser_path(url)
+  file === nothing && return ""
   view_coming(e, url, file)
   file
 end
 
 """
-Why the copy at `file` of the file at the address `url` isn't there for the
-window of `e`, or nothing when it is. The first time, this asks the server for
-the file, when the window may ask the web. When the file comes, it goes in
-`file`, marked as a copy of `url`, so that it runs no code unless its site may.
+Why the file at `file` of the browser folder, which keeps the file at the
+address `url`, isn't there for the window of `e`, or nothing when it is. The
+first time while Ladder is open, this asks the server for the file, when the
+window may ask the web. A file that the browser folder has already shows while
+it comes. What comes takes its place, unless you changed it.
 """
 view_coming(e, url::AbstractString, file::AbstractString) = begin
   state = get(VIEW_COPIES, url, nothing)
   if state === nothing
-    page_online(e) || return "Ladder gets $(basename(file)) when the window shows."
-    rm(file, force=true)   # a copy from before is from an earlier time that Ladder was open
+    page_online(e) || return isfile(file) ? nothing : "Ladder gets $(basename(file)) when the window shows."
     state = VIEW_COPIES[url] = Remote.ask(url, getter=(a...) -> PAGE_GETTER[](a...))
   end
   if state isa Remote.Coming
     a = Remote.landed(state)
-    a === nothing && (redraw_in!(e, 0.1); return "Getting $(basename(file)) from $(Remote.host(url))…")
+    a === nothing && (redraw_in!(e, 0.1); return isfile(file) ? nothing : "Getting $(basename(file)) from $(Remote.host(url))…")
     if Remote.ok(a)
-      mkpath(dirname(file))
-      write(file, a.bytes)
-      mark_copy!(file, url)
+      changed_here(file) || keep_got!(file, url, a.bytes) === nothing || redraw_in!(e, 0)
       state = VIEW_COPIES[url] = file
-      redraw_in!(e, 0)
     else
       state = VIEW_COPIES[url] = a
     end
   end
-  state == file && return nothing
+  (state == file || isfile(file)) && return nothing
   state isa Remote.Answer && state.status == 404 && return "$(Remote.host(url)) has no $(basename(file))."
   "$(Remote.host(url)) didn't send $(basename(file))."
 end
@@ -23503,7 +23488,7 @@ describe(v::ViewBlock) = begin
   isempty(v.target) && !v.held &&
     return Column(block_look()..., name="View", block_note("Write the name of a file in this block, like plan.pdf, or the address of a page of the web"))
   # A page from a web server shows a copy of the file, which may still be on its way
-  if !v.held && isremote(e.buf.path) && !has_scheme(v.target)
+  if !v.held && in_browser(e.buf.path) && !has_scheme(v.target)
     url = remote_src(e, view_named(v.source))
     why = url === nothing ? nothing : view_coming(e, url, v.target)
     why === nothing || return Column(block_look()..., name="View", block_note(why))
@@ -24775,7 +24760,7 @@ wiki link to a page that isn't made yet.
 """
 linked_page(e, url::AbstractString) = begin
   startswith(url, '^') && return nothing   # a footnote
-  isremote(e.buf.path) && return nothing   # a page from a web server links to no page of the Mac
+  in_browser(e.buf.path) && return nothing   # a page from a web server links to no page of the Mac
   target = wikitarget(url)
   name, heading = if target !== nothing
     occursin('#', target) ? String.(split(target, '#', limit=2)) : (String(target), "")
@@ -26263,7 +26248,7 @@ cover_key(e, rows) = begin
   k === nothing && return nothing
   src = String(strip(rows[k][3], ['"', '\'', ' ']))
   isempty(src) && return nothing
-  isremote(e.buf.path) && (src = something(remote_src(e, src), ""); isempty(src) && return nothing)
+  in_browser(e.buf.path) && (src = something(remote_src(e, src), ""); isempty(src) && return nothing)
   path = startswith(src, r"https?://") ? fetched(e, src) : abspath(docdir(e), expanduser(src))
   path === nothing ? nothing : picture_key(path)
 end
@@ -28106,7 +28091,7 @@ end
 const TRANSCLUSION = r"^\s*!\[\[([^\]|]+)(?:\|[^\]]*)?\]\]\s*$"
 
 "True when line `i` holds only a link that shows a part of another page"
-transcludes(b::Buffer, i::Int) = (line = b.lines[i]; occursin("![[", line) && occursin(TRANSCLUSION, line) && !isremote(b.path))
+transcludes(b::Buffer, i::Int) = (line = b.lines[i]; occursin("![[", line) && occursin(TRANSCLUSION, line) && !in_browser(b.path))
 
 "How many parts of other pages can show inside each other: a part of a page that shows a part of a page that…"
 const DEEPEST_PART = 3
@@ -28712,7 +28697,7 @@ sidebar lists it. Anything else opens in the app that the Mac uses for it. A pat
 """
 follow!(e, url) = begin
   startswith(url, '^') && return follow_note!(e, url[2:end])
-  isremote(e.buf.path) && return follow_remote!(e, url)   # a link of a page from a web server is from the page's address
+  in_browser(e.buf.path) && return follow_remote!(e, url)   # a link of a page from a web server is from the page's address
   target = wikitarget(url)
   target === nothing || return follow_wiki!(e, target)   # a wiki link, like [[Ideas]]
   occursin('#', url) && follow_heading!(e, url) && return e   # a heading of a page, like welcome.md#tables
@@ -31529,10 +31514,8 @@ describe(t::TopBar) = begin
                       mode...,
                       outside...) :
                      (more..., job_part(e)..., agent_part(e)..., checks..., diff_part(e)..., commit_part(e)..., mode...,
-                      # A page that's never changed has a lock at the end. A page from a web server has a button that
-                      # saves a copy on the Mac, with your changes.
-                      (b.fixed ? (lock_part(e),) : ())...,
-                      copy_part(e)...))...))
+                      # A page that's never changed has a lock at the end
+                      (b.fixed ? (lock_part(e),) : ())...))...))
 end
 
 "The face of what a file that's only shown says of itself, in the top bar"
@@ -31663,7 +31646,6 @@ mode_part(e) = e.buf.view == :markdown || !isempty(file_views(e.buf)) || julia_f
 const FILE_VIEWS = (:bits, :hex, :text, :file)   # the ways that a file with levels shows, from the lowest level
 const FILE_LEVELS = ("the file's bits", "the file's bytes in hexadecimal", "the file's text")   # and the tree or the table over them
 const PAGE_LEVELS = ("the symbols of the part with the caret", "the graphics that the symbols make")
-const SERVED_LEVELS = ("the HTML that the server sent", "the page that the HTML makes")   # of a page of HTML from a web server
 const BLOCK_LEVELS = ("the symbols that make this", "the graphics that the symbols make")
 const LEVELS_KEY = :levels
 const STOP_W = 24px      # the room of the dot of a level between the two ends, with the line that goes through it
@@ -31709,7 +31691,6 @@ levels(d::Document) = begin
   b = e.buf
   views = file_views(b)
   isempty(views) && return full_block(e) === nothing ? PAGE_LEVELS : BLOCK_LEVELS
-  served_html(b) && return SERVED_LEVELS
   length(views) == 3 ? FILE_LEVELS : (FILE_LEVELS..., json_page(b) ? "the tree of the file's values" : html_page(b) ? "the page that the HTML makes" :
                                                     term_page(b) ? "the terminal that the file keeps" : "the file's table")
 end
@@ -32524,11 +32505,11 @@ The name that the top bar shows: the page's title, or the name of its file.
 A page from a web server has the last name of its address, like `City` or
 `notes.md`, as the path shows it, and the path starts with the server's name.
 """
-bar_name(e) = something(page_title(e), isremote(e.buf.path) ? Remote.trail(e.buf.path)[end][1] : name(e.buf))
+bar_name(e) = something(page_title(e), (at = web_address(e.buf.path); isempty(at) ? name(e.buf) : Remote.trail(at)[end][1]))
 
 onkey(t::Title, ::KeyPress{Keys.mouse_right}) = begin
   e = editor(t)
-  isempty(e.buf.path) || !isempty(web_address(e.buf.path)) || file_menu!(e, window_of(t), e.buf.path; at=:title)
+  isempty(e.buf.path) || isremote(e.buf.path) || file_menu!(e, window_of(t), e.buf.path; at=:title)
   handled
 end
 
@@ -32950,7 +32931,7 @@ onkey(a::TitleArrow, ev::KeyPress{Keys.mouse_left}) = (open_folder_list!(editor(
 # A right-click on a name shows the menu of its folder or file, as in the sidebar. Only the file's own name can be renamed in the bar.
 onkey(c::TitleCrumb, ev::KeyPress{Keys.mouse_right}) = begin
   e = editor(c)
-  isempty(web_address(c.path)) || return handled   # a page or a folder of a web server has no file menu
+  isremote(c.path) && return handled   # a folder of a web server has no file menu, but the file of the browser folder that shows has
   c.last ? file_menu!(e, ev.window, c.path; at=:title) : file_menu!(e, ev.window, c.path; items=filter(!=("Rename"), file_menu(c.path)))
   handled
 end
@@ -33318,7 +33299,7 @@ search_kind_name(k::Symbol) = k == :page ? "Page" : uppercasefirst(Searches.WHAT
 search_heading(s::TitleSearch) = s.under == 0 ? nothing : (i = findfirst(x -> x.line == s.under, outline(s.of, s.page)); i === nothing ? nothing : outline(s.of, s.page)[i])
 
 "The name of the page at `path` in the search: its file's name, or the last name of the address of a page from a web server"
-search_file_name(path) = isremote(path) ? Remote.trail(path)[end][1] : basename(path)
+search_file_name(path) = (at = web_address(path); isempty(at) ? basename(path) : Remote.trail(at)[end][1])
 
 "The name of the place where the search looks: its folder, as the path names it, its heading, or its file"
 search_place(s::TitleSearch) =
@@ -33671,9 +33652,9 @@ scope_options(s::TitleSearch) = begin
   heads = v isa TitleTrail ? [x for x in v.parts if x.level < 7] : Entry[]
   out = Any[(key=(:under, x.line), name=x.title, icon=x.icon, words=[x.title]) for x in reverse(heads)]
   named = search_file_name(s.page)
-  push!(out, (key=(:file, 0), name=named, icon=isremote(s.page) ? "file-earmark-text" : file_icon(s.page), words=[named]))
+  push!(out, (key=(:file, 0), name=named, icon=in_browser(s.page) ? "file-earmark-text" : file_icon(s.page), words=[named]))
   # A web server doesn't say what pages a folder has, so a page from one is searched by itself
-  isremote(s.page) && return out
+  in_browser(s.page) && return out
   for (n, p) in reverse(steps(dirname(s.page), home_folder()))
     push!(out, (key=(:folder, p), name=n, icon="folder", words=[n]))
   end
@@ -34938,7 +34919,7 @@ end
 tab_tree(e) = node!(() -> Tree.ListTree(guides=true, frame=false, arrows=false, onchoose=item -> choose_tab!(e, item.firstchild.path)), e, :tab_tree)
 
 "The name of the tab of `path`: the file's name, or the last name of the address of a page from a web server. A new tab has no file."
-tab_name(path) = isempty(path) ? "New Tab" : isremote(path) ? Remote.trail(path)[end][1] : basename(path)
+tab_name(path) = isempty(path) ? "New Tab" : (at = web_address(path); isempty(at) ? basename(path) : Remote.trail(at)[end][1])
 
 """
 The name of the folder that the file of a tab is in, when another tab has the
@@ -37869,15 +37850,20 @@ end
 const fetches = Dict{String,Any}()
 pictures_dir() = joinpath(homedir(), "Library", "Caches", "Ladder", "pictures")
 
-"The file that holds the picture at the web address `url`. It's nothing while the picture is fetched, and if it can't be."
+"""
+The file that holds the picture at the web address `url`. It's nothing while
+the picture is fetched, and if it can't be. The picture goes in the browser
+folder, at its place on its site: see "the browser folder". One that no file
+of that folder can keep goes in Ladder's own folder of pictures.
+"""
 fetched(e, url) = begin
-  file = joinpath(pictures_dir(), string(hash(url), base=16))
+  file = something(browser_path(url), joinpath(pictures_dir(), string(hash(url), base=16)))
   state = get(fetches, url, :none)
   if state === :none
     # A picture that an earlier window fetched is still there
     isfile(file) && filesize(file) > 0 && return (fetches[url] = file)
     state = fetches[url] = try
-      mkpath(pictures_dir())
+      mkpath(dirname(file))
       run(pipeline(`curl --silent --fail --location --max-time 30 --output $(file * ".part") $url`, stdout=devnull, stderr=devnull), wait=false)
     catch
       nothing
@@ -37886,7 +37872,10 @@ fetched(e, url) = begin
   state isa Base.Process || return state
   if process_exited(state)
     part = file * ".part"
-    return fetches[url] = success(state) && isfile(part) ? (mv(part, file, force=true); file) : nothing
+    (success(state) && isfile(part)) || return (fetches[url] = nothing)
+    mv(part, file, force=true)
+    in_browser(file) && keep_got!(file, url, read(file))
+    return fetches[url] = file
   end
   redraw_in!(e, 0.2)   # look again soon
   nothing
@@ -37898,7 +37887,7 @@ picture_item(e, i) = begin
   m === nothing && return nothing
   src = unescaped(String(m[2]))
   # A page from a web server names its pictures from its own address, and shows no file of the Mac
-  far = isremote(e.buf.path)
+  far = in_browser(e.buf.path)
   far && (src = something(remote_src(e, String(m[2])), ""); isempty(src) && return nothing)
   (note = media_note(e, i, src)) === nothing || return note   # a video or a sound that's on its way from the web
   if !far
@@ -38032,7 +38021,7 @@ draw(ctx, size, ui::ConcreteRect, v::HTMLBlock) = (v.page === nothing || Web.dra
 "The address that the HTML of the page names its pictures and links from: the page's own"
 html_base(e) = begin
   path = e.buf.path
-  isremote(path) && return path
+  (at = web_address(path); isempty(at)) || return at
   path = isempty(path) ? joinpath(docdir(e), "page.md") : abspath(path)
   "file://" * replace(path, '%' => "%25", ' ' => "%20", '#' => "%23", '?' => "%3F")
 end
@@ -38040,7 +38029,7 @@ end
 "The file of Ladder's own at the address `src`, or nothing. A page from a web server reads no other file."
 html_file(e, src) = begin
   path = Remote.unescaped(replace(src, r"^file://"i => ""))
-  (path in LADDER_FONT_FILES || !isremote(e.buf.path)) ? path : nothing
+  (path in LADDER_FONT_FILES || isempty(web_address(e.buf.path))) ? path : nothing
 end
 
 """
@@ -40081,7 +40070,7 @@ code runs, and after that until another window runs code in the module.
 """
 running_code(f, e) = begin
   foreign(e.buf.path) && error(Eml.isemail(e.buf.path) ? "An email runs no code." :
-                               isremote(e.buf.path) ? "A page from a web server runs no code until you let its site run code, with Run Site Code." :
+                               in_browser(e.buf.path) ? "A page from a web server runs no code until you let its site run code, with Run Site Code." :
                                "A copy of a page from a web server runs no code until you let its site run code.")
   m = workspace(e)
   isempty(e.buf.path) || (PAGE_WINDOWS[page_key(e.buf.path)] = e)
@@ -43308,6 +43297,7 @@ describe(e::Editor) = begin
   # A web folder's page runs then too, once its site may run code. See "a web folder's own page".
   isempty(WEB_PAGES_DUE) || run_web_folder_pages!()
   isempty(SITES_TO_ASK) || ask_site!(e)
+  haskey(e.nodes, :reload_ask) && ask_reload!(e)
   scene
 end
 
@@ -43326,7 +43316,6 @@ describe_window(e::Editor) = begin
   receive!(e)
   await_default!(e)
   remote_tick!(e)
-  copy_tick!(e)
   moved = refresh!(e.buf)
   moved === nothing || (stay!(e, moved); fresh!(e, moved))
   # The bars beside the lines that just changed fade, so the window is drawn again while they show
@@ -44607,34 +44596,153 @@ shown_only!(ks::Vector{Line}) = begin
   hid
 end
 
+# --- the browser folder ---
+#
+# Each page and file that Ladder gets from the web goes in the browser folder,
+# ~/Browser, at its place on its site: https://example.com/notes/plans.md is
+# example.com/notes/plans.md there. The window shows that file. Being in the
+# folder is what makes the file act as a page of the web: its links and
+# pictures are from its web address, a click on a link opens it, the path in
+# the top bar starts with the site's name, and its code runs only for a site
+# that you allow. You can change it, and ⌘S writes your changes to the file,
+# never to the server.
+#
+# Each file keeps its web address in the extended attribute `COPY_MARK`, and a
+# fingerprint of what the server sent in `GOT_MARK`, so Ladder knows when you
+# changed it. When you go to its address again, the file shows at once while
+# Ladder asks the server. What the server sends takes the file's place, unless
+# you changed the file and the server has something new: then Ladder asks you
+# first. Reload Page asks you whenever you changed the file.
+#
+# A page of Markdown ends in .md, and a page of HTML in .html: the page of
+# example.com/notes/ is notes/index.md. No name can start with a dot, so a
+# folder's .ladder page, which would run its code, is never in the folder:
+# see "a web folder's own page".
+
+"The browser folder of a test, or \"\" for ~/Browser"
+const BROWSER_FOLDER = Ref("")
+
+"The folder that keeps each page and file that Ladder gets from the web, at its place on its site"
+browser_folder() = isempty(BROWSER_FOLDER[]) ? joinpath(home_folder(), "Browser") : BROWSER_FOLDER[]
+
+"True when `path` is a file or a folder in the browser folder"
+in_browser(path::AbstractString) = !isempty(path) && startswith(path, browser_folder() * "/")
+
+"""
+The file of the browser folder that keeps what's at `address`, or nothing when
+no file can, as for a name that starts with a dot. A `page` of Markdown ends in
+.md, and a page of HTML (`html`) in .html. Any other file keeps its name.
+"""
+browser_path(address::AbstractString; page=false, html=false) = begin
+  host = lowercase(Remote.host(address))
+  (Remote.isaddress(address) && !isempty(host) && !startswith(host, '.') && !occursin('/', host)) || return nothing
+  rel = Remote.copy_path(address; page)
+  rel === nothing && return nothing
+  html && !(lowercase(splitext(rel)[2]) in HTMLS) && (rel *= ".html")
+  joinpath(browser_folder(), host, rel)
+end
+
+"""
+The web address that the file or the folder at `path` is, for the window: an
+address itself, and the address of a file or a folder of the browser folder.
+It's "" for any other path.
+"""
+web_address(path::AbstractString) = begin
+  isremote(path) && return String(path)
+  in_browser(path) || return ""
+  from = isfile(path) ? copied_from(path) : ""
+  isempty(from) || return from
+  # A file that has lost its mark, or a folder: its place in the folder says its address
+  parts = split(relpath(path, browser_folder()), '/')
+  rest = join(parts[2:end], '/')
+  isdir(path) ? (rest = isempty(rest) ? "" : rest * "/") : (rest = replace(rest, r"(^|/)index\.(md|html)$" => s"\1"))
+  "https://" * parts[1] * "/" * replace(rest, '%' => "%25", ' ' => "%20", '#' => "%23", '?' => "%3F")
+end
+
+"The file of the browser folder that keeps the page at `address` already, or nothing"
+saved_page(address::AbstractString) = begin
+  for path in (browser_path(Remote.bare(address), page=true), browser_path(Remote.bare(address), html=true))
+    path !== nothing && isfile(path) && return path
+  end
+  nothing
+end
+
+"The name of the extended attribute that holds the fingerprint of what the server last sent for a file of the browser folder"
+const GOT_MARK = APP_ID * ".got"
+
+"A fingerprint of `bytes`, to tell whether two files hold the same: FNV-1a, which is the same in every run of Ladder"
+fingerprint(bytes) = (h = 0xcbf29ce484222325; for x in bytes; h = (h ⊻ x) * 0x00000100000001b3; end; string(h, base=16))
+
+"The fingerprint of what the server last sent for the file at `path`, or \"\""
+got_mark(path::AbstractString) = (data = Mac.extra(path, GOT_MARK); data === nothing ? "" : String(data))
+
+"Keep `value` in the extended attribute `name` of the file at `path`"
+mark_file!(path, name, value) = (Sys.isapple() && ccall(:setxattr, Cint, (Cstring, Cstring, Ptr{UInt8}, Csize_t, UInt32, Cint),
+                                                         path, name, value, sizeof(value), 0, 0); nothing)
+
+"True when the file at `path` of the browser folder isn't what the server last sent: you changed it"
+changed_here(path::AbstractString) = isfile(path) && fingerprint(read(path)) != got_mark(path)
+
+"""
+Put `bytes`, what the server sent for `address`, in the file at `path` of the
+browser folder, marked with the address and the fingerprint of the bytes. It's
+the path, or nothing when the disk says no, as when a file has the name of a
+folder that the path needs.
+"""
+keep_got!(path, address, bytes) = try
+  mkpath(dirname(path))
+  read_now = isfile(path) ? read(path) : nothing
+  read_now == bytes || write(path, bytes)
+  mark_copy!(path, Remote.bare(address))
+  mark_file!(path, GOT_MARK, fingerprint(bytes))
+  path
+catch
+  nothing
+end
+
+"""
+A page of the browser folder at `path`, as a window first shows it: with no
+caret until a click puts one in it, so the keys scroll it, as a browser's do.
+The caret's place is after any front matter, as it is in a file, so the front
+matter shows as a card.
+"""
+web_buffer(path) = begin
+  b = load(path)
+  b.reading = true
+  b
+end
+
 "A page that the window of `e` has asked a web server for"
 mutable struct PageAsked
   address::String      # as it was asked for, with what follows a #
   coming::Any          # the Remote.Coming, or nothing until the window may ask the web
   record::Bool         # the page that leaves goes on the list that `go_back!` reads
   else_browser::Bool   # what isn't Markdown opens in the browser, and Ladder says nothing of it
-  again::Bool          # the page was here already, and this asks for it again
+  again::Bool          # the window shows the page already, and this asks for it again
+  reload::Bool         # Reload Page asked for it: Ladder asks you first if you changed the file
   since::Float64       # when it was asked for
 end
 
 """
-Ask the server for the page at `address`, and show it in the window of `e`
-when it has come. The window shows what it has until then. With
-`else_browser`, what turns out not to be Markdown opens in your browser with
-no words about it, as a link does. A page that's asked for while another is
-on its way takes its place.
+Ask the server for the page at `address`, and show it in the window of `e`.
+A page that the browser folder has already shows at once, and what the
+server sends takes its place when it comes: see "the browser folder". Else
+the window shows what it has until the page comes. With `else_browser`, what
+turns out not to be Markdown or HTML opens in your browser with no words
+about it, as a link does. A page that's asked for while another is on its
+way takes its place. `reload` is Reload Page's.
 """
-get_page!(e, address; record=true, else_browser=false, again=false) = begin
-  hosted(e) === nothing || return get_page!(top_editor(e), address; record, else_browser, again)   # a link in a part of another page
-  # A page that you changed in the window shows as you changed it, and the server isn't asked. Reload Page asks again.
-  had = get(e.buffers, Remote.bare(address), nothing)
-  if !again && had !== nothing && dirty(had)
-    open!(e, had.path; record)
+get_page!(e, address; record=true, else_browser=false, again=false, reload=false) = begin
+  hosted(e) === nothing || return get_page!(top_editor(e), address; record, else_browser, again, reload)   # a link in a part of another page
+  address = String(strip(address))
+  saved = again ? nothing : saved_page(address)
+  if saved !== nothing
+    open!(e, saved; record)
     heading = Remote.place(address)
-    isempty(heading) || go_heading!(e, had.path, heading)
-    return e
+    isempty(heading) || go_heading!(e, saved, heading)
+    record, again = false, true
   end
-  e.nodes[:page_asked] = PageAsked(String(strip(address)), nothing, record, else_browser, again, time())
+  e.nodes[:page_asked] = PageAsked(address, nothing, record, else_browser, again, reload, time())
   redraw_in!(e, 0)
   e
 end
@@ -44656,9 +44764,10 @@ remote_tick!(e) = begin
   got = Remote.landed(a.coming)
   if got === nothing
     # A page that comes at once shows with no words before it. The words stay for as long as the page takes.
+    # A page that shows already, from the browser folder, needs none, unless you asked for it again.
     said = get(e.nodes, :result, ("", 0.0))
     words = "Getting $(Remote.label(a.address))…"
-    time() - a.since > PAGE_WAIT && (said[1] != words || time() - said[2] > 2) && (e.nodes[:result] = (words, time()))
+    (!a.again || a.reload) && time() - a.since > PAGE_WAIT && (said[1] != words || time() - said[2] > 2) && (e.nodes[:result] = (words, time()))
     redraw_in!(e, 0.05)
     return nothing
   end
@@ -44681,22 +44790,22 @@ end
 
 """
 Do what `got`, the server's answer for the page `a`, calls for. A page of
-Markdown shows in the window, and so does the page that a page of HTML
-makes. Anything else that the server sent, like a PDF file, opens in your
-browser. When the server sent nothing, or said that it has no such page,
-words under the top bar say so. A link to a page that the server has
-nothing for shows what the server says of it, as a browser does.
+Markdown or of HTML goes in the browser folder, and the window shows it. Ask
+for a page that the window shows already, and what came takes its place, as
+`take_page!` says. Anything else that the server sent, like a PDF file, opens
+in your browser. When the server sent nothing, or said that it has no such
+page, words under the top bar say so, and the window keeps its page. The page
+of what went wrong that a server sends with that isn't kept.
 """
 land_page!(e, a::PageAsked, got) = begin
   unsay_getting!(e)
-  if Remote.ismarkdown(got)
-    b = place_page!(e, a, remote_buffer(got))
-    heading = Remote.place(a.address)
-    isempty(heading) || e.buf !== b || go_heading!(e, b.path, heading)
-  elseif Remote.ishtml(got) && (Remote.ok(got) || a.else_browser)
-    place_page!(e, a, served_buffer(got))
-  elseif got.status == 0 || (!Remote.ok(got) && !a.else_browser)
+  page = Remote.ismarkdown(got)
+  if !Remote.ok(got)
     say_result!(e, Remote.problem(got))
+  elseif page || Remote.ishtml(got)
+    path = browser_path(got.address; page, html=!page)
+    path === nothing && return say_result!(e, "The browser folder can't keep $(Remote.label(got.address)).")
+    take_page!(e, a, path, got.address, Vector{UInt8}(join(Remote.lines(got), "\n")))
   else
     # A picture, a PDF file, or a page that's neither Markdown nor HTML: a browser shows those
     BROWSER[](a.address)
@@ -44706,74 +44815,90 @@ land_page!(e, a::PageAsked, got) = begin
 end
 
 """
-Show `b`, the page that came for `a`, in the window of `e`, and keep it among
-the window's pages. A page that was asked for again takes the place of the
-one that showed, from where that was scrolled to, and at the same level.
+Keep `bytes`, the page at `address` that came for `a`, in the file at `path`
+of the browser folder, and show it. What came takes the place of the file
+that the folder has, unless you changed that file, or the window has changes
+of yours to it that aren't saved. Then it stays as you changed it, and Ladder
+asks you after the frame whether to take what came, when the server has
+something new or you asked with Reload Page: see `ask_reload!`.
 """
-place_page!(e, a::PageAsked, b::Buffer) = begin
-  was = get(e.buffers, b.path, nothing)
-  e.buffers[b.path] = b
-  delete!(e.nodes, (:html, b.path))   # a page of HTML that showed at the address makes its page afresh
-  if was !== nothing && served_html(was) && served_html(b)
-    b.view = was.view
+take_page!(e, a::PageAsked, path, address, bytes) = begin
+  b = get(e.buffers, path, nothing)
+  mine = isfile(path) && (changed_here(path) || (b !== nothing && dirty(b)))
+  if !mine
+    keep_got!(path, address, bytes) === nothing && return say_result!(e, "The browser folder can't keep $(Remote.label(address)).")
+  elseif read(path) == bytes
+    mark_file!(path, GOT_MARK, fingerprint(bytes))   # what came is what you have, so nothing is changed after all
+  elseif a.reload || fingerprint(bytes) != got_mark(path)
+    e.nodes[:reload_ask] = (path, String(address), bytes)
   end
-  if was !== nothing && e.buf === was
-    # The page that shows was asked for again: the new text shows from where the old was scrolled to
-    b.offset = e.scroll.offset
-    e.buf = b
-  elseif !a.again
-    open!(e, b.path; record=a.record)
-  end
-  b
+  show_page!(e, a, path)
 end
 
 """
-The page that the server's answer `got` holds. Its path is the address that
-the answer came from, which the page's links and pictures are from. You can
-change it, but Ladder never writes it to the server: see `writes`. It shows no
-caret until a click puts one in it, so the keys scroll it, as a browser's do.
-The caret's place is after any front matter, as it is in a file, so the front
-matter shows as a card.
+Show the page of the browser folder at `path`, which came for `a`. A page that
+the window asked for again shows from where it was scrolled to.
 """
-remote_buffer(got) = begin
-  lines = Remote.lines(got)
-  b = Buffer(path=got.address, lines=lines, disk=copy(lines), told=copy(lines), reading=true)
-  b.sent = b.told
-  # No page that was at the address before has this version, so nothing that was laid out for one is used for this
-  b.version = b.saved = (stamp[] += 1)
-  t = front_matter(b.lines)
-  if t > 0
-    i = something(findnext(l -> !isempty(strip(l)), b.lines, t + 1), min(t + 1, length(b.lines)))
-    b.caret = b.anchor = (i, 0)
+show_page!(e, a::PageAsked, path) = begin
+  if !a.again
+    open!(e, path; record=a.record)
+    heading = Remote.place(a.address)
+    isempty(heading) || e.buf.path != path || go_heading!(e, path, heading)
   end
-  b
+  e
 end
 
-"The HTML of each page of HTML from a web server that a window has: see `served_buffer`"
-const SERVED_HTML = Dict{String,String}()
-
 """
-The page of HTML that the server's answer `got` holds, as a page that's read
-and not changed. It shows the page that its HTML makes, as an HTML file does,
-and the level under that shows its HTML. Its path is the address that the
-answer came from, which the page's links and pictures are from. A very long
-line of the HTML stops with an … at that level: the page has all of it.
+Ask whether the page of the browser folder that you changed takes what the
+server sent, after the frame that shows the page: see `take_page!`. A panel
+asks. When you say yes, the page is what came, in the file and in the window,
+and your changes are gone. When you say no, the page stays as you changed it,
+and Ladder asks again only when the server has something newer, or you use
+Reload Page.
 """
-served_buffer(got) = begin
-  html = join(Remote.lines(got), "\n")
-  SERVED_HTML[got.address] = html
-  lines = map(shown_line, split(html, '\n'))
-  b = Buffer(path=got.address, view=:file, lang="html", lines=lines, disk=copy(lines), told=copy(lines), fixed=true)
-  b.sent = b.told
-  b.version = b.saved = (stamp[] += 1)
-  b
+ask_reload!(e) = begin
+  q = pop!(e.nodes, :reload_ask, nothing)
+  q === nothing && return nothing
+  path, address, bytes = q
+  yes = (RELOAD_ASKER[] !== reload_panel || on_screen(e)) && RELOAD_ASKER[](path, address)
+  # The panel took the keyboard, so the window never heard the keys that answered it come up
+  w = window_of(e)
+  w === nothing || (w.keys = Keys(0))
+  if yes
+    keep_got!(path, address, bytes)
+    # The page in the window is read again from the file, without your changes
+    if haskey(e.buffers, path)
+      b = e.buffers[path] = web_buffer(path)
+      e.buf.path == path && (b.offset = e.scroll.offset; e.buf = b)
+    end
+  else
+    mark_file!(path, GOT_MARK, fingerprint(bytes))
+  end
+  redraw_in!(e, 0)
+  nothing
 end
 
-"True when `b` is a page of HTML from a web server, at either of its levels: the page that its HTML makes, or its HTML"
-served_html(b::Buffer) = b.view in SERVED_VIEWS && isremote(b.path)
+"""
+Ask whether the page of the browser folder at `path`, which you changed, takes
+what the server sent for `address`, in a panel. True when you say that it
+does. The button that Return presses keeps your changes.
+"""
+reload_panel(path::AbstractString, address::AbstractString) = with_pool() do
+  alert = msg(msg(cls("NSAlert"), "alloc"), "init")
+  msg(alert, "setMessageText:", nsstring("You changed $(Remote.trail(address)[end][1])"))
+  msg(alert, "setInformativeText:", nsstring(
+    "$(Remote.label(address)) can show what $(Remote.host(address)) has now. Your changes are then lost. " *
+    "The page is in your browser folder, at $(tilde(path))."))
+  msg(alert, "addButtonWithTitle:", nsstring("Keep My Changes"))
+  msg(alert, "addButtonWithTitle:", nsstring("Show What the Site Has"))
+  # 1000 is the first button, Keep My Changes
+  yes = ccall((:objc_msgSend, libobjc), Int, (Ptr{Cvoid}, Ptr{Cvoid}), alert, sel("runModal")) == 1001
+  msg(alert, "release")
+  yes
+end
 
-"The levels of a page of HTML from a web server, from the lowest"
-const SERVED_VIEWS = (:text, :file)
+"What asks whether a page that you changed takes what its server sent. A test puts its own function here."
+const RELOAD_ASKER = Ref{Function}(reload_panel)
 
 """
 The whole web address that `src` means in the page from a web server that
@@ -44781,7 +44906,7 @@ The whole web address that `src` means in the page from a web server that
 Mac written `file:` doesn't. A picture of the page is from the page's address.
 """
 remote_src(e, src::AbstractString) = begin
-  to = Remote.against(e.buf.path, strip(src))
+  to = Remote.against(web_address(e.buf.path), strip(src))
   Remote.isaddress(to) ? replace(to, ' ' => "%20") : nothing
 end
 
@@ -44794,13 +44919,13 @@ and a link to a file of the Mac go nowhere.
 """
 follow_remote!(e, url) = begin
   wikitarget(url) === nothing || return e
-  page = e.buf.path
+  page = web_address(e.buf.path)
   to = Remote.against(page, url)
   occursin(r"^mailto:"i, to) && return (BROWSER[](to); e)
   Remote.isaddress(to) || return e
   if Remote.bare(to) == Remote.bare(page)
     heading = Remote.place(to)
-    isempty(heading) || go_heading!(e, page, heading)
+    isempty(heading) || go_heading!(e, e.buf.path, heading)   # the page's file, which shows
     return e
   end
   get_page!(e, to, else_browser=true)
@@ -44845,7 +44970,7 @@ typed_path(e, text::AbstractString; near=true) = begin
     Remote.unescaped(replace(t[8:end], r"^localhost(?=/)"i => ""))
   elseif startswith(t, '/') || t == "~" || startswith(t, "~/")
     expanduser(t)
-  elseif near && !isempty(t) && !isremote(e.buf.path) && Remote.typed(t) === nothing
+  elseif near && !isempty(t) && !in_browser(e.buf.path) && Remote.typed(t) === nothing
     from = docdir(e)
     (isempty(from) || !ispath(joinpath(from, t))) && return nothing
     joinpath(from, t)
@@ -44882,61 +45007,29 @@ palette_address(e, p::CommandPalette) = begin
 end
 
 "Reload Page: ask the server again for the page from the web that shows"
-reload_page!(e) = isremote(e.buf.path) ? (forget_view_copies!(web_site(e.buf.path)); get_page!(e, e.buf.path, record=false, again=true)) : e
+reload_page!(e) = in_browser(e.buf.path) ? (at = web_address(e.buf.path); forget_view_copies!(web_site(at)); get_page!(e, at, record=false, again=true, reload=true)) : e
 
 "Ask again for the files that the `view` blocks of the pages of `site` show, the next time that each shows"
 forget_view_copies!(site) = filter!(((url, _),) -> web_site(url) != site, VIEW_COPIES)
 
 "Open In Browser: show the page from the web that shows in your browser"
-open_in_browser!(e) = (isremote(e.buf.path) && BROWSER[](e.buf.path); e)
+open_in_browser!(e) = (in_browser(e.buf.path) && BROWSER[](web_address(e.buf.path)); e)
 
-works_here(e, ::Union{Val{:reload_page},Val{:open_in_browser}}) = isremote(e.buf.path)
+works_here(e, ::Union{Val{:reload_page},Val{:open_in_browser}}) = in_browser(e.buf.path)
 
 add_command!(navigate!, title="Go to a file or a folder, like ~/Desktop, or a web address, like example.com/notes.md: Markdown on the web shows here, and the rest in your browser", keys="cmd+l")
 add_command!(reload_page!, title="Ask the server again for the page from the web that shows", kind=:look)
 add_command!(open_in_browser!, title="Show the page from the web that shows in your browser", kind=:look)
 
-# --- a copy of a page from a web server -----------------------------------------------------
+# --- the web address of a file ---------------------------------------------------------------
 #
-# You can't change a page from a web server, but you can change a copy of it.
-# The Save button in the top bar, after the lock, makes one, and so does
-# ⌘S. macOS's own panel asks where it goes: a folder that's named for the
-# site, like example.com. The page goes in that folder at its own place on
-# the site, so https://example.com/notes/plans.md is notes/plans.md in it.
-# When the copy is made, the window shows it, and you can change it.
-#
-# What the page links to is saved too, and what that links to, and so on:
-#
-#   - Each page and file that a link of a saved page names, when it's on
-#     the same site, in the folder of the page that you saved or a folder in
-#     that. Save the first page of a site, like example.com/, and the whole
-#     site comes.
-#   - Each picture of a saved page that's on the same site, from any folder.
-#
-# Ladder asks the server for each one as it asks for a page, eight at a time,
-# and words under the top bar count them. A page of Markdown is saved as a
-# page. A page of HTML isn't saved. Any other file, like a picture or a PDF,
-# is saved as the server sent it. Ladder saves 1,000 pages and files at most.
-# It saves no file whose name starts with a dot, like the `.ladder` page of a
-# folder, which would run its code.
-#
-# A saved page's name ends in .md, so that Ladder can change it: the page at
-# example.com/plans.html is plans.md, and the page of the folder
-# example.com/notes/ is notes/index.md. A link of a saved page that names
-# something that was saved names the copy, from the page's own folder. A link
-# to something that wasn't saved names its place on the web, so it still goes
-# there.
-#
-# Somebody else wrote the copy, so it runs no code, as the page from the web
-# runs none: see `foreign`. Each file of the copy keeps the address that it
-# came from in an extended attribute named `COPY_MARK`, which macOS keeps with
-# the file when Ladder saves your changes to it.
+# Each file of the browser folder keeps the address that it came from in an
+# extended attribute named `COPY_MARK`, which macOS keeps with the file when
+# Ladder saves your changes to it. So does each file of a copy of a site that
+# Ladder saved before it had the browser folder. Somebody else wrote such a
+# file, so it runs no code unless its site may: see `foreign`.
 
-"How many pages and files a copy asks a server for at once"
-const COPY_AT_ONCE = 8
-"How many pages and files a copy has at most"
-const COPY_MOST = 1000
-"The name of the extended attribute that holds the address that a copy came from"
+"The name of the extended attribute that holds the web address of a file of the browser folder, or of a copy that Ladder saved before it had one"
 const COPY_MARK = APP_ID * ".from"
 
 "Each file whose `COPY_MARK` Ladder has read or written, with the address that it came from, or \"\" when it has none"
@@ -44955,316 +45048,6 @@ mark_copy!(path, address) = begin
                          path, COPY_MARK, address, sizeof(address), 0, 0)
   nothing
 end
-
-"""
-Each link and picture of `lines` that names a place: its line, the columns
-before and after the place, the place as it's written, and whether it's a
-picture. A link, like [plans](plans.md), a picture, like ![a plan](plan.png),
-a picture of HTML, like <img src="plan.png">, and a named link's place, like
-[plan]: plan.png. A link in a code block or between backticks is code.
-"""
-web_links(lines) = begin
-  found = Tuple{Int,Int,Int,String,Bool}[]
-  ks = classify(lines)
-  # How many characters of `line` come before the byte at `at`
-  before(line, at) = length(line, 1, prevind(line, at))
-  for (i, line) in enumerate(lines)
-    ks[i].kind in (Kind.code, Kind.fence) && continue
-    # A footnote, like [^1]: Some words, names no place
-    m = match(r"^ {0,3}\[(?!\^)[^\]]+\]:[ \t]*<?([^\s>]+)", line)
-    if m !== nothing
-      a = before(line, m.offsets[1])
-      push!(found, (i, a, a + length(m[1]), String(m[1]), false))
-      continue
-    end
-    for m in eachmatch(r"<img\b[^>]*?\bsrc\s*=\s*[\"']([^\"']+)[\"']"i, line)
-      a = before(line, m.offsets[1])
-      push!(found, (i, a, a + length(m[1]), String(m[1]), true))
-    end
-    occursin("](", line) || continue
-    chars = collect(line)
-    n = length(chars)
-    opens = Int[]   # where each [ that hasn't closed is
-    j = 1
-    while j <= n
-      c = chars[j]
-      if c == '\\'
-        j += 2
-      elseif c == '`'
-        k = findnext(==('`'), chars, j + 1)
-        j = k === nothing ? j + 1 : k + 1
-      elseif c == '['
-        push!(opens, j)
-        j += 1
-      elseif c == ']' && !isempty(opens) && j < n && chars[j+1] == '('
-        o = pop!(opens)
-        picture = o > 1 && chars[o-1] == '!'
-        a = j + 2
-        if a <= n && chars[a] == '<'
-          # A place between < and > can have spaces in it
-          b = findnext(==('>'), chars, a + 1)
-          b === nothing && (j += 1; continue)
-          b > a + 1 && push!(found, (i, a, b - 1, String(chars[a+1:b-1]), picture))
-          j = b + 1
-        else
-          # The place ends at a space or at the ) that closes the link. A ( in it has its own ).
-          depth, b = 0, a
-          while b <= n && !isspace(chars[b]) && !(chars[b] == ')' && depth == 0)
-            chars[b] == '(' && (depth += 1)
-            chars[b] == ')' && (depth -= 1)
-            b += 1
-          end
-          b > a && push!(found, (i, a - 1, b - 1, String(chars[a:b-1]), picture))
-          j = b
-        end
-      elseif c == ']'
-        isempty(opens) || pop!(opens)
-        j += 1
-      else
-        j += 1
-      end
-    end
-  end
-  found
-end
-
-"A page from a web server, and what it links to, on their way to a folder of the Mac"
-mutable struct SiteCopy
-  start::String                               # the address of the page that you saved
-  folder::String                              # the folder of the Mac that's the copy of the site's top folder
-  waiting::Vector{Tuple{String,Bool}}         # each address that's still to be asked for, and whether a link names it, and not a picture
-  coming::Vector{Tuple{String,Bool,Any}}      # each address that's on its way, the same, and its Remote.Coming
-  seen::Set{String}                           # each address that was asked for, or waits to be
-  files::Dict{String,String}                  # each address that was saved, and the path of its copy
-  taken::Dict{String,String}                  # the path of each copy, in lower case, and the address that it's a copy of
-  pages::Vector{Tuple{String,String,Vector{String}}}   # each page: its address, its copy's path and its lines, which are written last
-  missed::Int                                 # how many addresses had nothing to save
-  over::Bool                                  # true when there was more than COPY_MOST to save
-end
-
-SiteCopy(start, folder) = SiteCopy(String(start), String(folder), [], [], Set([Remote.bare(start)]), Dict(), Dict(), [], 0, false)
-
-"How many pages and files of `c` are saved"
-copied(c::SiteCopy) = length(unique(values(c.files)))
-
-"""
-The path of the copy of what's at `address`, which `rel`, a path from the
-copy's folder, names. When the copy of something else has that path, as when
-a.md and a.html are each a page, the name has a number after it, like a-2.md.
-"""
-claim!(c::SiteCopy, rel, address) = begin
-  path = joinpath(c.folder, rel)
-  stem, ext = splitext(path)
-  n = 1
-  while get(c.taken, lowercase(path), address) != address
-    path = stem * "-$(n += 1)" * ext
-  end
-  c.taken[lowercase(path)] = address
-  path
-end
-
-"Ask for `address`, which a link of a saved page names when `page`, and a picture when not, unless it was asked for already"
-want!(c::SiteCopy, address, page) = begin
-  address in c.seen && return
-  length(c.seen) >= COPY_MOST && return (c.over = true; nothing)
-  push!(c.seen, address)
-  push!(c.waiting, (address, page))
-  nothing
-end
-
-"""
-Keep `lines`, the page at `address`, for the copy, and ask for what it links
-to. The address that was `asked` for names the same copy, as when the server
-moved the page.
-"""
-take_page!(c::SiteCopy, address, asked, lines) = begin
-  rel = Remote.copy_path(address, page=true)
-  rel === nothing && return (c.missed += 1; nothing)
-  file = claim!(c, rel, Remote.bare(address))
-  c.files[Remote.bare(address)] = c.files[Remote.bare(asked)] = file
-  push!(c.pages, (address, file, lines))
-  for (_, _, _, url, picture) in web_links(lines)
-    startswith(url, '#') && continue
-    to = Remote.bare(Remote.against(address, url))
-    (Remote.isaddress(to) && Remote.site(to) == Remote.site(c.start)) || continue
-    # A hidden file, like a folder's .ladder page, can't be saved, so it isn't asked for
-    (picture || Remote.inside(to, c.start)) && Remote.copy_path(to, page=!picture) !== nothing && want!(c, to, !picture)
-  end
-  nothing
-end
-
-"Write `bytes`, the file at `address`, into the copy. The address that was `asked` for names the same copy."
-take_file!(c::SiteCopy, address, asked, bytes) = begin
-  rel = Remote.copy_path(address)
-  rel === nothing && return (c.missed += 1; nothing)
-  file = claim!(c, rel, Remote.bare(address))
-  try
-    mkpath(dirname(file))
-    write(file, bytes)
-    mark_copy!(file, Remote.bare(address))
-  catch
-    return (c.missed += 1; nothing)   # the disk said no, as when a folder has the file's name
-  end
-  c.files[Remote.bare(address)] = c.files[Remote.bare(asked)] = file
-  nothing
-end
-
-"Do what `got`, the server's answer for `asked`, calls for. A link named it when `page`, and a picture named it when not."
-took!(c::SiteCopy, asked, page, got) = begin
-  Remote.ok(got) || return (c.missed += 1; nothing)
-  ended = Remote.bare(got.address)
-  # A page that moved to another site isn't saved, and its link goes on naming its address
-  Remote.site(ended) == Remote.site(c.start) || return nothing
-  # Two addresses can end at one page, as when one moved to the other
-  haskey(c.files, ended) && return (c.files[asked] = c.files[ended]; nothing)
-  page && Remote.ismarkdown(got) && return take_page!(c, ended, asked, Remote.lines(got))
-  # A page of HTML stays on the web
-  got.type in ("text/html", "application/xhtml+xml") && return nothing
-  take_file!(c, ended, asked, got.bytes)
-end
-
-"""
-Take what has come for `c`, and ask for more, up to `COPY_AT_ONCE` at a time.
-`getter` gets each, as it gets a page. It's true when nothing is left to ask
-for and nothing is on its way.
-"""
-copy_step!(c::SiteCopy; getter=Remote.curl) = begin
-  # What has come is taken in the order that it was asked for
-  come = [k for k in eachindex(c.coming) if Remote.landed(c.coming[k][3]) !== nothing]
-  foreach(k -> took!(c, c.coming[k][1], c.coming[k][2], Remote.landed(c.coming[k][3])), come)
-  deleteat!(c.coming, come)
-  while length(c.coming) < COPY_AT_ONCE && !isempty(c.waiting)
-    asked, page = popfirst!(c.waiting)
-    push!(c.coming, (asked, page, Remote.ask(asked; getter)))
-  end
-  isempty(c.coming) && isempty(c.waiting)
-end
-
-"""
-The lines of the page at `address`, whose copy is at `file`, with each link
-to something that was saved naming its copy, from the page's folder. A link
-to something that wasn't saved names its place on the web.
-"""
-copy_lines(c::SiteCopy, address, file, lines) = begin
-  changes = Tuple{Int,Int,Int,String}[]
-  for (i, from, to, url, _) in web_links(lines)
-    startswith(url, '#') && continue   # a heading of the page itself
-    target = Remote.against(address, url)
-    Remote.isaddress(target) || continue   # like mailto:
-    mark = (k = findfirst('#', url); k === nothing ? "" : url[k:end])
-    copy = get(c.files, Remote.bare(target), nothing)
-    name = copy !== nothing ? escaped(relpath(copy, dirname(file))) * mark : Remote.isaddress(url) ? url : target
-    name == url || push!(changes, (i, from, to, name))
-  end
-  with_names(lines, changes)
-end
-
-"Write each page of `c` into the copy, now that every file of it is there, so that each link names what it can"
-write_pages!(c::SiteCopy) = begin
-  for (address, file, lines) in c.pages
-    try
-      mkpath(dirname(file))
-      write(file, join(copy_lines(c, address, file, lines), "\n"))
-      mark_copy!(file, Remote.bare(address))
-    catch
-      c.missed += 1
-    end
-  end
-  nothing
-end
-
-"True when the window of `e` shows a page of Markdown from a web server, which can be saved as a copy. A page of HTML can't."
-copyable(e) = isremote(e.buf.path) && e.buf.view == :markdown
-
-"""
-Start to save a copy of the page from a web server that `e` shows, with what
-it links to, in `folder`. The copy goes on in each frame: see `copy_tick!`.
-"""
-copy_site!(e, folder) = begin
-  copyable(e) || return e
-  c = SiteCopy(e.buf.path, abspath(expanduser(folder)))
-  # Another page of the copy that you changed in the window goes in it as you changed it, and isn't asked for.
-  # These come first, as the page's links would ask for them.
-  for (address, b) in e.buffers
-    (b !== e.buf && isremote(address) && b.view == :markdown && dirty(b) && Remote.site(address) == Remote.site(c.start) &&
-     Remote.inside(address, c.start) && !(Remote.bare(address) in c.seen)) || continue
-    push!(c.seen, Remote.bare(address))
-    take_page!(c, address, address, copy(b.lines))
-  end
-  take_page!(c, e.buf.path, e.buf.path, copy(e.buf.lines))
-  e.nodes[:site_copy] = c
-  redraw_in!(e, 0)
-  e
-end
-
-"The copy that the window of `e` is saving, or nothing"
-copying(e) = (c = get(e.nodes, :site_copy, nothing); c isa SiteCopy ? c : nothing)
-
-"""
-Go on with the copy that the window of `e` is saving, and say how far it has
-got. Each frame calls this. When it's done, the window shows the copy of the
-page, if it still shows the page, and says what was saved.
-"""
-copy_tick!(e) = begin
-  c = copying(e)
-  (c === nothing || !page_online(e)) && return nothing
-  if !copy_step!(c, getter=(args...) -> PAGE_GETTER[](args...))
-    said = get(e.nodes, :result, ("", 0.0))
-    words = "Saving $(Remote.label(c.start)): $(copied(c)) of $(length(c.seen)) pages and files…"
-    (said[1] != words || time() - said[2] > 2) && (e.nodes[:result] = (words, time()))
-    redraw_in!(e, 0.05)
-    return nothing
-  end
-  delete!(e.nodes, :site_copy)
-  write_pages!(c)
-  page = get(c.files, Remote.bare(c.start), nothing)
-  page !== nothing && isfile(page) && e.buf.path == c.start && open!(e, page)
-  n = length(c.pages)
-  others = copied(c) - n
-  words = "Saved $n page$(n == 1 ? "" : "s")" * (others == 0 ? "" : " and $others other file$(others == 1 ? "" : "s")") * " in $(tilde(c.folder))."
-  c.missed > 0 && (words *= " $(c.missed) link$(c.missed == 1 ? "" : "s") had nothing to save.")
-  c.over && (words *= " Ladder stopped at $(commas(COPY_MOST)) pages and files.")
-  say_result!(e, words)
-  nothing
-end
-
-"The folder that the panel of a copy starts in: the window's folder, or Downloads"
-copy_place(e) = isdir(e.folder) ? e.folder : isdir(joinpath(homedir(), "Downloads")) ? joinpath(homedir(), "Downloads") : homedir()
-
-"Ask where the copy of the page from a web server that `e` shows goes, with macOS's own panel. It gives the folder's path, or nothing if you cancel."
-copy_panel(e) = with_pool() do
-  panel = msg(cls("NSSavePanel"), "savePanel")
-  msg(panel, "setNameFieldStringValue:", nsstring(replace(Remote.host(e.buf.path), ':' => ' ')))
-  msg(panel, "setDirectoryURL:", msg(cls("NSURL"), "fileURLWithPath:", nsstring(copy_place(e))))
-  msg(panel, "setMessage:", nsstring("Ladder saves the page in a folder of this name, with the pages and pictures that it links to."))
-  # 1 is the panel's Save button
-  ccall((:objc_msgSend, libobjc), Int, (Ptr{Cvoid}, Ptr{Cvoid}), panel, sel("runModal")) == 1 || return nothing
-  jstring(msg(msg(panel, "URL"), "path"))
-end
-
-"""
-Save a copy of the page from a web server that shows, with what it links to,
-in a folder that macOS's own panel asks for. The Save button in the top bar
-does this, and so does ⌘S.
-"""
-save_copy!(e) = begin
-  (copyable(e) && copying(e) === nothing) || return e
-  w = window_of(e)
-  # A window that isn't on the screen, like one a test makes, has no panel to ask with
-  (Sys.isapple() && w !== nothing && !isempty(w.glfw)) || return e
-  folder = copy_panel(e)
-  # The panel took the mouse and the keyboard, so the window never heard the button or the keys come up
-  w.keys = Keys(0)
-  folder === nothing || copy_site!(e, folder)
-  e
-end
-
-"The Save button of a page of Markdown from a web server, at the right end of the top bar"
-copy_part(e) = copyable(e) ? (button(e, :save_copy, "download"),) : ()
-
-BUTTONS[:save_copy] = (run=save_copy!, off=e -> copying(e) !== nothing, strong=false, busy=e -> copying(e) !== nothing,
-                       tip=e -> copying(e) !== nothing ? "Saving a copy…" :
-                                "Save a copy on this Mac that you can change, with the pages and pictures that it links to" * hint(e, :save))
 
 # --- the commands of a file and of a folder ---
 #
@@ -49609,7 +49392,7 @@ screen asks, unless a test put its own function in `SITE_ASKER`.
 """
 ask_site!(e) = begin
   path = e.buf.path
-  site = isremote(path) ? web_site(path) : ""
+  site = (at = web_address(path); isempty(at) ? "" : web_site(at))
   (site in SITES_TO_ASK && site_runs(site) === nothing) || return nothing
   (SITE_ASKER[] !== site_code_panel || on_screen(e)) || return nothing
   if get(e.nodes, :site_ask, "") != path
@@ -49632,7 +49415,7 @@ your answer, when the page is from a web server and you haven't said. Always
 true, so a check can end with it.
 """
 code_waits!(path::AbstractString) = begin
-  site = isremote(path) ? web_site(path) : ""
+  site = (at = web_address(path); isempty(at) ? "" : web_site(at))
   isempty(site) || site_runs(site) !== nothing || push!(SITES_TO_ASK, site)
   true
 end
@@ -49641,13 +49424,13 @@ end
 runs_sums(e) = !foreign(e.buf.path) || (code_waits!(e.buf.path); false)
 
 "Run Site Code: let the site of the page from the web that shows run the code of its pages"
-run_site_code!(e) = (isremote(e.buf.path) && site_runs!(web_site(e.buf.path), true, (e,)); e)
+run_site_code!(e) = (in_browser(e.buf.path) && site_runs!(page_site(e.buf.path), true, (e,)); e)
 
 "Stop Site Code: stop the site of the page from the web that shows from running the code of its pages"
-stop_site_code!(e) = (isremote(e.buf.path) && site_runs!(web_site(e.buf.path), false, (e,)); e)
+stop_site_code!(e) = (in_browser(e.buf.path) && site_runs!(page_site(e.buf.path), false, (e,)); e)
 
-works_here(e, ::Val{:run_site_code}) = isremote(e.buf.path) && site_runs(web_site(e.buf.path)) !== true
-works_here(e, ::Val{:stop_site_code}) = isremote(e.buf.path) && site_runs(web_site(e.buf.path)) === true
+works_here(e, ::Val{:run_site_code}) = in_browser(e.buf.path) && site_runs(page_site(e.buf.path)) !== true
+works_here(e, ::Val{:stop_site_code}) = in_browser(e.buf.path) && site_runs(page_site(e.buf.path)) === true
 
 add_command!(run_site_code!, title="Let this page's site run the code of its pages: their sums, tables and charts, and the .ladder pages that change how they show", kind=:look)
 add_command!(stop_site_code!, title="Stop this page's site from running the code of its pages", kind=:look)

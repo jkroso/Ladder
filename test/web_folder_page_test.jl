@@ -15,6 +15,7 @@ const px = K.px
 
 const dir = mktempdir()
 @eval K settings_file() = $(joinpath(dir, "settings"))
+K.BROWSER_FOLDER[] = joinpath(dir, "Browser")   # each page from the web goes in the test's own browser folder
 const ran = joinpath(dir, "ran")   # each run of a site's page adds a line to this file
 
 # What the stand-in for a server has at each address: the kind of file, the number it answers with, and the text
@@ -93,7 +94,7 @@ end
 @testset "a site that you haven't answered for shows plain, and asks once" begin
   K.navigate!(e, "https://blog.test/essays/post.md")
   frames()
-  @test e.buf.path == "https://blog.test/essays/post.md"
+  @test K.web_address(e.buf.path) == "https://blog.test/essays/post.md"
   # The page of each folder that the page is in was asked for, from the top down
   @test ladders() == ["https://blog.test/.ladder", "https://blog.test/essays/.ladder"]
   # The panel asked about the site, once, and you said no
@@ -104,7 +105,7 @@ end
   # Another page of the same folder asks for no folder again, and the panel doesn't ask again
   K.navigate!(e, "https://blog.test/essays/other.md")
   frames()
-  @test e.buf.path == "https://blog.test/essays/other.md"
+  @test K.web_address(e.buf.path) == "https://blog.test/essays/other.md"
   @test length(ladders()) == 2 && length(asks) == 1 && runs() == 0 && e.look == :own
   o = K.text_object(e)
   @test o isa K.WebPage && o.parent isa K.WebFolder{K.FS.Directory} && o.parent.address == "https://blog.test/essays/"
@@ -123,7 +124,7 @@ end
   # The blog's page itself looks as the site does
   K.navigate!(e, "https://blog.test/")
   frames()
-  @test e.buf.path == "https://blog.test/" && e.look == :site && runs() == 1
+  @test K.web_address(e.buf.path) == "https://blog.test/" && e.look == :site && runs() == 1
   @test K.text_object(e).parent isa K.WebFolder{K.BlogDirectory}
   # A page with a rating is a book review, which shows its title and stars
   K.navigate!(e, "https://blog.test/reviews/book.html")
@@ -174,7 +175,7 @@ end
   page!("https://blog.test/essays/", table)   # a folder with no Readme has only its list, from the page's first line
   K.navigate!(e, "https://blog.test/")
   frames()
-  @test e.buf.path == "https://blog.test/" && e.look == :site
+  @test K.web_address(e.buf.path) == "https://blog.test/" && e.look == :site
   v = e.nodes[(:web_listing, "https://blog.test/")]
   @test v isa K.WebListing && isempty(v.up)
   @test [x.name for x in v.entries] == ["essays", "Plans.md", "feed.jl"]
@@ -187,13 +188,13 @@ end
   # A click on a line asks for its page. A section's list starts with a line that goes up to the blog's page.
   v.rows[(:entry, "https://blog.test/essays/")].act(w)
   frames()
-  @test e.buf.path == "https://blog.test/essays/"
+  @test K.web_address(e.buf.path) == "https://blog.test/essays/"
   s = e.nodes[(:web_listing, "https://blog.test/essays/")]
   @test s.up == "https://blog.test/" && haskey(s.rows, (:up, "https://blog.test/"))
   @test any(it -> it.content isa K.Live && it.content.node === s, e.layout) && !any(it -> it.content isa K.Grid, e.layout)
   s.rows[(:up, "https://blog.test/")].act(w)
   frames()
-  @test e.buf.path == "https://blog.test/"
+  @test K.web_address(e.buf.path) == "https://blog.test/"
   # Each page in a folder of book reviews is a review
   reviews = K.WebFolder{K.BookReviewDirectory}("https://blog.test/reviews/", K.WebFolder{K.BlogDirectory}("https://blog.test/", nothing))
   @test [x.icon for x in K.web_entries(reviews, ["| [A book.md](A%20book.html) | Good | 2025-07-20 | 2025-07-20 |"])] == [:review]
@@ -201,7 +202,7 @@ end
   page!("https://blog.test/essays/post.md", "# A post\n\n" * table)
   K.navigate!(e, "https://blog.test/essays/post.md")
   frames()
-  @test e.buf.path == "https://blog.test/essays/post.md" && any(it -> it.content isa K.Grid, e.layout)
+  @test K.web_address(e.buf.path) == "https://blog.test/essays/post.md" && any(it -> it.content isa K.Grid, e.layout)
   page!("https://blog.test/", "# The blog\n\n| Name | Age |\n|---|---|\n| Sam | 3 |\n")
   K.navigate!(e, "https://blog.test/")
   frames()
@@ -215,7 +216,7 @@ end
   page!("https://blog.test/essays/post.md", "+++\ndescription = \"A post\"\n+++\n\n# A post\n\nSome words.\n")
   K.navigate!(e, "https://blog.test/")
   frames()
-  @test e.buf.path == "https://blog.test/" && e.look == :site
+  @test K.web_address(e.buf.path) == "https://blog.test/" && e.look == :site
   top = e.layout[1]
   @test top.first == 1 && top.last == 3 && top.tall == 0px && !(top.content isa K.Live)
   # A post keeps its card
@@ -231,15 +232,15 @@ end
   n = length(asks)
   K.navigate!(e, "https://html.test/a.md")
   frames()
-  @test e.buf.path == "https://html.test/a.md" && "https://html.test/.ladder" in asked
+  @test K.web_address(e.buf.path) == "https://html.test/a.md" && "https://html.test/.ladder" in asked
   @test isempty(K.WEB_FOLDER_PAGES["https://html.test/"].lines) && e.look == :own
   K.navigate!(e, "https://words.test/a.md")
   frames()
-  @test e.buf.path == "https://words.test/a.md" && !K.WEB_FOLDER_PAGES["https://words.test/"].code
+  @test K.web_address(e.buf.path) == "https://words.test/a.md" && !K.WEB_FOLDER_PAGES["https://words.test/"].code
   # A site that has no .ladder page asks nothing either
   K.navigate!(e, "https://plain.test/a/b.md")
   frames()
-  @test e.buf.path == "https://plain.test/a/b.md" && "https://plain.test/a/.ladder" in asked
+  @test K.web_address(e.buf.path) == "https://plain.test/a/b.md" && "https://plain.test/a/.ladder" in asked
   @test length(asks) == n && !K.works_here(e, Val(:stop_site_code)) && K.works_here(e, Val(:run_site_code))
 end
 
@@ -261,4 +262,5 @@ end
 end
 
 K.PAGE_GETTER[], K.SITE_ASKER[] = was_getter, was_asker
+K.BROWSER_FOLDER[] = ""
 foreach(f -> delete!(K.WEB_FOLDER_PAGES, f), filter(f -> endswith(Remote.host(f), ".test"), collect(keys(K.WEB_FOLDER_PAGES))))
