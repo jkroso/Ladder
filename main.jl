@@ -913,12 +913,16 @@ protected(path) = Eml.isemail(path) || (isfile(path) && !iswritable(path))
 isremote(path::AbstractString) = Remote.isaddress(path)
 
 """
-True when somebody else wrote the page at `path`: it's a page from a web
-server, a copy of one, or an email. Ladder runs no code of such a page. A
-block that would run code, like a `ui` block or a sum in a line of text,
-shows as its code. See "a copy of a page from a web server".
+True when somebody else wrote the page at `path` and Ladder runs none of its
+code. That's an email, and a page from a web server or a copy of one, unless
+you let the page's site run code. A block that would run code, like a `ui`
+block or a sum in a line of text, shows as its code. See "a copy of a page
+from a web server" and "a web folder's own page".
 """
-foreign(path::AbstractString) = isremote(path) || Eml.isemail(path) || !isempty(copied_from(path))
+foreign(path::AbstractString) = Eml.isemail(path) || ((isremote(path) || !isempty(copied_from(path))) && site_runs(page_site(path)) !== true)
+
+"The site that the page at `path` is from, like https://example.com: the site of a page from a web server or of a copy of one, or \"\""
+page_site(path::AbstractString) = isremote(path) ? web_site(path) : (from = copied_from(path); isempty(from) ? "" : web_site(from))
 
 "True when the page shows no caret and no key changes it: after Escape, and all the time in a page that's never changed"
 caretless(b::Buffer) = b.reading || b.fixed
@@ -1018,8 +1022,8 @@ kinds(b::Buffer) = begin
     b.kinds_at = b.version
   elseif b.kinds_at != b.version
     b.kinds = classify(b.lines)
-    # A page from a web server, and an email, show the code of a block that would run code or read the Mac's files
-    foreign(b.path) && shown_only!(b.kinds)
+    # A page that somebody else wrote, like an email, shows the code of a block that would run code or read the Mac's files
+    foreign(b.path) && shown_only!(b.kinds) && code_waits!(b.path)
     b.kinds_at = b.version
   end
   b.kinds
@@ -2344,7 +2348,7 @@ pieces(e, text::String, line::Line, raw::Bool, i::Int=0; open=nothing) = begin
       continue
     end
     # Line -1 isn't one of the document's lines: it's a line of a file under a path. Its inline code shows as code.
-    s.live && !shown && i >= 0 && !foreign(e.buf.path) ? push!(out, inline(e, i, s, base)) : symbols!(out, s.text, s.col, face(base, s), s.link)
+    s.live && !shown && i >= 0 && runs_sums(e) ? push!(out, inline(e, i, s, base)) : symbols!(out, s.text, s.col, face(base, s), s.link)
   end
   out
 end
@@ -3200,7 +3204,7 @@ cellpieces(e, i::Int, text::String, lo::Int, hi::Int, base::Face, raw::Bool; ope
     shown = raw || markup_shows(open, s.col, s.col + length(s.text))
     (s.markup || s.comment) && !shown && continue
     s.math && !shown && Maths.available() ? push!(out, equation(e, s, base)) :
-    s.live && !shown && !foreign(e.buf.path) ? push!(out, inline(e, i, s, base)) : symbols!(out, s.text, s.col, face(base, s), s.link)
+    s.live && !shown && runs_sums(e) ? push!(out, inline(e, i, s, base)) : symbols!(out, s.text, s.col, face(base, s), s.link)
   end
   out
 end
@@ -39932,8 +39936,9 @@ in it now. A name of the module that acts on a window acts on `e` while the
 code runs, and after that until another window runs code in the module.
 """
 running_code(f, e) = begin
-  foreign(e.buf.path) && error(isremote(e.buf.path) ? "A page from a web server runs no code." :
-                               Eml.isemail(e.buf.path) ? "An email runs no code." : "A copy of a page from a web server runs no code.")
+  foreign(e.buf.path) && error(Eml.isemail(e.buf.path) ? "An email runs no code." :
+                               isremote(e.buf.path) ? "A page from a web server runs no code until you let its site run code, with Run Site Code." :
+                               "A copy of a page from a web server runs no code until you let its site run code.")
   m = workspace(e)
   isempty(e.buf.path) || (PAGE_WINDOWS[page_key(e.buf.path)] = e)
   was = RUNNING_WINDOW[]
@@ -44444,14 +44449,18 @@ Make each code block of a page that somebody else wrote one that only shows
 its code, where Ladder would do more with it: run it, as it does a `ui`
 block, or read a file for it, or ask a server. `ks` are the kinds of the
 page's lines. A block of Julia code keeps its colours. A block in a language
-that Ladder does nothing with, like `python`, stays as it is. See `foreign`.
+that Ladder does nothing with, like `python`, stays as it is. True when a
+block that would do more now only shows its code. See `foreign`.
 """
 shown_only!(ks::Vector{Line}) = begin
+  hid = false
   for (i, l) in enumerate(ks)
     (l.kind in (Kind.fence, Kind.code) && !isempty(l.lang) && !(l.lang in SHOWN_BLOCKS) && known_lang(l.lang)) || continue
-    ks[i] = Line(l.kind, l.level, l.prefix, l.lang in (LIVE, CHECK, "julia") ? "julia" : "")
+    lang = l.lang in (LIVE, CHECK, "julia") ? "julia" : ""
+    hid |= lang != l.lang
+    ks[i] = Line(l.kind, l.level, l.prefix, lang)
   end
-  ks
+  hid
 end
 
 "A page that the window of `e` has asked a web server for"
@@ -49197,9 +49206,11 @@ end
 # no kind of its own.
 #
 # The page's code comes from whoever runs the site, so Ladder runs it only
-# for a site that you allow. The first time that a site sends a page with
-# code, Ladder shows the page plain and asks you. Ladder keeps your answer
-# for the site, in the file "sites that run code" beside the settings file.
+# for a site that you allow. The same answer lets the site's own pages run
+# their code: their sums, and blocks like `sheet` and `chart`. The first
+# time that a site sends a page with code, Ladder shows the page plain and
+# asks you. Ladder keeps your answer for the site, in the file "sites that
+# run code" beside the settings file.
 # Run Site Code and Stop Site Code, in the command palette, change it. Code
 # that ran stays loaded until Ladder quits, but a site that you stop has no
 # kinds from then on.
@@ -49250,7 +49261,7 @@ end
 const WEB_FOLDER_PAGES = Dict{String,WebFolderPage}()
 "The addresses of the web folders whose page waits to run"
 const WEB_PAGES_DUE = String[]
-"The sites whose .ladder pages wait for your answer: whether Ladder runs their code"
+"The sites whose pages wait for your answer: whether Ladder runs their code"
 const SITES_TO_ASK = Set{String}()
 
 "The site of `address`: how it's asked for and the computer that it's on, like https://example.com"
@@ -49296,13 +49307,13 @@ web_folders_tick!(e) = begin
   nothing
 end
 
-"The file in Ladder's own folder that keeps your answer for each site with .ladder pages: whether Ladder runs their code"
+"The file in Ladder's own folder that keeps your answer for each site with code in its pages: whether Ladder runs the code"
 sites_file() = joinpath(dirname(settings_file()), "sites that run code")
 
 "Your answers from `sites_file()`, as the file was when it was last read: the file, when it was saved, and the answer for each site"
 const SITE_ANSWERS = Ref(("", 0.0, Dict{String,Bool}()))
 
-"Your answer for each site: true when Ladder runs the code of its .ladder pages, and false when it doesn't"
+"Your answer for each site: true when Ladder runs the code of its pages, and false when it doesn't"
 site_answers() = begin
   file = sites_file()
   at = mtime(file)   # 0 when there's no file
@@ -49317,17 +49328,21 @@ site_answers() = begin
   said
 end
 
-"True when Ladder runs the code of the .ladder pages of `site`, false when it doesn't, or nothing when you haven't said"
+"True when Ladder runs the code of the pages of `site`, its .ladder pages too, false when it doesn't, or nothing when you haven't said"
 site_runs(site::AbstractString) = get(site_answers(), site, nothing)
 
-"Keep your answer for `site`: whether Ladder runs the code of its .ladder pages"
-site_runs!(site::AbstractString, yes::Bool) = begin
+"Keep your answer for `site`: whether Ladder runs the code of its pages. `also` are editors that aren't in `editors`, like one of a test."
+site_runs!(site::AbstractString, yes::Bool, also=()) = begin
   said = copy(site_answers())
   said[site] = yes
   mkpath(dirname(sites_file()))
   write(sites_file(), join(("$(said[s] ? "yes" : "no")\t$s" for s in sort!(collect(keys(said)))), "\n") * "\n")
   SITE_ANSWERS[] = ("", 0.0, said)   # the file is read again
   delete!(SITES_TO_ASK, site)
+  # Each page of the site that a window holds shows its code, or what its code makes, from the next frame
+  for e in Iterators.flatten((editors, also)), b in values(e.buffers)
+    page_site(b.path) == site && (b.kinds_at = -1)
+  end
   foreach(e -> redraw_in!(e, 0), editors)
   nothing
 end
@@ -49399,16 +49414,16 @@ run_web_folder_pages!() = begin
 end
 
 """
-Ask whether Ladder may run the code of the .ladder pages of `site`, in a
-panel. True when you say that it may. The button that Return presses is
-Don't Run.
+Ask whether Ladder may run the code of the pages of `site`, in a panel. True
+when you say that it may. The button that Return presses is Don't Run.
 """
 site_code_panel(site::AbstractString) = with_pool() do
   alert = msg(msg(cls("NSAlert"), "alloc"), "init")
   msg(alert, "setMessageText:", nsstring("Run the code of $(Remote.host(site))?"))
   msg(alert, "setInformativeText:", nsstring(
-    "$site has a .ladder page with Julia code. The code changes how the site's pages show in Ladder. " *
-    "It can also do anything that a program on your Mac can do.\n\n" *
+    "$site has pages with Julia code. The code shows their sums, tables and charts, " *
+    "and a .ladder page can change how the site's pages show. " *
+    "The code can also do anything that a program on your Mac can do.\n\n" *
     "Ladder keeps your answer. Run Site Code and Stop Site Code, in the command palette, change it."))
   msg(alert, "addButtonWithTitle:", nsstring("Don't Run"))
   msg(alert, "addButtonWithTitle:", nsstring("Run Its Code"))
@@ -49418,12 +49433,12 @@ site_code_panel(site::AbstractString) = with_pool() do
   yes
 end
 
-"What asks whether a site may run the code of its .ladder pages. A test puts its own function here."
+"What asks whether a site may run the code of its pages. A test puts its own function here."
 const SITE_ASKER = Ref{Function}(site_code_panel)
 
 """
 Ask you whether the site of the page that `e` shows may run the code of its
-.ladder pages, when the site waits for your answer. The page shows first:
+pages, when the site waits for your answer. The page shows first:
 Ladder asks in the frame after the one that showed it. Only a window on the
 screen asks, unless a test put its own function in `SITE_ASKER`.
 """
@@ -49443,20 +49458,34 @@ ask_site!(e) = begin
   # The panel took the keyboard, so the window never heard the keys that answered it come up
   w = window_of(e)
   w === nothing || (w.keys = Keys(0))
-  site_runs!(site, yes)
+  site_runs!(site, yes, (e,))
 end
 
-"Run Site Code: let the site of the page from the web that shows run the code of its .ladder pages"
-run_site_code!(e) = (isremote(e.buf.path) && site_runs!(web_site(e.buf.path), true); e)
+"""
+The page at `path` has code that Ladder doesn't run, so its site waits for
+your answer, when the page is from a web server and you haven't said. Always
+true, so a check can end with it.
+"""
+code_waits!(path::AbstractString) = begin
+  site = isremote(path) ? web_site(path) : ""
+  isempty(site) || site_runs(site) !== nothing || push!(SITES_TO_ASK, site)
+  true
+end
 
-"Stop Site Code: stop the site of the page from the web that shows from running the code of its .ladder pages"
-stop_site_code!(e) = (isremote(e.buf.path) && site_runs!(web_site(e.buf.path), false); e)
+"True when the sums in the lines of the page of `e` run. When they don't, each shows its code, and the page's site waits for your answer."
+runs_sums(e) = !foreign(e.buf.path) || (code_waits!(e.buf.path); false)
+
+"Run Site Code: let the site of the page from the web that shows run the code of its pages"
+run_site_code!(e) = (isremote(e.buf.path) && site_runs!(web_site(e.buf.path), true, (e,)); e)
+
+"Stop Site Code: stop the site of the page from the web that shows from running the code of its pages"
+stop_site_code!(e) = (isremote(e.buf.path) && site_runs!(web_site(e.buf.path), false, (e,)); e)
 
 works_here(e, ::Val{:run_site_code}) = isremote(e.buf.path) && site_runs(web_site(e.buf.path)) !== true
 works_here(e, ::Val{:stop_site_code}) = isremote(e.buf.path) && site_runs(web_site(e.buf.path)) === true
 
-add_command!(run_site_code!, title="Let this page's site run the code of its .ladder pages, which change how its pages show", kind=:look)
-add_command!(stop_site_code!, title="Stop this page's site from running the code of its .ladder pages", kind=:look)
+add_command!(run_site_code!, title="Let this page's site run the code of its pages: their sums, tables and charts, and the .ladder pages that change how they show", kind=:look)
+add_command!(stop_site_code!, title="Stop this page's site from running the code of its pages", kind=:look)
 
 # --- a SolidCraft design -------------------------------------------------------------------
 #

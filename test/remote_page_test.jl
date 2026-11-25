@@ -596,6 +596,57 @@ end
   end
 end
 
+# A site that you let run code runs the code of its pages, as a page of the Mac does: see `foreign` in main.jl
+@testset "a site that you let run code runs its pages' code" begin
+  site = "https://sums.example.com"
+  page!("$site/page.md", """
+    # Sums
+
+    Say !`n = 6` and so !`twice = 2n`.
+
+    ```sheet
+    A = 1 to 3
+    B = A * n
+    ```
+    """)
+  asks = String[]
+  was_asker = K.SITE_ASKER[]
+  K.SITE_ASKER[] = s -> (push!(asks, s); false)
+  sheets() = count(it -> it.content isa K.Sheet, e.layout)
+  try
+    # You haven't said whether the site may run code, so the page shows its code, and Ladder asks you once
+    K.navigate!(e, "sums.example.com/page.md"); frames(5)
+    b = e.buf
+    @test b.path == "$site/page.md"
+    @test asks == [site] && K.site_runs(site) === false
+    @test K.foreign(b.path) && sheets() == 0 && K.made(e, "twice", 3) == ("twice", false)
+    out = K.run_code(e, "1 + 1")
+    @test out[3] && occursin("until you let its site run code", out[1].msg)
+    shot("remote_site_code_no.png")
+    # Run Site Code: the sums run and the sheet shows
+    K.run_site_code!(e); frames(5)
+    @test K.site_runs(site) === true && !K.foreign(b.path) && length(asks) == 1
+    @test K.kinds(b)[findfirst(==("```sheet"), b.lines)].lang == "sheet" && sheets() == 1
+    @test any(k -> k isa Tuple && k[1] == :inline && k[2] == b.path, keys(e.nodes))
+    @test K.made(e, "twice", 3) == ("12", false)
+    shot("remote_site_code_yes.png")
+    # Stop Site Code: the page shows its code again
+    K.stop_site_code!(e); frames(5)
+    @test K.foreign(b.path) && sheets() == 0
+    # A copy of a page follows the answer for the site that it came from. Other sites and emails don't.
+    copy = joinpath(dir, "copy.md")
+    write(copy, "Say !`1 + 1`.\n")
+    K.mark_copy!(copy, "$site/page.md")
+    @test K.page_site(copy) == site && K.foreign(copy)
+    K.site_runs!(site, true)
+    @test !K.foreign(copy) && !K.foreign("$site/other.md") && K.foreign("https://example.com/a.md")
+    @test K.foreign(joinpath(dir, "note.eml")) && K.page_site(joinpath(dir, "mine.md")) == ""
+  finally
+    K.SITE_ASKER[] = was_asker
+    K.site_runs!(site, false)
+  end
+end
+
 # This test set is last. Once the palette has been used over a page of the Mac, the next hover on the
 # page's name starts its wait a frame late, and "the path in the top bar starts at the server's name" doesn't allow for that.
 @testset "Navigate goes to a file or a folder of the Mac" begin
