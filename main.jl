@@ -55350,10 +55350,12 @@ end
 # warm ink of the site, with links in its red. The text is as wide as the
 # site's, for as many words to a line, and a first heading is in the middle,
 # as big as the site's. The window has the site's colours while such a page
-# shows, whatever the theme. The page's front matter shows as on any page.
+# shows, whatever the theme. The page's front matter shows as on any page. A
+# terminal's file in a blog's folder isn't a page of the blog, so it has the
+# theme's colours.
 
 "How the page that's in the window looks: :site for a page of a blog, on the Mac or on a web server, as its site has it, or :own, as the settings say"
-page_look(e) = page_blog_folder(e) !== nothing || web_blog_page(e) ? :site : :own
+page_look(e) = !term_page(e.buf) && (page_blog_folder(e) !== nothing || web_blog_page(e)) ? :site : :own
 
 "True when the page that shows is from a web server, in a folder of a blog there: see \"a web folder's own page\""
 web_blog_page(e) = (o = text_object(e); o isa WebPage && o.parent isa WebFolder{<:BlogFolder})

@@ -295,6 +295,15 @@ end
   it = only(it for it in e.layout if it.first == 3)
   @test it.content.lines[1].x > 100px
   shot("canon-quotes.png")
+  # A terminal's file in the blog isn't a page of it: it has the theme's colours
+  vt = joinpath(canon, "Terminal.vt")
+  write(vt, "\e[1;31mred\e[0m and plain\r\n")
+  Base.invokelatest(K.show_path!, e, vt); frames()
+  @test K.term_shown(e) && e.look == :own && K.colours.bg == K.SEPIA.bg
+  @test e.nodes[(:term, vt)].paper == K.term_colour(K.SEPIA.bg)
+  Base.invokelatest(K.show_path!, e, quotes); frames()
+  @test e.look == :site
+  rm(vt)
   # A page outside the blog has the settings' own look again
   Base.invokelatest(K.show_path!, e, joinpath(K.pages_dir[], "welcome.md")); frames()
   @test e.look == :own && K.colours.bg == K.SEPIA.bg && K.body(e).family == e.font && isempty(K.blog_part(e))
