@@ -63,6 +63,14 @@ Slider(value=page_width(), min=400, max=1200, step=20, format=width -> round(Int
 
 The number is the width of the page in pixels, while the text is 17 pixels tall. Bigger text gets a wider page, so a line holds as many words as before. A window that is too narrow for the page shows it as wide as it can.
 
+## Top bar
+
+```ui
+Checkbox(label="Hide the top bar until I move the mouse to the top of the window", checked=page_hides_bar(), onchange=box -> page_hides_bar!(box.checked))
+```
+
+With this on, the page goes up to the top of the window, as a Mac's windows do when it hides its menu bar. Rest the mouse at the top edge of the window, and the top bar slides down over the page, with the window's close, minimise and zoom buttons. The bar slides back up when you move the mouse off it. It stays while a list or a menu of the bar is open. ⌘F shows the bar too, because the search opens under it.
+
 ## Spelling
 
 ```ui

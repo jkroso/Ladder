@@ -218,7 +218,7 @@ end
 scroll!(f::Film, words; top=40, seconds=0.9) = begin
   e = f.e
   from = K.num(e.scroll.offset)
-  most = max(0.0, K.num(e.scroll.content_height) - (TALL - K.num(K.TOPBAR_H)))
+  most = max(0.0, K.num(e.scroll.content_height) - (TALL - K.num(K.above_page(e))))
   to = clamp(K.num(K.item(e, line(f, words)).top) - top, 0.0, most)
   n = max(1, round(Int, seconds * FPS))
   for k in 1:n

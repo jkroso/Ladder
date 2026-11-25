@@ -347,7 +347,7 @@ const BUILDING_APP = haskey(ENV, "KIP_FROZEN") && ccall(:jl_generating_output, C
 if !BUILDING_APP
   @use "github.com/jkroso/UI.jl/Interface/inspector" toggle_inspector!
 end
-@use "github.com/jkroso/UI.jl/Interface/window" hide_titlebar! place_window_buttons! drag_window! set_dark! nswindow system_menu fills_screen fill_screen!
+@use "github.com/jkroso/UI.jl/Interface/window" hide_titlebar! place_window_buttons! fade_window_buttons! drag_window! set_dark! nswindow system_menu fills_screen fill_screen!
 @use "github.com/jkroso/UI.jl/Interface/Semantic/Icon" Icon icon_cache load_icon
 @use "github.com/jkroso/UI.jl/Interface/Semantic/SVG" SVGPath render_svg
 @use "github.com/jkroso/UI.jl/Interface/Semantic/TextInput" TextInput
@@ -1282,6 +1282,7 @@ end
   right::Bool = true                    # a page that has a panel at the right shows it, as a repository's page has git's panel. See `page_side`.
   own::Bool = false                     # you write the message of each commit, and the agent doesn't. See "an agent writes the commit's message".
   pinned::Bool = false                  # a click on the file's name pinned the path in the top bar open. See "the path in the top bar".
+  hide_bar::Bool = false                # the top bar hides until the mouse is at the top of the window. See "a top bar that hides".
   theme::Symbol = :sepia
   look::Symbol = :own                   # :site on a page of a blog, which looks as the blog's site does. See `page_look`.
   applied::Symbol = :none               # the theme the window was last told about
@@ -1791,7 +1792,7 @@ end
 page_room(e) = begin
   w, h = window_size(e)
   side = lowered(e) === nothing ? panel_w(e) * opened(e) : 0px
-  (max(w - side, 1px), max(h - TOPBAR_H, 1px))
+  (max(w - side, 1px), max(h - above_page(e), 1px))
 end
 
 """
@@ -4210,8 +4211,8 @@ suggestbox(e) = begin
      for (j, (n, note)) in enumerate(zip(names, notes))]...)
   # A list that's too wide for the room at its right stays in the window
   left = clamp(text_left(e) + across - 9px, 8px, max(8px, window_size(e)[1] - 8px - wide))
-  top = TOPBAR_H + PAGE_TOP + it.top - e.scroll.offset + down + 3px
-  top >= TOPBAR_H || return ()
+  top = above_page(e) + PAGE_TOP + it.top - e.scroll.offset + down + 3px
+  top >= above_page(e) || return ()
   (Row(width(grow=grow), height(grow=grow), Alignment.Start, padding(top, 0px, 0px, left), list),)
 end
 
@@ -4286,6 +4287,9 @@ sandbox(e) = get!(e.nodes, :sandbox) do
   # ... and whether the caret moves to a new place in a short time, and doesn't jump there
   Core.eval(m, :(const page_glide = $(() -> (reads!(e, :glide); e.glide))))
   Core.eval(m, :(const page_glide! = $(on -> glide!(e, Bool(on)))))
+  # ... and whether the top bar hides until the mouse is at the top of the window
+  Core.eval(m, :(const page_hides_bar = $(() -> (reads!(e, :hide_bar); e.hide_bar))))
+  Core.eval(m, :(const page_hides_bar! = $(on -> hide_bar!(e, Bool(on)))))
   # ... and whether the card of a link to a page shows the start of the page, while ⌘ is held
   Core.eval(m, :(const page_peeks = $(() -> (reads!(e, :peeks); e.peeks))))
   Core.eval(m, :(const page_peeks! = $(on -> peeks!(e, Bool(on)))))
@@ -4401,7 +4405,7 @@ rewrap!(e) = begin
   empty!(e.flows)
   win = window_of(e)
   if win !== nothing && !isempty(e.layout)
-    y = win.mouse[2] - TOPBAR_H - PAGE_TOP + e.scroll.offset
+    y = win.mouse[2] - above_page(e) - PAGE_TOP + e.scroll.offset
     i = findfirst(it -> it.top <= y < it.top + it.tall, e.layout)
     i === nothing || (e.nodes[:hold] = (e.layout[i].first, e.layout[i].top - e.scroll.offset))
   end
@@ -5877,7 +5881,7 @@ json_choose!(t::JSONTree, i) = begin
   h = json_row_h(e)
   top = r.top + h * (t.chosen - 1)   # where the row is in the window
   _, high = window_size(e)
-  top < TOPBAR_H + h ? scroll_page!(e, top - TOPBAR_H - h) : top + 2h > high ? scroll_page!(e, top + 2h - high) : nothing
+  top < above_page(e) + h ? scroll_page!(e, top - above_page(e) - h) : top + 2h > high ? scroll_page!(e, top + 2h - high) : nothing
   handled
 end
 
@@ -6809,7 +6813,7 @@ viewer(v::FileView, e, note) = begin
   ext = lowercase(splitext(path)[2])
   mac = Sys.isapple()
   _, h = window_size(e)
-  room = clamp(h - TOPBAR_H - PAGE_TOP - 150px, 240px, 800px)   # how tall a model or a video shows
+  room = clamp(h - above_page(e) - PAGE_TOP - 150px, 240px, 800px)   # how tall a model or a video shows
   # What's made for the file is kept, so the model stays as it was turned and the file plays on
   made(make, T) = v.viewer isa T ? v.viewer : (v.viewer = own!(v, make()))
   if ext in PICTURES || ext in MAC_PICTURES
@@ -8960,7 +8964,7 @@ end
 "The takeoff, the schedule or the sketch that fills the window, over the page and the sidebar and under the top bar"
 takeoff_over(e) = begin
   v = full_block(e)
-  v === nothing ? () : (Box(width(grow=grow), height(grow=grow), padding(TOPBAR_H, 0px, 0px, 0px), background(colours.bg), geometry(v)),)
+  v === nothing ? () : (Box(width(grow=grow), height(grow=grow), padding(above_page(e), 0px, 0px, 0px), background(colours.bg), geometry(v)),)
 end
 
 "Do what a button of a takeoff does"
@@ -9860,7 +9864,7 @@ wide window's plan, and under a tall window's.
 """
 goes_beside(v::TakeoffView) = begin
   w, h = num.(window_size(editor(v)))
-  h -= num(TOPBAR_H) + 38   # the top bar and the tools
+  h -= num(above_page(editor(v))) + 38   # the top bar and the tools
   s = plan_size(v)
   s === nothing && return w > h
   side = min(num(SIDE_W), 0.45w)
@@ -9891,7 +9895,7 @@ describe(v::TakeoffView) = begin
         Column(fixed(min(SIDE_W, window_size(e)[1] * 0.45)), height(grow=grow), Alignment.Start, border(1px, :solid, colours.line)[:left],
           table(v, reuse!(list, rows), tall=true), foot(v)))
     end
-    list.height = height(min(list_h(v), (window_size(e)[2] - TOPBAR_H - 38px) * LIST_SHARE))
+    list.height = height(min(list_h(v), (window_size(e)[2] - above_page(e) - 38px) * LIST_SHARE))
     Column(width(grow=grow), height(grow=grow), Alignment.Start, background(takeoff_back()), name="Takeoff",
       toolbar(v), prompt(v)..., area, table(v, reuse!(list, rows)), foot(v))
   end
@@ -10153,7 +10157,7 @@ full!(v::ScheduleView, on::Bool) = begin
 end
 
 "How tall the names and the bars are in a schedule that fills the window, when its tasks need less: the window, under the top bar and the schedule's buttons"
-full_room(v::ScheduleView) = num(window_size(editor(v))[2] - TOPBAR_H - 38px)
+full_room(v::ScheduleView) = num(window_size(editor(v))[2] - above_page(editor(v)) - 38px)
 
 "How tall the names and the bars of a schedule are"
 chart_h(v::ScheduleView) = (rows = DATES_H + TASK_H * length(v.tasks); px(v.full ? max(rows, full_room(v)) : rows))
@@ -10971,7 +10975,7 @@ end
 "The line of the to-do item whose row of the page is at the place `(x, y)` in the window, or nothing. An item that shows its markup isn't one."
 todo_line(e, x, y) = begin
   dx, dy = px(x) - e.origin[1], px(y) - e.origin[2]
-  (-30px <= dx < e.width && y >= num(TOPBAR_H)) || return nothing
+  (-30px <= dx < e.width && y >= num(above_page(e))) || return nothing
   dy >= 0px || return nothing
   it = e.layout[item_under(e, dx, dy)]
   f = it.content
@@ -11012,7 +11016,7 @@ task_over(e) = begin
   left = e.origin[1] + edge - wide
   top = e.origin[2] + it.top + f.above + vl.top
   top = d.floats ? top + vl.high - 2px : top + (vl.high - DETAILS_H) / 2
-  top >= TOPBAR_H || return hide()
+  top >= above_page(e) || return hide()
   d.box = (num(left), num(top), num(wide), num(DETAILS_H))
   (Row(width(grow=grow), height(grow=grow), Alignment.Start, padding(top, 0px, 0px, left), d),)
 end
@@ -11244,7 +11248,7 @@ side, it's in the top right corner. It stays under the top bar.
 """
 fill_spot(e, r) = begin
   w, _ = window_size(e)
-  top = min(max(r.top, TOPBAR_H + FILL_GAP), r.top + r.height - FILL_SIDE)
+  top = min(max(r.top, above_page(e) + FILL_GAP), r.top + r.height - FILL_SIDE)
   right = r.left + r.width + FILL_GAP
   right + FILL_SIDE <= w - FILL_GAP && return (right, top)
   left = r.left - FILL_GAP - FILL_SIDE
@@ -11571,7 +11575,7 @@ end
 zoom_over(e) = zooming(e) === nothing ? () :
   # A video that fills the screen has the top bar's room too, and black round it
   screening(e) ? (Box(width(grow=grow), height(grow=grow), background(RGBA(0, 0, 0, 1)), geometry(e.nodes[:zoom])),) :
-  (Box(width(grow=grow), height(grow=grow), padding(TOPBAR_H, 0px, 0px, 0px), background(colours.bg), geometry(e.nodes[:zoom])),)
+  (Box(width(grow=grow), height(grow=grow), padding(above_page(e), 0px, 0px, 0px), background(colours.bg), geometry(e.nodes[:zoom])),)
 
 "The button of `v` that's kept under `key`, with what it does and shows now"
 button!(v::ZoomView, key, action; icon="", tip="", off=false) = begin
@@ -11605,7 +11609,7 @@ describe(v::ZoomView) = begin
     b = what[2]
     w, h = window_size(e)
     b.zoom = round(Float64(e.zoom), digits=2)
-    b.wide, b.high = w, max(40px, h - TOPBAR_H)
+    b.wide, b.high = w, max(40px, h - above_page(e))
     return Stack(width(grow=grow), height(grow=grow), Alignment.Start, b)
   elseif what[1] == :node && what[2] isa Designs.DesignView
     # A SolidCraft design that's only shown has all of the window under the top bar, as a model has. Esc puts the document back.
@@ -11638,7 +11642,7 @@ describe(v::ZoomView) = begin
       return Stack(width(grow=grow), height(grow=grow), Alignment.Start,
         Box(width(grow=grow), height(grow=grow), background(RGBA(0, 0, 0, 1)), shows), corner...)
     end
-    node.height = max(160px, h - TOPBAR_H - BAR_ROOM - px(2ZOOM_EDGE) - 44px)
+    node.height = max(160px, h - above_page(e) - BAR_ROOM - px(2ZOOM_EDGE) - 44px)
     shows = with_theme(() -> geometry(node), component_theme(e.zoom))
     # A video has a button that makes it fill the screen
     buttons = node isa VideoPlayer ? (button!(v, :screen, :screen, icon="arrows-fullscreen", tip="Fill the screen  F"), close) : (close,)
@@ -11652,7 +11656,7 @@ describe(v::ZoomView) = begin
   # The page of a file itself is beside the sidebar, where it was drawn last.
   w, h = window_size(e)
   place = v.bare ? rect(part!(() -> ZoomArea(of=v), v, :area)) : nothing
-  v.bare || reframe!(v, (0.0, num(TOPBAR_H), num(w), num(h) - num(TOPBAR_H)))
+  v.bare || reframe!(v, (0.0, num(above_page(e)), num(w), num(h) - num(above_page(e))))
   place === nothing || reframe!(v, (num(place.left), num(place.top), num(place.width), num(place.height)))
   buttons = Any[diagram_buttons(v)..., button!(v, :smaller, (:zoom, 1 / ZOOM_STEP), icon="zoom-out", tip="Smaller  pinch, or ⌘ and scroll"),
                 Box(width(46px), Alignment.Center, justify=Alignment.Center,
@@ -19373,7 +19377,7 @@ gallery_edges(z::ZoomView) = begin
   wide = num(window_size(editor(z))[1])
   x, y = num(w.mouse[1]), num(w.mouse[2])
   arrow(by) = begin
-    near = y > num(TOPBAR_H) && (by < 0 ? x < GALLERY_NEAR : x > wide - GALLERY_NEAR)
+    near = y > num(bar_bottom(editor(z))) && (by < 0 ? x < GALLERY_NEAR : x > wide - GALLERY_NEAR)
     near && can_step(at.gallery, at.i, by) || return Box(width(GALLERY_EDGE))
     a = part!(() -> GalleryEdge(by=by), z, (:edge, by))
     a.of = at.gallery   # the view keeps its arrows, and the gallery can be another one of the page than when they were made
@@ -19794,7 +19798,7 @@ end
 onpinch(::SketchView, ::Pinch) = nothing
 
 "How tall the drawing is in a sketch that fills the window, when its shapes need less: the window, under the top bar and the sketch's buttons"
-full_room(v::SketchView) = num(window_size(editor(v))[2] - TOPBAR_H - (narrow(v) ? 76px : 38px))
+full_room(v::SketchView) = num(window_size(editor(v))[2] - above_page(editor(v)) - (narrow(v) ? 76px : 38px))
 
 act!(v::SketchView, action, w) = begin
   settle_number!(v)
@@ -23985,7 +23989,7 @@ pointed_line(e) = begin
     return k === nothing ? nothing : (line, page_todos(e)[k].key)
   end
   dx, dy = px(x) - e.origin[1], px(y) - e.origin[2]
-  (0px <= dx < e.width && y >= num(TOPBAR_H) && dy >= 0px) || return nothing
+  (0px <= dx < e.width && y >= num(above_page(e)) && dy >= 0px) || return nothing
   it = e.layout[item_under(e, dx, dy)]
   for (r, (name, top, high)) in enumerate(named_rows(e, it))
     it.top + top <= dy < it.top + top + high && return (it.first + r, name)
@@ -24505,7 +24509,7 @@ scrub_at(e, pos) = begin
   b = e.buf
   (isempty(e.layout) || readonly(b) || b.fixed || b.view != :markdown) && return nothing
   dx, dy = pos[1] - e.origin[1], pos[2] - e.origin[2]
-  (dy >= 0px && pos[2] >= TOPBAR_H) || return nothing
+  (dy >= 0px && pos[2] >= above_page(e)) || return nothing
   it = e.layout[item_under(e, dx, dy)]
   # Until the next frame, the layout is of the page that showed before, which can have more lines than this one
   it.last <= length(b.lines) || return nothing
@@ -29625,7 +29629,7 @@ right_panel(e) = begin
   (Row(fixed(wide * shows), height(grow=grow), Alignment.Start, clip=true,
      Column(fixed(wide), height(grow=grow), Alignment.Start, background(colours.panel), name="Side",
             border(1px, :solid, colours.line)[:left],
-       Box(width(grow=grow), height(TOPBAR_H)),   # under the top bar
+       Box(width(grow=grow), height(max(above_page(e), SIDE_GAP))),   # under the top bar
        own)),)
 end
 
@@ -29665,6 +29669,132 @@ buttons. In full screen they're hidden, and it leaves 8px, as it does after
 the arrows at the right.
 """
 mac_buttons_room(e) = MAC_BUTTONS_W - (MAC_BUTTONS_W - 8px) * cleared(e)
+
+# --- a top bar that hides -------------------------------------------------------------------
+#
+# With its setting on, the top bar hides as macOS can hide its menu bar. The
+# page then runs up to the top edge of the window. Rest the mouse at that edge
+# and the bar slides down over the page, with the Mac's close, minimise and
+# zoom buttons. It slides back up a moment after the mouse leaves it, unless a
+# list or a menu of the bar is open. ⌘F and a rename of the file bring it out
+# too, since what they show hangs from the bar.
+
+const BAR_EDGE = 10px    # how near the top of the window the mouse brings out a top bar that hides
+const BAR_WAIT = 0.15    # seconds the mouse rests there first, so a mouse on its way out of the window doesn't bring it out
+const BAR_STAYS = 0.3    # seconds the bar stays after the mouse leaves it
+const BAR_BELOW = 6px    # how far under the bar the mouse can go before the bar hides
+const SIDE_GAP = 8px     # the room over the sidebar's list, and over the panel at the right, while the bar hides
+
+"Hide the top bar until the mouse is at the top of the window, or with `on` false always show it. Each window does the same."
+hide_bar!(e, on::Bool) = (e.hide_bar = on; save_settings!(e); rerun!(e, :hide_bar); e)
+
+"How much room the top bar keeps at the top of the window, over the page. A bar that hides keeps none: it shows over the page."
+above_page(e) = e.hide_bar ? 0px : TOPBAR_H
+
+"When the top bar that hides last started to slide in or out, and how much of it showed then, from 0 to 1"
+bar_slid(e) = get(e.nodes, :bar_slid, (1.0, 0.0))
+
+"True when the top bar that hides is out, or sliding out. A new window's bar starts out, and goes when the mouse isn't on it."
+bar_out(e) = get(e.nodes, :bar_out, true)
+
+"How much of the top bar shows, from 0 to 1. A bar that doesn't hide always shows."
+bar_shown(e) = e.hide_bar ? ((from, at) = bar_slid(e); eased(from, bar_out(e) ? 1.0 : 0.0, at)) : 1.0
+
+bar_sliding(e) = e.hide_bar && time() - bar_slid(e)[2] < SLIDE_TIME
+
+"Where the top bar's top is: 0 while the bar shows, and as far above the window as the bar is tall while it hides"
+bar_top(e) = px(round(num((bar_shown(e) - 1) * TOPBAR_H)))
+
+"How far down the window the top bar reaches now"
+bar_bottom(e) = TOPBAR_H + bar_top(e)
+
+"Start the top bar sliding down into the window, or with `out` false, back up out of it"
+slide_bar!(e, out::Bool) = begin
+  bar_out(e) == out && return e
+  e.nodes[:bar_slid] = (bar_shown(e), time())
+  e.nodes[:bar_out] = out
+  e
+end
+
+"""
+Bring out the top bar that hides, or put it away, as the mouse and what's open
+ask. The Mac's close, minimise and zoom buttons go with it, and so does a path
+pinned in it.
+"""
+bar_tick!(e) = begin
+  w = window_of(e)
+  w === nothing && return
+  e.hide_bar || return (fade_window_buttons!(w, 1); nothing)
+  if bar_wanted(e, w)
+    delete!(e.nodes, :bar_leaving)
+    slide_bar!(e, true)
+  elseif bar_out(e)
+    since = get!(e.nodes, :bar_leaving, time())
+    if time() - since >= BAR_STAYS
+      delete!(e.nodes, :bar_leaving)
+      slide_bar!(e, false)
+    else
+      redraw_in!(e, BAR_STAYS - (time() - since))
+    end
+  end
+  shown = bar_shown(e)
+  fade_window_buttons!(w, shown)
+  # A path pinned in the bar shows only with the bar. It opens again once the bar shows: see `title_trail!`.
+  shown == 0 && close_popup!(w, :title_trail)
+  nothing
+end
+
+"""
+True when the top bar that hides should show: the mouse has rested at the top
+edge of the window, or is still on the bar, or something hangs from the bar.
+"""
+bar_wanted(e, w) = begin
+  # The search that ⌘F opens hangs under the path in the bar, and the file's name is renamed where the bar shows it
+  haskey(e.nodes, :search_asked) && return true
+  any(p -> p.key == TS_KEY, popups(w)) && return true
+  !isempty(e.buf.path) && renaming(e, :title) == e.buf.path && return true
+  wide, _ = window_size(e)
+  inside(x, y) = 0px <= x < wide && 0px <= y
+  if bar_out(e)
+    # A list, a menu or a tip that hangs from the bar keeps it. The path pinned in the bar doesn't: it shows whenever the bar does.
+    any(p -> p.key != :title_trail && p.anchor[2] < TOPBAR_H, popups(w)) && return true
+    # A window hears nothing when the mouse leaves it, so the bar looks where the mouse is for itself
+    isempty(w.glfw) || sync_mouse!(w)
+    x, y = w.mouse
+    on = inside(x, y) && y < TOPBAR_H + BAR_BELOW
+    on && !isempty(w.glfw) && redraw_in!(e, 0.2)
+    return on
+  end
+  # A drag that reaches the top of the window, like one that selects lines, doesn't bring the bar out
+  at_edge() = begin
+    x, y = w.mouse
+    inside(x, y) && y < BAR_EDGE && !(Keys.mouse_left in w.keys)
+  end
+  at_edge() || return (delete!(e.nodes, :bar_rest); false)
+  since = get!(e.nodes, :bar_rest, time())
+  time() - since < BAR_WAIT && return (redraw_in!(e, BAR_WAIT - (time() - since)); false)
+  # The mouse may have gone on out of the window
+  isempty(w.glfw) || sync_mouse!(w)
+  delete!(e.nodes, :bar_rest)
+  at_edge()
+end
+
+"""
+What the top bar that hides lies on, so the page doesn't show through it: the
+colours of the sidebar, the page and the panel at the right, as a bar that
+doesn't hide has under it, with a line along its bottom.
+"""
+bar_back(e) = begin
+  e.hide_bar || return ()
+  full = filled(e)
+  side = full || lowered(e) !== nothing || as_app(e) ? 0px : panel_w(e) * opened(e)
+  right = full || right_view(e) === nothing ? 0px : right_w(e) * right_opened(e)
+  line = border(1px, :solid, colours.line)
+  (Row(width(grow=grow), height(TOPBAR_H), Alignment.Start, offset_y=bar_top(e), background(colours.bg), line[:bottom],
+     (side > 0px ? (Box(fixed(side), height(grow=grow), background(colours.panel), line[:right]),) : ())...,
+     Box(width(grow=grow), height(grow=grow)),
+     (right > 0px ? (Box(fixed(right), height(grow=grow), background(colours.panel), line[:left]),) : ())...),)
+end
 
 "The most of the window's width that the sidebar can have, so the page keeps room beside it"
 widest_panel(e) = max(PANEL_MIN, min(PANEL_MAX, px(floor(num(window_size(e)[1]) / 2))))
@@ -30937,8 +31067,8 @@ tablebar(e) = begin
   (!caretless(b) && b.caret[1] == b.anchor[1] && !isempty(e.layout)) || return ()
   it = item(e, b.caret[1])
   it.content isa Grid || return ()
-  top = TOPBAR_H + PAGE_TOP + it.top + TABLE_GAP - e.scroll.offset - BAR_H - 3px
-  top >= TOPBAR_H || return ()
+  top = above_page(e) + PAGE_TOP + it.top + TABLE_GAP - e.scroll.offset - BAR_H - 3px
+  top >= above_page(e) || return ()
   bar = Row(height(BAR_H), padding(3px, 0px), radius(6px), background(colours.float), border(1px, :solid, colours.line), lifted,
     # A spreadsheet has no buttons that move a column's text: a number goes on the right and text on the left
     [node!(() -> TableButton(action=a, label=l), e, (:table, a)) for (a, l) in TABLE_ACTIONS[1:(isspread(it.content) ? 4 : end)]]...)
@@ -31217,7 +31347,7 @@ toggle_marks!(e) = begin
   (isempty(runs) || isempty(e.layout)) && return
   touches(it) = any(r -> first(r) <= it.last && last(r) >= it.first, runs)
   _, h = window_size(e)
-  seen = filter(it -> it.top + it.tall > e.scroll.offset && it.top < e.scroll.offset + h - TOPBAR_H - PAGE_TOP, e.layout)
+  seen = filter(it -> it.top + it.tall > e.scroll.offset && it.top < e.scroll.offset + h - above_page(e) - PAGE_TOP, e.layout)
   any(touches, seen) && return
   i = findfirst(touches, e.layout)
   i === nothing || (e.scroll.offset = max(0px, e.layout[i].top - 80px))
@@ -31456,7 +31586,7 @@ filled(e) = full_block(e) !== nothing || lowered(e) !== nothing || zooming(e) !=
 describe(t::TopBar) = begin
   e = editor(t)
   # While the page shows as slides or as an app, the bar is empty. It's still what you drag to move the window.
-  (slideshow(e) === nothing && !as_app(e)) || return Row(width(grow=grow), height(TOPBAR_H), name="TopBar")
+  (slideshow(e) === nothing && !as_app(e)) || return Row(width(grow=grow), height(TOPBAR_H), name="TopBar", offset_y=bar_top(e))
   b = e.buf
   # The buttons that code from the startup page adds for the page that shows, like the ones that answer an email,
   # and the ones of a page of a blog, which publish it
@@ -31502,7 +31632,7 @@ describe(t::TopBar) = begin
   e.nodes[:title_room] = wide - panel_w(e) * showing - left - side   # the name is cut short to fit in it
   # The top bar lies over the top of the sidebar. The file's name is in the
   # middle of the space beside the sidebar, so it moves as the sidebar slides.
-  Row(width(grow=grow), height(TOPBAR_H), name="TopBar",
+  Row(width(grow=grow), height(TOPBAR_H), name="TopBar", offset_y=bar_top(e),
     Row(fixed(left + panel_w(e) * showing), height(grow=grow),
       # The close, minimise and zoom buttons sit over the first 84px. In full screen they're hidden, and the buttons slide left.
       Row(fixed(over), height(grow=grow), padding(0px, 8px, 0px, mac_buttons_room(e)), child_gap=2px,
@@ -32060,7 +32190,7 @@ const SLIDE_COMMANDS = (:save, :inspector)
 slideshow(e) = get(e.nodes, :slides, nothing)
 
 "How tall a slide can be before it scrolls: the window's height, less the top bar and the room above and below the page's text"
-slide_room(e) = max(0px, window_size(e)[2] - TOPBAR_H - PAGE_TOP - page_bottom(e))
+slide_room(e) = max(0px, window_size(e)[2] - above_page(e) - PAGE_TOP - page_bottom(e))
 
 """
 The slides of the page that shows. The blocks that a `columns` block puts
@@ -32780,14 +32910,15 @@ title_trail!(e, t) = begin
   placed = open && kept isa TitleTrail && kept.path == path && kept.size == window_size(e) && kept.parts == focus_parts(e) &&
            (kept.centred || !pinned) && kept.title_at == title_place(e, t)
   placed || (show_title_trail!(e, t, w, path); redraw_in!(e, 0))
-  asked && placed && ask_search!(e, w, kept)
+  # A top bar that hides moves the path while it slides out, and a move closes the search. So the search waits for the bar.
+  asked && placed && !bar_sliding(e) && ask_search!(e, w, kept)
   # A window hears nothing when the mouse leaves it, so the path looks for itself. A pinned path stays, so it looks only while the mouse is on it.
   isempty(w.glfw) || (pinned && !ishovered(t)) || (sync_mouse!(w); redraw_in!(e, 0.2))
   nothing
 end
 
-"Where the file's name is in the top bar: the left edge and the width of its node, and the room in it before the name"
-title_place(e, t) = (r = rect(t); r === nothing ? nothing : (r.left, r.width, get(e.nodes, :title_lead, 0px)))
+"Where the file's name is in the top bar: the left edge and the width of its node, the room in it before the name, and how far the bar has slid"
+title_place(e, t) = (r = rect(t); r === nothing ? nothing : (r.left, r.width, get(e.nodes, :title_lead, 0px), bar_top(e)))
 
 "Put the path to `path` over the top bar, with the file's name where the bar shows it"
 show_title_trail!(e, t, w, path) = begin
@@ -32815,7 +32946,7 @@ show_title_trail!(e, t, w, path) = begin
   # The name is in the middle of its room in the bar, with the headings after it and as much room before it, so the middle of the name's node is the bar's
   x = v.centred ? r.left + r.width / 2 - total / 2 : r.left + get(e.nodes, :title_lead, 0px) - before
   x = clamp(x, start, max(start, wide - 8px - total))
-  popup!(w, v, anchor=(x, (TOPBAR_H - TT_H) / 2), placement=:below, gap=0px, width=total, key=:title_trail,
+  popup!(w, v, anchor=(x, bar_top(e) + (TOPBAR_H - TT_H) / 2), placement=:below, gap=0px, width=total, key=:title_trail,
          modal=false, theme=menu_theme())
   nothing
 end
@@ -34256,7 +34387,7 @@ file_menu!(e, w) = begin
   tree = file_tree(e)
   item = Tree.item_under(tree, w)
   if item === nothing
-    (w.mouse[2] > TOPBAR_H && isdir(e.folder) && ishovered(node!(Sidebar, e, :sidebar)) &&
+    (w.mouse[2] > bar_bottom(e) && isdir(e.folder) && ishovered(node!(Sidebar, e, :sidebar)) &&
      folder_view(e, directory(e)).list === nothing) || return
     return file_menu!(e, w, e.folder, items=[FOLDER_MENU; "-"; favourite_item(e.folder)])
   end
@@ -35072,7 +35203,7 @@ tab_list(e) = begin
   high = Tree.ROW_HEIGHT   # the height of a row while the theme's text has its usual size, as the sidebar's has
   pad = 6px
   needs = high * length(rows) + 2pad
-  room = max(high + 2pad, (window_size(e)[2] - TOPBAR_H) * TABS_MOST)
+  room = max(high + 2pad, (window_size(e)[2] - above_page(e)) * TABS_MOST)
   scroll = node!(() -> own_scroll!(Scroll(width(grow=grow), height(grow=grow))), e, :tabs_scroll)
   at = findfirst(==(e.buf.path), rows)
   if needs > room && at !== nothing && get(e.nodes, :tab_shown, "") != e.buf.path
@@ -35114,7 +35245,7 @@ describe(s::Sidebar) = begin
   Row(fixed(shows), height(grow=grow), Alignment.Start, clip=true,
     Column(fixed(wide), height(grow=grow), Alignment.Start, background(colours.panel), name="Files",
            border(1px, :solid, colours.line)[:right], offset_x=shows - wide,
-      Box(width(grow=grow), height(TOPBAR_H)),   # under the top bar
+      Box(width(grow=grow), height(max(above_page(e), SIDE_GAP))),   # under the top bar
       tab_list(e)...,                            # the files that are open, over the folder
       Row(width(grow=grow), height(30px), padding(16px, 0px), Alignment.Center, clip=true, name="Folder",
         folder_trail(e, wide - 32px)...),
@@ -35149,7 +35280,7 @@ end
 
 "The strip over the sidebar's edge, while the sidebar is open and not sliding. It starts under the top bar."
 panel_edge(e) = e.panel && !sliding(e) && lowered(e) === nothing ?
-  (Row(width(grow=grow), height(grow=grow), Alignment.Start, padding(TOPBAR_H, 0px, 0px, panel_w(e) - EDGE_W / 2),
+  (Row(width(grow=grow), height(grow=grow), Alignment.Start, padding(above_page(e), 0px, 0px, panel_w(e) - EDGE_W / 2),
        node!(PanelEdge, e, :edge)),) : ()
 
 # --- the folder at the top of the sidebar ---------------------------------------------
@@ -39247,7 +39378,7 @@ end
 
 "The find bar, placed at the top right of the window, under the top bar. Nothing when it's closed."
 findbar(e) = finding(e) ? (Row(width(grow=grow), height(grow=grow), Alignment.Start, justify=Alignment.End,
-                               padding(TOPBAR_H + 6px, 22px, 0px, 0px), node!(FindBar, e, :findbar)),) : ()
+                               padding(bar_bottom(e) + 6px, 22px, 0px, 0px), node!(FindBar, e, :findbar)),) : ()
 
 # --- spelling --------------------------------------------------------------------------------
 #
@@ -40566,7 +40697,7 @@ bring_failed!(e, o) = begin
   failed = o.first
   r = line_rect(e, failed)
   _, tall = window_size(e)
-  if r === nothing || r.top < TOPBAR_H || r.top + r.height > tall
+  if r === nothing || r.top < above_page(e) || r.top + r.height > tall
     note_place!(e)   # so ⌘⌥← goes back
     e.nodes[:hold] = (max(failed - 3, 1), 24px - PAGE_TOP)
   end
@@ -40614,7 +40745,7 @@ outcome_over(e) = begin
   w, h = window_size(e)
   side = panel_w(e) * opened(e)
   x0 = text_left(e)
-  y0 = TOPBAR_H + PAGE_TOP - e.scroll.offset
+  y0 = above_page(e) + PAGE_TOP - e.scroll.offset
   size = body(e).size * 0.8
   wide = measure(outcome_face(size), "0")   # every character of the font is this wide
   # A whole number of pixels, like the top of each box, so that an open box meets the rest under it with no line between them
@@ -40637,7 +40768,7 @@ outcome_over(e) = begin
     fits(left) < min(length(brief), 16) && ((left, top) = (x0 + vl.x, top + vl.high))
     top = px(round(num(top)))
     # On a page that's scrolled sideways, a box that would go over the numbers of the lines doesn't show
-    (top >= TOPBAR_H && top + high <= h && left >= x0 + sideways(e)) || continue
+    (top >= above_page(e) && top + high <= h && left >= x0 + sideways(e)) || continue
     n = max(fits(left), 1)
     o.shown = length(brief) > n ? first(brief, n - 1) * "…" : brief
     # The box of an outcome that's open shows the first line, so the rest starts at the second
@@ -42679,14 +42810,14 @@ callbox(e) = begin
   tall = high * (length(listed) + length(under)) + 12px
   # The name in the box is in line with the name in the code, so each value in the box is near the place where it's typed
   left = clamp(text_left(e) + across - measure(face, found.name) - 11px, edge, max(edge, w - 8px - wide))
-  page_y = TOPBAR_H + PAGE_TOP - e.scroll.offset
+  page_y = above_page(e) + PAGE_TOP - e.scroll.offset
   over = page_y + it.top + line_top(f, k) - tall - 3px
   at = item(e, b.caret[1])
   g = at.content
   g isa Flow || return ()
   j, _ = spot(g, b.caret[2])
   below = page_y + at.top + line_top(g, j) + g.lines[j].high + 3px
-  room_over = over >= TOPBAR_H + 4px
+  room_over = over >= above_page(e) + 4px
   room_below = below + tall <= window_size(e)[2] - 4px
   top = !room_below && room_over ? over : below
   box = Column(fixed(wide), Alignment.Start, padding(10px, 5px), radius(7px), background(colours.float), border(1px, :solid, colours.line), lifted,
@@ -43348,6 +43479,7 @@ describe_window(e::Editor) = begin
   zoom_tick!(e)
   slide_tick!(e)
   screen_tick!(e)
+  bar_tick!(e)
   code_tick!(e)
   run_tick!(e)
   term_tick!(e)
@@ -43376,7 +43508,7 @@ describe_window(e::Editor) = begin
   # times it only wakes to blink the caret.
   if win !== nothing
     # While the sidebar slides, the top bar's buttons slide, the command palette slides, or the caret moves to a new place, each frame is drawn as soon as it can be
-    win.animating = sliding(e) || clearing(e) || gliding(e) || palette_moving(e)
+    win.animating = sliding(e) || clearing(e) || gliding(e) || palette_moving(e) || bar_sliding(e)
     # A part of a live block that has the keyboard, like a text field, blinks its own caret
     win.wake = pop!(e.nodes, :ran, false) ? 0.05 : win.focus === e ? 0.51 - mod(time() - e.blink, 0.5) :
                win.focus === nothing ? 0.0 : 0.25
@@ -43387,14 +43519,14 @@ describe_window(e::Editor) = begin
     # The lines of a block that fill the window take the sidebar's room too
     (opened(e) > 0 && lowered(e) === nothing && !as_app(e) ? (node!(Sidebar, e, :sidebar),) : ())...,
     Column(width(grow=grow), height(grow=grow), Alignment.Start,
-      Box(width(grow=grow), height(TOPBAR_H)),   # under the top bar
+      Box(width(grow=grow), height(above_page(e))),   # under the top bar
       node!(Page, e, :page)),
     right_panel(e)...)
   # The command palette has nothing behind it that dims the page, and it shows while it slides down after it closes
   popup = palette_shows(e) ? (palette(e),) : e.popup == :none ? () : (node!(Backdrop, e, :backdrop), finder(e))
   Stack(width(grow=grow), height(grow=grow), Alignment.Start, name="Editor",
     body, panel_edge(e)..., tablebar(e)..., put_back_over(e)..., outcome_over(e)..., callbox(e)..., suggestbox(e)..., findbar(e)..., sound_over(e)..., fill_over(e)..., task_over(e)..., slides_over(e)..., takeoff_over(e)..., zoom_over(e)...,
-    (screening(e) ? () : (node!(TopBar, e, :topbar),))...,   # a video that fills the screen is all that the window shows
+    (screening(e) || bar_shown(e) == 0 ? () : (bar_back(e)..., node!(TopBar, e, :topbar)))...,   # a video that fills the screen is all that the window shows
     popup...)
 end
 
@@ -43491,7 +43623,7 @@ end
 const pages_dir = Ref(joinpath(@__DIR__, "pages"))
 
 "The settings that every window has the same: each is a field of the editor"
-const SHARED = (:theme, :font, :weight, :zoom, :widest, :plain, :spelling, :updates, :autosave, :peeks, :ai, :glide, :wrap, :numbers, :shade, :beside, :indent, :code_scale, :code_font, :code_weight, :guide, :bundle, :rebound, :side, :hidden, :right, :own, :pinned)
+const SHARED = (:theme, :font, :weight, :zoom, :widest, :plain, :spelling, :updates, :autosave, :peeks, :ai, :glide, :wrap, :numbers, :shade, :beside, :indent, :code_scale, :code_font, :code_weight, :guide, :bundle, :rebound, :side, :hidden, :right, :own, :pinned, :hide_bar)
 
 "The folder of the pages that have the settings"
 settings_dir() = joinpath(pages_dir[], "settings")
@@ -43606,7 +43738,7 @@ save_settings!(e) = begin
     mkpath(dirname(settings_file()))
     # After the bundle of key bindings comes a line for each command that has other keys than the bundle's, like key.save=ctrl+s
     changed = join(["key.$name=$(e.rebound[name])\n" for name in sort!(collect(keys(e.rebound)))])
-    write(settings_file(), "theme=$(e.theme)\nfont=$(e.font)\nweight=$(e.weight)\nzoom=$(e.zoom)\nwidth=$(e.widest.value)\nplain=$(e.plain)\nspelling=$(e.spelling)\nupdates=$(e.updates)\nautosave=$(e.autosave)\npeeks=$(e.peeks)\nagent=$(e.ai)\nglide=$(e.glide)\nwrap=$(e.wrap)\nnumbers=$(e.numbers)\nshade=$(e.shade)\nbeside=$(e.beside)\nindent=$(e.indent)\ncode=$(e.code_scale)\ncodefont=$(e.code_font)\ncodeweight=$(e.code_weight)\nguide=$(e.guide)\nsidebar=$(e.side.value)\nhidden=$(e.hidden)\nright=$(e.right)\nownmessage=$(e.own)\npinned=$(e.pinned)\nkeys=$(e.bundle)\n$changed")
+    write(settings_file(), "theme=$(e.theme)\nfont=$(e.font)\nweight=$(e.weight)\nzoom=$(e.zoom)\nwidth=$(e.widest.value)\nplain=$(e.plain)\nspelling=$(e.spelling)\nupdates=$(e.updates)\nautosave=$(e.autosave)\npeeks=$(e.peeks)\nagent=$(e.ai)\nglide=$(e.glide)\nwrap=$(e.wrap)\nnumbers=$(e.numbers)\nshade=$(e.shade)\nbeside=$(e.beside)\nindent=$(e.indent)\ncode=$(e.code_scale)\ncodefont=$(e.code_font)\ncodeweight=$(e.code_weight)\nguide=$(e.guide)\nsidebar=$(e.side.value)\nhidden=$(e.hidden)\nright=$(e.right)\nownmessage=$(e.own)\npinned=$(e.pinned)\nhidebar=$(e.hide_bar)\nkeys=$(e.bundle)\n$changed")
   catch
     # A file that can't be written only means the settings last as long as the window
   end
@@ -43745,6 +43877,8 @@ load_settings!(e) = begin
       e.own = value == "true"
     elseif name == "pinned"
       e.pinned = value == "true"
+    elseif name == "hidebar"
+      e.hide_bar = value == "true"
     elseif name == "keys"
       any(b -> first(b) == value, BUNDLES) && (e.bundle = String(value))
     elseif startswith(name, "key.")
@@ -48973,7 +49107,7 @@ show_steps!(e, check::FileCheck) = begin
   # The function comes in sight, near the top of the window, when it isn't
   r = line_rect(e, steps.first)
   _, tall = window_size(e)
-  if r === nothing || r.top < TOPBAR_H || r.top + r.height > tall
+  if r === nothing || r.top < above_page(e) || r.top + r.height > tall
     note_place!(e)
     e.nodes[:hold] = (max(steps.first - 3, 1), 24px - PAGE_TOP)
   end
@@ -52728,8 +52862,8 @@ put_back_over(e) = begin
   right = text_left(e) + e.width
   out = Any[]
   for (k, y) in enumerate(gone.tops)
-    y = TOPBAR_H + page_top(e) + y - e.scroll.offset + 1px
-    TOPBAR_H <= y <= h - 20px || continue
+    y = above_page(e) + page_top(e) + y - e.scroll.offset + 1px
+    above_page(e) <= y <= h - 20px || continue
     # While the window chooses the changes to commit, each has a tick box too
     tick = choosing(e) ? (node!(() -> TickChange(k=k), e, (:tick_change, k)),) : ()
     push!(out, Row(width(grow=grow), height(grow=grow), Alignment.Start, justify=Alignment.End, padding(y, max(w - right, 0px), 0px, 0px),
@@ -56176,7 +56310,7 @@ stopped_tick!(e, key::Symbol, words, since) = begin
   else
     # The words look as a tooltip does, under the middle of the top bar
     wide, _ = window_size(e)
-    spot = (wide / 2, 0px, 1px, TOPBAR_H - 8px)
+    spot = (wide / 2, 0px, 1px, max(bar_bottom(e) - 8px, 0px))
     popup!(win, Bubble(content=Box(padding(8px, 5px), label(words, 12px, color=TIP_INK)), target=spot),
            anchor=spot, placement=:bottom, gap=6px, key=key, input=false)
     redraw_in!(e, left)

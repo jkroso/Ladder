@@ -1208,6 +1208,8 @@ In the path, click the › after the file's name, or after a heading, to search 
 
 The button at the right of the search chooses where to look: a heading of the path, the whole file, or a folder on the way to the file, with the folders in it. In a folder, the kind Pages finds a page by its name. ↑ and ↓ pick a row, and Return or a click shows it. Tab opens the list of kinds, and Esc closes the search.
 
+For more room for the page, turn on Hide the top bar in [Settings](settings/settings.md#top-bar). The page then goes up to the top of the window. Rest the mouse at the window's top edge, and the bar slides down over the page. It slides back up when you move the mouse off it.
+
 The list leaves out hidden files and folders, the ones whose names start with a dot, like `.media`. To list them too, click the eye beside the button at the top left, or press ⌘⇧. as you do in the Finder. Click the eye again to leave them out.
 
 To leave out a file or a folder that you never look at, like `~/Movies`, right-click it and choose Ignore. Ladder remembers it, and treats it as a hidden file from then on: the lists of a folder leave it out, and the searches don't look in it. The eye shows the files that you ignore too, fainter than the others. Right-click one and choose Stop Ignoring to show it again. [Settings](settings/settings.md#ignored-files) lists all of them.
