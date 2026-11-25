@@ -1,12 +1,12 @@
 # The facts of a folder of news, apart from the window that shows it. main.jl
 # draws the folder as the front page of a newspaper, and starts the agents.
 #
-# A folder of news holds a page for each kind of news that you want, like
-# `AI.md`, which says in your own words what to look for. Once a day an agent
-# reads each page, looks on the web for news of that kind, and writes an
-# article for each story. The name of the page is the name of the paper's
-# section for its news. A page called Readme isn't a kind of news: it can say
-# what the folder is for, and so can `CLAUDE.md`.
+# A folder of news has a page called `Interests.md`, which says the kinds of
+# news that you want. Each `##` heading in it is a section of the paper, and
+# under it you say in your own words what to look for. Once a day an agent
+# reads each section, looks on the web for news of that kind, and writes an
+# article for each story. What comes before the first `##` heading isn't a
+# kind of news: it can say what the page is for.
 #
 # Ladder keeps a file called `AGENTS.md` in the folder, which tells an agent
 # of your own how to write the articles: see `instructions`. Many agents read a
@@ -34,17 +34,17 @@
 # did with each article in `feedback.csv`, in the folder, after the article
 # has gone, so the agents learn what you like. An article of an earlier day
 # that you didn't open is there too: it didn't interest you enough. Each article's `by` is its reporter: an agent, or the
-# author of a post of a feed (see feeds.jl). The front page shows how many of
-# each reporter's articles you liked, so they compete as reporters do.
+# author of a post of a feed (see feeds.jl). Each learns which of its
+# articles you liked and read, so they compete as reporters do.
 #
 # Ladder deletes an article when it's older than the settings keep news: a
 # week, unless you change it. It deletes nothing else. A file that you put in
 # a day's folder stays, and so does the folder while it holds one. To keep an
 # article, move it out of its day's folder.
 #
-#     interests(folder)             # each page that says a kind of news: its section's name, its file and its words
+#     interests(folder)             # each section of Interests.md: its name, what Ladder knows it by, and its words
 #     editions(folder)              # the articles of each day, the newest day first
-#     ask(interest, now; printed, since)   # what the agent is asked for the news of a page
+#     ask(interest, now; printed, since)   # what the agent is asked for the news of a section
 #     reply_articles(reply)         # the articles in what the agent replied
 #     write_articles!(folder, section, found, now; by)   # writes each article in the folder of its day
 #     prune!(folder)                # deletes the articles that are older than the settings keep
@@ -59,12 +59,12 @@
 # Another agent can write the articles, like one that runs on a server: Ladder
 # shows and deletes any article in a day's folder whose front matter has a
 # title and a section. With the setting :off, Ladder starts no agent of its own.
-#     last_ran(path), ran!(path)    # when an agent last got the news of the page at `path`
+#     last_ran(key), ran!(key)      # when an agent last got the news of the section that Ladder knows by `key`
 
 @use "github.com/jkroso/Prospects.jl" @def
 @use Dates: Dates, Date, DateTime, Day, Hour, Minute
 
-# --- the settings, and when the news of each page was last asked for ---------------------
+# --- the settings, and when the news of each section was last asked for ------------------
 
 "The file of the settings of news. A test names a file of its own."
 const FILE = Ref("")
@@ -80,7 +80,7 @@ another agent writes the articles.
 """
 const AGENTS = (:daily, :asked, :off)
 
-"The settings of news, and when the news of each page was last asked for, by the page's file"
+"The settings of news, and when the news of each section was last asked for, by its key: see `interest_key`"
 @def mutable struct Kept
   keep::Int = KEEP_DAYS
   agents::Symbol = :daily
@@ -119,10 +119,10 @@ end
 "How many days Ladder remembers that a post of a feed is in the paper"
 const SEEN_DAYS = 90
 
-"Write the settings `k` to their file. A page that's gone takes its line with it, and so does a post seen more than `SEEN_DAYS` ago."
+"Write the settings `k` to their file. A section whose page is gone takes its line with it, and so does a post seen more than `SEEN_DAYS` ago."
 keep!(k::Kept) = begin
   path = file()
-  filter!(p -> isfile(first(p)), k.ran)
+  filter!(p -> isfile(replace(first(p), r"#[^/]*\z" => "")), k.ran)
   oldest = Dates.now() - Day(SEEN_DAYS)
   filter!(p -> last(p) > oldest, k.seen)
   stamp(t) = Dates.format(t, "yyyy-mm-ddTHH:MM:SS")
@@ -150,9 +150,9 @@ agents!(when::Symbol) = (when in AGENTS || error("Ladder's agents get the news :
 companion() = kept().companion
 companion!(on::Bool) = (k = kept(); k.companion = on; keep!(k); nothing)
 
-"When an agent last got the news of the page at `path`, or nothing when none has"
-last_ran(path::AbstractString) = get(kept().ran, String(path), nothing)
-ran!(path::AbstractString, at::DateTime=Dates.now()) = (k = kept(); k.ran[String(path)] = at; keep!(k); nothing)
+"When an agent last got the news of the section that Ladder knows by `key`, or nothing when none has"
+last_ran(key::AbstractString) = get(kept().ran, String(key), nothing)
+ran!(key::AbstractString, at::DateTime=Dates.now()) = (k = kept(); k.ran[String(key)] = at; keep!(k); nothing)
 
 "True when Ladder has put the post of a feed with the id `id` in the paper"
 seen(id::AbstractString) = haskey(kept().seen, replace(id, r"\s" => " "))
@@ -164,32 +164,58 @@ saw!(ids, at::DateTime=Dates.now()) = (isempty(ids) && return nothing; k = kept(
 "The endings of the files that are pages"
 const PAGES = (".md", ".markdown")
 
-"A page of a folder of news that says, in your words, a kind of news that you want"
+"The page of a folder of news that says the kinds of news that you want"
+const INTERESTS = "Interests.md"
+
+"What `Interests.md` says when Ladder makes it"
+const INTERESTS_PAGE = """
+# Interests
+
+Each `##` heading on this page is a section of the paper. Under it, say in your own words what news you want in that section, and what to leave out. The heading is the section's name. Ladder's agent reads each section and writes its articles.
+
+For example:
+
+```markdown
+## AI
+
+New AI models and what they can do. Leave out funding rounds.
+```
+"""
+
+"A section of `Interests.md`: a kind of news that you want, in your words"
 @def struct Interest
-  name::String = ""    # the file's name without its ending: the name of the section of the paper that its news goes in
-  path::String = ""
-  words::String = ""   # what the page says, without its front matter
+  name::String = ""    # the heading: the name of the section of the paper that its news goes in
+  key::String = ""     # what Ladder knows it by: see `interest_key`
+  words::String = ""   # what the page says under the heading
 end
 
-"The names of the pages of a folder of news that aren't kinds of news, in small letters: what the folder is for, what an agent reads, and the list of feeds"
-const NOT_NEWS = ("readme", "agents", "claude", "feeds")
+"What Ladder knows the section `name` of the folder of news `folder` by, like `.../News/Interests.md#AI`"
+interest_key(folder::AbstractString, name::AbstractString) = joinpath(folder, INTERESTS) * "#" * name
 
-"True when the file called `name` can be a page that says a kind of news: a page that isn't hidden, and isn't the folder's Readme or an agent's instructions"
-interest_name(name::AbstractString) =
-  !startswith(name, '.') && lowercase(splitext(name)[2]) in PAGES && !(lowercase(splitext(name)[1]) in NOT_NEWS)
-
-"The pages of the folder `folder` that each say a kind of news that you want, in the order of their names"
+"""
+The sections of `Interests.md` in the folder `folder`, in the page's order.
+Each `##` heading starts one, and a `#` heading ends it. A heading in a block
+of code isn't one. A section whose heading is there twice has the words of
+both.
+"""
 interests(folder::AbstractString) = begin
-  names = try readdir(folder) catch; String[] end
-  out = Interest[]
-  for n in sort!(names, by=lowercase)
-    interest_name(n) || continue
-    path = joinpath(folder, n)
-    isfile(path) || continue
-    text = try read(path, String) catch; continue end
-    push!(out, Interest(name=String(splitext(n)[1]), path=path, words=String(strip(last(matter(text))))))
+  text = try read(joinpath(folder, INTERESTS), String) catch; return Interest[] end
+  names, words = String[], Vector{String}[]
+  inside, fenced = 0, false
+  for line in eachsplit(last(matter(text)), '\n')
+    heading = fenced ? nothing : match(r"^ {0,3}(#{1,2})[ \t]+(.+?)[ \t#]*$", line)
+    if heading === nothing
+      occursin(r"^ {0,3}(```|~~~)", line) && (fenced = !fenced)
+      inside > 0 && push!(words[inside], String(line))
+    elseif heading[1] == "##"
+      name = String(strip(heading[2]))
+      inside = something(findfirst(==(name), names), 0)
+      inside == 0 && (push!(names, name); push!(words, String[]); inside = length(names))
+    else
+      inside = 0
+    end
   end
-  out
+  [Interest(name=n, key=interest_key(folder, n), words=String(strip(join(ws, '\n')))) for (n, ws) in zip(names, words)]
 end
 
 # --- the articles --------------------------------------------------------------------------
@@ -507,7 +533,7 @@ liked_words(ms) = begin
 end
 
 """
-What the agent is asked for the news of the page `interest`, at the time
+What the agent is asked for the news of the section `interest`, at the time
 `now`. `printed` are the headlines of its section that the paper has now, which
 it leaves out. The news is new since `since`. `most` is how many articles it
 writes at most. `liked` is what you did with the articles of its section,
@@ -670,7 +696,7 @@ end
 """
 What `AGENTS.md` says: how an agent of your own writes the articles of a
 folder of news. `days` is how many days Ladder keeps an article, 0 for ever,
-`most` the most articles for one page, and `zone` the reader's time zone.
+`most` the most articles for one section, and `zone` the reader's time zone.
 """
 instructions(; days::Integer=keep_days(), most::Integer=5, zone::AbstractString=time_zone()) = """
 $KEPT_LINE
@@ -681,15 +707,15 @@ This folder is a newspaper. You find the news and write its articles. Ladder, a 
 
 ## What the reader wants
 
-Each Markdown page at the top of this folder says one kind of news that the reader wants, in their own words. `AI.md` is an example. The page's name without `.md` is the name of its section in the paper: `AI`. This file, `Readme.md`, `CLAUDE.md` and `Feeds.md` aren't kinds of news.
+`$INTERESTS` in this folder says the kinds of news that the reader wants, in their own words. Each `##` heading on it is a section of the paper, and the words under the heading say what news goes in that section. The heading is the section's name: `## AI` is the section `AI`. What comes before the first `##` heading isn't a kind of news.
 
 ## Each time you run
 
-1. Read each page at the top of this folder.
+1. Read `$INTERESTS`.
 2. Read `$FEEDBACK`, if it's there. It says which articles the reader opened, which they liked, and which they didn't.
-3. For each page, search the web for news of that kind since your last run. If you don't know when that was, use the date of the newest article of that section, or else the last 2 days.
+3. For each section, search the web for news of that kind since your last run. If you don't know when that was, use the date of the newest article of that section, or else the last 2 days.
 4. Read the headlines of that section's articles in the folders of the days. Leave out a story that's there already, unless something new has happened in it.
-5. Write an article for each new story that the reader would want to know about: $most at most for each page. Write more of what the reader opened and liked, and less of what they didn't. If there's no news of a kind, write nothing for it.
+5. Write an article for each new story that the reader would want to know about: $most at most for each section. Write more of what the reader opened and liked, and less of what they didn't. If there's no news of a kind, write nothing for it.
 
 ## Where an article goes
 
@@ -721,7 +747,7 @@ The company said that it would fly the booster again within a month.
 The front matter is between the lines of `---`:
 
 - `title` is the headline, on one line. An article must have it.
-- `section` is the name of the page that asked for the news, like `AI` for `AI.md`. An article must have it.
+- `section` is the heading of `$INTERESTS` that asked for the news, like `AI` for `## AI`. An article must have it.
 - `summary` is one or two sentences that say what happened, on one line.
 - `importance` is a number from 1 to 10 for how much the story matters to the reader. The most important story leads the front page. A story without one has 5.
 - `date` is when you wrote the article, as YYYY-MM-DDTHH:MM in the reader's time zone.
@@ -737,11 +763,11 @@ Ladder keeps what the reader did with each article in `$FEEDBACK` in this folder
 
 ## Other reporters
 
-Other agents write for this paper too. Ladder also puts the posts of the feeds that `Feeds.md` lists in the paper, each by its author. The front page shows how many articles of each reporter the reader liked, and how many they opened. Write your own name in `by`, so that the reader's marks count for you.
+Other agents write for this paper too. Ladder also puts the posts of the feeds that `Feeds.md` lists in the paper, each by its author. `$FEEDBACK` says which articles of each reporter the reader liked, and which they opened. Write your own name in `by`, so that the reader's marks count for you.
 
 ## What Ladder does
 
-Ladder shows each article as soon as you write it. $(days > 0 ? "It deletes each article $(days == 1 ? "a day" : "$days days") after its date" : "It keeps every article"), so don't delete any. Don't change the reader's pages, an article that's there already, `$FEEDBACK`, `Feeds.md` or this file.
+Ladder shows each article as soon as you write it. $(days > 0 ? "It deletes each article $(days == 1 ? "a day" : "$days days") after its date" : "It keeps every article"), so don't delete any. Don't change `$INTERESTS`, an article that's there already, `$FEEDBACK`, `Feeds.md` or this file.
 """
 
 """

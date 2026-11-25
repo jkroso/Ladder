@@ -106,6 +106,13 @@ end
   @test e.nodes[(:folder_page, plain)] isa K.FolderPage
   @test !e.panel   # the sidebar stays hidden
   shot("folder")
+  # The folder's name has a › after it, which lists what's in the folder, and a second click takes the list away
+  hover!()
+  @test haskey(trail().arrows, plain) && K.num(rect(arrow(plain)).left) > K.num(rect(crumb(plain)).left)
+  click(middle(arrow(plain)))
+  @test list().dir == plain && list().names == ["Sub", "a.md", "b.md"]
+  click(middle(arrow(plain)))
+  @test isempty(lists())
   K.open!(e, a); frames()
 end
 

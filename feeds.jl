@@ -43,7 +43,7 @@ const PODCASTS = "apple-podcasts:"
 const PAGE = """
 # Feeds
 
-Put the address of an RSS or Atom feed on a line of this page. Ladder gets each feed every hour while the paper shows, and when you click Get the News. Each new post shows in the paper as an article by its author.
+Put the address of an RSS or Atom feed on a line of this page. Ladder gets each feed every hour while the paper shows, and when you click the round arrow at the right of the top bar. Each new post shows in the paper as an article by its author.
 
 A feed's posts go in the section of the heading over it. A feed with no heading over it gets a section of its own, with the feed's name. For example:
 

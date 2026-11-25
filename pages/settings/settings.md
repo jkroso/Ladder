@@ -124,11 +124,11 @@ Row(Alignment.Center, child_gap=12px, say("Ladder's agent gets the news"),
                onchange=group -> news_agents!(whens[group.selected])))
 ```
 
-A folder of news is a newspaper that agents write for you. It has a page for each kind of news that you want, in your own words. Ladder deletes each article when it's older than the time in the list. Choose For ever to keep every article.
+A folder of news is a newspaper that agents write for you. Its page `Interests.md` says the kinds of news that you want, in your own words, with a heading for each. Ladder deletes each article when it's older than the time in the list. Choose For ever to keep every article.
 
-With Once a day, the agent above reads each page the first time that you open the folder each day. It searches the web and writes the articles. With When I ask, it does that only when you click Get the News.
+With Once a day, the agent above reads each section of `Interests.md` the first time that you open the folder each day. It searches the web and writes the articles. With When I ask, it does that only when you click the round arrow at the right of the top bar of the front page.
 
-Choose Never when an agent of your own writes the articles, like one that runs on a server. Ladder then starts no agent, and has no Get the News button unless the folder has feeds. It still shows each article that the other agent writes, and deletes it when it's too old. Ladder keeps a file called `AGENTS.md` in each folder of news, which tells the other agent what to write and where. The [Welcome](../welcome.md) page has an example of an article, and says how to add feeds and mark the articles that you like.
+Choose Never when an agent of your own writes the articles, like one that runs on a server. Ladder then starts no agent, and has no button that gets the news unless the folder has feeds. It still shows each article that the other agent writes, and deletes it when it's too old. Ladder keeps a file called `AGENTS.md` in each folder of news, which tells the other agent what to write and where. The [Welcome](../welcome.md) page has an example of an article, and says how to add feeds and mark the articles that you like.
 
 ```ui
 Checkbox(label="Start Grok to talk with about the news when I open it", checked=news_companion(), onchange=box -> news_companion!(box.checked))
