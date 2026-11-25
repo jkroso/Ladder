@@ -261,6 +261,64 @@ end
   @test b.caret == (8, 0)   # none of the clicks moved the caret
 end
 
+@testset "a click on a method shows its code" begin
+  o = outcome(8)
+  t = o.body.detail
+  litres = findfirst(row -> row[1] == "litres", t.rows)
+  click(middle(rect(t.parts[litres])))
+  @test t.open == litres && t.inner.what == "method"
+  # A method of another file: the file shows in a window beside this one, with the caret on the method's first line
+  r = t.inner.parts[1]
+  @test r isa K.MethodRow && K.cursor(r) == :hand
+  click(middle(rect(r)))
+  shown = filter(o -> o !== e && o.buf.path == realpath(joinpath(dir, "paint.jl")), K.editors)
+  @test length(shown) == 1 && only(shown).buf.caret[1] == 2
+  @test b.path == page && b.caret == (8, 0)   # this window still shows the page
+  # A second click brings that window to the front, and opens no other
+  click(middle(rect(r)))
+  @test count(o -> o.buf.path == realpath(joinpath(dir, "paint.jl")), K.editors) == 1
+  foreach(o -> (win = K.window_of(o); win === nothing || close(win)), shown)
+  click(middle(rect(t.parts[litres])))   # hides the method again
+  K.focus(e)
+  # A method that the page makes is a line of this page, so the caret goes there and no window opens
+  n = length(K.editors)
+  t = opened!(6)
+  caret!(9)
+  @test outcome(6).open
+  click(middle(rect(t.parts[1])))
+  @test b.caret == (6, 0) && length(K.editors) == n
+  # A method of Julia's own shows the file of Julia's code that has it
+  t = opened!(4)
+  k = findfirst(m -> m.module === Base && String(m.file) == "essentials.jl", t.methods)
+  r = K.method_row!(outcome(4).body, t, k)
+  @test K.cursor(r) == :hand
+  onkey(r, KeyPress{Keys.mouse_left}(0, w))
+  base = realpath(Base.find_source_file("essentials.jl"))
+  shown = filter(o -> o.buf.path == base, K.editors)
+  @test length(shown) == 1 && startswith(only(shown).buf.lines[only(shown).buf.caret[1]], r"\s*(function )?length\(")
+  @test b.caret == (4, 0)
+  # Ladder never changes a file of Julia's own: it has the lock, a key typed in it changes nothing, and nothing writes it
+  o = only(shown)
+  @test o.buf.fixed && K.caretless(o.buf) && !K.writes(o.buf)
+  was = copy(o.buf.lines)
+  win = K.window_of(o)
+  ontype(win, Typed('x', win)); frame(win)
+  K.edit!(o.buf, (1, 0), (1, 0), "x")
+  @test o.buf.lines == was
+  # The top bar has the lock, which says "Read only" while the mouse is over it
+  lock_in(node) = (hasproperty(node, :from) && node.from isa K.ReadOnly) || (node isa K.GeometricUI && any(lock_in, node.children))
+  @test lock_in(K.describe(o.nodes[:topbar])) && K.tip(o.nodes[:read_only]) == "Read only"
+  foreach(o -> (win = K.window_of(o); win === nothing || close(win)), shown)
+  # A method that code made with no file has no code to show, so a click on it does nothing
+  nofile = Core.eval(Module(), Base.remove_linenums!(:(nofile(x) = x)))
+  t = K.Detail(nofile)
+  r = K.method_row!(outcome(4).body, t, 1)
+  @test K.cursor(r) == :arrow
+  onkey(r, KeyPress{Keys.mouse_left}(0, w))
+  @test length(K.editors) == n && b.caret == (4, 0)
+  opened!(8)   # the next test closes the box of the module
+end
+
 @testset "a box closes with a click, and the page is as it was" begin
   o = outcome(8)
   click(middle(rect(o)))

@@ -111,8 +111,14 @@ const first_line = findfirst(startswith("describe(g::Gauge)"), readlines(source)
   @test m isa Method && K.code_place(m) == (realpath(source), first_line)
   @test K.code_label(m) == "gauge.jl:$first_line"
   @test K.drawn_by(3) === nothing
-  # A function of Julia's own has no file on this Mac
-  @test K.code_place(which(sin, Tuple{Float64})) === nothing
+  # A method of Julia's own is in Julia's folder of code: Base's by its place in Base's folder, the standard library's by the
+  # path of the Mac that built Julia. A method that code made with no file has none.
+  trig = which(sin, Tuple{Float64})
+  @test K.code_place(trig) == (realpath(Base.find_source_file(String(trig.file))), trig.line)
+  @test K.code_place(which(K.Dates.year, Tuple{K.Dates.Date}))[1] == realpath(Base.fixup_stdlib_path(String(which(K.Dates.year, Tuple{K.Dates.Date}).file)))
+  @test K.code_place(only(methods(Core.eval(Module(), Base.remove_linenums!(:(nofile(x) = x)))))) === nothing
+  # Ladder shows Julia's own files and never changes them, as it does an email
+  @test K.protected(K.code_place(trig)[1]) && !K.protected(realpath(source))
   # The built app says where it wrote each file that the Mac that built it had
   other = joinpath(dir, "copy.jl")
   write(other, "1\n")

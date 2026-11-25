@@ -110,6 +110,9 @@ end
   @test m isa Method && K.code_place(m) == (realpath(walls), 7)
   m = goes("walls::Vector{Wall}", "Wall")
   @test m isa Method && K.code_place(m)[1] == realpath(walls)
+  # A function of Julia's own is in Julia's folder of code, at a method of the module that made it, not at a package's
+  m = goes("sum(w -> w.long", "sum")
+  @test m isa Method && m.module === Base && dirname(K.code_place(m)[1]) == realpath(dirname(Base.find_source_file("essentials.jl")))
   # A part of a value, after a dot, has no place, and nor has a name that nothing made
   @test goes("sum(w -> w.long", "long") === nothing
   K.edit!(b, (length(b.lines), 0), (length(b.lines), 0), "nowhere_at_all(1)")

@@ -87,7 +87,7 @@ sizes = [round(2.4 * 3.6, digits=1),
 
 ## Functions and modules
 
-The box of a function opens to show the function's documentation and a table of its methods. The box of a module opens to show the module's readme, or its documentation, and a table of the names that it defines. Type in the field over that table to search the names. The wheel moves through an open box.
+The box of a function opens to show the function's documentation and a table of its methods. Click a method to see its code in a window beside this one. The box of a module opens to show the module's readme, or its documentation, and a table of the names that it defines. Type in the field over that table to search the names. The wheel moves through an open box.
 
 ```julia
 length

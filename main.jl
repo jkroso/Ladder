@@ -914,10 +914,11 @@ readonly(b::Buffer) = !(b.view in (:markdown, :code))
 
 """
 True when Ladder shows the file at `path` as a page and never changes it: the
-file is an email, or the Mac marks it as read-only. Ladder marks each email
-that it keeps, and a mark that you put on a page of your own counts the same.
+file is an email, a file of Julia's own code, or the Mac marks it as
+read-only. Ladder marks each email that it keeps, and a mark that you put on a
+page of your own counts the same.
 """
-protected(path) = Eml.isemail(path) || (isfile(path) && !iswritable(path))
+protected(path) = Eml.isemail(path) || julia_own(path) || (isfile(path) && !iswritable(path))
 
 "True when `path` is the address of a page on a web server, like https://example.com/notes.md, and not a file on the Mac. See \"a page from a web server\"."
 isremote(path::AbstractString) = Remote.isaddress(path)
@@ -41318,11 +41319,12 @@ mutable struct Detail
   inner::Any                        # the Detail of that value
   parts::Dict{Int,Any}              # the node of each row of a module's table that has been in view. It takes the row's clicks.
   wide::px                          # how wide the rows were last drawn
+  methods::Vector{Method}           # the method of each row of a function's table. A click on the row shows its code.
 end
 
 Detail(of, lines, rows, what; search=nothing) =
   Detail(of, lines, nothing, nothing, rows, what, Scroll(width(grow=grow), height(grow=grow)), search, nothing, Int[],
-         nothing, Dict{Int,String}(), Set{String}(), 0, "", nothing, Dict{Any,Any}(), 0, nothing, Dict{Int,Any}(), 0px)
+         nothing, Dict{Int,String}(), Set{String}(), 0, "", nothing, Dict{Any,Any}(), 0, nothing, Dict{Int,Any}(), 0px, Method[])
 
 "A row of a module's table of names. A click on it shows the name's value under it, or hides it."
 @def mutable struct NameRow <: SemanticUI
@@ -41400,8 +41402,8 @@ readme_lines(m::Module) = begin
   nothing
 end
 
-"One row of the table for each method of `f`: what it takes, and the module, the file and the line that it's in"
-method_rows(f) = map(collect(Base.invokelatest(methods, f))) do m
+"The row of a table of methods for the method `m`: what it takes, and the module, the file and the line that it's in"
+method_row(m::Method) = begin
   # A package's own way to write a type in the method can fail. The method's name and the names of its arguments can't.
   takes = try
     String(first(split(Base.invokelatest(sprint, show, m), " @ ")))
@@ -41410,6 +41412,9 @@ method_rows(f) = map(collect(Base.invokelatest(methods, f))) do m
   end
   (takes, "", string(m.module, " · ", basename(string(m.file)), ":", m.line))
 end
+
+"One row of the table for each method of `f`: what it takes, and the module, the file and the line that it's in"
+method_rows(f) = map(method_row, collect(Base.invokelatest(methods, f)))
 
 "What kind of thing the value `v` is, which a module calls `name`"
 kind_of(name::String, v) =
@@ -41506,7 +41511,12 @@ name_rows(m::Module) = begin
 end
 
 "What the open box of the function `f` shows"
-Detail(f::Function) = Detail(f, doc_lines(parentmodule(f), nameof(f)), method_rows(f), "method")
+Detail(f::Function) = begin
+  ms = collect(Method, Base.invokelatest(methods, f))
+  t = Detail(f, doc_lines(parentmodule(f), nameof(f)), map(method_row, ms), "method")
+  t.methods = ms
+  t
+end
 
 "What the open box of the module `m` shows"
 Detail(m::Module) = begin
@@ -41677,7 +41687,9 @@ detail_row(e, t::Detail, row::NTuple{3,String}, wide; open=nothing, lit=false) =
   if isempty(row[2])
     # What a method takes, or the name of a field, has most of the row. Where the method is, or the field's type, has the rest.
     place = min(measure(plain, row[3]) + 4px, wide * 0.4)
-    return Row(width(grow=grow), height(DETAIL_ROW), Alignment.Center, child_gap=10px, parts(row[1], wide - place - 10px), words(row[3], place))
+    # The space at each end keeps the words in from the edge of the colour that the row has under the mouse
+    return Row(width(grow=grow), height(DETAIL_ROW), Alignment.Center, child_gap=10px, padding(6px, 0px), radius(4px),
+               background(lit ? colours.hover : clear), parts(row[1], wide - place - 22px), words(row[3], place))
   end
   arrow = open === nothing ? 0px : 16px
   name, kind = wide * 0.4, 96px
@@ -41696,6 +41708,36 @@ cursor(::NameRow) = :hand
 onkey(r::NameRow, ::KeyPress{Keys.mouse_left}) = (open_row!(r.of, r.i); handled)
 onmouse(::NameRow, ::MouseMove) = handled
 onscroll(r::NameRow, ev::MouseScroll) = onscroll(r.of, ev)
+
+"""
+A row of a function's table of methods. A click on it shows the method's code:
+its file in a window beside this one, as ⌘⌥ shows the code of a part. A method
+that the page itself makes is a line of this page, so the caret goes there.
+A method of Julia's own shows the file of Julia's code that has it. A method
+whose file isn't on this Mac has no code to show, so the mouse over it doesn't
+light it.
+"""
+@def mutable struct MethodRow <: SemanticUI
+  of::Any = nothing       # the OutcomeBody that the table is in
+  detail::Any = nothing   # the Detail of the function, which can be the Detail under a row of a module's table
+  i::Int = 0              # which row of the table
+  place::Any = nothing    # the method's file on this Mac and its line, or nothing
+end
+
+"The node of row `i` of the table of methods `t`, which is in the box `d`"
+method_row!(d::OutcomeBody, t::Detail, i::Int) =
+  get!(() -> own!(d, MethodRow(of=d, detail=t, i=i, place=code_place(t.methods[i]))), t.parts, i)
+
+"The row `i` of the table of `t`, in the box `d`: a node that takes clicks for a module's name or a function's method, or else the row as it looks"
+table_row(e, d::OutcomeBody, t::Detail, i::Int, wide) =
+  t.what == "name" && t === d.detail ? name_row!(d, i) :
+  t.what == "method" && i <= length(t.methods) ? method_row!(d, t, i) : detail_row(e, t, t.rows[i], wide)
+
+describe(r::MethodRow) = (t = r.detail; detail_row(editor(r), t, t.rows[r.i], t.wide; lit=r.place !== nothing && ishovered(r)))
+cursor(r::MethodRow) = r.place === nothing ? :arrow : :hand
+onkey(r::MethodRow, ::KeyPress{Keys.mouse_left}) = (r.place === nothing || show_method!(editor(r), r.detail.methods[r.i]); handled)
+onmouse(::MethodRow, ::MouseMove) = handled
+onscroll(r::MethodRow, ev::MouseScroll) = onscroll(r.of, ev)
 
 """
 The lines of `page` that are between `from` and `to` under its top, with room
@@ -41886,13 +41928,13 @@ onkey(r::KindRow, ::KeyPress{Keys.mouse_left}) = begin
   handled
 end
 
-"What shows under an open row, `wide` across: the part of it between `from` and `to` under its top, with room for the rest"
-inner_view(e, t::Detail, wide, from, to) = begin
+"What shows under an open row of the box `d`, `wide` across: the part of it between `from` and `to` under its top, with room for the rest"
+inner_view(e, d::OutcomeBody, t::Detail, wide, from, to) = begin
   y = TEXT_PAD
   doc = t.page === nothing ? () : (page_part(e, t.page, from - y, to - y)..., spacer(TEXT_PAD))
   y += doc_tall(t) + DETAIL_HEAD
   table = isempty(t.rows) ? () :
-    (table_head(count_words(t)), rows_part(j -> detail_row(e, t, t.rows[j], wide), length(t.rows), from - y, to - y)...)
+    (table_head(count_words(t)), rows_part(j -> table_row(e, d, t, j, wide), length(t.rows), from - y, to - y)...)
   # A line down its left side joins it to its row
   Column(width(grow=grow), Alignment.Start, padding(0px, 0px, 0px, INNER_X - 2px), border(2px, :solid, colours.line)[:left],
          spacer(TEXT_PAD), doc..., table...)
@@ -41922,7 +41964,7 @@ detail_view(e, d::OutcomeBody) = begin
   # The open row, as its place among the rows that were found. Its value shows under it.
   k = t.inner === nothing ? nothing : findfirst(==(t.open), found)
   inner = k === nothing ? nothing : t.inner
-  inner === nothing || page!(e, inner, wide - INNER_X)
+  inner === nothing || (page!(e, inner, wide - INNER_X); inner.wide = wide - INNER_X)
   under = inner === nothing ? 0px : inner_tall(inner)
   k = something(k, n)
   total = TEXT_PAD + above + head_h + DETAIL_ROW * n + under + TEXT_PAD
@@ -41932,10 +41974,10 @@ detail_view(e, d::OutcomeBody) = begin
   y = TEXT_PAD
   doc = page === nothing ? () : (page_part(e, page, from - y, to - y)..., spacer(TEXT_PAD))
   y += above + head_h
-  row(j) = t.what == "name" ? name_row!(d, found[j]) : detail_row(e, t, t.rows[found[j]], wide)
+  row(j) = table_row(e, d, t, found[j], wide)
   before = rows_part(row, k, from - y, to - y)
   y += DETAIL_ROW * k
-  section = inner === nothing ? () : (inner_view(e, inner, wide - INNER_X, from - y, to - y),)
+  section = inner === nothing ? () : (inner_view(e, d, inner, wide - INNER_X, from - y, to - y),)
   y += under
   after = rows_part(j -> row(k + j), n - k, from - y, to - y)
   head = !table ? () : t.what == "name" ? (names_head(d, wide, count_words(t, n)),) : (table_head(count_words(t, n)),)
@@ -44368,9 +44410,10 @@ end
 #     function with several methods has several places: the click goes to the
 #     first, and a click on a place that it went to goes to the next.
 #   - A name from another file that Ladder loaded, like a function of UI.jl,
-#     shows in a window beside this one, as the code of a thing does: see "the
-#     code of a thing". A name after a dot, like `arrange` in `Boards.arrange`,
-#     is looked for in the module before the dot.
+#     or of Julia's own code, like `length`, shows in a window beside this
+#     one, as the code of a thing does: see "the code of a thing". A method of
+#     the module that made the function comes first. A name after a dot, like
+#     `arrange` in `Boards.arrange`, is looked for in the module before the dot.
 #
 # The command Go To lists the places of a file of code, as it lists the
 # headings of a page: each section that a comment like `# --- name ---` starts,
@@ -44478,10 +44521,12 @@ definition(e, at::Pos) = begin
   value = named_value(home, join([found.owners; found.name], '.'))
   (value isa Function || value isa Type) || return nothing
   ms = try collect(Base.invokelatest(methods, value)) catch; return nothing end
-  # A method in a file that Ladder loaded comes before a method of Julia's own
-  ms = filter(m -> code_place(m) !== nothing, ms)
-  isempty(ms) && return nothing
-  first(sort(ms, by=m -> (!haskey(Kip.modules, code_place(m)[1]), code_place(m)[1], m.line)))
+  placed = [(m, p) for m in ms for p in (code_place(m),) if p !== nothing]
+  isempty(placed) && return nothing
+  # A method of the module that made the function comes first, so `length` goes to Base's own and not to a package's.
+  # Then a method in a file that Ladder loaded comes before a method of Julia's own.
+  own = try parentmodule(value) catch; nothing end
+  first(first(sort(placed, by=((m, p),) -> (m.module !== own, !haskey(Kip.modules, p[1]), p[1], m.line))))
 end
 
 """
@@ -44498,18 +44543,35 @@ definition!(e, at::Pos) = begin
   end
   place = definition(e, at)
   place === nothing && return false
-  if place isa Method
-    here = code_place(place)
-    # A method of the file that shows is a line of this window
-    here[1] == page_key(e.buf.path) || return (show_code!(e, place); true)
-    place = (settled_line(place, e.buf.lines, here[2]), 0)
-  end
-  place == at && return true
-  note_place!(e)   # ⌘⌥← comes back here
+  place isa Method && return show_method!(e, place)
+  place == at || go_to_place!(e, place)
+  true
+end
+
+"""
+Put the caret at `place` of the page, and the place near the top of the
+window, with a few lines over it. ⌘⌥← comes back to where the caret was.
+"""
+go_to_place!(e, place) = begin
+  note_place!(e)
   e.buf.caret = e.buf.anchor = place
   focus(e)
   touch!(e)
-  e.nodes[:hold] = (max(place[1] - 3, 1), 24px - PAGE_TOP)   # the definition goes near the top of the window, with a few lines over it
+  e.nodes[:hold] = (max(place[1] - 3, 1), 24px - PAGE_TOP)
+  true
+end
+
+"""
+Show the code of the method `m`: its file in a window beside the window of
+`e`, or its line of this window when the page that shows has it. False when
+this Mac doesn't have its file.
+"""
+show_method!(e, m::Method) = begin
+  here = code_place(m)
+  here === nothing && return false
+  here[1] == page_key(e.buf.path) || return (show_code!(e, m); true)
+  place = (settled_line(m, e.buf.lines, here[2]), 0)
+  place == e.buf.caret || go_to_place!(e, place)
   true
 end
 
@@ -45571,11 +45633,70 @@ end
 drawn_by(x::SemanticUI) = try which(describe, Tuple{typeof(x)}) catch; nothing end
 drawn_by(x) = nothing
 
-"The file on this Mac that has the method `m`, and its line there. It's nothing when this Mac doesn't have the file, as for a function of Julia's own."
+"""
+The file on this Mac that has the method `m`, and its line there. A method of
+Julia's own is in Julia's folder of code: see `julia_file`. It's nothing when
+this Mac doesn't have the file, as for a method that code made with no file.
+"""
 code_place(m::Method) = begin
   path = String(m.file)
   path = get(SOURCE_FILES, path, path)
-  isabspath(path) && isfile(path) ? (realpath(path), Int(m.line)) : nothing
+  isabspath(path) && isfile(path) && return (realpath(path), Int(m.line))
+  file = julia_file(m, path)
+  file === nothing ? nothing : (file, Int(m.line))
+end
+
+"""
+The folder of Julia's own code when Ladder was loaded. In the built app it's
+the folder of the Julia that built the app. The app has no copy of Julia's
+code, and this Mac can still have that Julia.
+"""
+const BUILT_JULIA = normpath(Sys.BINDIR, Base.DATAROOTDIR, "julia")
+
+"""
+What Ladder found of Julia's own code: the folder of the Julia that it found
+it for, `bin`, the folders of Julia's code on this Mac, `dirs`, and the file
+that each method's file is, as `julia_file` found it, or nothing, `files`.
+Julia's code doesn't change while Ladder runs. The built app runs from its own
+folder, so it doesn't use what the build found.
+"""
+const JULIA_CODE = Ref{Any}(nothing)
+
+"What Ladder found of Julia's own code, as `JULIA_CODE` keeps it"
+julia_code() = begin
+  found = JULIA_CODE[]
+  found !== nothing && found.bin == Sys.BINDIR && return found
+  dirs = unique(String[form for dir in (normpath(Sys.BINDIR, Base.DATAROOTDIR, "julia"), BUILT_JULIA) if isdir(dir)
+                       for form in (dir, realpath(dir))])
+  JULIA_CODE[] = (bin=Sys.BINDIR, dirs=dirs, files=Dict{Tuple{String,Bool},Union{String,Nothing}}())
+end
+
+"True when the file at `path` is in a folder of Julia's own code. Ladder shows it and never changes it, as it does an email."
+julia_own(path::AbstractString) = any(dir -> startswith(path, dir * "/"), julia_code().dirs)
+
+"""
+The file of Julia's own code that `path`, the file of the method `m`, is on
+this Mac, or nothing. A method of Base or Core names its file by its place in
+Base's folder, like `essentials.jl`. A method of Julia's standard library or
+of its compiler names it by where it was on the Mac that built Julia, and that
+path has `share/julia/` in it. The file is looked for in the Julia that runs
+Ladder, then in the Julia that built it. Ladder shows the file and never
+changes it: see `julia_own`.
+"""
+julia_file(m::Method, path::AbstractString) = begin
+  base = Base.moduleroot(m.module) in (Base, Core)
+  code = julia_code()
+  get!(code.files, (String(path), base)) do
+    k = findlast("share/julia/", path)
+    # Only Base and Core name a file by its place in Base's folder. A file that code made with no file is called "none".
+    k === nothing && !base && return nothing
+    rest = k === nothing ? joinpath("base", path) : path[last(k)+1:end]
+    for dir in code.dirs
+      file = joinpath(dir, rest)
+      isfile(file) && return realpath(file)
+    end
+    nothing
+  end
 end
 
 "The thing under the mouse of the window `w` that has code to show, with the method that draws it: the nearest part of the window whose method is in a file on this Mac. It's nothing over a place with none."
