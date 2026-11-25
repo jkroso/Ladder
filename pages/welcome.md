@@ -1214,7 +1214,7 @@ After the file's name, the top bar shows where the caret is: the headings over i
 
 In the path, click the › after the file's name, or after a heading, to search what's in the file or under the heading. ⌘F opens the search of the whole file, with the words you selected in it. At first the search lists the headings and the components there. Click one to go to it. Type words, choose kinds of thing with the Kinds button, or do both. With kinds and no words, the search lists every thing of those kinds, like every to-do item that isn't ticked, or every sketch. Each kind that you choose shows as a chip in the search. Click a chip to take it away.
 
-The button at the right of the search chooses where to look: a heading of the path, the whole file, or a folder on the way to the file, with the folders in it. In a folder, the kind Pages finds a page by its name. ↑ and ↓ pick a row, and Return or a click shows it. Tab opens the list of kinds, and Esc closes the search.
+↑ and ↓ pick a row, and Return or a click shows it. Tab opens the list of kinds, and Esc closes the search.
 
 For more room for the page, choose Always or In full screen only for Hide the top bar in [Settings](settings/settings.md#top-bar). While the bar hides, the page goes up to the top of the window. Rest the mouse at the window's top edge, and the bar slides down over the page. It slides back up when you move the mouse off it.
 

@@ -529,8 +529,6 @@ end
   # With nothing asked, it lists the page's headings
   @test [r.x.title for r in s.rows if r.kind == :entry] == ["Guide", "Tea", "Milk"]
   @test K.search_place(s) == "guide.md" && K.search_field(s).placeholder == "Search guide.md"
-  # The places to look are the page alone: a server doesn't say what's in its folders
-  @test [o.key for o in K.scope_options(s)] == [(:file, 0)]
   shot("remote_search.png")
   # Words find the lines that have them, and Return goes to the line
   typed("cold")

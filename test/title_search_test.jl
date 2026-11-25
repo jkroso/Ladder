@@ -76,9 +76,8 @@ caret!(i) = (b = e.buf; b.reading = false; b.caret = b.anchor = (i, 0); frames()
 titles() = [x.title for x in trail().parts]
 search() = e.nodes[:title_search]
 menu() = only(p.content for p in popups(w) if p.key == K.TS_MENU)
-"What each row of the search shows, in the list's order: a heading or a component that's there, a page, or a thing that was found"
-found() = [r.kind == :entry ? "part " * "  "^r.depth * r.x.title : r.kind == :page ? "page " * K.search_page_name(search(), r.path) : r.m.text
-           for r in search().rows]
+"What each row of the search shows, in the list's order: a heading or a component that's there, or a thing that was found"
+found() = [r.kind == :entry ? "part " * "  "^r.depth * r.x.title : r.m.text for r in search().rows]
 drop(k) = trail().drops[k]
 "Open the search under the › after the file's name (0), or after the path's heading `k`"
 open!(k) = (hover!(); click(middle(drop(k))))
@@ -165,7 +164,7 @@ end
   @test showing(K.TS_KEY) && showing(:title_trail)   # the path stays
   s = search()
   @test w.focus === K.search_field(s)
-  @test s.under == 0 && s.folder == ""
+  @test s.under == 0
   @test found() == ["part Plan", "part   Costs", "part     Sheet"]
   # It hangs under the ›
   r, ra = rect(s), rect(drop(0))
@@ -214,7 +213,6 @@ end
   @test showing(K.TS_MENU)
   m = menu()
   @test w.focus === m.parts[:field]
-  @test !any(o -> o.key == :page, m.rows)   # pages aren't a kind of thing in a page
   typed("sheet")   # a kind is found by any name that a find block knows it by
   @test m.rows[m.pick].key == :sheet
   key(Keys.enter)
@@ -248,58 +246,14 @@ end
   @test found() == ["part Plan", "part   Costs", "part     Sheet"]   # nothing asked again
 end
 
-@testset "the place button looks under a heading, in the file, or in a folder on the way to it" begin
-  click(middle(search().parts[:scope]))
-  m = menu()
-  @test [o.name for o in m.rows] == ["Costs", "Plan", "plan.md", "Jobs", "~"]
-  @test m.rows[m.pick].name == "plan.md"
-  key(Keys.down)
-  key(Keys.enter)
-  @test search().folder == jobs && !showing(K.TS_MENU)
-  # In a folder, nothing is listed until something is asked
-  @test isempty(search().rows)
-  typed("plumb")
-  @test found() == ["page tasks", "Plumbing", "Call the plumber", "A plumber's note"]
-  @test search().rows[search().pick].kind == :thing   # the first thing found is picked, not the page over it
-  @test K.search_summary(search()) == "3 things in 1 page of Jobs."
-  shot("folder")
-end
-
-@testset "in a folder, Pages finds a page by its name" begin
-  clear!()
-  click(middle(search().parts[:kinds]))
-  typed("pages")
-  key(Keys.enter)
-  key(Keys.escape)
-  @test search().wants == [:page]
-  @test found() == ["page plan", "page tasks", "page Site/bathroom"]
-  typed("bath")
-  @test found() == ["page Site/bathroom"]
-  @test K.search_summary(search()) == "1 page in Jobs."
-  clear!()
-  key(Keys.backspace)
-end
-
-@testset "kinds in a folder list every thing of those kinds in its pages" begin
-  key(Keys.tab)
-  typed("tasks")
-  key(Keys.enter)
-  typed("")
-  f = menu().parts[:field]; f.text = ""; f.anchor = f.cursor = 0; frames()
-  typed("sketch")
-  key(Keys.enter)
-  key(Keys.escape)
-  @test search().wants == [:todo, :sketch]
-  @test found() == ["page tasks", "Call the plumber", "page Site/bathroom", "Bathroom"]
-end
-
-@testset "Return shows the thing that's picked in its page, and the search goes" begin
-  click(middle(search().parts[(:chip, :sketch)]))
-  typed("plumber")
-  @test found() == ["page tasks", "Call the plumber"]
+@testset "Return shows the thing that's picked in the page, and the search goes" begin
+  # The › says where to look, so the search has no button that chooses a place
+  @test collect(keys(filter(p -> p[2] isa K.SearchButton, search().parts))) == [:kinds]
+  typed("intro")
+  @test found() == ["Intro text."]
   key(Keys.enter)
   @test !showing(K.TS_KEY)
-  @test e.buf.path == tasks
+  @test e.buf.path == plan
   @test e.buf.caret[1] == 3
   @test w.focus === e
 end
@@ -320,7 +274,7 @@ end
   key(Keys.f, Keys.cmd)
   @test showing(:title_trail) && showing(K.TS_KEY)
   s = search()
-  @test s.arrow === drop(0) && s.under == 0 && s.folder == ""
+  @test s.arrow === drop(0) && s.under == 0
   @test w.focus === K.search_field(s) && K.search_field(s).text == ""
   @test found() == ["part Plan", "part   Costs", "part     Sheet"]
   shot("cmd-f")
