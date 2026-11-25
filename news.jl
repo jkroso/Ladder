@@ -36,7 +36,11 @@
 #     write_articles!(folder, section, found, now; by)   # writes each article in the folder of its day
 #     prune!(folder)                # deletes the articles that are older than the settings keep
 #     keep_days(), keep_days!(n)    # how many days Ladder keeps an article: 0 is for ever
-#     auto(), auto!(on)             # whether Ladder gets the news when you open the folder
+#     agents(), agents!(when)       # when Ladder's own agents get the news: :daily, :asked or :off
+#
+# Another agent can write the articles, like one that runs on a server: Ladder
+# shows and deletes any article in a day's folder whose front matter has a
+# title and a section. With the setting :off, Ladder starts no agent of its own.
 #     last_ran(path), ran!(path)    # when an agent last got the news of the page at `path`
 
 @use "github.com/jkroso/Prospects.jl" @def
@@ -51,10 +55,17 @@ file() = isempty(FILE[]) ? joinpath(homedir(), "Library", "Application Support",
 "How many days Ladder keeps an article, until you change it"
 const KEEP_DAYS = 7
 
+"""
+When Ladder's own agents get the news: `:daily`, once a day when the folder
+shows, and when you ask; `:asked`, only when you ask; or `:off`, never, as
+another agent writes the articles.
+"""
+const AGENTS = (:daily, :asked, :off)
+
 "The settings of news, and when the news of each page was last asked for, by the page's file"
 @def mutable struct Kept
   keep::Int = KEEP_DAYS
-  auto::Bool = true
+  agents::Symbol = :daily
   ran::Dict{String,DateTime} = Dict{String,DateTime}()
 end
 
@@ -77,7 +88,7 @@ kept() = begin
       m = match(r"^(\w+)=(.*)$", line)
       m === nothing && continue
       m[1] == "keep" && (k.keep = max(0, something(tryparse(Int, m[2]), k.keep)))
-      m[1] == "auto" && (k.auto = m[2] != "false")
+      m[1] == "agents" && Symbol(m[2]) in AGENTS && (k.agents = Symbol(m[2]))
     end
   end
   READ[] = (t, path, k)
@@ -90,7 +101,7 @@ keep!(k::Kept) = begin
   filter!(p -> isfile(first(p)), k.ran)
   try
     mkpath(dirname(path))
-    write(path, "keep=$(k.keep)\nauto=$(k.auto)\n" * join("ran\t$p\t$(Dates.format(t, "yyyy-mm-ddTHH:MM:SS"))\n" for (p, t) in sort!(collect(k.ran))))
+    write(path, "keep=$(k.keep)\nagents=$(k.agents)\n" * join("ran\t$p\t$(Dates.format(t, "yyyy-mm-ddTHH:MM:SS"))\n" for (p, t) in sort!(collect(k.ran))))
     READ[] = (mtime(path), path, k)
   catch
     # A file that can't be written only means that the settings last until Ladder quits
@@ -103,9 +114,9 @@ end
 keep_days() = kept().keep
 keep_days!(n::Integer) = (k = kept(); k.keep = max(0, Int(n)); keep!(k); nothing)
 
-"True when Ladder gets the news of each page once a day, when you open its folder"
-auto() = kept().auto
-auto!(on::Bool) = (k = kept(); k.auto = on; keep!(k); nothing)
+"When Ladder's own agents get the news: :daily, :asked or :off. See `AGENTS`."
+agents() = kept().agents
+agents!(when::Symbol) = (when in AGENTS || error("Ladder's agents get the news :daily, :asked or :off, not :$when."); k = kept(); k.agents = when; keep!(k); nothing)
 
 "When an agent last got the news of the page at `path`, or nothing when none has"
 last_ran(path::AbstractString) = get(kept().ran, String(path), nothing)

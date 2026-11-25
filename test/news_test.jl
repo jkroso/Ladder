@@ -117,8 +117,8 @@ today() = joinpath(news, Dates.format(Dates.today(), "yyyy-mm-dd"))
   @test N.file_name("Up/down: 50%") == "Up-down - 50%"
   # The day of a day's folder
   @test N.edition_day("2026-11-25") == Date(2026, 11, 25) && N.edition_day("notes") === nothing && N.edition_day("2026-13-45") === nothing
-  # The settings start as a week, and daily
-  @test N.keep_days() == 7 && N.auto()
+  # The settings start as a week, and Ladder's agents get the news daily
+  @test N.keep_days() == 7 && N.agents() == :daily
 end
 
 @testset "a folder with no pages says how to ask for news, in a newspaper's look" begin
@@ -233,12 +233,30 @@ end
   @test !ispath(folder) && length(front().editions) == 1
   # A file that isn't an article stays, and so does its folder
   @test isfile(joinpath(kept, "mine.txt"))
-  # Daily news can be turned off
-  Base.invokelatest(Core.eval, m, :(news_daily!(false)))
-  @test !N.auto()
+  # With news only when you ask, opening the folder starts no agent, and Get the News is there
+  Base.invokelatest(Core.eval, m, :(news_agents!("asked")))
+  @test N.agents() == :asked && Base.invokelatest(Core.eval, m, :(news_agents())) == "asked"
   write(joinpath(news, "Later.md"), "Later news.\n")
   again()
+  @test isempty(K.news_runs(news)) && [b.words for b in K.news_buttons(e, front())] == ["Get the News", "New Page"]
+end
+
+@testset "with Ladder's agents off, another agent writes the articles" begin
+  m = K.sandbox(e)
+  Base.invokelatest(Core.eval, m, :(news_agents!("off")))
+  @test N.agents() == :off
+  again()
+  # There's no Get the News, and nothing starts an agent: not the button, the command, or a page with no news today
+  @test [b.words for b in K.news_buttons(e, front())] == ["New Page"]
+  @test !K.works_here(e, Val(:get_the_news))
+  K.get_news!(e, news)
   @test isempty(K.news_runs(news))
+  # An article that another agent writes shows, with the importance it gives it
+  write(joinpath(today(), "A story from another agent.md"), "---\ntitle: A story from another agent\nsection: Space\nimportance: 10\nby: Grok\n---\n\nIts words.\n")
+  again()
+  lead = front().editions[1].articles[1]
+  @test lead.title == "A story from another agent" && lead.by == "Grok"
+  shot("other-agent")
 end
 
 close(w)

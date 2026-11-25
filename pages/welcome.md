@@ -1267,6 +1267,29 @@ Once a day, when the folder's front page shows, the agent that [Settings](settin
 
 The front page looks like a newspaper's: the folder's name at the top, then the most important story with its first paragraphs, the next stories beside it, and the rest in columns. The earlier days follow, with their headlines. Click a story to read its article. Ladder deletes each article after a week. Settings can keep the news for longer, or for ever. To keep one article, move it out of its day's folder.
 
+### News from another agent
+
+Another agent can write the articles, like one that runs on a server. In [Settings](settings/settings.md#news), choose "Ladder starts no agent". Then Ladder never starts an agent for the news, and the front page shows what the other agent writes. Give that agent the folder's pages, and ask it to write each article as a Markdown file in the folder of its day, like `2026-11-25/A rocket lands on its tower.md`:
+
+```markdown
+---
+title: A rocket lands on its tower
+section: Space
+summary: The tower's arms caught the booster as it fell.
+importance: 7
+date: 2026-11-25T07:30
+by: Grok
+---
+
+The article's paragraphs.
+
+## Sources
+
+- [example.com](https://example.com/rocket)
+```
+
+The title and the section are what make the file an article, and the section is the name of one of the folder's pages. The summary shows under the headline. The importance, from 1 to 10, puts the stories in order: the most important is the lead story. Without one, a story has 5. The date is when the agent wrote it, and Ladder deletes the article a week after that. Without a date, the article has noon of its folder's day.
+
 You can write the file `.ladder` yourself too. It ends with a block like the one for a desktop, with `Ladder.NotesDirectory`, `Ladder.BlogDirectory`, `Ladder.DownloadsDirectory`, `Ladder.PicturesDirectory`, `Ladder.ScreenshotsDirectory` or `Ladder.NewsDirectory`. Show Folder As leaves a file that you wrote as it is.
 
 A zip file shows what it holds, without being unpacked: its folders and files, each file with its size and when it changed. Click a folder to open it, and click a file to see that one file. Ladder doesn't change a file that it shows from a zip file. Click Unpack to unpack the whole file beside itself, as two clicks in the Finder do.

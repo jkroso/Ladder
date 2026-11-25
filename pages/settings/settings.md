@@ -103,10 +103,18 @@ Row(Alignment.Center, child_gap=12px, say("Keep each article for"),
 ```
 
 ```ui
-Checkbox(label="Get the news once a day, when I open a folder of news", checked=news_daily(), onchange=box -> news_daily!(box.checked))
+say(text) = Text(text, size=page_text_size() * 1px)
+whens = ["daily", "asked", "off"]
+Row(Alignment.Center, child_gap=12px, say("Ladder's agent gets the news"),
+    RadioGroup(labels=["Once a day", "When I ask", "Never"], selected=something(findfirst(==(news_agents()), whens), 1),
+               onchange=group -> news_agents!(whens[group.selected])))
 ```
 
-A folder of news is a newspaper that agents write for you. It has a page for each kind of news that you want, in your own words. The agent above reads each page once a day, searches the web and writes the articles. Ladder deletes each article when it's older than the time in the list. Choose For ever to keep every article. With the box off, an agent gets the news only when you click Get the News.
+A folder of news is a newspaper that agents write for you. It has a page for each kind of news that you want, in your own words. Ladder deletes each article when it's older than the time in the list. Choose For ever to keep every article.
+
+With Once a day, the agent above reads each page the first time that you open the folder each day. It searches the web and writes the articles. With When I ask, it does that only when you click Get the News.
+
+Choose Never when an agent of your own writes the articles, like one that runs on a server. Ladder then has no Get the News button, and starts no agent. It still shows each article that the other agent writes, and deletes it when it's too old. The [Welcome](../welcome.md) page shows what an article has to be, under News from another agent.
 
 To start, press ⌘⇧P and choose Open News. Ladder makes the folder News in your home folder, and shows it.
 

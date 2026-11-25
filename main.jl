@@ -4345,12 +4345,12 @@ sandbox(e) = get!(e.nodes, :sandbox) do
   # ... and the files and folders that you ignore: `ignored_files()` gives their paths, and `stop_ignoring!(path)` shows one again
   Core.eval(m, :(const ignored_files = $(() -> (reads!(e, :ignored); sort!(collect(Folders.ignored()), by=lowercase)))))
   Core.eval(m, :(const stop_ignoring! = $(path -> ignore!(e, String(path), false))))
-  # ... and the news: `news_days()` is how many days Ladder keeps an article, 0 for ever, and `news_daily()` is true
-  # when it gets the news of a folder of news once a day, when the folder shows. See "a folder of news".
+  # ... and the news: `news_days()` is how many days Ladder keeps an article, 0 for ever, and `news_agents()` is
+  # when Ladder's own agents get the news: "daily", "asked" or "off". See "a folder of news".
   Core.eval(m, :(const news_days = $(() -> (reads!(e, :news); News.keep_days()))))
   Core.eval(m, :(const news_days! = $(n -> (News.keep_days!(Int(n)); empty!(NEWS_PRUNED); nothing))))
-  Core.eval(m, :(const news_daily = $(() -> (reads!(e, :news); News.auto()))))
-  Core.eval(m, :(const news_daily! = $(on -> (News.auto!(Bool(on)); nothing))))
+  Core.eval(m, :(const news_agents = $(() -> (reads!(e, :news); String(News.agents())))))
+  Core.eval(m, :(const news_agents! = $(when -> (News.agents!(Symbol(when)); nothing))))
   # ... and the names that code from the startup page adds
   foreach(f -> f(m, e), values(PAGE_NAMES))
   # The units that a sheet has, from Units.jl, so that code can work with lengths, times and so on: 12m * 2.4m.
@@ -55480,11 +55480,14 @@ add_command!(show_folder_as!, title="Show a folder as a kind of folder: a deskto
 #
 # Once a day, when the front page shows, Ladder starts an agent for each page
 # whose news it hasn't asked for that day: the agent that Settings chose. Get
-# the News asks again now, for every page. Each agent searches the web and
+# the News asks again now, for every page. Settings can leave the daily news
+# out, so an agent works only when you click Get the News, or turn Ladder's
+# agents off, for another agent that writes the articles, like one on a
+# server. Then the page has no Get the News, and shows what that agent wrote. Each agent searches the web and
 # replies with articles, which Ladder writes in the folder of the day. Three
 # agents work at once, and the others wait. Ladder stops an agent that takes
 # more than 15 minutes, and Stop stops them all. The front page says what each
-# agent is doing, and what went wrong. Settings can turn the daily news off.
+# agent is doing, and what went wrong.
 #
 # Ladder deletes each article when it's older than Settings keep the news: a
 # week, unless you change it. It looks when it lists the folder, at most once
@@ -55592,6 +55595,8 @@ the agent that Settings chose for `e`. Each waits for its turn. A page that
 says nothing, or whose news is asked for already, isn't asked.
 """
 get_news!(e, folder::AbstractString, pages=News.interests(folder)) = begin
+  # Another agent writes the news, so Ladder starts none
+  News.agents() == :off && return nothing
   asked = Set(r.interest.path for r in [NEWS_WORKING; NEWS_WAITING])
   pages = [p for p in pages if !isempty(p.words) && !(p.path in asked)]
   isempty(pages) && return nothing
@@ -55689,7 +55694,7 @@ EACH_FRAME[:news] = news_tick!
 
 "Ask for the news of each page of the folder of `v` that hasn't had its news today, when Settings say to"
 news_auto!(e, v) = begin
-  (News.auto() && !v.day) || return nothing
+  (News.agents() == :daily && !v.day) || return nothing
   today = Dates.today()
   due = [p for p in v.interests if (l = News.last_ran(p.path); l === nothing || Dates.Date(l) < today)]
   isempty(due) || get_news!(e, v.path, due)
@@ -55853,19 +55858,25 @@ news_status(e, v::NewsPage, z) = begin
   (Column(width(grow=grow), Alignment.Start, padding(0px, 8px * z), child_gap=4px * z, lines...),)
 end
 
-"The front page's buttons: Get the News, or Stop while agents work, and New Page"
+"The front page's buttons: Get the News, or Stop while agents work, and New Page. With Ladder's agents off, there's no Get the News."
 news_buttons(e, v::NewsPage) = begin
   v.day && return ()
   busy = !isempty(news_runs(v.path))
-  (busy ? page_button!(v, :stop, _ -> stop_news!(v.path), icon="stop-circle", words="Stop") :
-          page_button!(v, :get, _ -> get_news!(e, v.path), icon="arrow-clockwise", words="Get the News", off=all(p -> isempty(p.words), v.interests)),
-   page_button!(v, :page, _ -> new_page!(e, v.path), icon="pencil-square", words="New Page"))
+  page = page_button!(v, :page, _ -> new_page!(e, v.path), icon="pencil-square", words="New Page")
+  busy ? (page_button!(v, :stop, _ -> stop_news!(v.path), icon="stop-circle", words="Stop"), page) :
+  News.agents() == :off ? (page,) :
+    (page_button!(v, :get, _ -> get_news!(e, v.path), icon="arrow-clockwise", words="Get the News", off=all(p -> isempty(p.words), v.interests)), page)
 end
 
 "What the front page `v` shows when it has no stories: how to ask for news, or that the agents are getting it"
 news_empty(e, v::NewsPage, z) = begin
   busy = !isempty(news_runs(v.path))
-  says = isempty(v.interests) ?
+  off = News.agents() == :off
+  says = off ?
+    ("No news yet.",
+     "Ladder starts no agent for the news, as Settings say. The articles that your own agent writes show here: each in the folder of its day, " *
+     "like $(Dates.format(Dates.today(), "yyyy-mm-dd")), with a title and a section in its front matter. The Welcome page has an example.") :
+    isempty(v.interests) ?
     ("What news do you want?",
      "Write a page in this folder for each kind of news that you want. Say in your own words what to look for, and what to leave out. " *
      "The page's name is the name of its section: AI.md for news about AI. Once a day, the agent that Settings chose reads each page, " *
@@ -55991,7 +56002,7 @@ add_command!(open_news!, title="Show your newspaper: the folder News in your hom
 "Ask the agents for the news of each page of the folder of news that shows, now, as its button Get the News does"
 get_the_news!(e) = (o = page_object(e); o isa NewsDirectory ? get_news!(e, string(o.path)) : nothing)
 add_command!(get_the_news!, title="Ask the agents for the news of each page of the folder of news that shows, now")
-works_here(e, ::Val{:get_the_news}) = page_object(e) isa NewsDirectory
+works_here(e, ::Val{:get_the_news}) = page_object(e) isa NewsDirectory && News.agents() != :off
 
 # Show Folder As makes any folder one of news
 NewsDirectory in OWN_KINDS || push!(OWN_KINDS, NewsDirectory)
