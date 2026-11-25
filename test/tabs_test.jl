@@ -174,6 +174,41 @@ end
   close(w)
 end
 
+"The rectangles of the boxes called `called` that the last frame drew in the rectangle `r` of a node"
+drawn_at(r, called, out=Any[]) = begin
+  hasproperty(r.from, :name) && r.from.name == called && push!(out, r)
+  hasproperty(r, :children) && foreach(c -> drawn_at(c, called, out), r.children)
+  out
+end
+"The dots that the last frame drew in the tab of the file `name`"
+dots(e, name) = drawn_at(rect(tab(e, name)), "Dot")
+
+@testset "the × of a tab shows in the place of its dot" begin
+  e, w, f = window("a.md", "b.md")
+  show!(e, w, f, "b.md")
+  # An agent waits for each page, so each tab has a dot
+  e.nodes[:agents] = (time() + 1e6, [K.Agent.Waiter("", K.truepath(joinpath(f, n)), "Claude") for n in ("a.md", "b.md")])
+  frames(w)
+  dot = only(dots(e, "a.md"))
+  hover(w, middle(rect(tab(e, "a.md")))...)
+  x = rect(tab(e, "a.md").firstchild.close)
+  shot(w, "tab-close-dot.png")
+  # The dot hides, and the × has its middle where the dot had its middle
+  @test isempty(dots(e, "a.md"))
+  @test K.num(middle(x)[1]) ≈ K.num(middle(dot)[1]) atol=0.5
+  @test K.num(middle(x)[2]) ≈ K.num(middle(dot)[2]) atol=0.5
+  # The × is all inside the tab's row
+  row = rect(tab(e, "a.md"))
+  @test K.num(x.left + x.width) <= K.num(row.left + row.width)
+  # The tab that the mouse isn't over keeps its dot
+  @test length(dots(e, "b.md")) == 1
+  # A tab with no dot has its × in the same place
+  e.nodes[:agents] = (time() + 1e6, K.Agent.Waiter[])
+  hover(w, middle(rect(tab(e, "b.md")))...)
+  @test K.num(middle(rect(tab(e, "b.md").firstchild.close))[1]) ≈ K.num(middle(x)[1]) atol=0.5
+  close(w)
+end
+
 @testset "a click with the middle button closes a tab" begin
   e, w, f = window("a.md", "b.md")
   show!(e, w, f, "b.md")

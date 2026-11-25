@@ -35327,12 +35327,13 @@ describe(l::TabLabel) = begin
   e = editor(l)
   shortcut = tab_keys(e, l.path)
   shows = l.path == e.buf.path
-  changed = haskey(e.buffers, l.path) && dirty(e.buffers[l.path])
   over = Tree.hovered(l.parent)
   over && l.close === nothing && (l.close = own!(l, TabClose()))
   over && (l.close.path = l.path)
+  closer = over && isempty(shortcut)
   folder = tab_folder(e, l.path)
-  Row(width(grow=grow), height(grow=grow), padding(0px, 8px, 0px, 0px), child_gap=4px, clip=true, name="Tab",
+  # The × has its middle where the last dot has its middle, so it shows in the dot's place: the row's end has less room while it shows
+  Row(width(grow=grow), height(grow=grow), padding(0px, closer ? 8px + 3px - 9px : 8px, 0px, 0px), child_gap=4px, clip=true, name="Tab",
     mark(l, isempty(l.path) ? "plus-lg" : isempty(web_address(l.path)) ? file_icon(l.path) : "globe"),
     # The name loses its end, and not the × after it, when it's too long for the sidebar
     Box(width(grow=grow), Alignment.Start, clip_x=true,
@@ -35340,10 +35341,22 @@ describe(l::TabLabel) = begin
         Box(label(tab_name(l.path), color=colours.ink, weight=shows ? "Semibold" : "")),
         (folder === nothing ? () : (Box(label(folder, 11px, color=colours.faint)),))...)),
     tab_marks(e, l.path)...,
-    # While ⌘ is held, the keys that show the tab take the place of the × and the dot
+    # While ⌘ is held, the keys that show the tab take the place of the × and the dots
     (!isempty(shortcut) ? (Box(label(shortcut, 12px, color=colours.dim)),) :
-     # The × takes the place of the dot of changes that aren't saved, as the mouse comes over the tab
-     over ? (l.close,) : changed ? (Box(fixed(18px), Alignment.Center, Box(width(6px), height(6px), radius(3px), background(colours.dim))),) : ())...)
+     # The × takes the place of the dots as the mouse comes over the tab, and nothing moves to make room for it
+     closer ? (l.close,) : tab_dots(e, l.path))...)
+end
+
+"""
+The dots at the end of the tab of the file at `path`, as the sidebar's tree
+has them: one in the colour of the Nudge button for a page that an agent
+waits for, and a grey one for changes that aren't saved.
+"""
+tab_dots(e, path) = begin
+  awaited = !isempty(path) && !isremote(path) && ismarkdown(path) && !isempty(agents(e, path))
+  changed = haskey(e.buffers, path) && dirty(e.buffers[path])
+  ((awaited ? (Box(width(6px), height(6px), radius(3px), background(colours.accent), name="Dot"),) : ())...,
+   (changed ? (Box(width(6px), height(6px), radius(3px), background(colours.dim), name="Dot"),) : ())...)
 end
 
 "How long ⌘ is held by itself before the tabs show their keys, in seconds. A shortcut like ⌘S is quicker, so it doesn't flash them."
@@ -35372,19 +35385,16 @@ end
 """
 What the tab of the file at `path` shows of the file's state, after its name,
 as the sidebar's tree shows it: git's letter for a file with changes, like M
-or U, and a dot for a page that an agent waits for. A terminal's tab has a
-ring that turns while its shell runs a command, and none while the shell
-waits for one.
+or U. A terminal's tab has a ring that turns while its shell runs a command,
+and none while the shell waits for one. The dots come after these: see `tab_dots`.
 """
 tab_marks(e, path) = begin
   (isempty(path) || isremote(path)) && return ()
   o = object(e, path)
-  awaited = ismarkdown(path) && !isempty(agents(e, path))
   v = get(e.nodes, (:term, path), nothing)
   working = v !== nothing && Terms.busy(v)
   working && redraw_in!(e, SPIN_FRAME)   # the ring turns
   ((o isa FSObject ? entry_marks(e, o) : ())...,
-   (awaited ? (Box(width(6px), height(6px), radius(3px), background(colours.accent)),) : ())...,
    (working ? (Box(fixed(18px), height(18px), Alignment.Center, justify=Alignment.Center, Spinner(size=11px)),) : ())...)
 end
 
