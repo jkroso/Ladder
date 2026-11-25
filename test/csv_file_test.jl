@@ -181,7 +181,7 @@ end
 @testset "any other column has a field, and shows the rows that have its words" begin
   s = sheet()
   click(middle(rect(head(4))))
-  @test menu() && s.asking == 4 && w.focus === s.field
+  @test menu() && s.asking == 4 && w.focus === s.field.sub
   typed("note 2")
   @test !isempty(s.found) && all(n -> occursin("note 2", lowercase(n)), column(4))
   @test length(s.found) == 1 + 10 + 100   # notes 2, 20 to 29, and 200 to 299

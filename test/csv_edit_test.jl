@@ -9,6 +9,7 @@
 @use "github.com/jkroso/MiniFB.jl" Window KeyPress MouseMove Keys onkey onmouse Typed ontype
 @use "github.com/jkroso/UI.jl/Interface/draw" frame rect popups
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
+@use "github.com/jkroso/UI.jl/Interface/testing" pixels
 @use GeometryBasics: Vec2
 @use Dates: Date
 const px = K.px
@@ -96,20 +97,28 @@ end
   b = e.buf
   click(place(1, 2))
   s = sheet()
-  @test s.editing == (2, 2) && w.focus === s.input
+  # The field is Ladder's own editor of text, so its caret and selection are the page's
+  f = s.input
+  @test s.editing == (2, 2) && f isa K.CellField && w.focus === f.sub
   # The cell's text is selected, so what's typed takes its place
-  @test s.input.text == "12" && s.input.anchor == 0 && s.input.cursor == 2
+  @test K.cell_text(f) == "12" && f.sub.buf.anchor == (1, 0) && f.sub.buf.caret == (1, 2)
+  # Its text is in the table's font and size, with no colours of code
+  line = K.kinds(f.sub.buf)[1]
+  shown = K.face(f.sub, line)
+  @test shown.family == K.cell_face().family && K.num(shown.size) ≈ K.num(K.cell_face().size)
+  @test all(p -> p.face.color == shown.color, K.pieces(f.sub, "3, \"x\" 4", line, false))
   shot("csv-edit-field")
   typed("15")
+  shot("csv-edit-typed")
   @test b.lines[2] == "Paint,12,\"Two coats, low sheen\""   # nothing goes in the file until the field closes
   key(Keys.enter)
   # Return keeps it, and goes to the cell below. The rest of the row is as the file had it.
   @test b.lines[2] == "Paint,15,\"Two coats, low sheen\"" && b.saved != b.version
-  @test sheet().editing == (3, 2) && sheet().input.text == "40"
+  @test sheet().editing == (3, 2) && K.cell_text(sheet().input) == "40"
   @test column(2) == ["15", "40", "3"]
   # Tab goes right, and from the end of a row to the start of the next
   key(Keys.tab)
-  @test sheet().editing == (3, 3) && sheet().input.text == "The \"good\" pine"
+  @test sheet().editing == (3, 3) && K.cell_text(sheet().input) == "The \"good\" pine"
   key(Keys.tab)
   @test sheet().editing == (4, 1)
   key(Keys.tab, Keys.shft)
@@ -185,7 +194,7 @@ end
   s = sheet()
   @test s.asking == 2 && haskey(s.parts, (:action, :rename))
   press(s.parts[(:action, :rename)])
-  @test sheet().editing == (1, 2) && sheet().input.text == "Price"
+  @test sheet().editing == (1, 2) && K.cell_text(sheet().input) == "Price"
   typed("Cost")
   key(Keys.enter)
   @test b.lines[1] == "Name,Cost,Note" && sheet().editing == (2, 2)
@@ -227,6 +236,60 @@ end
   K.file_level!(e, :file)
   frames(3)
   @test e.buf.view == :file && K.table_text(e.buf) && e.buf.lines[4] == "Big Screws,3,Box of 100"
+end
+
+"The box of the dark pixels of the window between (x0, y0) and (x1, y1), in px of the window, from a picture with two pixels to the px"
+ink(x0, y0, x1, y1; dark=140) = begin
+  f = joinpath(dir, "window.png")
+  save_png(f, w)
+  ps = pixels(f)
+  k = size(ps, 2) / K.num(K.window_size(e)[1])
+  found = [(x, y) for y in round(Int, y0 * k):round(Int, y1 * k), x in round(Int, x0 * k):round(Int, x1 * k)
+           if (p = ps[y, x]; 0.3(p >> 16 & 0xff) + 0.59(p >> 8 & 0xff) + 0.11(p & 0xff) < dark)]
+  isempty(found) ? nothing : (minimum(first, found), minimum(last, found), maximum(first, found), maximum(last, found)) ./ k
+end
+
+@testset "a cell's text stays where it is when its field opens" begin
+  # As a cell, then in its field with no caret and nothing selected
+  x0, y0 = place(2, 3) .- (8, K.num(K.ROW_H) / 2)
+  room = (x0 + 4, y0 + 4, x0 + K.num(sheet().widths[3]) - 4, y0 + K.num(K.ROW_H) - 4)
+  before = ink(room...)
+  click(place(2, 3))
+  @test sheet().editing == (3, 3)
+  w.focus = nothing
+  frames()
+  @test before !== nothing && ink(room...) == before
+  K.focus(sheet().input)
+  key(Keys.escape)
+  # The name of a heading, after the picture of its column's kind
+  r = rect(head(2))
+  room = (K.num(r.left) + 4, K.num(r.top) + 4, K.num(r.left + r.width) - 4, K.num(r.top + r.height) - 4)
+  before = ink(room...)
+  K.edit_cell!(v, 1, 2)
+  frames()
+  w.focus = nothing
+  frames()
+  # The edge of a round letter, like the top of C, can be one pixel of the picture apart: half a px
+  after = ink(room...)
+  @test sheet().input.icon == "hash" && after !== nothing && maximum(abs.(after .- before)) <= 0.5
+  K.focus(sheet().input)
+  key(Keys.escape)
+  # A field of the menu, with the words that say what it's for and with the same words typed
+  click(middle(rect(head(2))))
+  f = sheet().field
+  r = rect(f)
+  room = (K.num(r.left) + 3, K.num(r.top) + 3, K.num(r.left + r.width) - 3, K.num(r.top + r.height) - 3)
+  w.focus = nothing
+  frames()
+  words = ink(room..., dark=215)
+  K.focus(f)
+  typed(f.placeholder)
+  w.focus = nothing
+  frames()
+  @test words !== nothing && ink(room..., dark=215) == words
+  K.focus(f)
+  key(Keys.escape)
+  @test isempty(sheet().bounds)
 end
 
 const kinds = file("kinds.csv", """
@@ -272,11 +335,12 @@ end
   s.sort = nothing
   click(middle(rect(head(4))))
   s = sheet()
-  @test w.focus === s.field && s.field.placeholder == "\$3" && s.upto.placeholder == "\$100"
+  # The fields are Ladder's own editor of text too, and say the least and the greatest value while they're empty
+  @test s.field isa K.MenuField && w.focus === s.field.sub && s.field.placeholder == "\$3" && s.upto.placeholder == "\$100"
   typed("5")
   @test Set(column(4)) == Set(["\$12.50", "\$100"])
   key(Keys.tab)
-  @test w.focus === s.upto
+  @test w.focus === s.upto.sub
   typed("50")
   @test column(4) == ["\$12.50"] && K.narrowed(s, 4)
   shot("csv-between")

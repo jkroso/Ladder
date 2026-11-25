@@ -2121,6 +2121,8 @@ face(e, line::Line) = begin
   k == Kind.blockquote ? (isempty(line.lang) ? Face(b, style=slanted(b.style), color=colours.dim) : b) :
   # A comment on lines of its own is in the page's font, and dim
   line.lang == COMMENT ? Face(b, color=colours.dim) :
+  # The text of a cell's field is in the editor's own font: see "the field of a cell"
+  k == Kind.code && line.lang == CELL_LANG ? b :
   # Code is the size that the settings page chooses. The markup of a table or a rule is code's usual size.
   k in (Kind.code, Kind.fence) ? Face(b, family=codefont(), style=codestyle(), size=code_size(e)) :
   k in (Kind.table, Kind.rule) ? Face(b, family=codefont(), style=codestyle(), size=b.size * CODE_SCALE) : b
@@ -2349,6 +2351,10 @@ pieces(e, text::String, line::Line, raw::Bool, i::Int=0; open=nothing) = begin
     a > 0 && push!(out, piece(head(text, a), 0, Face(base, color=colours.faint)))
     z > a && push!(out, piece(rest(head(text, z), a), a, base))
     z < length(text) && push!(out, piece(rest(text, z), z, Face(base, color=colours.faint)))
+    return out
+  elseif k == Kind.code && line.lang == CELL_LANG
+    # The text of a cell's field has no colours of code
+    isempty(text) || push!(out, piece(text, 0, base))
     return out
   elseif k == Kind.code && line.lang in (HEX, BITS)
     # In a line of a file's bytes, the place in the file is faint and the bytes as characters are dim
@@ -6985,6 +6991,7 @@ const WIDEST_CELL = 360px       # the widest a column is before the columns shar
 const FEW_VALUES = 20           # a column with no more different values than this lists them in its menu
 const SHEET_MENU_W = 240px
 const SHEET_KEY = :sheet_column
+const DASH_W = 10px             # the room for the dash between the two fields of a column's menu
 
 "The table of a CSV file that the page shows, and what's chosen for it"
 mutable struct FileSheet
@@ -7245,9 +7252,9 @@ sheet_view(v, e, note) = begin
   isempty(s.table.problem) || return nothing
   # What the fields of a heading's menu hold is what its column keeps, as it's typed
   c = s.asking
-  if c > 0 && s.field !== nothing
-    ranged(s, c) ? hold!(s, c, s.field.text, s.upto === nothing ? "" : s.upto.text) :
-      values_of(s, c) === nothing && keep!(s, c, s.field.text)
+  if c > 0 && s.field isa MenuField
+    ranged(s, c) ? hold!(s, c, cell_text(s.field), s.upto isa MenuField ? cell_text(s.upto) : "") :
+      values_of(s, c) === nothing && keep!(s, c, cell_text(s.field))
   end
   found = sheet_rows!(e, s)
   n, total = length(found), length(s.table.rows) - 1
@@ -7264,9 +7271,8 @@ sheet_view(v, e, note) = begin
   lo = clamp(floor(Int, (into - HEAD_H) / ROW_H) - 4, 0, shown)
   hi = min(shown, lo + ceil(Int, h / ROW_H) + 8)
   plain = cell_face()
-  cell(r, c, w) = s.editing == (r, c) ? editing_cell(s, w, ROW_H) :
-    Row(fixed(w), height(ROW_H), padding(CELL_PAD, 0px), Alignment.Center, clip=true,
-        label(r <= length(s.table.rows) ? shown_cell(s, r, c, w - 2CELL_PAD, plain) : "", 12px))
+  cell(r, c, w) = Row(fixed(w), height(ROW_H), padding(CELL_PAD, 0px), Alignment.Center, clip=true,
+                      label(r <= length(s.table.rows) ? shown_cell(s, r, c, w - 2CELL_PAD, plain) : "", 12px))
   row(k) = (r = k <= n ? found[k] : length(s.table.rows) + 1;
     Row(fixed(room), height(ROW_H), Alignment.Start, background(iseven(k) ? colours.stripe : clear),
       [cell(r, c, w) for (c, w) in enumerate(s.widths)]...))
@@ -7276,15 +7282,26 @@ sheet_view(v, e, note) = begin
     [sheet_part!(() -> SheetHead(of=v, column=c), v, (:head, c)) for c in eachindex(s.widths)]...)
   # The headings are over the rows, and move down with the window until the rows end
   stick = clamp(into, 0px, ROW_H * max(shown - 1, 0))
-  table = Stack(fixed(room), Alignment.Start, rows, Box(Alignment.Start, offset_y=stick, heads))
+  # The field of the cell that's being changed lies over its cell, and over the rows under it when its text needs them
+  field = s.editing === nothing ? nothing : cell_layer(v, s, found, stick)
+  over_rows = field === nothing || s.editing[1] == 1 ? () : (field,)
+  over_heads = field === nothing || s.editing[1] != 1 ? () : (field,)
+  table = Stack(fixed(room), Alignment.Start, rows, over_rows..., Box(Alignment.Start, offset_y=stick, heads), over_heads...)
   frame = sheet_part!(() -> SheetFrame(of=v), v, :frame)
   frame.wide, frame.inside = e.width, Box(Alignment.Start, offset_x=-s.across, table)
   frame
 end
 
-"The cell of `s` that's being changed, `w` wide and `tall` tall: its field, in a box with a line round it in the accent colour"
-editing_cell(s::FileSheet, w, tall) = Box(fixed(w), height(tall), padding(CELL_PAD - 2px, 0px), Alignment.Center, background(colours.bg),
-                                          border(2px, :solid, colours.accent), s.input)
+"The field of the cell of `s` that's being changed, where the cell is in the table, or nothing when the cell doesn't show"
+cell_layer(v, s::FileSheet, found, stick) = begin
+  r, c = s.editing
+  k = r == 1 ? 0 : r > length(s.table.rows) ? length(found) + 1 : findfirst(==(r), found)
+  (k === nothing || !(s.input isa CellField)) && return nothing
+  f = s.input::CellField
+  f.wide, f.heading = s.widths[c], r == 1
+  f.icon = r == 1 ? get(KIND_ICONS, s.kinds[c], "") : ""
+  Box(Alignment.Start, offset_x=sum(s.widths[1:c-1], init=0px), offset_y=r == 1 ? stick : HEAD_H + ROW_H * (k - 1), f)
+end
 
 "The line round a CSV file's table, which has round corners. The table scrolls sideways inside it."
 @def mutable struct SheetFrame <: SemanticUI
@@ -7360,7 +7377,6 @@ describe(h::SheetHead) = begin
   s = h.of.table::FileSheet
   c = h.column
   w = s.widths[c]
-  s.editing == (1, c) && return editing_cell(s, w, HEAD_H)
   way = s.sort !== nothing && s.sort[1] == c ? s.sort[2] : nothing
   lit = ishovered(h) || s.asking == c
   fewer = narrowed(s, c)
@@ -7380,8 +7396,6 @@ end
 cursor(::SheetHead) = :hand
 onmouse(::SheetHead, ::MouseMove) = handled
 
-"Put `text` in the field `f`, with the caret after it, and `words` in it while it's empty"
-fill_field!(f, text, words) = (f.text = text; f.placeholder = words; f.cursor = f.anchor = length(text); f.scroll = 0px; f)
 
 onkey(h::SheetHead, ev::KeyPress{Keys.mouse_left}) = begin
   v = h.of
@@ -7393,10 +7407,8 @@ onkey(h::SheetHead, ev::KeyPress{Keys.mouse_left}) = begin
   s.asking = c
   # What esc puts back: the column's words, its ticked values and its two values
   s.was = (get(s.filters, c, nothing), haskey(s.picks, c) ? copy(s.picks[c]) : nothing, get(s.bounds, c, nothing))
-  field() = own!(v, TextInput(placeholder="", font_family=SANS, font_size=13px,
-                              look=(_, text) -> Row(width(grow=grow), height(grow=grow), clip=true, text)))
-  s.field === nothing && (s.field = field())
-  s.upto === nothing && (s.upto = field())
+  s.field isa MenuField || (s.field = field_editor!(own!(v, MenuField(of=v))))
+  s.upto isa MenuField || (s.upto = field_editor!(own!(v, MenuField(of=v))))
   # The fields start with what the column keeps. Those of a column of numbers or days show its least and greatest value while they're empty.
   if ranged(s, c)
     least, most = extent(s, c)
@@ -7433,13 +7445,16 @@ describe(m::SheetMenu) = begin
   order(way) = sheet_part!(() -> SheetOrder(of=v, way=way), v, (:sort, way))
   values = values_of(s, col)
   value(text, count) = (r = sheet_part!(() -> SheetValue(of=v, value=text), v, (:value, col, text)); r.count = count; r)
-  field(f) = Box(width(grow=grow), height(28px), padding(8px, 0px), radius(6px), border(1px, :solid, c.line), background(c.frame), f)
   rule() = Box(width(grow=grow), height(13px), Alignment.Center, Box(width(grow=grow), height(1px), background(c.rule)))
+  # The fields are as wide as the menu has room for: one, or two with a dash between them
+  room = SHEET_MENU_W - 2(6px + 1px) - 2 * 4px
+  half = (room - 2 * 6px - DASH_W) / 2
+  ranged(s, col) && ((s.field.wide, s.upto.wide) = (half, half))
   # A column of numbers or days shows the rows between two values, and one with few values lists them
   between = ranged(s, col) ? (section("BETWEEN"), Row(width(grow=grow), padding(4px, 2px), child_gap=6px, Alignment.Center,
-                                                      field(s.field), Box(label("–", 13px, color=c.dim)), field(s.upto))) : ()
+                                                      s.field, Box(fixed(DASH_W), Alignment.Center, label("–", 13px, color=c.dim)), s.upto)) : ()
   listed = values === nothing ? () : (section("SHOW"), [value(text, count) for (text, count) in values]...)
-  contains = !ranged(s, col) && values === nothing ? (section("FILTER FOR"), Box(width(grow=grow), padding(4px, 2px), field(s.field))) : ()
+  contains = !ranged(s, col) && values === nothing ? (s.field.wide = room; (section("FILTER FOR"), Box(width(grow=grow), padding(4px, 2px), s.field))) : ()
   # A file that the page changes can have its columns changed here
   changes = sheet_edits(v) && sheet_whole(v) ?
     (rule(), [sheet_part!(() -> SheetAction(of=v, what=a), v, (:action, a)) for a in COLUMN_ACTIONS if a != :delete || length(s.widths) > 1]...) : ()
@@ -7464,12 +7479,10 @@ end
 # Tab goes between the two fields of a column of numbers or days
 onkey(m::SheetMenu, ev::KeyPress{Keys.tab}) = begin
   s = m.of.table::FileSheet
-  (ranged(s, m.column) && s.upto !== nothing) || return handled
-  focus(ev.window.focus === s.field ? s.upto : s.field)
+  (ranged(s, m.column) && s.upto isa MenuField) || return handled
+  focus(ev.window.focus === s.field.sub ? s.upto : s.field)
   handled
 end
-# What's typed in a field has no step back of its own, and the page's steps back are for its cells
-onkey(::SheetMenu, ev::KeyPress{Keys.z}) = Keys.cmd in ev.window.keys ? handled : nothing
 
 describe(r::SheetOrder) = begin
   s, c = r.of.table::FileSheet, found_colours()
@@ -7593,15 +7606,11 @@ edit_cell!(v, r, c) = begin
   end_edit!(v)
   sheet_edits(v) || return handled
   s = v.table::FileSheet
-  frame = sheet_part!(() -> SheetFrame(of=v), v, :frame)
-  s.input === nothing && (s.input = own!(frame, TextInput(placeholder="", font_family=SANS, font_size=12px,
-                                                          look=(_, text) -> Row(width(grow=grow), height(grow=grow), Alignment.Center, clip=true, text))))
-  text = r <= length(s.table.rows) ? s.table.rows[r][c] : ""
-  s.input.text = text
-  s.input.anchor, s.input.cursor, s.input.scroll = 0, length(text), 0px
+  f = cell_field!(v)
+  fill_cell!(f, r <= length(s.table.rows) ? s.table.rows[r][c] : "")
   s.editing = (r, c)
   show_cell!(v, r, c)
-  focus(s.input)
+  focus(f)
   handled
 end
 
@@ -7611,7 +7620,7 @@ end_edit!(v; keep=true) = begin
   (s isa FileSheet && s.editing !== nothing) || return v
   r, c = s.editing
   s.editing = nothing
-  keep && s.input !== nothing && put_cell!(v, r, c, s.input.text)
+  keep && s.input isa CellField && put_cell!(v, r, c, cell_text(s.input))
   v
 end
 
@@ -7804,9 +7813,8 @@ next_cell(v, r, c, way) = begin
   nothing
 end
 
-"Keep what's typed in the cell of `f`'s table that's being changed, and open the field of the cell `way` from it, if there's one"
-edit_on!(f::SheetFrame, way) = begin
-  v = f.of
+"Keep what's typed in the cell of the table of `v` that's being changed, and open the field of the cell `way` from it, if there's one"
+edit_on!(v, way) = begin
   s = v.table
   (s isa FileSheet && s.editing !== nothing) || return nothing
   r, c = s.editing
@@ -7816,36 +7824,210 @@ edit_on!(f::SheetFrame, way) = begin
   handled
 end
 
-# The keys that the field of a cell has no use for come here
-onkey(f::SheetFrame, ev::KeyPress{Keys.enter}) = unmodified(ev) ? edit_on!(f, :down) : only_held(ev, Keys.shft) ? edit_on!(f, :up) : nothing
-onkey(f::SheetFrame, ev::KeyPress{Keys.tab}) = unmodified(ev) ? edit_on!(f, :right) : only_held(ev, Keys.shft) ? edit_on!(f, :left) : nothing
-onkey(f::SheetFrame, ev::KeyPress{Keys.down}) = unmodified(ev) ? edit_on!(f, :down) : nothing
-onkey(f::SheetFrame, ev::KeyPress{Keys.up}) = unmodified(ev) ? edit_on!(f, :up) : nothing
-onkey(f::SheetFrame, ev::KeyPress{Keys.escape}) = begin
-  s = f.of.table
-  (unmodified(ev) && s isa FileSheet && s.editing !== nothing) || return nothing
-  stop_edit!(f.of, keep=false)
-  handled
+# --- the field of a cell ------------------------------------------------------------------------
+#
+# The field that a cell of a CSV file's table opens is Ladder's own editor of
+# text, as a field of a SolidCraft design is: see "the fields of a SolidCraft
+# design". So its caret, what's selected, and the keys that move and change
+# the text look and work as they do on a page. Its text is in the table's
+# font, at the table's size, so it doesn't change when the field opens. It's
+# plain text, with no colours of code and no markup of Markdown. Text that's
+# longer than the column goes on to the next line, and the field grows down
+# over the rows under it.
+#
+# Return, Tab, ↑, ↓ and esc are the table's: see "changing a CSV file". ⌘Z
+# takes back what was typed in the field, and when nothing was, the field
+# closes and the page takes back its last change. A command for the page or
+# the window, like ⌘S, puts what was typed in the cell first.
+
+"The field of the cell of a CSV file's table that's being changed: see \"the field of a cell\""
+@def mutable struct CellField <: SemanticUI
+  sub::Any = nothing      # the editor of its text
+  of::Any = nothing       # the FileView
+  wide::px = 0px          # how wide its column is
+  heading::Bool = false   # it's the field of a heading, whose text is semibold
+  icon::String = ""       # the picture of the kind of its column, before the name of a heading, or ""
+  took::Bool = false      # the editor of its text took the last key, which goes no further: see `cell_key!`
 end
-# ⌘Z puts back what the cell held before you typed. With nothing typed, it closes the field, and the page takes back its last change.
-onkey(f::SheetFrame, ev::KeyPress{Keys.z}) = begin
-  s = f.of.table
-  (only_held(ev, Keys.cmd) && s isa FileSheet && s.editing !== nothing) || return nothing
-  r, c = s.editing
-  was = r <= length(s.table.rows) ? s.table.rows[r][c] : ""
-  s.input.text == was || (fill_field!(s.input, was, ""); return handled)
-  stop_edit!(f.of, keep=false)
-  nothing
+
+"""
+A field in the menu of a column of a CSV file's table: the words that the
+column's rows have, or the first or the last value that shows. It's Ladder's
+own editor of text, as the field of a cell is. While it's empty, it says what
+it's for.
+"""
+@def mutable struct MenuField <: SemanticUI
+  sub::Any = nothing          # the editor of its text
+  of::Any = nothing           # the FileView
+  wide::px = 0px              # how wide the menu has room for it to be
+  placeholder::String = ""    # what it says while it has no text
+  took::Bool = false          # the editor of its text took the last key, which goes no further: see `cell_key!`
 end
-# Any other key with ⌘ held, like ⌘S, is the page's. What was typed goes in the cell first.
-onkey(f::SheetFrame, ev::KeyPress) = (Keys.cmd in ev.window.keys && stop_edit!(f.of); nothing)
+
+"A field of a CSV file's table: the field of a cell, or a field in the menu of a column"
+const SheetField = Union{CellField,MenuField}
+
+const CELL_LANG = "cell"   # the language of the text of a field of a table: plain text, in the table's font
+const CELL_TEXT = 12px     # how big the text of a table's cells is: see `cell_face`
+const MENU_TEXT = 13px     # and the text of the menu of a column
+
+"Give the field `f` an editor of its own for its text, whose keys go to `cell_key!` before it does what it does with them"
+field_editor!(f::SheetField) = begin
+  sub = Editor()
+  sub.buf = Buffer(lines=[""], view=:code, lang=CELL_LANG)
+  sub.nodes[:input] = own!(sub, TextInput())
+  sub.nodes[:sheet_cell] = f
+  setfield!(sub, :parent, f)
+  f.sub = sub
+  f
+end
+
+"The field of the cells of the table of `v`, made the first time that it's asked for"
+cell_field!(v) = begin
+  s = v.table::FileSheet
+  s.input isa CellField && return s.input
+  s.input = field_editor!(own!(sheet_part!(() -> SheetFrame(of=v), v, :frame), CellField(of=v)))
+end
+
+"The field of a CSV file's table that the editor `e` is the text of, or nothing for any other editor"
+cell_field_of(e) = get(e.nodes, :sheet_cell, nothing)
+
+"The text in the field `f`"
+cell_text(f::SheetField) = join(f.sub.buf.lines, '\n')
+
+"Put `text` in the field `f`, all of it selected. ⌘Z in the field doesn't take it back."
+fill_cell!(f::SheetField, text) = begin
+  b = f.sub.buf
+  edit!(b, (1, 0), line_end(b, length(b.lines)), String(text))
+  empty!(b.undo)
+  empty!(b.redo)
+  b.anchor, b.caret = (1, 0), line_end(b, length(b.lines))
+  f
+end
+
+"Put `text` in the field `f` of a column's menu, with the caret after it, and `words` in it while it's empty"
+fill_field!(f::MenuField, text, words) = (fill_cell!(f, text); b = f.sub.buf; b.anchor = b.caret; f.placeholder = words; f)
+
+"How big the text of the field `f` is, and how heavy"
+field_type(f::CellField) = (CELL_TEXT, f.heading ? 600 : 400)
+field_type(::MenuField) = (MENU_TEXT, 400)
+
+"Give the editor of the field `f` the colours and the keys of the page, and the font and the size of the table's text"
+follow_cell!(f::SheetField) = begin
+  sub = f.sub
+  follow_host!(sub, editor(f.of))
+  sub.numbers = sub.shade = false
+  sub.guide = 0
+  sub.wrap = true
+  size, weight = field_type(f)
+  sub.font, sub.look, sub.weight = SANS, :own, weight
+  sub.zoom = num(size) / num(TEXT_SIZE)
+  # Text that was laid out at another size or weight is laid out again
+  key = (sub.zoom, sub.font, sub.weight)
+  get(sub.nodes, :cell_style, nothing) == key || (sub.nodes[:cell_style] = key; empty!(sub.flows))
+  f
+end
+
+"""
+Lay out the text of the field `f` for `room`, and give what shows it, with how
+tall its text is and how tall its first line is. Its editor's text is made in
+the theme at its usual size, so it's as big as it was laid out. While a field
+of the menu is empty, the words that say what it's for show where its text goes.
+"""
+field_text(f::SheetField, room) = begin
+  sub = f.sub
+  follow_cell!(f)
+  w = window_of(f)
+  b = sub.buf
+  # The selection shows only while the field has the keyboard
+  (w !== nothing && w.focus === sub) || (b.anchor = b.caret)
+  layout!(sub, room)
+  tall = isempty(sub.layout) ? first(field_type(f)) * 1.5 : lowest(sub, sub.layout)
+  one = !isempty(sub.layout) && sub.layout[1].content isa Flow && !isempty(sub.layout[1].content.lines) ? sub.layout[1].content.lines[1].high : tall
+  shown = with_theme(unscaled(component_theme(editor(f.of).zoom))) do
+    doc = Row(fixed(room), height(tall), Alignment.Start, node!(Document, sub, :document))
+    words = f isa MenuField && b.lines == [""] ? f.placeholder : ""
+    isempty(words) ? doc : Stack(fixed(room), height(tall), Alignment.Start,
+                                 Row(fixed(room), height(tall), Alignment.Center, clip_x=true, label(words, MENU_TEXT, color=colours.dim)), doc)
+  end
+  shown, tall, one
+end
+
+# The text in the field is where it was in the cell: its first line is in the middle of the cell's height, as the cell's
+# text is, and a heading's name is after the picture of its column's kind. Text of more lines makes the field taller.
+# A Row puts the editor's text at its top, so the room over the text is said, inside the line round the field.
+describe(f::CellField) = begin
+  room = max(f.wide - 2CELL_PAD - (isempty(f.icon) ? 0px : 14px), 12px)
+  text, tall, one = field_text(f, room)
+  short = f.heading ? HEAD_H : ROW_H
+  over = (short - one) / 2 - 2px
+  icon = isempty(f.icon) ? () : (Box(fixed(10px), height(one), Alignment.Center, Icon(f.icon, size=10px, color=colours.faint)),)
+  Row(fixed(f.wide), height(max(short, tall + short - one)), padding(over, CELL_PAD - 2px, 0px, CELL_PAD - 2px), child_gap=4px,
+      Alignment.Start, background(colours.bg), border(2px, :solid, colours.accent), name="Cell field", icon..., text)
+end
+
+describe(f::MenuField) = begin
+  c = found_colours()
+  room = max(f.wide - 2 * 8px - 2px, 12px)
+  text, tall, one = field_text(f, room)
+  Row(fixed(f.wide), height(max(28px, tall + 28px - one)), padding((28px - one) / 2 - 1px, 8px, 0px, 8px), radius(6px), Alignment.Start,
+      border(1px, :solid, c.line), background(c.frame), name="Menu field", text)
+end
+
+# A click on the field, past its text, puts the caret in the text. A click on the text was the text's, and comes here after.
+onkey(f::SheetField, ev::KeyPress{Keys.mouse_left}) = (hittest(ev.window) === f && (focus(f); press!(f.sub, ev.window.mouse)); handled)
+cursor(::SheetField) = :ibeam
+# A key that the editor of its text took goes no further. The editor gives no `handled`, and the page would take it too, as ⌘Z.
+onkey(f::SheetField, ::KeyPress) = f.took ? (f.took = false; handled) : nothing
+focus(f::SheetField) = focus(f.sub)
 
 # A click anywhere else keeps what was typed in the cell
-onblur(f::SheetFrame, from) = begin
+onblur(f::CellField, from) = begin
   s = f.of.table
-  (s isa FileSheet && from === s.input && s.editing !== nothing) || return nothing
+  (from === f.sub && s isa FileSheet && s.editing !== nothing) || return nothing
   end_edit!(f.of)
   handled
+end
+
+"The commands that the field of a cell does as the page does them. Any other is the page's or the window's."
+const CELL_COMMANDS = (:undo, :redo, :cut, :copy, :paste, :paste_copy, :select_all)
+
+"""
+What a key does in the field of a cell, before its editor does what it does
+with a key: `handled`, nothing when the key goes on to the page and then the
+window, or :text when the editor does what it does with the key. See "the
+field of a cell".
+"""
+cell_key!(f::CellField, e, w, K, command) = begin
+  v = f.of
+  K == Keys.enter && unmodified(w) && return edit_on!(v, :down)
+  K == Keys.enter && only_held(w, Keys.shft) && return edit_on!(v, :up)
+  K == Keys.tab && unmodified(w) && return edit_on!(v, :right)
+  K == Keys.tab && only_held(w, Keys.shft) && return edit_on!(v, :left)
+  K in (Keys.up, Keys.down) && unmodified(w) && return edit_on!(v, K == Keys.up ? :up : :down)
+  K == Keys.escape && unmodified(w) && return (stop_edit!(v, keep=false); handled)
+  command === nothing && return :text
+  b = e.buf
+  # ⌘Z takes back the page's last change when the field has nothing of its own to take back
+  if command in (:undo, :redo) && isempty(command == :undo ? b.undo : b.redo)
+    stop_edit!(v, keep=false)
+    return nothing
+  end
+  (command in CELL_COMMANDS || COMMANDS[command].kind in (:type, :move)) && return :text
+  stop_edit!(v)
+  nothing
+end
+
+"""
+What a key does in a field of the menu of a column: see `cell_key!`. Return,
+esc and Tab are the menu's, which sees them first. ⌘Z takes back what was
+typed, and does nothing more while the menu shows. A command for the page or
+the window goes on to them.
+"""
+cell_key!(f::MenuField, e, w, K, command) = begin
+  command === nothing && return :text
+  command in (:undo, :redo) && return isempty(command == :undo ? e.buf.undo : e.buf.redo) ? handled : :text
+  (command in CELL_COMMANDS || COMMANDS[command].kind in (:type, :move)) ? :text : nothing
 end
 
 "The menu items that change a column, in their order"
@@ -29912,7 +30094,7 @@ const PAIRS = Dict('(' => ')', '[' => ']', '{' => '}', '"' => '"', '\'' => '\'')
 const CLOSING = Set(values(PAIRS))
 
 "True when line `i` is code that's typed as text. A row of a sheet or a spreadsheet is typed as a cell."
-typed_code(b::Buffer, i::Int) = kinds(b)[i].kind == Kind.code && !insheet(b, i) && !inspread(b, i)
+typed_code(b::Buffer, i::Int) = (k = kinds(b)[i]; k.kind == Kind.code && k.lang != CELL_LANG && !insheet(b, i) && !inspread(b, i))
 
 "How many quotes in `text` start or end a string. One after a \\ is a character of its string."
 quotes(text::AbstractString) = count(r"(?<!\\)\"", text)
@@ -31602,6 +31784,9 @@ onkey(e::Editor, ev::KeyPress{K}) where K = begin
   # the sheet of its parameters, Return and Tab are the sheet's.
   field = design_field_of(e)
   field === nothing || (done = design_key!(field, e, w, K, command); done === :text || return done)
+  # In the field of a cell of a CSV file's table, Return, Tab, ↑, ↓ and esc go from cell to cell
+  cell = cell_field_of(e)
+  cell === nothing || (done = cell_key!(cell, e, w, K, command); cell.took = done === :text; done === :text || return done)
   # While the command palette shows, every key is its own, whatever part of it has the keyboard
   e.popup == :commands && return (palette_key!(e, w, K, command); K == Keys.tab ? handled : nothing)
   kind = command === nothing ? :none : COMMANDS[command].kind
