@@ -30377,6 +30377,10 @@ indent_lines!(e, out::Bool) = begin
   t === List ? shift_lines!(e, out, STEP, in((Kind.bullet, Kind.ordered, Kind.todo))) : nothing
 end
 
+# ⌘] and ⌘[ have a use only on a page that you can change. On one that you can't, the keys go to another
+# command that has them, if code from the startup page added one. See `command_here`.
+works_here(e, ::Union{Val{:indent_line},Val{:outdent_line}}) = !readonly(e.buf) && !e.buf.fixed
+
 # In a list, Tab moves the item in and shift-Tab moves it back out
 indent!(e, out::Bool, ::Type{List}) = begin
   b = e.buf
@@ -31558,6 +31562,7 @@ end
 The key bindings as they are now. `of` has the shortcuts of each command: the
 bundle's, with the ones that the key bindings page changed. `commands` has the
 command of each shortcut, and `starts` each stroke that starts a shortcut of two.
+`also` has the other commands of a shortcut that two or more commands have.
 """
 keys_now(e) = begin
   made = get(e.nodes, :keys, nothing)
@@ -31568,16 +31573,34 @@ keys_now(e) = begin
     haskey(of, name) && (of[name] = read_shortcuts(text))
   end
   commands = Dict{Shortcut,Symbol}()
-  # A shortcut that two commands have runs the one that the page lists first
+  also = Dict{Shortcut,Vector{Symbol}}()
+  # A shortcut that two commands have runs the one that the page lists first, where that one has a use: see `command_here`
   for (_, cs) in COMMAND_GROUPS, c in cs, s in of[c.name]
-    get!(commands, s, c.name)
+    haskey(commands, s) ? push!(get!(Vector{Symbol}, also, s), c.name) : (commands[s] = c.name)
   end
   starts = Set{Stroke}(first(s) for s in keys(commands) if length(s) == 2)
-  e.nodes[:keys] = (bundle=e.bundle, rebound=e.rebound, of=of, commands=commands, starts=starts, count=length(COMMANDS))
+  e.nodes[:keys] = (bundle=e.bundle, rebound=e.rebound, of=of, commands=commands, also=also, starts=starts, count=length(COMMANDS))
 end
 
+"""
+The command that the shortcut `s` runs in the window of `e`, with the key
+bindings `ks`, or nothing. Of the commands that have the shortcut, it's the
+first that has a use there (see `works_here`). So code from the startup page
+can give a key that Ladder has a use where Ladder's command has none, like ⌘]
+on a page that you can't change. When none has a use, it's the first.
+"""
+command_here(e, ks, s) = begin
+  name = get(ks.commands, s, nothing)
+  others = get(ks.also, s, nothing)
+  (others === nothing || works_here(e, Val(name))) && return name
+  something(findfirst_here(e, others), name)
+end
+
+"The first of the commands `names` that has a use in the window of `e`, or nothing"
+findfirst_here(e, names) = (i = findfirst(n -> works_here(e, Val(n)), names); i === nothing ? nothing : names[i])
+
 "The command that the key `K` runs by itself in window `w`, with the keys that are held there, or nothing"
-command_of(e, w, K) = get(keys_now(e).commands, (Stroke(w.keys & HELD, K),), nothing)
+command_of(e, w, K) = command_here(e, keys_now(e), (Stroke(w.keys & HELD, K),))
 
 """
 The command that the key `K` runs in window `w`, with the keys that are held
@@ -31591,9 +31614,9 @@ command!(e, w, K) = begin
   s = Stroke(w.keys & HELD, K)
   before = pop!(e.nodes, :stroke, nothing)
   name, select = if before !== nothing
-    (get(ks.commands, (before, s), :wait), false)
+    (something(command_here(e, ks, (before, s)), :wait), false)
   elseif haskey(ks.commands, (s,))
-    (ks.commands[(s,)], false)
+    (command_here(e, ks, (s,)), false)
   elseif s in ks.starts
     e.nodes[:stroke] = s
     (:wait, false)

@@ -167,6 +167,41 @@ end
   @test b.lines[9] == "Some words"
 end
 
+@testset "a shortcut that two commands have runs the first one that has a use on the page" begin
+  # Code from the startup page gives ⌘] a command too, like one that shows the next email
+  went = Ref(0)
+  K.add_commands!("Tests", [K.Command(:test_next, "Go to the next one", :window, "cmd+right_bracket", (e, w, _) -> (went[] += 1))])
+  e, w = window("- a\n  - b\n", name="two.md")
+  b = e.buf
+  @test K.keys_now(e).also[first(K.read_shortcuts("cmd+right_bracket"))] == [:test_next]
+  # On a page that you can change, Ladder's ⌘] has a use, and it moves the line in
+  caret!(e, w, 2, 4)
+  press(w, Keys.right_bracket, cmd)
+  @test b.lines[2] != "  - b" && went[] == 0
+  press(w, Keys.left_bracket, cmd)
+  @test b.lines[2] == "  - b"
+  # On a page that you can't change, like an email or a file that the Mac marks as read-only, Ladder's ⌘] has
+  # none, so the other command runs
+  path = joinpath(dir, "fixed.md")
+  write(path, "- a\n  - b\n")
+  chmod(path, 0o444)
+  o = K.build_editor(path)
+  ow = Window(o, size=(900px, 700px))
+  frame(ow); frame(ow)
+  K.focus(o)
+  @test o.buf.fixed
+  press(ow, Keys.right_bracket, cmd)
+  @test went[] == 1 && o.buf.lines[2] == "  - b"
+  # A key that only one command has goes to it, as it always did, though it has no use here
+  ks = K.keys_now(o)
+  @test K.command_here(o, ks, first(K.read_shortcuts("cmd+left_bracket"))) == :outdent_line
+  @test K.command_here(o, ks, first(K.read_shortcuts("cmd+right_bracket"))) == :test_next
+  chmod(path, 0o644)
+  delete!(K.COMMANDS, :test_next)
+  filter!(g -> first(g) != "Tests", K.COMMAND_GROUPS)
+  filter!(p -> last(p).name != :test_next, K.ADDED_COMMANDS)
+end
+
 @testset "the commands for whole lines" begin
   e, w = window("a\nb\nc\nd")
   b = e.buf
