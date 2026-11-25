@@ -474,11 +474,47 @@ check_startup(dir) = begin
   said[4] == "1.00 AUD/hr" || error("The code of a startup page gave the wrong wage: ", said[4])
 end
 
-"The app's self-test: the pages as the app writes them out, the code of a startup page, then some typing, then a shell in a terminal's file"
+"True in an app whose image is a file of its own (APP_FORM=image in bundle.jl), with Julia's own starter beside the app's. Only that app can compile a cache."
+can_cache() = isfile(joinpath(Sys.BINDIR, "julia")) && endswith(unsafe_string(Base.JLOptions().image_file), ".dylib")
+
+"""
+Compile a cache of a package that the app wasn't built with, and load the
+package from it. Julia compiles a cache in a second process, which starts from
+the app's own image, and Julia's linker makes the cache's compiled code into a
+library. The package needs a standard library that the image may not hold.
+The cache goes in `dir`, and an app that can't compile a cache does nothing.
+"""
+check_cache(dir) = begin
+  can_cache() || return false
+  pkg = joinpath(dir, "Rung")
+  mkpath(joinpath(pkg, "src"))
+  write(joinpath(pkg, "Project.toml"), "name = \"Rung\"\nuuid = \"5a1f0c1e-1111-4222-8333-0123456789ab\"\n\n" *
+                                       "[deps]\nDates = \"ade2ca70-3891-5945-98fb-dc099432e06a\"\nCRC32c = \"8bf52ea8-c179-5cab-976a-9e18b702a9bc\"\n")
+  write(joinpath(pkg, "src", "Rung.jl"), "module Rung\nusing Dates, CRC32c\nday() = Date(2026, 11, 26)\nsum() = crc32c(\"ladder\")\nprecompile(day, ())\nend\n")
+  depot = joinpath(dir, "depot")
+  pushfirst!(DEPOT_PATH, depot)
+  pushfirst!(LOAD_PATH, pkg)
+  try
+    id = Base.PkgId(Base.UUID("5a1f0c1e-1111-4222-8333-0123456789ab"), "Rung")
+    made = Base.compilecache(id, joinpath(pkg, "src", "Rung.jl"))
+    made isa Exception && error("The app didn't compile a cache: ", sprint(showerror, made))
+    m = Base.require(id)
+    origin = get(Base.pkgorigins, id, nothing)
+    (origin !== nothing && origin.cachepath !== nothing && startswith(origin.cachepath, depot)) || error("The app loaded a package from its source, not from the cache it compiled")
+    string(Base.invokelatest(m.day)) == "2026-11-26" || error("A package from a cache gave the wrong day")
+  finally
+    filter!(!=(depot), DEPOT_PATH)
+    filter!(!=(pkg), LOAD_PATH)
+  end
+  true
+end
+
+"The app's self-test: the pages as the app writes them out, the code of a startup page, a cache of a package if the app can compile one, then some typing, then a shell in a terminal's file"
 self_test() = begin
   dir = mktempdir()
   check_pages(dirname(unpack(dir)))
   check_startup(dir)
+  check_cache(dir) && Core.println(Core.stdout, "The app compiled a cache of a package and loaded it.")
   warm_up()
   check_terminal(shell=true)
   rm(dir, recursive=true)

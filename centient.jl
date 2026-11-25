@@ -172,8 +172,10 @@ command(dir) = begin
   runtime = joinpath(dirname(dir), "runtime")
   own = joinpath(runtime, "julia", "bin", "julia")
   up = joinpath(homedir(), ".juliaup", "bin", "julia")
+  # Ladder's app has Julia's starter too, for its own image only: it has no image of Julia's to run a program with
   here = joinpath(Sys.BINDIR, "julia")
-  julia = isfile(own) ? own : isfile(up) ? up : isfile(here) ? here : "julia"
+  whole = isfile(here) && isfile(normpath(Sys.BINDIR, "..", "lib", "julia", "sys." * Base.BinaryPlatforms.platform_dlext()))
+  julia = isfile(own) ? own : isfile(up) ? up : whole ? here : "julia"
   image = joinpath(dir, IMAGE)
   cmd = isfile(image) ? `$julia -J$image --startup-file=no --compiled-modules=no $(joinpath(dir, SERVER))` :
                         `$julia --project=$dir $(joinpath(dir, SERVER))`

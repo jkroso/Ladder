@@ -29,8 +29,18 @@
 #   APP_TRIM=no          JuliaC's trimming: no, safe, unsafe or unsafe-warn. Trimming leaves out
 #                        the code the app doesn't use. The app is first run with
 #                        `--record`, and opens its window for a few seconds. See record.jl.
-#   APP_PRUNE=1          delete the native libraries the self-test didn't load.
+#   APP_PRUNE=0          1 deletes the native libraries the self-test didn't load. It's 1 for
+#                        APP_FORM=program.
 #   APP_PROJECT=path     the Julia project to build from, if not Ladder's own.
+#   APP_FORM=image       where the app's image is. `image` keeps it in a file of its own,
+#                        lib/<program>.dylib, and the app's program is a small starter (starter.c) that
+#                        loads it. That app can compile a cache of a package that it wasn't built with,
+#                        as a plug-in is: Julia compiles a cache in a second process, which must start
+#                        from the same image. `program` puts the image inside the app's program, as
+#                        the apps up to 0.5.0 had it. That app is about 260 MB smaller, and loads only
+#                        what it was built with. A trimmed app is always that form.
+#   APP_KIP=path         a folder of Kip to build with, in place of the Kip that Julia's own list of
+#                        packages has.
 #
 # The app's entry point is app.jl, which starts with start.jl.
 
@@ -43,7 +53,11 @@ option(name, default) = get(ENV, "APP_$name", default)
 const cpu = option("CPU", "apple-m1")
 const strips = split(option("STRIP", ""), ',', keepempty=false)
 const trim = option("TRIM", "no")
-const prune = option("PRUNE", "1") == "1"
+# A trimmed app can't compile anything new, so it has no use for an image of its own
+const imaged = trim == "no" && option("FORM", "image") == "image"
+# An app that can compile a cache keeps every library. A package that it loads later can need one
+# that Ladder itself never loads: Poppler's needs the libiconv that the image names and doesn't use.
+const prune = option("PRUNE", imaged ? "0" : "1") == "1"
 
 "The name of the Developer ID certificate in your keychain, or `-` when there's none"
 developer_id() = try
@@ -69,6 +83,10 @@ project_files(dir) = begin
 end
 
 const project = project_files(option("PROJECT", root))
+# JuliaC hides Julia's own list of packages from the build, so the folder of Kip goes into the build's copy of the project
+let kip = option("KIP", "")
+  isempty(kip) || run(`$(Base.julia_cmd()) --startup-file=no --project=$project -e "using Pkg; Pkg.develop(path=ARGS[1])" $kip`)
+end
 
 # --- the packages Kip gets from GitHub ------------------------------------------
 #
@@ -154,10 +172,14 @@ build_app(; name, program, id, entry, version="1.0", threads=nothing, icon=nothi
   options = threads === nothing ? Dict{String,String}() : Dict("threads" => threads)
   build_time = @elapsed begin
     trim == "no" || (ENV["APP_CALLS"] = record_calls(entry, threads))
-    image = ImageRecipe(output_type="--output-exe", file=entry, project=project, cpu_target=cpu,
-                        trim_mode=trim, julia_args=["--strip-$s" for s in strips], jl_options=options)
-    link = LinkRecipe(image_recipe=image, outname=joinpath(bundle, program), rpath="@bundle")
+    image = ImageRecipe(output_type=imaged ? "--output-sysimage" : "--output-exe", file=entry, project=project, cpu_target=cpu,
+                        trim_mode=trim, julia_args=["--strip-$s" for s in strips], jl_options=imaged ? Dict{String,String}() : options)
+    # The image goes in lib, beside Julia's own libraries, and Julia's other libraries are in lib/julia
+    link = LinkRecipe(image_recipe=image, outname=joinpath(bundle, imaged ? program * ".dylib" : program), rpath=imaged ? "." : "@bundle")
     compile_products(image)
+    # JuliaC links in a few lines of C that set Julia's options again as the image loads. That drops the
+    # program that the starter gave with -e, and the starter gives the options itself.
+    imaged && filter!(o -> !occursin("jl-options", o), image.extra_objects)
     link_products(link)
     bundle_products(BundleRecipe(link_recipe=link, output_dir=bundle))
   end
@@ -169,6 +191,7 @@ build_app(; name, program, id, entry, version="1.0", threads=nothing, icon=nothi
     mv(joinpath(bundle, part), joinpath(contents, part == "bin" ? "MacOS" : part))
   end
   rm(bundle)
+  imaged && starter!(contents, program, threads)
   foreach(h -> cp(h, joinpath(contents, "MacOS", basename(h))), helpers)
   if icon !== nothing
     mkpath(joinpath(contents, "Resources"))
@@ -195,6 +218,7 @@ build_app(; name, program, id, entry, version="1.0", threads=nothing, icon=nothi
 
   executable = joinpath(contents, "MacOS", program)
   loaded = self_test(contents, executable)
+  println("The self-test loaded ", length(loaded), " libraries, ", count(startswith(contents), loaded), " of them the app's own")
   if prune
     println("Pruning removed ", mb(prune_libraries(contents, loaded)))
     println("Stand-ins for unused libraries saved ", mb(stub_unused_libraries(contents)))
@@ -206,7 +230,7 @@ build_app(; name, program, id, entry, version="1.0", threads=nothing, icon=nothi
   println("\nBuilt in ", round(build_time / 60, digits=1), " minutes with cpu=$cpu strip=$(join(strips, ',')) trim=$trim",
           prune ? " pruned" : "")
   println(app, ": ", mb(disk_size(app)))
-  for part in ("MacOS/$program", "lib", "share")
+  for part in ("MacOS/$program", "lib", "share", (imaged ? ("lib/$program.dylib", "libexec") : ())...)
     println("  ", rpad(part, 18), lpad(mb(disk_size(joinpath(contents, part))), 10))
   end
   "--install" in ARGS && install(app)
@@ -214,6 +238,40 @@ build_app(; name, program, id, entry, version="1.0", threads=nothing, icon=nothi
 end
 
 mb(n) = string(round(n / 1e6, digits=1), " MB")
+
+"""
+Give an app whose image is a file of its own what starts it, and what it needs
+to compile a cache of a package:
+
+- its program, starter.c, which loads the image with Julia's own code
+- Julia's own starter, as bin/julia. Julia runs that one, with the same image,
+  each time it compiles a cache. Julia looks for it in the `bin` that's beside
+  the `lib` its own library is in, not beside the app's program.
+- Julia's own tools, in libexec/julia: its linker, which makes a cache's
+  compiled code into a library, and the few programs its libraries run
+- the source of Julia's standard libraries, for a package that needs one that
+  the image doesn't hold, and the test helpers that one of them runs
+"""
+starter!(contents, program, threads) = begin
+  macos = joinpath(contents, "MacOS")
+  mkpath(macos)
+  flags = threads === nothing ? String[] : ["-DTHREADS=\"$threads\""]
+  run(`clang -O1 $(joinpath(@__DIR__, "starter.c")) -DIMAGE=\"$program.dylib\" $flags -o $(joinpath(macos, program))
+       -L$(joinpath(contents, "lib")) -ljulia -Wl,-rpath,@executable_path/../lib`)
+  mkpath(joinpath(contents, "bin"))
+  cp(joinpath(Sys.BINDIR, "julia"), joinpath(contents, "bin", "julia"))
+  # Julia's linker, and the 7z that Pkg runs as its own cache is compiled
+  mkpath(joinpath(contents, "libexec"))
+  cp(joinpath(Sys.BINDIR, Base.PRIVATE_LIBEXECDIR), joinpath(contents, "libexec", "julia"))
+  stdlib = joinpath(contents, "share", "julia", "stdlib")
+  mkpath(stdlib)
+  cp(Sys.STDLIB, joinpath(stdlib, basename(Sys.STDLIB)))
+  # The REPL library runs a few of Julia's test helpers as its cache is compiled, and JuliaInterpreter needs the REPL
+  helpers = joinpath("share", "julia", "test", "testhelpers")
+  mkpath(joinpath(contents, dirname(helpers)))
+  cp(normpath(Sys.BINDIR, "..", helpers), joinpath(contents, helpers))
+  nothing
+end
 
 "True when the file at `path` holds compiled code: a program or a library"
 compiled(path) = begin
@@ -320,7 +378,8 @@ self_test(contents, executable) = begin
     cmd = addenv(`sandbox-exec -p $sandbox $executable --self-test --libraries`, "JULIA_DEPOT_PATH" => depot)
     if success(pipeline(ignorestatus(cmd), stdout=output, stderr=errors))
       lines = split(String(take!(output)), '\n', keepempty=false)
-      println(lines[1])
+      # What the test says comes first, then the libraries, each a path
+      foreach(println, Iterators.takewhile(!ispath, lines))
       return Set(realpath(l) for l in lines[2:end] if ispath(l))
     end
     problem = String(take!(errors))
@@ -348,6 +407,8 @@ prune_libraries(contents, loaded) = begin
     endswith(path, ".dylib") || occursin(".dylib.", path) || continue
     realpath(path) in loaded && continue
     occursin("libjulia", basename(path)) && continue
+    # Julia's linker, which the self-test's own process doesn't load, links to these
+    imaged && any(n -> startswith(basename(path), n), ("libLLVM", "libz.", "libzstd.")) && continue
     removed += filesize(path)
     rm(path)
   end
