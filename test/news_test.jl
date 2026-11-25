@@ -238,7 +238,7 @@ end
   @test N.agents() == :asked && Base.invokelatest(Core.eval, m, :(news_agents())) == "asked"
   write(joinpath(news, "Later.md"), "Later news.\n")
   again()
-  @test isempty(K.news_runs(news)) && [b.words for b in K.news_buttons(e, front())] == ["Get the News", "New Page"]
+  @test isempty(K.news_runs(news)) && [b.words for b in K.news_buttons(e, front())] == ["Get the News", "Feeds", "New Page"]
 end
 
 @testset "with Ladder's agents off, another agent writes the articles" begin
@@ -247,7 +247,7 @@ end
   @test N.agents() == :off
   again()
   # There's no Get the News, and nothing starts an agent: not the button, the command, or a page with no news today
-  @test [b.words for b in K.news_buttons(e, front())] == ["New Page"]
+  @test [b.words for b in K.news_buttons(e, front())] == ["Feeds", "New Page"]
   @test !K.works_here(e, Val(:get_the_news))
   K.get_news!(e, news)
   @test isempty(K.news_runs(news))
@@ -270,6 +270,7 @@ end
   @test occursin("their time zone is Australia/Sydney", text) && occursin("5 at most for each page", text)
   @test occursin("It deletes each article 7 days after its date", text)
   @test occursin("It keeps every article", N.instructions(days=0, zone=""))
+  @test occursin("Read `feedback.csv`", text) && occursin("`liked: yes`", text) && occursin("Feeds.md", text)
   @test !occursin("time zone is", N.instructions(zone=""))
   # It follows the settings
   m = K.sandbox(e)
@@ -283,4 +284,248 @@ end
   @test read(path, String) == "Write only about rockets.\n"
 end
 
+@testset "you mark an article that you liked, or didn't, and its reporter learns of it" begin
+  K.open_folder!(e, news)
+  frames()
+  a = first(x for ed in front().editions for x in ed.articles if x.read === nothing)
+  row(path) = (f = relpath(path, news); i = findfirst(m -> m.file == f, N.marks(news)); i === nothing ? nothing : N.marks(news)[i])
+  # Opening a story from the front page writes when you read it, which feedback.csv keeps
+  click(middle(front().stories[a.path]))
+  @test e.buf.path == a.path
+  frames()
+  @test N.article(a.path).read !== nothing && occursin("\nread: ", read(a.path, String))
+  r = row(a.path)
+  @test r !== nothing && r.read && r.liked === nothing && r.title == a.title && r.by == a.by
+  liked, disliked = e.nodes[:news_head].marks
+  @test !liked.on && !disliked.on
+  # Liked it writes the mark in the article, and feedback.csv keeps it
+  click(middle(liked))
+  @test occursin("\nliked: yes\n", read(a.path, String)) && N.article(a.path).liked === true
+  @test liked.on && !disliked.on && row(a.path).liked === true
+  shot("article-marked")
+  # Didn't like it gives the other mark, and a click on a mark that's on takes it off
+  click(middle(disliked))
+  @test occursin("\nliked: no\n", read(a.path, String)) && !occursin("liked: yes", read(a.path, String))
+  click(middle(disliked))
+  @test !occursin("liked:", read(a.path, String)) && row(a.path).liked === nothing && row(a.path).read
+  click(middle(liked))
+  # The front page shows the mark on the story, and each reporter's score at its foot
+  K.open_folder!(e, news)
+  again()
+  s = only(filter(s -> s[1] == a.by, front().scores))
+  @test s[2] == 1 && s[3] == 0 && s[4] >= 1 && s[5] >= s[4]
+  shot("marks")
+  # A mark stays in feedback.csv after its article has gone
+  rm(a.path)
+  again()
+  @test row(a.path) !== nothing && row(a.path).liked === true
+  # An article of an earlier day that you didn't open is in feedback.csv, and one of today isn't yet
+  old = mkpath(joinpath(news, Dates.format(Dates.today() - Day(1), "yyyy-mm-dd")))
+  write(joinpath(old, "A dull story.md"), "---\ntitle: A dull story\nsection: Space\nby: Grok\n---\n\nWords.\n")
+  write(joinpath(today(), "A new story.md"), "---\ntitle: A new story\nsection: Space\nby: Grok\n---\n\nWords.\n")
+  again()
+  @test row(joinpath(old, "A dull story.md")) !== nothing && !row(joinpath(old, "A dull story.md")).read
+  @test row(joinpath(today(), "A new story.md")) === nothing
+  # Ladder's agent is told what you liked of its section, and what you didn't open
+  asked = N.ask(N.Interest(name="Space", words="Rockets."), Dates.now(); liked=filter(m -> m.section == "Space", N.marks(news)))
+  @test occursin("They liked these:\n\n- $(a.title)", asked) && occursin("They didn't open these:", asked) && occursin("- A dull story", asked)
+  # The menu of a story on the front page marks its article, without opening it. A mark with a tick comes off.
+  b = joinpath(today(), "A new story.md")
+  K.news_story_act!(e, b, findfirst(==("Didn't Like It"), K.NEWS_STORY_MENU))
+  @test N.article(b).liked === false && N.article(b).read === nothing && e.buf.path != b
+  K.news_story_act!(e, b, findfirst(==("Didn't Like It"), K.NEWS_STORY_MENU))
+  @test N.article(b).liked === nothing && row(b) === nothing
+  K.news_story_act!(e, b, findfirst(==("Liked It"), K.NEWS_STORY_MENU))
+  again()
+  @test N.article(b).liked === true && row(b).liked === true && !row(b).read
+  # Its Open writes when you read it too
+  K.news_story_act!(e, b, findfirst(==("Open"), K.NEWS_STORY_MENU))
+  @test e.buf.path == b && N.article(b).read !== nothing
+end
+
+@testset "the posts of a feed show as articles by their authors" begin
+  stamp(t) = Dates.format(t, "e, dd u yyyy HH:MM:SS") * " +0000"
+  posted = Dates.now(Dates.UTC) - Dates.Hour(2)
+  rss = """<?xml version="1.0"?><rss version="2.0" xmlns:dc="http://purl.org/dc/elements/1.1/"><channel><title>Sam's Blog</title>
+    <item><title>A telescope sees the first stars</title><link>https://sam.example.com/stars</link><dc:creator>Sam Lee</dc:creator>
+    <pubDate>$(stamp(posted))</pubDate><description>&lt;p&gt;The light left them 13 billion years ago.&lt;/p&gt;</description></item>
+    <item><title>An old post</title><link>https://sam.example.com/old</link><pubDate>$(stamp(posted - Day(30)))</pubDate><description>Old.</description></item>
+    </channel></rss>"""
+  got = String[]
+  K.FEED_GETTER[] = (address, file, about) -> begin
+    push!(got, address)
+    occursin("missing", address) ? write(about, "$address\ntext/html\n404\n") :
+      (write(file, rss); write(about, "$address\napplication/rss+xml\n200\n"))
+    () -> true
+  end
+  write(joinpath(news, "Feeds.md"), "# Feeds\n\n## Space\n\n- https://sam.example.com/feed.xml\n- https://missing.example.com/feed.xml\n")
+  K.open_folder!(e, news)
+  again()
+  frames()
+  @test length(got) == 2
+  v = front()
+  posts = [a for ed in v.editions for a in ed.articles if a.by == "Sam Lee"]
+  @test length(posts) == 1 && posts[1].title == "A telescope sees the first stars" && posts[1].section == "Space"
+  @test posts[1].link == "https://sam.example.com/stars" && occursin("The light left them 13 billion years ago.", posts[1].text)
+  @test any(s -> occursin("missing.example.com", s) && occursin("404", s), values(K.FEEDS_SAID))
+  @test !any(p -> p.name == "Feeds", v.interests)
+  # The feeds come again after an hour, or when you click Get the News, which is there while the folder has feeds
+  again()
+  @test length(got) == 2
+  @test [b.words for b in K.news_buttons(e, front())] == ["Get the News", "Feeds", "New Page"]
+  shot("feeds")
+  # A post that you deleted doesn't come back
+  rm(posts[1].path)
+  K.news_now!(e, news)
+  frames()
+  again()
+  @test length(got) == 4
+  @test !any(a -> a.by == "Sam Lee", (a for ed in front().editions for a in ed.articles))
+end
+
+@testset "the episodes of the shows that you follow in Apple Podcasts are articles by their shows" begin
+  # A library like Apple Podcasts' own, with the columns that Ladder reads
+  lib = joinpath(dir, "MTLibrary.sqlite")
+  ago(h) = round(Int, time() - 3600h) - K.Feeds.Podcasts.APPLE_TIME
+  sql = """
+  create table ZMTPODCAST (Z_PK integer primary key, ZTITLE text, ZSUBSCRIBED integer, ZSTORECOLLECTIONID integer);
+  create table ZMTEPISODE (Z_PK integer primary key, ZUUID text, ZTITLE text, ZPODCAST integer, ZPUBDATE real, ZSTORETRACKID integer, ZWEBPAGEURL text, ZUSERDELETED integer);
+  create table ZMTEPISODEDESCRIPTION (Z_PK integer primary key, ZEPISODE integer, ZTEXT text, ZPLAINTEXT text);
+  insert into ZMTPODCAST values (1, 'Sam Talks', 1, 111), (2, 'A show you left', 0, 222);
+  insert into ZMTEPISODE values (1, 'ep-1', 'Rockets with Kim', 1, $(ago(3)), 999, null, 0), (2, 'ep-2', 'An old one', 1, $(ago(24 * 30)), 0, null, 0),
+                                (3, 'ep-3', 'Not yours', 2, $(ago(2)), 0, null, 0);
+  insert into ZMTEPISODEDESCRIPTION values (1, 1, '<p>Kim on how the <a href="https://example.com/b"> booster</a> lands.</p><p>Second part.</p>', null);
+  """
+  run(`/usr/bin/sqlite3 $lib $sql`)
+  K.Feeds.Podcasts.LIBRARY[] = lib
+  write(joinpath(news, "Feeds.md"), "# Feeds\n\n## Listening\n\n- Apple Podcasts\n")
+  @test [f.url for f in K.Feeds.feeds(news)] == [K.Feeds.PODCASTS] && K.Feeds.feeds(news)[1].section == "Listening"
+  K.open_folder!(e, news)
+  K.news_now!(e, news)
+  ok = (t = time(); while haskey(K.FEEDS_COMING, K.Feeds.PODCASTS) && time() - t < 10; frames(1); sleep(0.05) end; !haskey(K.FEEDS_COMING, K.Feeds.PODCASTS))
+  again()
+  eps = [a for ed in front().editions for a in ed.articles if a.by == "Sam Talks"]
+  @test ok && length(eps) == 1 && eps[1].title == "Rockets with Kim" && eps[1].section == "Listening"
+  @test eps[1].link == "https://podcasts.apple.com/podcast/id111?i=999" && occursin("## Listen\n\n- [Apple Podcasts](https://podcasts.apple.com/podcast/id111?i=999)", read(eps[1].path, String))
+  @test occursin("Kim on how the [booster](https://example.com/b) lands.\n\nSecond part.", eps[1].text) && eps[1].summary == "Kim on how the booster lands. Second part."
+  # A library that Ladder can't read says so on the front page
+  K.Feeds.Podcasts.LIBRARY[] = joinpath(dir, "no library.sqlite")
+  K.news_now!(e, news)
+  ok = (t = time(); while haskey(K.FEEDS_COMING, K.Feeds.PODCASTS) && time() - t < 10; frames(1); sleep(0.05) end; !haskey(K.FEEDS_COMING, K.Feeds.PODCASTS))
+  @test ok && occursin("Apple Podcasts", get(K.FEEDS_SAID, K.Feeds.PODCASTS, ""))
+  K.Feeds.Podcasts.LIBRARY[] = ""
+  delete!(K.FEEDS_SAID, K.Feeds.PODCASTS)
+  rm(joinpath(news, "Feeds.md"))
+end
+
+@testset "a reading companion talks with you about any article of the folder, in a terminal that keeps the talk" begin
+  K.Agent.place[] = mktempdir()
+  started = Any[]
+  K.COMPANION_STARTER[] = v -> push!(started, v)
+  folder = realpath(news)
+  # Opening the front page starts one, in a terminal whose file is in the folder of today's articles
+  opens() = (K.open_folder!(e, news); e.nodes[:news_shown] = 0.0; frames())
+  opens()
+  @test length(started) == 1
+  v = started[1]
+  file = realpath(joinpath(news, K.COMPANION_FILE))
+  script = read(v.command[2], String)
+  @test v.dir == folder && v.path == joinpath(folder, Dates.format(Dates.today(), "yyyy-mm-dd"), "Talk with Grok.vt") && isfile(v.path)
+  @test v in K.terminals(e) && e.nodes[(:term, v.path)] === v
+  @test occursin("ladder wait", script) && occursin(file, script) && occursin("reading companion", script) && occursin("say my question and your answer here too", script)
+  @test !any(p -> startswith(p.name, "."), front().interests)
+  # It doesn't start again while it starts
+  opens()
+  @test length(started) == 1
+  # While it waits, it's the agent of each article of the folder, and of no other page. No dot says that it waits elsewhere.
+  write(joinpath(K.Agent.folder(), "$(getpid()).wait"), file * "\nGrok\n")
+  delete!(e.nodes, :agents)
+  art = first(a for ed in front().editions for a in ed.articles)
+  @test [w.name for w in K.agents(e, art.path)] == ["Grok"]
+  @test isempty(K.agents(e, joinpath(dir, "page.md"))) && isempty(K.elsewhere(e))
+  # So Ask Agent on an article asks it
+  K.news_open!(e, art.path)
+  frames()
+  @test K.sharer(e) == "Grok" && K.asks_whom(e) == "Grok"
+  # One that waits and that Ladder didn't start, as before Ladder last opened, stays
+  delete!(K.NEWS_COMPANIONS, folder)
+  opens()
+  @test length(started) == 1
+  rm(joinpath(K.Agent.folder(), "$(getpid()).wait"))
+  # The `ladder wait` of a companion whose program has ended is stopped, and another starts, with a file of its own
+  stale = run(`sleep 60`, wait=false)
+  write(joinpath(K.Agent.folder(), "$(getpid(stale)).wait"), file * "\nGrok\n")
+  delete!(e.nodes, :agents)
+  K.NEWS_COMPANIONS[folder] = (0.0, v)
+  opens()
+  ok = (t = time(); while process_running(stale) && time() - t < 5; sleep(0.05) end; !process_running(stale))
+  @test ok && length(started) == 2 && basename(started[2].path) == "Talk with Grok 2.vt"
+  # Settings can turn it off
+  K.NEWS_COMPANIONS[folder] = (0.0, v)
+  N.companion!(false)
+  opens()
+  @test length(started) == 2
+  N.companion!(true)
+  # A day's talk goes when all that day's articles have gone
+  old = mkpath(joinpath(news, Dates.format(Dates.today() - Day(9), "yyyy-mm-dd")))
+  write(joinpath(old, "Talk with Grok.vt"), "Hello\n")
+  @test joinpath(old, "Talk with Grok.vt") in N.prune!(news; days=7) && !isdir(old)
+  # When Grok asks whether it may work in a folder that's new to it, the front page says where to answer
+  v2 = started[2]
+  K.NEWS_COMPANIONS[folder] = (time(), v2)
+  v2.shell = :running
+  K.Terms.feed!(K.Terms.terminal(v2), Vector{UInt8}("Do you trust the contents of this directory?"))
+  @test occursin("Talk with Grok 2 asks whether it may work in this folder", K.companion_status(news))
+  v2.shell = nothing
+  @test K.companion_status(news) == ""
+  # Its `ladder wait` stops when the window closes its terminal
+  stale = run(`sleep 60`, wait=false)
+  write(joinpath(K.Agent.folder(), "$(getpid(stale)).wait"), file * "\nGrok\n")
+  K.end_companions!(e)
+  ok = (t = time(); while process_running(stale) && time() - t < 5; sleep(0.05) end; !process_running(stale))
+  @test ok && !haskey(K.NEWS_COMPANIONS, folder)
+  # The front page has a tab, and the companion ends when the tab closes, but not while an article of the folder shows
+  opens()
+  v3 = started[end]
+  @test news in K.tabs(e) && K.NEWS_COMPANIONS[folder][2] === v3
+  K.news_open!(e, art.path)
+  frames()
+  @test haskey(K.NEWS_COMPANIONS, folder)
+  stale = run(`sleep 60`, wait=false)
+  write(joinpath(K.Agent.folder(), "$(getpid(stale)).wait"), file * "\nGrok\n")
+  K.close_tab!(e, news)
+  frames()
+  ok = (t = time(); while process_running(stale) && time() - t < 5; sleep(0.05) end; !process_running(stale))
+  @test ok && !haskey(K.NEWS_COMPANIONS, folder) && !(v3 in K.terminals(e)) && !(news in K.tabs(e))
+  K.COMPANION_STARTER[] = nothing
+  K.Agent.place[] = ""
+  foreach(x -> filter!(o -> o !== x, K.terminals(e)), started)
+end
+
 close(w)
+
+@testset "in a wide window, the front page is no wider than NEWS_WIDEST, in the middle" begin
+  e.panel = false
+  wide = Window(e, size=(2400px, 900px))
+  K.open_folder!(e, news)
+  foreach(_ -> Base.invokelatest(frame, wide), 1:4)
+  shown = filter(r -> r !== nothing, [rect(s) for s in values(front().stories)])
+  @test !isempty(shown)
+  left = minimum(K.num(r.left) for r in shown)
+  right = maximum(K.num(r.left + r.width) for r in shown)
+  @test right - left <= K.num(K.NEWS_WIDEST * e.zoom) + 1
+  @test abs((left + right) / 2 - 1200) < 40
+  close(wide)
+  # Many reporters with long names stay in the window, as a paper with feeds and podcasts has them
+  rows = join(("\"$(Dates.today() - Day(1))\",\"A show with a long name, number $i, about history and philosophy 🔓\",\"AI\",\"\",\"no\",\"Title $i\",\"\",\"x/$i.md\"\n" for i in 1:30))
+  write(joinpath(news, "feedback.csv"), join(N.MARK_COLUMNS, ",") * "\n" * rows)
+  narrow = Window(e, size=(900px, 900px))
+  K.open_folder!(e, news)
+  front().read = 0.0
+  foreach(_ -> Base.invokelatest(frame, narrow), 1:4)
+  @test length(front().scores) >= 30
+  shown = filter(r -> r !== nothing, [rect(s) for s in values(front().stories)])
+  @test !isempty(shown) && all(r -> K.num(r.left) >= 0 && K.num(r.left + r.width) <= 900, shown)
+  @test K.news_glyphs("Premium (🔓 for Sam)") == "Premium (for Sam)"
+  close(narrow)
+end

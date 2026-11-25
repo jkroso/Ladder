@@ -1277,7 +1277,35 @@ A folder that shows as **News** is a newspaper that agents write for you. Press 
 
 Once a day, when the folder's front page shows, the agent that [Settings](settings/settings.md#news) chose reads each page, searches the web and writes the day's articles. Click Get the News to ask again now, and Stop to stop the agents. The front page says what each agent is doing, and what went wrong. Each day's articles go in a folder named by the day, like `2026-11-25`.
 
-The front page looks like a newspaper's: the folder's name at the top, then the most important story with its first paragraphs, the next stories beside it, and the rest in columns. The earlier days follow, with their headlines. Click a story to read its article. Ladder deletes each article after a week. Settings can keep the news for longer, or for ever. To keep one article, move it out of its day's folder.
+The front page looks like a newspaper's: the folder's name at the top, then the most important story with its first paragraphs, the next stories beside it, and the rest in columns. The earlier days follow, with their headlines. Click a story to read its article. Ladder deletes each article after a week. Settings can keep the news for longer, or for ever. To keep one article, move it out of its day's folder. In a wide window, the front page stays as wide as a newspaper's, in the middle.
+
+### Your marks, and the reporters
+
+At the top of each article are two buttons: Liked it and Didn't like it. A click writes your mark in the article's front matter, as `liked: yes` or `liked: no`, and a second click takes it off. To mark a story without opening it, right-click it on the front page and choose Liked It or Didn't Like It. The mark that the article has now has a tick. The story on the front page shows your mark with a small hand.
+
+What you open is a kind of feedback too. When you click a story on the front page, Ladder writes `read:` and the time in its article. Ladder keeps what you did with each article in the file `feedback.csv` in the folder, also after the article has gone. It has a row for each article that you opened or marked, and for each article of an earlier day, so it also says what you didn't open. Ladder's agent reads it for its section, and so can an agent of your own.
+
+Each article's `by` is its reporter: an agent, or the author of a feed's post. The foot of the front page shows each reporter with how many of their articles you liked, how many you didn't, and how many you read. So agents compete for your attention, as reporters compete for a newspaper's front page.
+
+### Talk with Grok about the news
+
+When you open a folder of news, Ladder starts Grok behind the page, to talk with about what you read. On any article, select words, right-click and choose Ask Grok…. Its answer shows under the words, and you can ask more there. It's one session for all your reading, so it remembers what you asked before, on any article. Grok reads the article, and searches the web or X when the article doesn't say.
+
+Grok runs in a terminal of Ladder's own. Its file, `Talk with Grok.vt` in the folder of today's articles, keeps the whole talk. Open it to read it, or to type to Grok there. It goes when that day's articles go. The front page has a tab in the sidebar, as a file has, and Grok ends when you close that tab. [Settings](settings/settings.md#news) can turn Grok off.
+
+### Feeds
+
+Click Feeds on the front page to list RSS and Atom feeds. Ladder makes the page `Feeds.md` in the folder, which says what to do. Put each feed's address on a line, under a heading with the name of the section that its posts go in:
+
+```markdown
+## AI
+
+- https://simonwillison.net/atom/everything/
+```
+
+A line that says `Apple Podcasts` puts in the paper each new episode of the shows that you follow in Apple Podcasts. Ladder reads them from the Podcasts app's library on this Mac, so it needs no feed's address. Each episode is an article by its show, made from its show notes, and its link opens it in Apple Podcasts.
+
+Ladder gets each feed every hour while the front page shows, and when you click Get the News. Each new post becomes an article by its author, in the folder of the day that it was posted. A feed with no heading over it gets a section with the feed's name. Ladder remembers each post that it wrote, so a post that you delete doesn't come back. With Ladder's agents off, Get the News is there while the folder has feeds.
 
 ### News from another agent
 
@@ -1304,7 +1332,7 @@ The article's paragraphs.
 - [example.com](https://example.com/rocket)
 ```
 
-The title and the section are what make the file an article, and the section is the name of one of the folder's pages. `AGENTS.md`, `Readme.md` and `CLAUDE.md` aren't kinds of news. The summary shows under the headline. The importance, from 1 to 10, puts the stories in order: the most important is the lead story. Without one, a story has 5. The date is when the agent wrote it, and Ladder deletes the article a week after that. Without a date, the article has noon of its folder's day.
+The title and the section are what make the file an article, and the section is the name of one of the folder's pages. `AGENTS.md`, `Readme.md`, `CLAUDE.md` and `Feeds.md` aren't kinds of news. The summary shows under the headline. The importance, from 1 to 10, puts the stories in order: the most important is the lead story. Without one, a story has 5. The date is when the agent wrote it, and Ladder deletes the article a week after that. Without a date, the article has noon of its folder's day.
 
 You can write the file `.ladder` yourself too. It ends with a block like the one for a desktop, with `Ladder.NotesDirectory`, `Ladder.BlogDirectory`, `Ladder.DownloadsDirectory`, `Ladder.PicturesDirectory`, `Ladder.ScreenshotsDirectory` or `Ladder.NewsDirectory`. Show Folder As leaves a file that you wrote as it is.
 

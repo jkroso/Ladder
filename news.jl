@@ -28,6 +28,15 @@
 #
 #     The article's paragraphs, and then its sources.
 #
+# You mark an article that you liked, or didn't, on its page: Ladder writes
+# `liked: yes` or `liked: no` in its front matter. When you open an article
+# from the front page, Ladder writes `read:` and the time. It keeps what you
+# did with each article in `feedback.csv`, in the folder, after the article
+# has gone, so the agents learn what you like. An article of an earlier day
+# that you didn't open is there too: it didn't interest you enough. Each article's `by` is its reporter: an agent, or the
+# author of a post of a feed (see feeds.jl). The front page shows how many of
+# each reporter's articles you liked, so they compete as reporters do.
+#
 # Ladder deletes an article when it's older than the settings keep news: a
 # week, unless you change it. It deletes nothing else. A file that you put in
 # a day's folder stays, and so does the folder while it holds one. To keep an
@@ -42,6 +51,10 @@
 #     keep_days(), keep_days!(n)    # how many days Ladder keeps an article: 0 is for ever
 #     agents(), agents!(when)       # when Ladder's own agents get the news: :daily, :asked or :off
 #     write_instructions!(folder)   # writes AGENTS.md, which tells another agent what to write
+#     marked(text, liked)           # the article's text with your mark: true, false, or nothing for none
+#     opened(text, at)              # the article's text with the time that you first read it
+#     keep_marks!(folder)           # writes what you did with each of the folder's articles in feedback.csv
+#     marks(folder), scores(folder) # each row that feedback.csv keeps, and how each reporter did
 #
 # Another agent can write the articles, like one that runs on a server: Ladder
 # shows and deletes any article in a day's folder whose front matter has a
@@ -72,6 +85,8 @@ const AGENTS = (:daily, :asked, :off)
   keep::Int = KEEP_DAYS
   agents::Symbol = :daily
   ran::Dict{String,DateTime} = Dict{String,DateTime}()
+  seen::Dict{String,DateTime} = Dict{String,DateTime}()   # the posts of feeds that are in the paper, by their ids, and when Ladder wrote each
+  companion::Bool = true   # Ladder starts a reading companion when you open a folder of news: see main.jl
 end
 
 "What the file of settings held when it was last read or written: when it changed, its path, and what it holds"
@@ -86,27 +101,35 @@ kept() = begin
   k = Kept()
   t > 0 && for line in (try readlines(path) catch; String[] end)
     parts = split(line, '\t')
-    if length(parts) == 3 && parts[1] == "ran"
+    if length(parts) == 3 && parts[1] in ("ran", "seen")
       when = tryparse(DateTime, parts[3])
-      when === nothing || (k.ran[String(parts[2])] = when)
+      when === nothing || ((parts[1] == "ran" ? k.ran : k.seen)[String(parts[2])] = when)
     else
       m = match(r"^(\w+)=(.*)$", line)
       m === nothing && continue
       m[1] == "keep" && (k.keep = max(0, something(tryparse(Int, m[2]), k.keep)))
       m[1] == "agents" && Symbol(m[2]) in AGENTS && (k.agents = Symbol(m[2]))
+      m[1] == "companion" && (k.companion = m[2] != "off")
     end
   end
   READ[] = (t, path, k)
   k
 end
 
-"Write the settings `k` to their file. A page that's gone takes its line with it."
+"How many days Ladder remembers that a post of a feed is in the paper"
+const SEEN_DAYS = 90
+
+"Write the settings `k` to their file. A page that's gone takes its line with it, and so does a post seen more than `SEEN_DAYS` ago."
 keep!(k::Kept) = begin
   path = file()
   filter!(p -> isfile(first(p)), k.ran)
+  oldest = Dates.now() - Day(SEEN_DAYS)
+  filter!(p -> last(p) > oldest, k.seen)
+  stamp(t) = Dates.format(t, "yyyy-mm-ddTHH:MM:SS")
   try
     mkpath(dirname(path))
-    write(path, "keep=$(k.keep)\nagents=$(k.agents)\n" * join("ran\t$p\t$(Dates.format(t, "yyyy-mm-ddTHH:MM:SS"))\n" for (p, t) in sort!(collect(k.ran))))
+    write(path, "keep=$(k.keep)\nagents=$(k.agents)\ncompanion=$(k.companion ? "on" : "off")\n" * join("ran\t$p\t$(stamp(t))\n" for (p, t) in sort!(collect(k.ran))) *
+                join("seen\t$(replace(id, r"\s" => " "))\t$(stamp(t))\n" for (id, t) in sort!(collect(k.seen))))
     READ[] = (mtime(path), path, k)
   catch
     # A file that can't be written only means that the settings last until Ladder quits
@@ -123,9 +146,18 @@ keep_days!(n::Integer) = (k = kept(); k.keep = max(0, Int(n)); keep!(k); nothing
 agents() = kept().agents
 agents!(when::Symbol) = (when in AGENTS || error("Ladder's agents get the news :daily, :asked or :off, not :$when."); k = kept(); k.agents = when; keep!(k); nothing)
 
+"True when Ladder starts an agent to talk with about the news, when you open a folder of news"
+companion() = kept().companion
+companion!(on::Bool) = (k = kept(); k.companion = on; keep!(k); nothing)
+
 "When an agent last got the news of the page at `path`, or nothing when none has"
 last_ran(path::AbstractString) = get(kept().ran, String(path), nothing)
 ran!(path::AbstractString, at::DateTime=Dates.now()) = (k = kept(); k.ran[String(path)] = at; keep!(k); nothing)
+
+"True when Ladder has put the post of a feed with the id `id` in the paper"
+seen(id::AbstractString) = haskey(kept().seen, replace(id, r"\s" => " "))
+"Remember that the posts with the ids `ids` are in the paper"
+saw!(ids, at::DateTime=Dates.now()) = (isempty(ids) && return nothing; k = kept(); foreach(id -> k.seen[replace(id, r"\s" => " ")] = at, ids); keep!(k); nothing)
 
 # --- the pages that say what news you want -------------------------------------------------
 
@@ -139,8 +171,8 @@ const PAGES = (".md", ".markdown")
   words::String = ""   # what the page says, without its front matter
 end
 
-"The names of the pages of a folder of news that aren't kinds of news, in small letters: what the folder is for, and what an agent reads"
-const NOT_NEWS = ("readme", "agents", "claude")
+"The names of the pages of a folder of news that aren't kinds of news, in small letters: what the folder is for, what an agent reads, and the list of feeds"
+const NOT_NEWS = ("readme", "agents", "claude", "feeds")
 
 "True when the file called `name` can be a page that says a kind of news: a page that isn't hidden, and isn't the folder's Readme or an agent's instructions"
 interest_name(name::AbstractString) =
@@ -170,9 +202,15 @@ end
   summary::String = ""
   importance::Int = 5    # from 1 to 10: how much the story matters to you
   when::DateTime = DateTime(2000)   # when it was written, by the Mac's clock
-  by::String = ""        # the agent that wrote it
+  by::String = ""        # its reporter: the agent that wrote it, or the author of the post of a feed
   text::String = ""      # what's under its front matter
+  liked::Union{Bool,Nothing} = nothing   # what you thought of it: true, false, or nothing when you didn't say
+  link::String = ""      # the post of a feed that it is, on the web
+  read::Union{DateTime,Nothing} = nothing   # when you first opened it from the front page, or nothing
 end
+
+"What the word `s` of `liked:` means: true for yes, false for no, or nothing"
+liked_word(s::AbstractString) = (w = lowercase(strip(s)); w in ("yes", "true", "liked") ? true : w in ("no", "false", "disliked") ? false : nothing)
 
 "The articles of one day, the most important first"
 @def struct Edition
@@ -221,7 +259,8 @@ article(path::AbstractString, day::Date=Date(2000)) = begin
       Article(path=String(path), title=title, section=section, summary=get(said, "summary", ""),
               importance=clamp(something(tryparse(Int, get(said, "importance", "")), 5), 1, 10),
               when=something(tryparse(DateTime, get(said, "date", "")), DateTime(day) + Hour(12)),
-              by=get(said, "by", ""), text=String(strip(text)))
+              by=get(said, "by", ""), text=String(strip(text)), liked=liked_word(get(said, "liked", "")), link=get(said, "link", ""),
+              read=tryparse(DateTime, get(said, "read", "")))
   catch
     nothing
   end
@@ -262,8 +301,9 @@ printed(folder::AbstractString, section::AbstractString) =
 
 """
 Delete each article of `folder` that's older than `days` days, and a day's
-folder that it leaves empty. With `days` 0, nothing goes. It gives the paths
-of what went.
+folder that it leaves empty. A talk about the news in a day's folder, a `.vt`
+file, goes once all that day's articles have gone: when the whole day is older.
+With `days` 0, nothing goes. It gives the paths of what went.
 """
 prune!(folder::AbstractString; days::Integer=keep_days(), now::DateTime=Dates.now()) = begin
   gone = String[]
@@ -272,8 +312,12 @@ prune!(folder::AbstractString; days::Integer=keep_days(), now::DateTime=Dates.no
   for (d, dir) in day_folders(folder)
     names = try readdir(dir) catch; continue end
     for n in names
-      (startswith(n, '.') || !(lowercase(splitext(n)[2]) in PAGES)) && continue
       path = joinpath(dir, n)
+      if !startswith(n, '.') && lowercase(splitext(n)[2]) == ".vt" && DateTime(d) + Day(1) < oldest
+        try rm(path); push!(gone, path) catch end
+        continue
+      end
+      (startswith(n, '.') || !(lowercase(splitext(n)[2]) in PAGES)) && continue
       a = article(path, d)
       (a !== nothing && a.when < oldest) || continue
       try
@@ -291,6 +335,151 @@ prune!(folder::AbstractString; days::Integer=keep_days(), now::DateTime=Dates.no
   gone
 end
 
+# --- what you thought of each article ------------------------------------------------------
+
+"""
+The text `text` with the key `key` of its front matter set to `value`, at the
+end of the front matter, or taken out for nothing. Text with no front matter
+stays as it is.
+"""
+with_key(text::AbstractString, key::AbstractString, value::Union{AbstractString,Nothing}) = begin
+  lines = split(text, '\n')
+  (length(lines) >= 2 && rstrip(lines[1]) == "---") || return String(text)
+  stop = findnext(l -> rstrip(l) in ("---", "..."), lines, 2)
+  stop === nothing && return String(text)
+  keys = [l for l in lines[2:stop-1] if !occursin(Regex("^" * key * "\\s*:", "i"), l)]
+  value === nothing || push!(keys, "$key: $value")
+  join([lines[1]; keys; lines[stop:end]], '\n')
+end
+
+"The text of an article, `text`, with your mark: `liked: yes` for true, `liked: no` for false, and no mark for nothing"
+marked(text::AbstractString, liked::Union{Bool,Nothing}) = with_key(text, "liked", liked === nothing ? nothing : liked ? "yes" : "no")
+
+"The text of an article, `text`, that you opened at `at`: it says `read:` and the time, unless it says that already"
+opened(text::AbstractString, at::DateTime=Dates.now()) =
+  haskey(first(matter(text)), "read") ? String(text) : with_key(text, "read", Dates.format(at, "yyyy-mm-ddTHH:MM"))
+
+"The file of a folder of news that keeps each mark that you gave an article, after the article has gone"
+const FEEDBACK = "feedback.csv"
+"The most marks that it keeps: the newest"
+const MOST_MARKS = 1000
+
+"What you did with an article, as `feedback.csv` keeps it"
+@def struct Mark
+  day::Date = Date(2000)     # the day of the article
+  by::String = ""            # its reporter
+  section::String = ""
+  liked::Union{Bool,Nothing} = nothing   # your mark: true, false, or nothing for none
+  read::Bool = false         # you opened it from the front page
+  title::String = ""
+  summary::String = ""
+  file::String = ""          # its file, from the folder of news, like 2026-11-25/A rocket lands.md
+end
+
+"The names of the columns of `feedback.csv`"
+const MARK_COLUMNS = ["day", "by", "section", "liked", "read", "title", "summary", "file"]
+
+"`s` as a cell of a CSV file: in quotes, with a quote in it written twice, on one line"
+csv_cell(s) = "\"" * replace(replace(string(s), r"\s*\n\s*" => " "), "\"" => "\"\"") * "\""
+
+"The rows of the CSV text `s`, each a list of its cells. A cell in quotes can hold a comma, a quote written twice, or a line break."
+csv_rows(s::AbstractString) = begin
+  rows, row, cell = Vector{String}[], String[], IOBuffer()
+  quoted, i, n = false, firstindex(s), lastindex(s)
+  while i <= n
+    c = s[i]
+    if quoted
+      if c == '"'
+        j = nextind(s, i)
+        j <= n && s[j] == '"' ? (print(cell, '"'); i = j) : (quoted = false)
+      else
+        print(cell, c)
+      end
+    elseif c == '"'
+      quoted = true
+    elseif c == ','
+      push!(row, String(take!(cell)))
+    elseif c == '\n'
+      push!(row, String(take!(cell)))
+      all(isempty, row) || push!(rows, row)
+      row = String[]
+    elseif c != '\r'
+      print(cell, c)
+    end
+    i = nextind(s, i)
+  end
+  push!(row, String(take!(cell)))
+  all(isempty, row) || push!(rows, row)
+  rows
+end
+
+"The text of `feedback.csv` with the marks `ms`"
+marks_text(ms) = join(MARK_COLUMNS, ",") * "\n" *
+  join(join(csv_cell.([Dates.format(m.day, "yyyy-mm-dd"), m.by, m.section, m.liked === nothing ? "" : m.liked ? "yes" : "no",
+                       m.read ? "yes" : "no", m.title, m.summary, m.file]), ",") * "\n" for m in ms)
+
+"Each row that `feedback.csv` of the folder of news `folder` keeps, the newest first"
+marks(folder::AbstractString) = begin
+  text = try read(joinpath(folder, FEEDBACK), String) catch; return Mark[] end
+  rows = csv_rows(text)
+  isempty(rows) && return Mark[]
+  col = Dict(lowercase(strip(n)) => i for (i, n) in enumerate(rows[1]))
+  cell(r, name) = (i = get(col, name, 0); 0 < i <= length(r) ? r[i] : "")
+  out = Mark[]
+  for r in rows[2:end]
+    isempty(cell(r, "file")) && isempty(cell(r, "title")) && continue
+    push!(out, Mark(day=something(tryparse(Date, cell(r, "day")), Date(2000)), by=cell(r, "by"), section=cell(r, "section"),
+                    liked=liked_word(cell(r, "liked")), read=liked_word(cell(r, "read")) === true,
+                    title=cell(r, "title"), summary=cell(r, "summary"), file=cell(r, "file")))
+  end
+  out
+end
+
+"""
+Write in `feedback.csv` what you did with each article of the folder of news
+`folder`: each that you marked or opened, and each of a day before `today`,
+which you had the chance to open. The row of an article that has gone stays.
+The row of one that you took your mark off, and didn't open, goes, unless it's
+of an earlier day. It's true when the file changed.
+"""
+keep_marks!(folder::AbstractString; today::Date=Dates.today()) = begin
+  there, now = Set{String}(), Mark[]
+  for ed in editions(folder), a in ed.articles
+    file = relpath(a.path, folder)
+    push!(there, file)
+    a.liked === nothing && a.read === nothing && ed.day >= today && continue
+    push!(now, Mark(day=ed.day, by=a.by, section=a.section, liked=a.liked, read=a.read !== nothing, title=a.title, summary=a.summary, file=file))
+  end
+  was = marks(folder)
+  ms = [now; filter(m -> !(m.file in there), was)]
+  sort!(ms, by=m -> (m.day, m.file), rev=true)
+  length(ms) > MOST_MARKS && resize!(ms, MOST_MARKS)
+  path = joinpath(folder, FEEDBACK)
+  isempty(ms) && !isfile(path) && return false
+  text = marks_text(ms)
+  text == (try read(path, String) catch; "" end) && return false
+  try write(path, text); true catch; false end
+end
+
+"""
+How each reporter did, as (by, liked, not, read, of): how many of their
+articles you liked, how many you didn't, how many you opened, and of how many
+that `feedback.csv` keeps. The best are first: the most liked, less what you
+didn't like, and then the most read.
+"""
+scores(folder::AbstractString) = begin
+  count = Dict{String,Vector{Int}}()
+  for m in marks(folder)
+    isempty(m.by) && continue
+    c = get!(() -> [0, 0, 0, 0], count, m.by)
+    m.liked === true && (c[1] += 1)
+    m.liked === false && (c[2] += 1)
+    m.read && (c[3] += 1)
+    c[4] += 1
+  end
+  sort!([(by, c[1], c[2], c[3], c[4]) for (by, c) in count], by=s -> (s[3] - s[2], -s[4] / max(s[5], 1), s[1]))
+end
+
 # --- what the agent is asked, and what it replies -------------------------------------------
 
 "The line that starts each article in what the agent replies"
@@ -300,12 +489,31 @@ const MARK = "=== ARTICLE ==="
 long_day(d) = Dates.format(d, "E d U yyyy")
 
 """
+What the agent is told of what the reader did with the articles `ms`: those
+that they liked, those that they didn't, those that they opened, and those
+that they didn't open, 10 of each at most
+"""
+liked_words(ms) = begin
+  line(m) = "- " * m.title * (isempty(m.summary) ? "" : ": " * m.summary)
+  some(f) = [m for m in ms if f(m)][1:min(end, 10)]
+  yes, no = some(m -> m.liked === true), some(m -> m.liked === false)
+  read, unread = some(m -> m.read && m.liked === nothing), some(m -> !m.read && m.liked === nothing)
+  all(isempty, (yes, no, read, unread)) && return ""
+  "\nThe reader opens the articles that interest them, and marks those that they liked, and those that they didn't. Other reporters write for this paper too, and the reader's choices say whose articles they like best. Write more of what the reader liked and opened, and less of what they didn't." *
+    (isempty(yes) ? "" : "\n\nThey liked these:\n\n" * join(line.(yes), "\n")) *
+    (isempty(no) ? "" : "\n\nThey didn't like these:\n\n" * join(line.(no), "\n")) *
+    (isempty(read) ? "" : "\n\nThey opened these:\n\n" * join(line.(read), "\n")) *
+    (isempty(unread) ? "" : "\n\nThey didn't open these:\n\n" * join(line.(unread), "\n")) * "\n"
+end
+
+"""
 What the agent is asked for the news of the page `interest`, at the time
 `now`. `printed` are the headlines of its section that the paper has now, which
 it leaves out. The news is new since `since`. `most` is how many articles it
-writes at most.
+writes at most. `liked` is what you did with the articles of its section,
+from `feedback.csv`, so it writes more of what you liked and read.
 """
-ask(interest::Interest, now::DateTime; printed=String[], since::DateTime=now - Day(2), most::Integer=5) = """
+ask(interest::Interest, now::DateTime; printed=String[], since::DateTime=now - Day(2), most::Integer=5, liked=Mark[]) = """
 You're the reporter of a newspaper that has one reader. It's $(long_day(now)), $(Dates.format(now, "HH:MM")) where the reader is.
 
 The reader wants news of this kind. These are their own words:
@@ -315,7 +523,7 @@ $(strip(interest.words))
 >>>
 
 Search the web for news of this kind from $(long_day(since)) until now. Choose the stories that the reader would most want to know about: $most at most, and fewer when there's less news. Leave out a story that isn't new since $(long_day(since)).$(isempty(printed) ? "" : " Leave out these stories, which the paper has printed already, unless something new has happened in them:\n\n" * join(("- " * p for p in printed), "\n"))
-
+$(liked_words(liked))
 Write an article about each story, as a good newspaper writes it. Put the most important facts first. Write 3 to 6 short paragraphs in plain words. Say only what your sources say, and name a source in the text where that matters.
 
 Reply with only the articles, one after another, each in this form:
@@ -473,14 +681,15 @@ This folder is a newspaper. You find the news and write its articles. Ladder, a 
 
 ## What the reader wants
 
-Each Markdown page at the top of this folder says one kind of news that the reader wants, in their own words. `AI.md` is an example. The page's name without `.md` is the name of its section in the paper: `AI`. This file, `Readme.md` and `CLAUDE.md` aren't kinds of news.
+Each Markdown page at the top of this folder says one kind of news that the reader wants, in their own words. `AI.md` is an example. The page's name without `.md` is the name of its section in the paper: `AI`. This file, `Readme.md`, `CLAUDE.md` and `Feeds.md` aren't kinds of news.
 
 ## Each time you run
 
 1. Read each page at the top of this folder.
-2. For each page, search the web for news of that kind since your last run. If you don't know when that was, use the date of the newest article of that section, or else the last 2 days.
-3. Read the headlines of that section's articles in the folders of the days. Leave out a story that's there already, unless something new has happened in it.
-4. Write an article for each new story that the reader would want to know about: $most at most for each page. If there's no news of a kind, write nothing for it.
+2. Read `$FEEDBACK`, if it's there. It says which articles the reader opened, which they liked, and which they didn't.
+3. For each page, search the web for news of that kind since your last run. If you don't know when that was, use the date of the newest article of that section, or else the last 2 days.
+4. Read the headlines of that section's articles in the folders of the days. Leave out a story that's there already, unless something new has happened in it.
+5. Write an article for each new story that the reader would want to know about: $most at most for each page. Write more of what the reader opened and liked, and less of what they didn't. If there's no news of a kind, write nothing for it.
 
 ## Where an article goes
 
@@ -520,9 +729,19 @@ The front matter is between the lines of `---`:
 
 Under the front matter, write 3 to 6 short paragraphs in plain words, with the most important facts first. Say only what your sources say, and name a source in the text where that matters. Put no headings in the story. End with a `## Sources` heading and a link to each web page that you used.
 
+## What the reader thought
+
+The reader marks an article that they liked with `liked: yes` in its front matter, and one that they didn't like with `liked: no`. When the reader opens an article from the front page, Ladder writes `read:` and the time in it.
+
+Ladder keeps what the reader did with each article in `$FEEDBACK` in this folder, also after the article has gone. It has a row for each article that the reader opened or marked, and for each article of an earlier day. Its columns are the article's day, its reporter (`by`), its section, `liked` (yes, no, or nothing), `read` (yes or no), its title, its summary and its file. An article of an earlier day that the reader didn't open didn't interest them enough.
+
+## Other reporters
+
+Other agents write for this paper too. Ladder also puts the posts of the feeds that `Feeds.md` lists in the paper, each by its author. The front page shows how many articles of each reporter the reader liked, and how many they opened. Write your own name in `by`, so that the reader's marks count for you.
+
 ## What Ladder does
 
-Ladder shows each article as soon as you write it. $(days > 0 ? "It deletes each article $(days == 1 ? "a day" : "$days days") after its date" : "It keeps every article"), so don't delete any. Don't change the reader's pages, an article that's there already, or this file.
+Ladder shows each article as soon as you write it. $(days > 0 ? "It deletes each article $(days == 1 ? "a day" : "$days days") after its date" : "It keeps every article"), so don't delete any. Don't change the reader's pages, an article that's there already, `$FEEDBACK`, `Feeds.md` or this file.
 """
 
 """

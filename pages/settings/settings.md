@@ -128,7 +128,13 @@ A folder of news is a newspaper that agents write for you. It has a page for eac
 
 With Once a day, the agent above reads each page the first time that you open the folder each day. It searches the web and writes the articles. With When I ask, it does that only when you click Get the News.
 
-Choose Never when an agent of your own writes the articles, like one that runs on a server. Ladder then has no Get the News button, and starts no agent. It still shows each article that the other agent writes, and deletes it when it's too old. Ladder keeps a file called `AGENTS.md` in each folder of news, which tells the other agent what to write and where. The [Welcome](../welcome.md) page has an example of an article.
+Choose Never when an agent of your own writes the articles, like one that runs on a server. Ladder then starts no agent, and has no Get the News button unless the folder has feeds. It still shows each article that the other agent writes, and deletes it when it's too old. Ladder keeps a file called `AGENTS.md` in each folder of news, which tells the other agent what to write and where. The [Welcome](../welcome.md) page has an example of an article, and says how to add feeds and mark the articles that you like.
+
+```ui
+Checkbox(label="Start Grok to talk with about the news when I open it", checked=news_companion(), onchange=box -> news_companion!(box.checked))
+```
+
+With the box on, Ladder starts Grok in a terminal of its own, behind the page, when you open a folder of news. It's your reading companion: on any article, select words, right-click and choose Ask Grok…, and its answer shows under them. It's one session for all your reading, so it remembers what you talked about. The terminal's file, `Talk with Grok.vt` in the folder of today's articles, keeps the talk: open it to read it, or to talk with Grok there. It goes when that day's articles go. Grok ends when you close the tab of the news, and Ladder starts another the next time that you open it.
 
 To start, press ⌘⇧P and choose Open News. Ladder makes the folder News in your home folder, and shows it.
 

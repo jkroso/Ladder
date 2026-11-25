@@ -424,6 +424,7 @@ end
 @use "./folders" => Folders
 @use "./blog" => Blogs
 @use "./news" => News
+@use "./feeds" => Feeds
 @use "github.com/jkroso/UI.jl/Interface/draw" Bubble
 @use "github.com/jkroso/UI.jl/Interface/draw" popups sync_mouse! popup_at tab!
 @use "github.com/jkroso/UI.jl/Interface/draw" set_tool! window_tool draw_tool draw_tool_under tool_input tool_cursor invalidate_layout!
@@ -1903,7 +1904,7 @@ list that `go_back!` reads.
 close_file!(e) = begin
   delete!(e.nodes, :new_tab)   # a new tab closes too
   next = tab_after_close!(e)
-  next === nothing || return open!(e, next)
+  next === nothing || return show_tab_page!(e, next)
   folder = closes_to(e)
   folder === nothing || return open_folder!(e, folder)
   show_no_file!(e)
@@ -4383,6 +4384,8 @@ sandbox(e) = get!(e.nodes, :sandbox) do
   Core.eval(m, :(const news_days! = $(n -> (News.keep_days!(Int(n)); empty!(NEWS_PRUNED); nothing))))
   Core.eval(m, :(const news_agents = $(() -> (reads!(e, :news); String(News.agents())))))
   Core.eval(m, :(const news_agents! = $(when -> (News.agents!(Symbol(when)); nothing))))
+  Core.eval(m, :(const news_companion = $(() -> (reads!(e, :news); News.companion()))))
+  Core.eval(m, :(const news_companion! = $(on -> (News.companion!(Bool(on)); nothing))))
   # ... and the names that code from the startup page adds
   foreach(f -> f(m, e), values(PAGE_NAMES))
   # The units that a sheet has, from Units.jl, so that code can work with lengths, times and so on: 12m * 2.4m.
@@ -24014,6 +24017,7 @@ end
 "End the shell of every terminal of the window of `e`, and write its file: the window has closed"
 close_terminals!(e) = begin
   haskey(e.nodes, :terminals) || return
+  end_companions!(e)
   foreach(Terms.close!, terminals(e))
   empty!(terminals(e))
   nothing
@@ -32246,12 +32250,13 @@ end
 const TRUE_PATHS = Dict{String,String}()
 truepath(path) = get!(() -> ispath(path) ? realpath(path) : abspath(path), TRUE_PATHS, path)
 
-"The agents that wait for the file at `path`"
+"The agents that wait for the file at `path`. A page of a folder of news has the folder's reading companion too: see `news_companion!`."
 agents(e, path) = begin
   ws = waiters(e)
   (isempty(ws) || isempty(path)) && return ws[1:0]
   at = truepath(path)
-  filter(w -> w.page == at, ws)
+  found = filter(w -> w.page == at, ws)
+  isempty(found) ? filter(w -> companion_for(w, at), ws) : found
 end
 
 "The agents that wait for the page that's showing"
@@ -32262,7 +32267,8 @@ elsewhere(e) = begin
   ws = waiters(e)
   isempty(ws) && return ws
   at = isempty(e.buf.path) ? "" : truepath(e.buf.path)
-  filter(w -> w.page != at, ws)
+  # A reading companion waits for a file that no one opens, and talks about any page of its folder
+  filter(w -> w.page != at && basename(w.page) != COMPANION_FILE, ws)
 end
 
 "Save the page and tell each agent that waits for it what you changed. Nothing happens if no agent waits."
@@ -35968,7 +35974,13 @@ end
 tabs(e) = get!(() -> String[], e.nodes, :tabs)::Vector{String}
 
 "True when the page at `path` can have a tab: a file, a new page that has no file yet, or a page from a web server. A folder can't."
-tabbable(path) = !isempty(path) && (isremote(path) || !isdir(path))
+tabbable(path) = !isempty(path) && (isremote(path) || !isdir(path) || news_tab(path))
+
+"True when the folder at `path` is a folder of news, whose front page you read as a page, so it has a tab: see `news_companion!`"
+news_tab(path) = isdir(path) && (try FS.get(FSPath(path)) isa NewsDirectory catch; false end)
+
+"Show the page of the tab of `path`: its file, or the front page of a folder of news"
+show_tab_page!(e, path) = isdir(path) ? open_folder!(e, path) : open!(e, path)
 
 "Give the file that the window of `e` shows a tab at the bottom of the tabs, unless it has one. A page of the settings gets none."
 add_tab!(e) = begin
@@ -35978,7 +35990,7 @@ add_tab!(e) = begin
 end
 
 "Close the tabs of files that have gone from the Mac and that the window has no page of, as when another app deleted one"
-drop_gone_tabs!(e) = filter!(p -> p == e.buf.path || isremote(p) || showable(e, p), tabs(e))
+drop_gone_tabs!(e) = filter!(p -> p == e.buf.path || isremote(p) || showable(e, p) || news_tab(p), tabs(e))
 
 """
 Take the tab of the file that shows out of the tabs, and give the tab that
@@ -36040,7 +36052,7 @@ tab_rows(e) = new_tab(e) ? [tabs(e); ""] : tabs(e)
 "Show the file of the tab at `path`, and give the text the keyboard. A tab whose file has gone closes."
 choose_tab!(e, path) = begin
   drop_gone_tabs!(e)
-  path in tabs(e) && path != e.buf.path && open!(e, path)
+  path in tabs(e) && path != e.buf.path && show_tab_page!(e, path)
   focus(e)
   nothing
 end
@@ -36080,7 +36092,8 @@ describe(l::TabLabel) = begin
   folder = tab_folder(e, l.path)
   # The × has its middle where the last dot has its middle, so it shows in the dot's place: the row's end has less room while it shows
   Row(width(grow=grow), height(grow=grow), padding(0px, closer ? 8px + 3px - 9px : 8px, 0px, 0px), child_gap=4px, clip=true, name="Tab",
-    mark(l, isempty(l.path) ? "plus-lg" : isempty(web_address(l.path)) ? file_icon(l.path) : "globe"),
+    # A folder with a tab is a folder of news
+    mark(l, isempty(l.path) ? "plus-lg" : !isempty(web_address(l.path)) ? "globe" : isdir(l.path) ? "newspaper" : file_icon(l.path)),
     # The name loses its end, and not the × after it, when it's too long for the sidebar
     Box(width(grow=grow), Alignment.Start, clip_x=true,
       Row(Alignment.Center, child_gap=6px,
@@ -47785,7 +47798,7 @@ and Homebrew's go after the terminal's PATH, for a terminal that hasn't got
 them. The agent's name is there for `ladder wait`, so that the top bar shows
 its logo.
 """
-session_script(k::AgentKind, path, dir) = begin
+session_script(k::AgentKind, path, dir; words=session_words(k, path)) = begin
   found = agent_path(k)
   quoted = Base.shell_escape_posixly
   folders = join(unique([ladder_bins(); dirname(found); "/opt/homebrew/bin"; "/usr/local/bin"]), ':')
@@ -47795,13 +47808,14 @@ session_script(k::AgentKind, path, dir) = begin
   export PATH="\$PATH":$(quoted(folders))
   export LADDER_AGENT=$(quoted(k.name))
   cd $(quoted(dir)) || exit 1
-  exec $(join(quoted.([found; session_words(k, path)]), ' '))
+  exec $(join(quoted.([found; words]), ' '))
   """
 end
 
-"Kero's command, when Kero is open, or nothing"
+"Kero's command, when Kero is open, or nothing. `pgrep` doesn't find Kero's process on macOS 27, and `ps` does."
 kero_command() = begin
-  success(pipeline(`pgrep -xq Kero`, stderr=devnull)) || return nothing
+  open = try occursin("/Kero.app/Contents/MacOS/Kero", read(pipeline(`ps -A -o comm`, stderr=devnull), String)) catch; false end
+  open || return nothing
   found = Sys.which("kero")
   found === nothing || return found
   file = joinpath(homedir(), "Library", "Application Support", "kero", "bin", "kero")
@@ -56761,6 +56775,17 @@ add_command!(show_folder_as!, title="Show a folder as a kind of folder: a deskto
 # more than 15 minutes, and Stop stops them all. The front page says what each
 # agent is doing, and what went wrong.
 #
+# Feeds.md in the folder lists RSS and Atom feeds (see feeds.jl). Ladder gets
+# each every hour while the front page shows, and when you click Get the News,
+# and each new post becomes an article by its author. So with Ladder's agents
+# off, Get the News is there while the folder has feeds.
+#
+# An article's page has two buttons, Liked it and Didn't like it, which write
+# your mark in its front matter. Ladder keeps each mark in feedback.csv, and
+# tells its agents what you liked of their section. Each reporter, an agent or
+# a feed's author, has a score at the foot of the front page: how many of
+# their articles you liked, and how many you didn't.
+#
 # Ladder deletes each article when it's older than Settings keep the news: a
 # week, unless you change it. It looks when it lists the folder, at most once
 # in 10 minutes.
@@ -56902,7 +56927,8 @@ news_start!(r::NewsRun) = begin
   now = Dates.now()
   last = News.last_ran(r.interest.path)
   since = last === nothing || last < now - Day(2) ? now - Day(2) : last
-  words = News.ask(r.interest, now; printed=News.printed(r.folder, r.interest.name), since, most=NEWS_MOST)
+  liked = filter(m -> m.section == r.interest.name, News.marks(r.folder))
+  words = News.ask(r.interest, now; printed=News.printed(r.folder, r.interest.name), since, most=NEWS_MOST, liked)
   News.ran!(r.interest.path, now)
   r.at, r.started = now, time()
   try
@@ -56945,6 +56971,8 @@ start those that wait while fewer than `NEWS_AT_ONCE` work. Each window does
 this in each frame, and while agents work it draws a frame twice a second.
 """
 news_tick!(e) = begin
+  feeds_tick!(e)
+  companions_tick!(e)
   isempty(NEWS_WORKING) && isempty(NEWS_WAITING) && return nothing
   for r in copy(NEWS_WORKING)
     if r.reading === nothing || istaskdone(r.reading)
@@ -56973,6 +57001,271 @@ news_auto!(e, v) = begin
   nothing
 end
 
+# --- the feeds of a folder of news ---
+
+"The feeds on their way from their servers, by their addresses, each with its folder of news. The shows of Apple Podcasts are a task that writes their episodes."
+const FEEDS_COMING = Dict{String,Tuple{String,Feeds.Feed,Any}}()
+"When Ladder last asked for each feed, by its address, as time() says"
+const FEEDS_ASKED = Dict{String,Float64}()
+"What went wrong when Ladder last got each feed, by its address"
+const FEEDS_SAID = Dict{String,String}()
+"How many seconds Ladder waits before it gets a feed again"
+const FEED_EVERY = Ref(3600.0)
+"What gets a feed, for a test: a function of the address, a file and a file for what the server said, as `Remote.curl` is. Nothing means curl."
+const FEED_GETTER = Ref{Any}(nothing)
+
+"Start to get each feed of the folder of news `folder` that Ladder hasn't got for an hour, or each now with `now`"
+get_feeds!(folder::AbstractString; now=false) = begin
+  for f in Feeds.feeds(folder)
+    haskey(FEEDS_COMING, f.url) && continue
+    now || time() - get(FEEDS_ASKED, f.url, -Inf) >= FEED_EVERY[] || continue
+    FEEDS_ASKED[f.url] = time()
+    # Apple Podcasts' library is read by a program, which the window doesn't wait for
+    c = f.url == Feeds.PODCASTS ? (@async Feeds.write_episodes!(String(folder), f)) :
+        FEED_GETTER[] === nothing ? Remote.ask(f.url) : Remote.ask(f.url; getter=FEED_GETTER[])
+    FEEDS_COMING[f.url] = (String(folder), f, c)
+  end
+  nothing
+end
+
+"Write the posts of each feed that has come, as articles. Each window does this in each frame, with the agents."
+feeds_tick!(e) = begin
+  isempty(FEEDS_COMING) && return nothing
+  for (url, (folder, f, c)) in collect(FEEDS_COMING)
+    if c isa Task
+      istaskdone(c) || continue
+      delete!(FEEDS_COMING, url)
+      episodes_landed!(f, c)
+      continue
+    end
+    a = Remote.landed(c)
+    a === nothing && continue
+    delete!(FEEDS_COMING, url)
+    feed_landed!(folder, f, a)
+  end
+  redraw_in!(e, 0.5)
+  nothing
+end
+
+"Write the new posts of the feed `f` of the folder of news `folder`, from what its server answered, `a`, or say what went wrong"
+feed_landed!(folder, f::Feeds.Feed, a) = begin
+  if !(200 <= a.status < 300)
+    FEEDS_SAID[f.url] = a.status == 0 ? "Ladder couldn't get the feed $(f.url)." : "Ladder couldn't get the feed $(f.url): its server answered $(a.status)."
+    return nothing
+  end
+  name, posts = try Feeds.read_feed(String(copy(a.bytes))) catch; ("", Feeds.Post[]) end
+  if isempty(name) && isempty(posts)
+    FEEDS_SAID[f.url] = "$(f.url) isn't an RSS or Atom feed."
+    return nothing
+  end
+  delete!(FEEDS_SAID, f.url)
+  written = try
+    Feeds.write_posts!(folder, f, name, posts)
+  catch err
+    FEEDS_SAID[f.url] = "Ladder couldn't write the posts of $(isempty(name) ? f.url : name): " * trouble(err)
+    String[]
+  end
+  isempty(written) && return nothing
+  NEWS_ENDED[] = time()
+  foreach(list_files!, editors)
+  nothing
+end
+
+"Say what came of the task `c` that wrote the new episodes of Apple Podcasts, of the line `f` of Feeds.md"
+episodes_landed!(f::Feeds.Feed, c::Task) = begin
+  written = try
+    fetch(c)
+  catch err
+    why = err isa TaskFailedException ? err.task.exception : err
+    FEEDS_SAID[f.url] = why isa ErrorException ? why.msg * "." : "Ladder couldn't write the episodes of Apple Podcasts: " * trouble(why)
+    return nothing
+  end
+  delete!(FEEDS_SAID, f.url)
+  isempty(written) && return nothing
+  NEWS_ENDED[] = time()
+  foreach(list_files!, editors)
+  nothing
+end
+
+"Show `Feeds.md` of the folder of news `folder`, which lists its feeds. Ladder makes it, with what it's for, when it isn't there."
+open_feeds!(e, folder::AbstractString) = begin
+  path = joinpath(folder, Feeds.FILE)
+  isfile(path) || (try write(path, Feeds.PAGE) catch; return nothing end)
+  open!(e, path)
+  list_files!(e)
+  nothing
+end
+
+"Get the news of the folder of news `folder` now: its feeds, and the news of each page from Ladder's agent, when Settings let it"
+news_now!(e, folder::AbstractString) = (get_feeds!(folder; now=true); get_news!(e, folder))
+
+# --- a reading companion for a folder of news ---
+#
+# When you open a folder of news, Ladder starts Grok in a terminal of its own,
+# behind the page, to talk with about what you read: your reading companion.
+# The terminal's file is `Talk with Grok.vt` in the folder of today's articles,
+# so it keeps the talk, and it goes when that day's articles go. Open it to
+# read the talk, or to talk with Grok there.
+#
+# The companion waits for the hidden file `.reading.md` in the folder (see
+# agent.jl), and Ladder counts it as the agent of each page of the folder. So
+# on any article, Ask Grok… asks it, and its answer shows under what you
+# marked. It's one session for as long as it runs, so it remembers what you
+# talked about. The folder's front page has a tab, like a file, and the
+# companion ends when that tab closes, or its window.
+#
+# Ladder starts another when you open the front page and the companion doesn't
+# wait, didn't start in the last five minutes, and its program has ended. A
+# window that keeps no settings, as a test's, starts none. Settings can turn
+# the companion off.
+
+"The agent that Ladder starts as a reading companion, when it's installed. Else it's the agent that Settings chose."
+const NEWS_COMPANION = "Grok"
+"The hidden file of a folder of news that its reading companion waits for"
+const COMPANION_FILE = ".reading.md"
+"What `.reading.md` says"
+const COMPANION_TEXT = "Ladder made this file. The agent that you talk with about the news waits for it. Ask it from any article with Ask Agent.\n"
+"The reading companions that Ladder started, by their folders: when, and the terminal that each runs in"
+const NEWS_COMPANIONS = Dict{String,Tuple{Float64,Any}}()
+"How many seconds a companion has to start waiting before Ladder looks at its program"
+const COMPANION_START = Ref(300.0)
+"What starts a companion's terminal, for a test: a function of the terminal. Nothing means `Terms.start!`."
+const COMPANION_STARTER = Ref{Any}(nothing)
+
+"True when the agent that waits, `w`, is the reading companion of a folder of news that holds the file at `at`"
+companion_for(w, at) = basename(w.page) == COMPANION_FILE && startswith(at, dirname(w.page) * "/")
+
+"""
+What the reading companion of the folder of news `folder` is told first.
+`file` is what it waits for.
+"""
+companion_words(folder, file) = """
+You're my reading companion. I read the newspaper in the folder $folder in Ladder, an app that shows it as a newspaper, and I'll ask you about what I'm reading. It's one conversation for as long as I read, so remember what we talk about.
+
+1. Read $(News.INSTRUCTIONS) in that folder to learn how the paper is made, and the titles and summaries of the newest day's articles, in the folder named by the date. $(News.FEEDBACK) says which articles I opened and which I liked. Don't change any file of the paper.
+2. Run `ladder wait $(Base.shell_escape_posixly(file))` in the background. Then say in one sentence that you're ready. Don't run `ladder show`.
+3. When that command ends, it prints what I asked in Ladder, with the page that I'm reading and the words that I marked on it. Read the article. When it doesn't have the answer, search the web, or X. Then answer as the command says: write the answer to the file that it names. Then say my question and your answer here too, so that this conversation keeps them.
+4. Then run the same `ladder wait` command in the background again. Do that each time, until I say that we're done."""
+
+"What goes after the command of the agent `k` to start it as the companion of `folder`: the first words, and leave to run `ladder wait`"
+companion_args(k::AgentKind, folder, file) = begin
+  words = companion_words(folder, file)
+  k.name == "Claude" ? [words, "--allowedTools", "Bash(ladder wait *)"] :
+  # Grok draws on the terminal's second screen, which keeps no past, unless it's minimal: then the talk goes into the past, which the file keeps
+  k.name == "Grok" ? ["--minimal", "--allow", "Bash(ladder wait*)", words] :
+  k.name == "Gemini" ? ["-i", words] : [words]
+end
+
+"""
+Start the reading companion of the folder of news `folder` for the window of
+`e`, unless it waits, has just started, or its program still runs. A `ladder
+wait` of a companion whose program has ended is stopped first, so that no
+question goes to it.
+"""
+news_companion!(e, folder) = begin
+  (News.companion() && (e.remember || COMPANION_STARTER[] !== nothing)) || return nothing
+  folder = truepath(folder)
+  file = companion_file(folder)
+  isfile(file) || (try write(file, COMPANION_TEXT) catch; return nothing end)
+  started = get(NEWS_COMPANIONS, folder, nothing)
+  if started !== nothing
+    time() - started[1] < COMPANION_START[] && return nothing
+    Terms.running(started[2]) && return nothing
+  end
+  if any(w -> w.page == truepath(file), waiters(e))
+    started === nothing && return nothing   # one that Ladder didn't start, as before it last opened, or of another window's
+    stop_waits!(e, file)
+  end
+  k = agent_kind(NEWS_COMPANION)
+  k = try agent_path(k); k catch; agent_kind(e.ai) end
+  try
+    script = joinpath(tempdir(), "ladder-sessions", "news-$(round(Int, time() * 1000)).command")
+    mkpath(dirname(script))
+    write(script, session_script(k, file, folder; words=companion_args(k, folder, truepath(file))))
+    chmod(script, 0o755)
+    # The talk is kept in the folder of today's articles
+    day = joinpath(folder, Dates.format(Dates.today(), "yyyy-mm-dd"))
+    mkpath(day)
+    talk = News.free_path(day, "Talk with $(k.name)", ".vt")
+    touch(talk)
+    v = Terms.TerminalView(path=talk, dir=folder, command=["/bin/zsh", script])
+    term_look!(v, e)
+    w = window_of(e)
+    v.wake = () -> (w === nothing || isempty(w.glfw) || GLFW.PostEmptyEvent(); nothing)
+    e.nodes[(:term, talk)] = v
+    push!(terminals(e), v)
+    something(COMPANION_STARTER[], Terms.start!)(v)
+    NEWS_COMPANIONS[folder] = (time(), v)
+  catch
+  end
+  nothing
+end
+
+"Stop each `ladder wait` of the file `file`, so that no question goes to an agent that has gone"
+stop_waits!(e, file) = begin
+  at = truepath(file)
+  for w in Agent.waiters()
+    w.page == at || continue
+    pid = tryparse(Int, first(split(basename(w.file), '.')))
+    pid === nothing || (try ccall(:kill, Cint, (Cint, Cint), pid, 15) catch end)
+  end
+  delete!(e.nodes, :agents)
+  nothing
+end
+
+"""
+End the reading companion of the folder of news `folder`, which runs in a
+terminal of the window of `e`: its program, and its `ladder wait`. Its talk is
+written to its file.
+"""
+stop_companion!(e, folder) = begin
+  started = pop!(NEWS_COMPANIONS, folder, nothing)
+  started === nothing && return nothing
+  v = started[2]
+  stop_waits!(e, companion_file(folder))
+  Terms.close!(v)
+  filter!(o -> o !== v, terminals(e))
+  get(e.nodes, (:term, v.path), nothing) === v && delete!(e.nodes, (:term, v.path))
+  nothing
+end
+
+"End each reading companion of the window of `e` whose folder's tab has closed. A folder that shows still has its companion."
+companions_tick!(e) = begin
+  isempty(NEWS_COMPANIONS) && return nothing
+  for (folder, (_, v)) in collect(NEWS_COMPANIONS)
+    any(x -> x === v, terminals(e)) || continue
+    (any(p -> truepath(p) == folder, tabs(e)) || (!isempty(e.buf.path) && truepath(e.buf.path) == folder)) && continue
+    stop_companion!(e, folder)
+  end
+  nothing
+end
+
+"The reading companions that run in the terminals of the window of `e` end with it: their `ladder wait` stops too"
+end_companions!(e) = begin
+  for (folder, (_, v)) in collect(NEWS_COMPANIONS)
+    any(x -> x === v, terminals(e)) || continue
+    stop_waits!(e, companion_file(folder))
+    delete!(NEWS_COMPANIONS, folder)
+  end
+  nothing
+end
+
+"""
+What the front page of `folder` says of its reading companion: that it asks
+whether it may work in the folder, as Grok asks of a folder that's new to it.
+The question is in its terminal, which doesn't show.
+"""
+companion_status(folder) = begin
+  started = get(NEWS_COMPANIONS, truepath(folder), nothing)
+  (started === nothing || !Terms.running(started[2]) || started[2].term === nothing) && return ""
+  v = started[2]
+  occursin("trust the contents of this directory", Terms.Screens.words(v.term)) || return ""
+  "$(splitext(basename(v.path))[1]) asks whether it may work in this folder. Open “$(basename(v.path))” in the folder $(basename(dirname(v.path))) to answer it."
+end
+
+"The file that the reading companion of the folder of news `folder` waits for"
+companion_file(folder) = joinpath(folder, COMPANION_FILE)
+
 # --- the front page ---
 
 # A newspaper's look: Georgia, on newsprint, in black ink. The masthead is in Big Caslon. Both come with every Mac.
@@ -56999,6 +57292,8 @@ const NEWS = Palette(bg=colorant"rgb(246,243,236)", ink=colorant"rgb(22,22,22)",
 const NEWS_MEASURE = 38.0
 "How much bigger than the text each level of heading is in an article"
 const NEWS_HEADINGS = (2.0, 1.3, 1.1, 1.0, 1.0, 1.0)
+"The widest a front page gets, before zooming. In a wider window it's in the middle, so it keeps a newspaper's shape."
+const NEWS_WIDEST = 1140px
 
 "True when the window shows a front page of a folder of news, or an article of one, which have a newspaper's look"
 news_look(e) = begin
@@ -57016,6 +57311,8 @@ end
   day::Bool = false                                       # it's the folder of one day's articles
   editions::Vector{News.Edition} = News.Edition[]
   interests::Vector{News.Interest} = News.Interest[]
+  feeds::Vector{Feeds.Feed} = Feeds.Feed[]                # the feeds that Feeds.md lists
+  scores::Vector{Tuple{String,Int,Int,Int,Int}} = Tuple{String,Int,Int,Int,Int}[]   # how each reporter did: see `News.scores`
   read::Float64 = 0.0                                     # when the folder was last read
   stories::Dict{String,Any} = Dict{String,Any}()          # the node of each story, by its article's path
   buttons::Dict{Any,PageButton} = Dict{Any,PageButton}()
@@ -57029,7 +57326,69 @@ end
 
 describe(s::NewsStory) = s.look === nothing ? Box() : s.look(s)
 cursor(::NewsStory) = :hand
-onkey(s::NewsStory, ::KeyPress{Keys.mouse_left}) = (open_folder!(editor(s), s.path); handled)
+onkey(s::NewsStory, ::KeyPress{Keys.mouse_left}) = (news_open!(editor(s), s.path); handled)
+
+"""
+Show the article at `path`, from its story on a front page. The first time,
+Ladder writes `read:` and the time in it, as what you open is a kind of
+feedback too.
+"""
+news_open!(e, path) = begin
+  text = try read(path, String) catch; "" end
+  new = isempty(text) ? text : News.opened(text)
+  if new != text
+    try
+      write(path, new)
+      News.keep_marks!(dirname(dirname(path)))
+      NEWS_ENDED[] = time()
+    catch
+    end
+  end
+  open_folder!(e, path)
+  nothing
+end
+
+"The menu of a story on a front page: Open, and the marks, with a tick on the mark that its article has"
+const NEWS_STORY_MENU = ["Open", "-", "Liked It", "Didn't Like It"]
+
+"""
+A right-click on a story shows its menu, so you can mark its article without
+opening it. A mark with a tick is the article's mark now, and choosing it
+takes the mark off.
+"""
+onkey(s::NewsStory, ev::KeyPress{Keys.mouse_right}) = begin
+  a = News.article(s.path)
+  a === nothing && return handled
+  ticked = a.liked === nothing ? () : [(a.liked ? 3 : 4,)]
+  act(i...) = news_story_act!(editor(s), s.path, last(i))
+  system_menu(ev.window, NEWS_STORY_MENU, act; ticked) || drawn_menu!(ev.window, NEWS_STORY_MENU, act; ticked)
+  handled
+end
+
+"Do what the item `i` of the menu of the story of the article at `path` says"
+news_story_act!(e, path, i) = begin
+  item = get(NEWS_STORY_MENU, i, "")
+  item == "Open" && return news_open!(e, path)
+  item in ("Liked It", "Didn't Like It") || return nothing
+  a = News.article(path)
+  a === nothing && return nothing
+  liked = item == "Liked It"
+  news_mark_file!(path, a.liked === liked ? nothing : liked)
+end
+
+"""
+Give the article in the file at `path` your mark, as `news_mark!` does, by
+writing its file. A window that shows the file reads it again.
+"""
+news_mark_file!(path, liked::Union{Bool,Nothing}) = begin
+  text = try read(path, String) catch; return nothing end
+  new = News.marked(text, liked)
+  new == text && return nothing
+  try write(path, new) catch; return nothing end
+  News.keep_marks!(dirname(dirname(path)))
+  NEWS_ENDED[] = time()
+  nothing
+end
 
 "The story of the front page `v` for the article `a`, which looks as `look` says"
 news_story!(v::NewsPage, a::News.Article, look) = begin
@@ -57055,6 +57414,11 @@ news_read!(e, v::NewsPage) = begin
     v.editions = News.editions(v.path)
   end
   v.interests = News.interests(top)
+  v.feeds = Feeds.feeds(top)
+  # Each mark is in feedback.csv, and the feeds come every hour
+  News.keep_marks!(top)
+  v.scores = News.scores(top)
+  v.day || get_feeds!(top)
   nothing
 end
 
@@ -57071,14 +57435,25 @@ their lines are, by the size of the type: a headline's are close, as a
 newspaper's are, and a paragraph's further apart.
 """
 news_text(s, size; color=colours.ink, style="", family=NEWS_TYPE, align=TextAlign.Left, lead=1.45) =
-  Box(width(grow=grow), Text(s, size=size, family=family, subfamily=style, color=color, wrap=WrapMode.words, align=align, lineheight=size * lead))
+  Box(width(grow=grow), Text(news_glyphs(s), size=size, family=family, subfamily=style, color=color, wrap=WrapMode.words, align=align, lineheight=size * lead))
 "Words in the newspaper's type on one line"
 news_words(s, size; color=colours.ink, style="", family=NEWS_TYPE) =
-  Box(Text(s, size=size, family=family, subfamily=style, color=color, wrap=WrapMode.none))
+  Box(Text(news_glyphs(s), size=size, family=family, subfamily=style, color=color, wrap=WrapMode.none))
+
+"""
+The words `s` without the emoji and the symbols that the newspaper's type
+hasn't got, which a Text would draw as boxes: a podcast's name can have one,
+like 🔓. A space after one goes too.
+"""
+news_glyphs(s) = replace(s, NO_GLYPHS => "")
+const NO_GLYPHS = Regex("[\U1F000-\U1FAFF\u2600-\u27BF\u2B00-\u2BFF\uFE0F\u200D]+\\s?")
 "A line across the page"
 news_rule(h=1px; color=colours.ink) = Box(width(grow=grow), height(h), background(color))
 "The small capitals over a headline that name its story's section"
 news_kicker(a::News.Article, z) = news_words(uppercase(a.section), 10.5px * z, color=colours.accent, style="Bold", family=NEWS_SANS)
+"The mark that you gave an article: a hand with its thumb up when you liked it, or down when you didn't"
+news_liked(liked::Bool, size) = Icon(liked ? "hand-thumbs-up-fill" : "hand-thumbs-down-fill", size=size, color=liked ? colours.accent : colours.dim)
+
 "Who wrote the article `a`, and when"
 news_byline(a::News.Article, z) =
   news_words(join(filter(!isempty, [isempty(a.by) ? "" : "By $(a.by)", news_clock(a.when)]), "  ·  "), 11px * z, color=colours.dim, family=NEWS_SANS)
@@ -57087,10 +57462,15 @@ news_byline(a::News.Article, z) =
 news_story(v, a::News.Article, size, small, z; opening=0) = news_story!(v, a, s -> begin
   over = ishovered(s)
   paras = opening > 0 ? News.paragraphs(a) : String[]
+  # A headline's box ends at the foot of its capitals, so big type needs more space under it.
+  # The lead story's summary and byline get more space too.
+  under = opening > 0 ? 0.3size : 0.08size
   Column(width(grow=grow), Alignment.Start, child_gap=9px * z, name="Story",
-    news_kicker(a, z),
-    news_text(a.title, size, style="Bold", color=over ? colours.accent : colours.ink, lead=1.12),
-    (small === nothing || isempty(a.summary) ? () : (news_text(a.summary, small, color=colours.dim, lead=1.35),))...,
+    a.liked === nothing ? news_kicker(a, z) : Row(child_gap=6px * z, news_kicker(a, z), news_liked(a.liked, 10.5px * z)),
+    Box(width(grow=grow), padding(0px, 0px, under, 0px),
+      news_text(a.title, size, style="Bold", color=over ? colours.accent : colours.ink, lead=1.12)),
+    (small === nothing || isempty(a.summary) ? () :
+      (Box(width(grow=grow), padding(0px, 0px, opening > 0 ? 6px * z : 0px, 0px), news_text(a.summary, small, color=colours.dim, lead=1.35)),))...,
     (opening > 0 ? (news_byline(a, z),) : ())...,
     (opening > 0 ? (Column(width(grow=grow), Alignment.Start, padding(0px, 6px * z), child_gap=20px * z,
                            (news_text(p, 15.5px * z) for p in paras[1:min(end, opening)])...),) : ())...,
@@ -57128,18 +57508,31 @@ news_status(e, v::NewsPage, z) = begin
     said === nothing && continue
     push!(lines, news_text(said[2], 13px * z, color=said[1] == :problem ? colours.removed : colours.dim, style="Italic"))
   end
+  asks = v.day ? "" : companion_status(v.path)
+  isempty(asks) || push!(lines, news_text(asks, 13px * z, color=colours.removed, style="Italic"))
+  # A feed that went wrong has a line. When more than two did, as when the Mac is offline, one line says so.
+  wrong = [FEEDS_SAID[f.url] for f in v.feeds if !isempty(get(FEEDS_SAID, f.url, ""))]
+  says = length(wrong) <= 2 ? wrong : ["Ladder couldn't get $(length(wrong)) of the feeds. The first: " * lowercasefirst(replace(wrong[1], r"^Ladder couldn't get " => "")), ]
+  foreach(s -> push!(lines, news_text(s, 13px * z, color=colours.removed, style="Italic")), says)
   isempty(lines) && return ()
   (Column(width(grow=grow), Alignment.Start, padding(0px, 8px * z), child_gap=4px * z, lines...),)
 end
 
-"The front page's buttons: Get the News, or Stop while agents work, and New Page. With Ladder's agents off, there's no Get the News."
+"""
+The front page's buttons: Get the News, or Stop while agents work, Feeds and
+New Page. With Ladder's agents off, Get the News is there only while the
+folder has feeds, which it gets.
+"""
 news_buttons(e, v::NewsPage) = begin
   v.day && return ()
   busy = !isempty(news_runs(v.path))
-  page = page_button!(v, :page, _ -> new_page!(e, v.path), icon="pencil-square", words="New Page")
-  busy ? (page_button!(v, :stop, _ -> stop_news!(v.path), icon="stop-circle", words="Stop"), page) :
-  News.agents() == :off ? (page,) :
-    (page_button!(v, :get, _ -> get_news!(e, v.path), icon="arrow-clockwise", words="Get the News", off=all(p -> isempty(p.words), v.interests)), page)
+  rest = (page_button!(v, :feeds, _ -> open_feeds!(e, v.path), icon="rss", words="Feeds"),
+          page_button!(v, :page, _ -> new_page!(e, v.path), icon="pencil-square", words="New Page"))
+  off = News.agents() == :off
+  busy ? (page_button!(v, :stop, _ -> stop_news!(v.path), icon="stop-circle", words="Stop"), rest...) :
+  off && isempty(v.feeds) ? rest :
+    (page_button!(v, :get, _ -> news_now!(e, v.path), icon="arrow-clockwise", words="Get the News",
+                  off=isempty(v.feeds) && all(p -> isempty(p.words), v.interests)), rest...)
 end
 
 "What the front page `v` shows when it has no stories: how to ask for news, or that the agents are getting it"
@@ -57148,8 +57541,8 @@ news_empty(e, v::NewsPage, z) = begin
   off = News.agents() == :off
   says = off ?
     ("No news yet.",
-     "Ladder starts no agent for the news, as Settings say. The articles that your own agent writes show here. " *
-     "Tell it to read $(News.INSTRUCTIONS) in this folder, which says what to write and where.") :
+     "Ladder starts no agent for the news, as Settings say. The articles that your own agent writes show here, and so do the posts of the feeds that Feeds lists. " *
+     "Tell your agent to read $(News.INSTRUCTIONS) in this folder, which says what to write and where.") :
     isempty(v.interests) ?
     ("What news do you want?",
      "Write a page in this folder for each kind of news that you want. Say in your own words what to look for, and what to leave out. " *
@@ -57167,9 +57560,12 @@ describe(v::NewsPage) = begin
   e = editor(v)
   news_read!(e, v)
   news_auto!(e, v)
+  # The front page draws at least every two seconds, so a longer gap means that it has just opened
+  shown, e.nodes[:news_shown] = get(e.nodes, :news_shown, 0.0), time()
+  !v.day && time() - shown > 10 && news_companion!(e, v.path)
   redraw_in!(e, 2)   # the folder is read again, so a new article gets its story
   z = e.zoom
-  wide = num(text_width(e))
+  wide = min(num(text_width(e)), num(NEWS_WIDEST * z))
   n = wide >= 980 ? 3 : wide >= 640 ? 2 : 1
   top = v.day ? dirname(v.path) : v.path
   newest = isempty(v.editions) ? nothing : v.editions[1]
@@ -57190,8 +57586,7 @@ describe(v::NewsPage) = begin
       news_words(uppercase(sections), 10.5px * z, color=colours.dim, style="Bold", family=NEWS_SANS),
       Box(width(grow=grow)), news_words(kept, 12px * z, color=colours.dim, style="Italic")),
     news_rule())
-  newest === nothing && return Column(width(grow=grow), Alignment.Start, padding(0px, 0px, 40px * z, 0px), name="Newspaper",
-                                      head, news_status(e, v, z)..., news_empty(e, v, z))
+  newest === nothing && return news_sheet(z, head, news_status(e, v, z)..., news_empty(e, v, z))
   as = newest.articles
   lead, side, rest = as[1], as[2:min(end, 4)], as[5:end]
   front = if n == 1
@@ -57215,19 +57610,107 @@ describe(v::NewsPage) = begin
       news_rule(2px), news_words(uppercase(news_day_name(ed.day)), 12px * z, style="Bold", family=NEWS_SANS),
       news_spread(v, ed.articles, n, z; size=15.5px, small=nothing)))
   end
-  Column(width(grow=grow), Alignment.Start, padding(0px, 0px, 40px * z, 0px), child_gap=0px, name="Newspaper",
-    head, news_status(e, v, z)..., Box(height(18px * z)), front,
+  news_sheet(z, head, news_status(e, v, z)..., Box(height(18px * z)), front,
     (isempty(rest) ? () : (Box(width(grow=grow), padding(0px, 20px * z), news_rule()), news_spread(v, rest, n, z)))...,
-    earlier...)
+    earlier..., news_reporters(v, z, n)...)
 end
 
 cursor(::NewsPage) = :arrow
 
+"""
+The reporters at the foot of the front page `v`, in `n` columns: each agent or
+author of the articles that `feedback.csv` keeps, with how many you liked, how
+many you didn't, and how many you opened of how many, the best first, down
+each column. A paper whose feedback.csv has nothing has none. A name wraps, as
+a podcast's can be long, so nothing makes the page wider than the window.
+"""
+news_reporters(v::NewsPage, z, n) = begin
+  isempty(v.scores) && return ()
+  small(s) = news_words(s, 12px * z, color=colours.dim, family=NEWS_SANS)
+  score((by, yes, no, read, of)) = Column(width(grow=grow), Alignment.Start, padding(0px, 0px, 12px * z, 0px), child_gap=3px * z,
+    news_text(by, 14px * z, style="Bold", lead=1.2),
+    Row(child_gap=10px * z, Alignment.Center,
+      Row(child_gap=4px * z, Alignment.Center, news_liked(true, 11px * z), small(string(yes))),
+      Row(child_gap=4px * z, Alignment.Center, news_liked(false, 11px * z), small(string(no))),
+      small("read $read of $of")))
+  tall = cld(length(v.scores), n)
+  cols = [Any[score(s) for s in v.scores[(k - 1) * tall + 1:min(k * tall, end)]] for k in 1:n]
+  (Column(width(grow=grow), Alignment.Start, padding(30px * z, 0px, 0px, 0px), child_gap=10px * z, name="Reporters",
+     news_rule(2px), news_words("THE REPORTERS, BY WHAT YOU READ AND LIKED", 12px * z, style="Bold", family=NEWS_SANS),
+     news_columns(cols, z; of=n)),)
+end
+
+"A front page with `parts`, from the top, no wider than `NEWS_WIDEST`, in the middle of the window"
+news_sheet(z, parts...) =
+  Column(width(grow=grow), Alignment.Center, child_gap=0px,
+    Column(width(grow=grow, max=NEWS_WIDEST * z), Alignment.Start, padding(0px, 0px, 40px * z, 0px), child_gap=0px, name="Newspaper", parts...))
+
 # --- an article ---
 
-"The top of an article in a folder of news, in place of the card of its front matter: its section, headline, summary and byline"
+"The top of an article in a folder of news, in place of the card of its front matter: its section, headline, summary and byline, and your mark"
 @def mutable struct NewsHead <: SemanticUI
   said::Dict{String,String} = Dict{String,String}()   # what the front matter sets, by its keys in small letters
+  marks::Vector{Any} = Any[]                          # the buttons Liked it and Didn't like it
+end
+
+"""
+A button at the top of an article that marks it: Liked it, or Didn't like it.
+It shows your mark: its hand is filled while the article has its mark. A click
+gives the article its mark, or takes the mark off when it has it.
+"""
+@def mutable struct NewsMark <: SemanticUI
+  liked::Bool = true    # the mark that it gives: liked, or not liked
+  on::Bool = false      # the article has its mark now
+end
+
+describe(m::NewsMark) = begin
+  z = editor(m).zoom
+  over = ishovered(m)
+  colour = m.on ? colours.accent : over ? colours.ink : colours.dim
+  icon = (m.liked ? "hand-thumbs-up" : "hand-thumbs-down") * (m.on ? "-fill" : "")
+  Row(height(26px * z), padding(10px * z, 0px), radius(13px * z), child_gap=6px * z, Alignment.Center, name="Mark",
+      background(m.on ? RGBA(colours.accent, 0.1) : over ? colours.hover : clear),
+      border(1px, :solid, m.on ? RGBA(colours.accent, 0.45) : colours.line),
+    Icon(icon, size=13px * z, color=colour),
+    Box(Text(m.liked ? "Liked it" : "Didn't like it", size=12px * z, family=NEWS_SANS, subfamily="Medium", color=colour, wrap=WrapMode.none)))
+end
+
+cursor(::NewsMark) = :hand
+onkey(m::NewsMark, ev::KeyPress{Keys.mouse_left}) = (hide_tooltip!(ev.window); news_mark!(editor(m), m.on ? nothing : m.liked); handled)
+onmouse(m::NewsMark, ev::MouseMove) = begin
+  r = rect(m)
+  r === nothing && return handled
+  tip = m.on ? "Click to take your mark off" :
+        m.liked ? "Click to mark that you liked it. Its reporter learns from your marks." : "Click to mark that you didn't like it. Its reporter learns from your marks."
+  show_tooltip!(ev.window, tip_label(tip), r.left, r.top, r.width, r.height, placement=:bottom, gap=6px)
+  handled
+end
+
+"""
+Give the article that the window of `e` shows your mark: `liked: yes` in its
+front matter for true, `liked: no` for false, or no mark for nothing. The
+caret stays where it was. Ladder saves the article, so its reporter and
+feedback.csv have the mark at once.
+"""
+news_mark!(e, liked::Union{Bool,Nothing}) = begin
+  b = e.buf
+  lines = b.lines
+  (length(lines) >= 2 && rstrip(lines[1]) == "---") || return nothing
+  stop = findnext(l -> rstrip(l) in ("---", "..."), lines, 2)
+  stop === nothing && return nothing
+  was = join(lines[1:stop], '\n')
+  new = News.marked(was, liked)
+  new == was && return nothing
+  caret, anchor = b.caret, b.anchor
+  lo, hi = (1, 0), (stop, length(lines[stop]))
+  edit!(b, lo, hi, new)
+  ends = b.caret
+  b.caret, b.anchor = moved(caret, lo, hi, ends), moved(anchor, lo, hi, ends)
+  save!(b)
+  folder = dirname(dirname(b.path))
+  News.keep_marks!(folder)
+  NEWS_ENDED[] = time()
+  nothing
 end
 
 matter_view(e, ::NewsDay, ::FS.File{:md}, rows) = news_head(e, rows)
@@ -57250,10 +57733,22 @@ describe(h::NewsHead) = begin
   section, summary = get(said, "section", ""), get(said, "summary", "")
   Column(width(grow=grow), Alignment.Start, padding(s * 0.4, 0px, s * 1.1, 0px), child_gap=s * 0.6, name="Headline",
     (isempty(section) ? () : (news_words(uppercase(section), 11px * z, color=colours.accent, style="Bold", family=NEWS_SANS),))...,
-    news_text(get(said, "title", ""), 2.1s, style="Bold", lead=1.12),
-    (isempty(summary) ? () : (news_text(summary, 1.2s, color=colours.dim, style="Italic", lead=1.35),))...,
-    (isempty(byline) ? () : (news_words(byline, 11.5px * z, color=colours.dim, family=NEWS_SANS),))...,
+    # A headline's box ends at the foot of its capitals, so its big type needs more space under it
+    Box(width(grow=grow), padding(0px, 0px, 0.3 * 2.1s, 0px), news_text(get(said, "title", ""), 2.1s, style="Bold", lead=1.12)),
+    (isempty(summary) ? () : (Box(width(grow=grow), padding(0px, 0px, 0.25s, 0px), news_text(summary, 1.2s, color=colours.dim, style="Italic", lead=1.35)),))...,
+    news_head_foot(h, byline, News.liked_word(get(said, "liked", "")), z),
     news_rule(color=colours.line))
+end
+
+"The line under an article's summary: its byline, and the buttons that mark it, at the right"
+news_head_foot(h::NewsHead, byline, liked, z) = begin
+  isempty(h.marks) && (h.marks = Any[own!(h, NewsMark(liked=true)), own!(h, NewsMark(liked=false))])
+  for m in h.marks
+    m.on = liked === m.liked
+  end
+  Row(width(grow=grow), Alignment.Center, child_gap=8px * z,
+    (isempty(byline) ? () : (news_words(byline, 11.5px * z, color=colours.dim, family=NEWS_SANS),))...,
+    Box(width(grow=grow)), h.marks...)
 end
 
 onkey(h::NewsHead, ev::KeyPress{Keys.mouse_left}) = click_page!(h, ev)
@@ -57274,9 +57769,9 @@ end
 
 add_command!(open_news!, title="Show your newspaper: the folder News in your home folder, where agents write the news that you ask for")
 "Ask the agents for the news of each page of the folder of news that shows, now, as its button Get the News does"
-get_the_news!(e) = (o = page_object(e); o isa NewsDirectory ? get_news!(e, string(o.path)) : nothing)
-add_command!(get_the_news!, title="Ask the agents for the news of each page of the folder of news that shows, now")
-works_here(e, ::Val{:get_the_news}) = page_object(e) isa NewsDirectory && News.agents() != :off
+get_the_news!(e) = (o = page_object(e); o isa NewsDirectory ? news_now!(e, string(o.path)) : nothing)
+add_command!(get_the_news!, title="Get the news of the folder of news that shows, now: the posts of its feeds, and the news of each page from Ladder's agent")
+works_here(e, ::Val{:get_the_news}) = (o = page_object(e); o isa NewsDirectory && (News.agents() != :off || !isempty(Feeds.feeds(string(o.path)))))
 
 # Show Folder As makes any folder one of news
 NewsDirectory in OWN_KINDS || push!(OWN_KINDS, NewsDirectory)
@@ -57563,7 +58058,7 @@ take_place!() = begin
   (ispath(path) && !(isdir(path) && ispackage(path))) || return nothing
   pair(s) = (m = match(r"^(\d+),(\d+)$", s); m === nothing ? (1, 0) : (parse(Int, m[1]), parse(Int, m[2])))
   (path=path, folder=get(kept, "folder", ""), caret=pair(get(kept, "caret", "")), anchor=pair(get(kept, "anchor", "")),
-   offset=px(something(tryparse(Float64, get(kept, "offset", "")), 0.0)), tabs=filter(isfile, tabbed))
+   offset=px(something(tryparse(Float64, get(kept, "offset", "")), 0.0)), tabs=filter(p -> isfile(p) || news_tab(p), tabbed))
 end
 
 "An editor at the place `p` that `take_place!` gave: its file, or its folder in the page, its tabs, and the folder that its sidebar listed"
