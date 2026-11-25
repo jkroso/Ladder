@@ -1236,11 +1236,12 @@ Ladder knows some folders by itself, and shows each in its own way:
 - **A folder of notes**, which is a folder with an `.obsidian` in it. Under the text of each page, "Linked from" lists the pages that link to it. Click the line over the list to see the folder's own page: the pages that changed last, the names that pages link to and that no page has yet, and the pages that no page links to. Click a name with no page to start that page.
 - **Downloads.** The newest file is first, in the groups of days that the Finder has. A file that a browser saved has the site that it came from after its name.
 - **Pictures.** The pictures show as a grid, the newest first, with the month over each group. The folders in it come first. Type in the field over the grid to leave only the pictures that have what you typed, in their names or in the words that they show, like the text of a screenshot. Your Mac reads the words of each picture the first time that you type there, which takes a part of a second for each picture. When photos say where they were taken, as a phone's photos do, a map over the grid has a dot for each one. Click a dot to go to its photo. The folder that your Mac saves screenshots to, and a folder called Screenshots in Pictures, show their pictures by the day.
+- **News**, the folder News in your home folder: a newspaper that agents write for you. See below.
 - **The Trash.** Your home folder lists it. Each thing has the folder that it was in. Choose one and press ⌘⌫, or right-click it and choose Put Back, to move it back there. Ladder never empties the Trash. The Finder does that.
 
 In Downloads, Pictures and the Trash, click a line or a picture to choose it, and click it twice to show it. Hold ⌘ or ⇧ to choose more. The arrow keys go from one to the next, Return shows what's chosen, and ⌘⌫ moves it to the Trash. Right-click for the menu of the file.
 
-To show another folder in one of these ways, open a file of the folder, press ⌘⇧P and choose Show Folder As. Choose the kind from the list: Desktop, Notes, Blog, Downloads, Pictures or Screenshots. Ladder writes the file `.ladder` in the folder, and the window shows the folder in its new way. Plain takes that file away, and the folder is as the Finder has it again.
+To show another folder in one of these ways, open a file of the folder, press ⌘⇧P and choose Show Folder As. Choose the kind from the list: Desktop, Notes, Blog, Downloads, Pictures, Screenshots or News. Ladder writes the file `.ladder` in the folder, and the window shows the folder in its new way. Plain takes that file away, and the folder is as the Finder has it again.
 
 Other people can write a kind of folder and keep it on GitHub. To use one, type its address in place of a kind from the list, like `github.com/jkroso/Media.lad`, which shows a folder of films as a page of posters. Ladder gets the code from GitHub the first time.
 
@@ -1260,7 +1261,13 @@ GitHub serves the site when the repository's settings say so: under Settings, th
 
 A blog can make its site and send it with a script of its own. Put the script in the blog's folder at `.bin/publish`. Then **Publish** runs that script, and Ladder writes no `docs`. After the script has done its work once, the list says which posts were made or changed since. The posts of such a blog are also its book reviews, the files that end in `.review`, and its pages of Julia code, the files that end in `.dom.jl`.
 
-You can write the file `.ladder` yourself too. It ends with a block like the one for a desktop, with `Ladder.NotesDirectory`, `Ladder.BlogDirectory`, `Ladder.DownloadsDirectory`, `Ladder.PicturesDirectory` or `Ladder.ScreenshotsDirectory`. Show Folder As leaves a file that you wrote as it is.
+A folder that shows as **News** is a newspaper that agents write for you. Press ⌘⇧P and choose Open News to make the folder News in your home folder and show it. In the folder, write a page for each kind of news that you want, like `AI.md`. Say in your own words what to look for, and what to leave out. The page's name is the name of its section in the paper. A page called Readme is for your own notes.
+
+Once a day, when the folder's front page shows, the agent that [Settings](settings/settings.md#news) chose reads each page, searches the web and writes the day's articles. Click Get the News to ask again now, and Stop to stop the agents. The front page says what each agent is doing, and what went wrong. Each day's articles go in a folder named by the day, like `2026-11-25`.
+
+The front page looks like a newspaper's: the folder's name at the top, then the most important story with its first paragraphs, the next stories beside it, and the rest in columns. The earlier days follow, with their headlines. Click a story to read its article. Ladder deletes each article after a week. Settings can keep the news for longer, or for ever. To keep one article, move it out of its day's folder.
+
+You can write the file `.ladder` yourself too. It ends with a block like the one for a desktop, with `Ladder.NotesDirectory`, `Ladder.BlogDirectory`, `Ladder.DownloadsDirectory`, `Ladder.PicturesDirectory`, `Ladder.ScreenshotsDirectory` or `Ladder.NewsDirectory`. Show Folder As leaves a file that you wrote as it is.
 
 A zip file shows what it holds, without being unpacked: its folders and files, each file with its size and when it changed. Click a folder to open it, and click a file to see that one file. Ladder doesn't change a file that it shows from a zip file. Click Unpack to unpack the whole file beside itself, as two clicks in the Finder do.
 

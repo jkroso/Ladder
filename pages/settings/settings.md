@@ -91,6 +91,25 @@ This is the agent that Ladder starts when you ask for a change to a part of the 
 
 When an agent shares the page with you, Ladder asks that agent instead, and the button shows its logo.
 
+## News
+
+```ui
+say(text) = Text(text, size=page_text_size() * 1px)
+days = [1, 3, 7, 14, 30, 0]
+names = ["A day", "3 days", "A week", "2 weeks", "30 days", "For ever"]
+Row(Alignment.Center, child_gap=12px, say("Keep each article for"),
+    Box(width(160px), Dropdown(options=names, selected=something(findfirst(==(news_days()), days), 3),
+                               onchange=dropdown -> news_days!(days[dropdown.selected]))))
+```
+
+```ui
+Checkbox(label="Get the news once a day, when I open a folder of news", checked=news_daily(), onchange=box -> news_daily!(box.checked))
+```
+
+A folder of news is a newspaper that agents write for you. It has a page for each kind of news that you want, in your own words. The agent above reads each page once a day, searches the web and writes the articles. Ladder deletes each article when it's older than the time in the list. Choose For ever to keep every article. With the box off, an agent gets the news only when you click Get the News.
+
+To start, press ⌘⇧P and choose Open News. Ladder makes the folder News in your home folder, and shows it.
+
 ## Caret
 
 ```ui

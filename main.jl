@@ -419,6 +419,7 @@ end
 @use "./macfolders" => Mac
 @use "./folders" => Folders
 @use "./blog" => Blogs
+@use "./news" => News
 @use "github.com/jkroso/UI.jl/Interface/draw" Bubble
 @use "github.com/jkroso/UI.jl/Interface/draw" popups sync_mouse! popup_at tab!
 @use "github.com/jkroso/UI.jl/Interface/draw" set_tool! window_tool draw_tool draw_tool_under tool_input tool_cursor invalidate_layout!
@@ -2078,6 +2079,8 @@ input(e) = e.nodes[:input]::TextInput
 const TEXT_SIZE = 17px   # of the page's text, before it's zoomed
 # A page of a blog has the typeface of the blog's site, in its usual weight. See "the look of a blog's site".
 body(e) = e.look == :site ? Face(SITE_FONT[], "", TEXT_SIZE * e.zoom, colours.ink, false) :
+          # An article in a folder of news has a newspaper's typeface. See "a folder of news".
+          e.look == :news ? Face(NEWS_TYPE, "", TEXT_SIZE * e.zoom, colours.ink, false) :
                             Face(e.font, nearest_weight(e.font, e.weight).style, TEXT_SIZE * e.zoom, colours.ink, false)
 const HEADINGS = (2.1, 1.75, 1.4, 1.2, 1.05, 1.0)
 "How much bigger than the text each level of heading is on a page of a blog, as its site has them"
@@ -2089,6 +2092,7 @@ face(e, line::Line) = begin
   k = line.kind
   # A blog's site has its headings a little lighter than bold
   k == Kind.heading && e.look == :site && return Face(b, style=line.level == 4 ? "SemiBold Italic" : "SemiBold", size=b.size * SITE_HEADINGS[line.level])
+  k == Kind.heading && e.look == :news && return Face(b, style="Bold", size=b.size * NEWS_HEADINGS[line.level])
   k == Kind.heading ? Face(emboldened(b), size=b.size * HEADINGS[line.level]) :
   # A callout's text is the page's own. Its title is bold, in the colour of its kind.
   opens_callout(line) ? Face(emboldened(b), color=callout_colour(line.lang)) :
@@ -4341,6 +4345,12 @@ sandbox(e) = get!(e.nodes, :sandbox) do
   # ... and the files and folders that you ignore: `ignored_files()` gives their paths, and `stop_ignoring!(path)` shows one again
   Core.eval(m, :(const ignored_files = $(() -> (reads!(e, :ignored); sort!(collect(Folders.ignored()), by=lowercase)))))
   Core.eval(m, :(const stop_ignoring! = $(path -> ignore!(e, String(path), false))))
+  # ... and the news: `news_days()` is how many days Ladder keeps an article, 0 for ever, and `news_daily()` is true
+  # when it gets the news of a folder of news once a day, when the folder shows. See "a folder of news".
+  Core.eval(m, :(const news_days = $(() -> (reads!(e, :news); News.keep_days()))))
+  Core.eval(m, :(const news_days! = $(n -> (News.keep_days!(Int(n)); empty!(NEWS_PRUNED); nothing))))
+  Core.eval(m, :(const news_daily = $(() -> (reads!(e, :news); News.auto()))))
+  Core.eval(m, :(const news_daily! = $(on -> (News.auto!(Bool(on)); nothing))))
   # ... and the names that code from the startup page adds
   foreach(f -> f(m, e), values(PAGE_NAMES))
   # The units that a sheet has, from Units.jl, so that code can work with lengths, times and so on: 12m * 2.4m.
@@ -26587,7 +26597,8 @@ text_width(e) = begin
   # the lines of a block that fill the window. A page is no wider than the settings say. A page of a blog is
   # as wide as its site's text, for as many words to a line. A page with comments leaves room for them at its right.
   numbered(e.buf) || alone || json_page(e.buf) || bytes_page(e.buf) || sheet_page(e.buf) || own_page(e) ? max(room, 240px) :
-    clamp(room - comment_room(e), 240px, e.look == :site ? SITE_MEASURE * TEXT_SIZE * e.zoom : e.widest * e.zoom)
+    clamp(room - comment_room(e), 240px, e.look == :site ? SITE_MEASURE * TEXT_SIZE * e.zoom :
+                                         e.look == :news ? NEWS_MEASURE * TEXT_SIZE * e.zoom : e.widest * e.zoom)
 end
 
 """
@@ -43306,7 +43317,7 @@ describe_window(e::Editor) = begin
   # A page of a blog looks as the blog's site does, whatever the theme. Text laid out in the other look is laid out again.
   look = page_look(e)
   look == e.look || (e.look = look; restyle!(e))
-  use!(look == :site ? SITE : getproperty(THEMES, e.theme))
+  use!(look == :site ? SITE : look == :news ? NEWS : getproperty(THEMES, e.theme))
   use_code_font!(e)
   win = window_of(e)
   if win !== nothing && e.applied != look_key(e)
@@ -50672,6 +50683,7 @@ end
 #     folders in it are each a `NotesDirectory`
 #   - the Mac's Downloads folder, its Pictures folder, the folder that it saves
 #     screenshots to and its Trash each have a kind: see "the Mac's own folders"
+#   - ~/News is a folder of news: see "a folder of news"
 #
 # A kind that code gave the folder by its path comes first, and then the kind
 # that the folder's own page gives it. So a page still makes any of these
@@ -50684,6 +50696,7 @@ const PLACE_KINDS = Dict{String,Any}()
 found_kind(path::AbstractString) = begin
   k = get(PLACE_KINDS, path, nothing)
   k === nothing || return k
+  path == news_folder() && return NewsDirectory
   k = mac_kind(path)
   k === nothing || return k
   # Obsidian keeps its settings for a folder of notes in a folder of this name. A folder
@@ -55343,14 +55356,14 @@ end
 # terminal's file in a blog's folder isn't a page of the blog, so it has the
 # theme's colours.
 
-"How the page that's in the window looks: :site for a page of a blog, on the Mac or on a web server, as its site has it, or :own, as the settings say"
-page_look(e) = !term_page(e.buf) && (page_blog_folder(e) !== nothing || web_blog_page(e)) ? :site : :own
+"How the page that's in the window looks: :site for a page of a blog, on the Mac or on a web server, as its site has it, :news for a newspaper's front page or article, or :own, as the settings say"
+page_look(e) = !term_page(e.buf) && (page_blog_folder(e) !== nothing || web_blog_page(e)) ? :site : news_look(e) ? :news : :own
 
 "True when the page that shows is from a web server, in a folder of a blog there: see \"a web folder's own page\""
 web_blog_page(e) = (o = text_object(e); o isa WebPage && o.parent isa WebFolder{<:BlogFolder})
 
 "What the window's colours are called now, for what's kept with them: :site on a page of a blog, or else the theme's name"
-look_key(e) = e.look == :site ? :site : e.theme
+look_key(e) = e.look in (:site, :news) ? e.look : e.theme
 
 # --- a kind for a folder, in one step ---------------------------------------------------
 #
@@ -55448,6 +55461,540 @@ folder_shown!(e, path) = begin
 end
 
 add_command!(show_folder_as!, title="Show a folder as a kind of folder: a desktop, notes, or a kind from GitHub")
+
+# --- a folder of news --------------------------------------------------------------------------
+#
+# A folder of news is a newspaper that agents write for you. It holds a page
+# for each kind of news that you want, like `AI.md`, which says in your own
+# words what to look for and what to leave out. The page's name is the name of
+# the paper's section for its news. news.jl says what else is in the folder:
+# a folder for each day's articles, like `2026-11-25`.
+#
+# The folder shows as the front page of a newspaper: the folder's name as the
+# masthead, the day under it, and then the newest day's articles, the most
+# important first. The first is the lead story, with its first paragraphs. The
+# next few are beside it, and the rest are in columns under it. The earlier
+# days follow, with their headlines. A click on a story shows its article,
+# which has the look of a newspaper's page. A day's folder shows as that day's
+# front page.
+#
+# Once a day, when the front page shows, Ladder starts an agent for each page
+# whose news it hasn't asked for that day: the agent that Settings chose. Get
+# the News asks again now, for every page. Each agent searches the web and
+# replies with articles, which Ladder writes in the folder of the day. Three
+# agents work at once, and the others wait. Ladder stops an agent that takes
+# more than 15 minutes, and Stop stops them all. The front page says what each
+# agent is doing, and what went wrong. Settings can turn the daily news off.
+#
+# Ladder deletes each article when it's older than Settings keep the news: a
+# week, unless you change it. It looks when it lists the folder, at most once
+# in 10 minutes.
+#
+# ~/News is a folder of news when it's there. The command Open News makes it
+# and shows it. Show Folder As makes any other folder one, as News.
+
+"A folder of news: a page for each kind of news that you want, and a folder for each day's articles. See \"a folder of news\"."
+@def struct NewsDirectory <: AbstractDirectory end
+"The folder of one day's articles, in a folder of news, named by the day, like 2026-11-25"
+@def struct NewsDay <: AbstractDirectory end
+const NewsFolder = Union{NewsDirectory,NewsDay}
+
+# A folder in a folder of news holds a day's articles, when its name is a day
+FS.kind(::NewsDirectory, path::FSPath) = News.edition_day(basename(string(path))) === nothing ? folder_kind(path) : NewsDay
+FS.kind(::NewsDay, path::FSPath) = folder_kind(path)
+
+push!(BLOCK_ICONS, "newspaper", "arrow-clockwise", "stop-circle", "pencil-square")
+entry_icon(::NewsDirectory) = "newspaper"
+
+"The folder of news that Open News makes: ~/News. A test names a folder of its own."
+const NEWS_FOLDER = Ref("")
+news_folder() = isempty(NEWS_FOLDER[]) ? joinpath(home_folder(), "News") : NEWS_FOLDER[]
+
+"When the old articles of each folder of news were last deleted, by the folder"
+const NEWS_PRUNED = Dict{String,Float64}()
+
+"Delete the articles of the folder of news `folder` that are older than Settings keep them, at most once in 10 minutes. It gives what went."
+news_prune!(folder::AbstractString) = begin
+  time() - get(NEWS_PRUNED, folder, 0.0) < 600 && return String[]
+  NEWS_PRUNED[folder] = time()
+  News.prune!(folder)
+end
+
+# The sidebar lists the days first, the newest at the top, and then the pages that say what news you want
+entries(e, d::NewsDirectory) = begin
+  news_prune!(string(d.path))
+  found = invoke(entries, Tuple{Any,AbstractDirectory}, e, d)
+  days = sort!(filter(o -> o isa NewsDay, found), by=o -> basename(string(o.path)), rev=true)
+  [days; filter(o -> !(o isa NewsDay), found)]
+end
+
+"A click on a folder of news in the sidebar shows its front page, and the sidebar lists what it holds"
+open!(e, d::NewsFolder; record=true) = (open!(e, string(d.path); record); go_folder!(e, string(d.path)))
+page_view(e, d::NewsFolder) = (path = string(d.path); node!(() -> NewsPage(path=path, day=d isa NewsDay), e, (:news, path)))
+page_fills(e, ::NewsFolder) = true
+
+# --- the agents that get the news ---
+
+"An agent that gets the news of one page of a folder of news"
+@def mutable struct NewsRun
+  folder::String = ""
+  interest::News.Interest = News.Interest()
+  command::Any = nothing      # what starts it, with the words that it's asked going after
+  by::String = ""             # the agent's name
+  at::Dates.DateTime = Dates.DateTime(2000)   # when it was asked, by the Mac's clock
+  started::Float64 = 0.0
+  process::Any = nothing
+  reading::Any = nothing      # the task that reads what it prints
+  step::String = ""           # what it's doing now, as the front page says it
+  late::Bool = false          # Ladder stopped it, as it took too long
+end
+
+"The agents that get news now"
+const NEWS_WORKING = NewsRun[]
+"The agents that wait for their turn to get news"
+const NEWS_WAITING = NewsRun[]
+"What came of the last agent of each page, by the page's file: `:note` and words for no news, or `:problem` and what went wrong"
+const NEWS_SAID = Dict{String,Tuple{Symbol,String}}()
+"When an agent last ended, so a front page reads its folder again"
+const NEWS_ENDED = Ref(0.0)
+"How many agents get news at once"
+const NEWS_AT_ONCE = Ref(3)
+"How many seconds an agent has to get the news before Ladder stops it"
+const NEWS_LONGEST = Ref(15 * 60.0)
+"The most articles that an agent writes for one page"
+const NEWS_MOST = 5
+"The command that gets the news, for a test: it's given the words that the agent would get. Nothing means the agent that Settings chose."
+const NEWS_COMMAND = Ref{Any}(nothing)
+
+"""
+The options of the agent `k` for the news: it searches the web and reads
+pages, and changes no file. Claude Code writes articles with Sonnet, in safe
+mode, so no plugin, MCP server or hook of yours runs, and no session is kept.
+"""
+news_options(k::AgentKind) =
+  k.name == "Claude" ? ["--model", "sonnet", "--output-format", "stream-json", "--verbose", "--safe-mode", "--no-session-persistence",
+                        "--allowedTools", "WebSearch,WebFetch", "-p"] :
+  k.name == "Grok" ? ["--permission-mode", "plan", "--no-memory", "-p"] : k.look
+
+"The command that gets the news for the window of `e`, and the agent's name"
+news_command(e) = begin
+  NEWS_COMMAND[] === nothing || return (NEWS_COMMAND[], agent_kind(e.ai).name)
+  k = agent_kind(e.ai)
+  (kind_command(k, news_options(k)), k.name)
+end
+
+"The agents of the folder of news `folder` that get news now, and then those that wait for their turn"
+news_runs(folder) = NewsRun[r for r in [NEWS_WORKING; NEWS_WAITING] if r.folder == folder]
+
+"""
+Ask for the news of each page of `pages`, of the folder of news `folder`, with
+the agent that Settings chose for `e`. Each waits for its turn. A page that
+says nothing, or whose news is asked for already, isn't asked.
+"""
+get_news!(e, folder::AbstractString, pages=News.interests(folder)) = begin
+  asked = Set(r.interest.path for r in [NEWS_WORKING; NEWS_WAITING])
+  pages = [p for p in pages if !isempty(p.words) && !(p.path in asked)]
+  isempty(pages) && return nothing
+  command, by = try
+    news_command(e)
+  catch err
+    foreach(p -> NEWS_SAID[p.path] = (:problem, trouble(err)), pages)
+    return nothing
+  end
+  for p in pages
+    delete!(NEWS_SAID, p.path)
+    push!(NEWS_WAITING, NewsRun(folder=folder, interest=p, command=command, by=by))
+  end
+  news_tick!(e)
+  nothing
+end
+
+"Stop the agents that get the news of the folder `folder`, and those that wait"
+stop_news!(folder::AbstractString) = begin
+  for r in news_runs(folder)
+    r.process === nothing || (try kill(r.process) catch end)
+    NEWS_SAID[r.interest.path] = (:note, "You stopped it.")
+  end
+  filter!(r -> r.folder != folder, NEWS_WORKING)
+  filter!(r -> r.folder != folder, NEWS_WAITING)
+  nothing
+end
+
+"Start the agent `r`. The news is new since the agent last got the news of its page, or else since two days ago."
+news_start!(r::NewsRun) = begin
+  now = Dates.now()
+  last = News.last_ran(r.interest.path)
+  since = last === nothing || last < now - Day(2) ? now - Day(2) : last
+  words = News.ask(r.interest, now; printed=News.printed(r.folder, r.interest.name), since, most=NEWS_MOST)
+  News.ran!(r.interest.path, now)
+  r.at, r.started = now, time()
+  try
+    r.process, r.reading = start_agent(r.command, words, r.folder, r)
+    push!(NEWS_WORKING, r)
+  catch err
+    NEWS_SAID[r.interest.path] = (:problem, "Ladder couldn't start $(r.by): " * trouble(err))
+  end
+  nothing
+end
+
+"Write the articles that the agent `r` wrote, which has ended, or say why there are none"
+news_done!(r::NewsRun) = begin
+  printed = try fetch(r.reading) catch err; trouble(err) end
+  text = agent_text(printed)
+  found = News.reply_articles(text)
+  page, name = r.interest.path, r.interest.name
+  if !isempty(found)
+    try
+      News.write_articles!(r.folder, name, found, r.at; by=r.by)
+      delete!(NEWS_SAID, page)
+    catch err
+      NEWS_SAID[page] = (:problem, "Ladder couldn't write the articles of $name: " * trouble(err))
+    end
+  elseif News.no_news(text)
+    NEWS_SAID[page] = (:note, "$(r.by) found no news of $name.")
+  else
+    why = strip(first(split(strip(text) * "\n", '\n')))
+    NEWS_SAID[page] = (:problem, r.late ? "$(r.by) took more than $(round(Int, NEWS_LONGEST[] / 60)) minutes on $name, so Ladder stopped it." :
+                                 isempty(why) ? "$(r.by) wrote no articles for $name." : "$(r.by) wrote no articles for $name: " * request_words(why))
+  end
+  NEWS_ENDED[] = time()
+  foreach(list_files!, editors)
+  nothing
+end
+
+"""
+Take in what the agents that ended wrote, stop one that took too long, and
+start those that wait while fewer than `NEWS_AT_ONCE` work. Each window does
+this in each frame, and while agents work it draws a frame twice a second.
+"""
+news_tick!(e) = begin
+  isempty(NEWS_WORKING) && isempty(NEWS_WAITING) && return nothing
+  for r in copy(NEWS_WORKING)
+    if r.reading === nothing || istaskdone(r.reading)
+      filter!(x -> x !== r, NEWS_WORKING)
+      news_done!(r)
+    elseif !r.late && time() - r.started > NEWS_LONGEST[]
+      r.late = true
+      try kill(r.process) catch end
+    end
+  end
+  while length(NEWS_WORKING) < NEWS_AT_ONCE[] && !isempty(NEWS_WAITING)
+    news_start!(popfirst!(NEWS_WAITING))
+  end
+  redraw_in!(e, 0.5)
+  nothing
+end
+
+EACH_FRAME[:news] = news_tick!
+
+"Ask for the news of each page of the folder of `v` that hasn't had its news today, when Settings say to"
+news_auto!(e, v) = begin
+  (News.auto() && !v.day) || return nothing
+  today = Dates.today()
+  due = [p for p in v.interests if (l = News.last_ran(p.path); l === nothing || Dates.Date(l) < today)]
+  isempty(due) || get_news!(e, v.path, due)
+  nothing
+end
+
+# --- the front page ---
+
+# A newspaper's look: Georgia, on newsprint, in black ink. The masthead is in Big Caslon. Both come with every Mac.
+"The typeface of a newspaper's text and headlines"
+const NEWS_TYPE = "Georgia"
+"The typeface of a newspaper's name at the top of its front page"
+const NEWS_MAST = "Big Caslon"
+"The typeface of the small capitals that name a story's section"
+const NEWS_SANS = "Helvetica Neue"
+
+"The colours of a newspaper: black ink on newsprint, and its links in a dark blue. Code keeps the colours of the paper theme."
+const NEWS = Palette(bg=colorant"rgb(246,243,236)", ink=colorant"rgb(22,22,22)", dim=colorant"rgb(88,86,82)",
+                     faint=colorant"rgb(150,146,138)", marker=colorant"rgb(110,106,100)",
+                     line=colorant"rgb(206,201,190)", chip=colorant"rgb(236,232,222)",
+                     chip_line=colorant"rgb(214,208,196)", block=colorant"rgb(240,236,227)",
+                     head=colorant"rgb(236,232,222)", stripe=colorant"rgb(240,237,229)",
+                     accent=colorant"rgb(28,72,122)", select=RGBA(0.11, 0.28, 0.48, 0.2),
+                     panel=colorant"rgb(238,234,225)", hover=colorant"rgb(230,225,214)",
+                     active=colorant"rgb(222,216,203)", float=colorant"rgb(250,248,243)",
+                     shade=RGBA(0.1, 0.1, 0.1, 0.18),
+                     comment=PAPER.comment, string=PAPER.string, number=PAPER.number,
+                     keyword=PAPER.keyword, call=PAPER.call, type=PAPER.type)
+"How many times the size of its text an article is wide: about 11 words to a line, as a wide column of a newspaper has"
+const NEWS_MEASURE = 38.0
+"How much bigger than the text each level of heading is in an article"
+const NEWS_HEADINGS = (2.0, 1.3, 1.1, 1.0, 1.0, 1.0)
+
+"True when the window shows a front page of a folder of news, or an article of one, which have a newspaper's look"
+news_look(e) = begin
+  term_page(e.buf) && return false
+  o = page_object(e)
+  o isa NewsFolder && return true
+  o === nothing || return false
+  o = text_object(e)
+  o isa FSObject && !(o isa AbstractDirectory) && o.parent isa NewsDay
+end
+
+"The front page of a folder of news, or of one day's folder of its articles"
+@def mutable struct NewsPage <: SemanticUI
+  path::String = ""
+  day::Bool = false                                       # it's the folder of one day's articles
+  editions::Vector{News.Edition} = News.Edition[]
+  interests::Vector{News.Interest} = News.Interest[]
+  read::Float64 = 0.0                                     # when the folder was last read
+  stories::Dict{String,Any} = Dict{String,Any}()          # the node of each story, by its article's path
+  buttons::Dict{Any,PageButton} = Dict{Any,PageButton}()
+end
+
+"A story on a front page: its look, which a click on it opens the article of"
+@def mutable struct NewsStory <: SemanticUI
+  path::String = ""
+  look::Any = nothing   # a function of the story that gives what it shows, as it can be under the mouse
+end
+
+describe(s::NewsStory) = s.look === nothing ? Box() : s.look(s)
+cursor(::NewsStory) = :hand
+onkey(s::NewsStory, ::KeyPress{Keys.mouse_left}) = (open_folder!(editor(s), s.path); handled)
+
+"The story of the front page `v` for the article `a`, which looks as `look` says"
+news_story!(v::NewsPage, a::News.Article, look) = begin
+  length(v.stories) > 2000 && empty!(v.stories)
+  s = get!(() -> own!(v, NewsStory(path=a.path)), v.stories, a.path)
+  s.look = look
+  s
+end
+
+"Read the folder of the front page `v` again, two seconds after it was last read, or when an agent has ended. Articles that are too old go first."
+news_read!(e, v::NewsPage) = begin
+  time() - v.read < 2 && v.read > Folders.changed() && v.read > NEWS_ENDED[] && return nothing
+  v.read = time()
+  top = v.day ? dirname(v.path) : v.path
+  isempty(news_prune!(top)) || list_files!(e)
+  if v.day
+    d = News.edition_day(basename(v.path))
+    v.editions = d === nothing ? News.Edition[] : [News.Edition(day=d, path=v.path, articles=News.day_articles(v.path, d))]
+    filter!(ed -> !isempty(ed.articles), v.editions)
+  else
+    v.editions = News.editions(v.path)
+  end
+  v.interests = News.interests(top)
+  nothing
+end
+
+"A day as a newspaper names it: Wednesday 25 November 2026"
+news_day_words(d) = Dates.format(d, "E d U yyyy")
+"The time of `t` as a clock shows it: 7:31 am"
+news_clock(t::Dates.DateTime) = (h = Dates.hour(t); "$(h % 12 == 0 ? 12 : h % 12):$(lpad(Dates.minute(t), 2, '0')) $(h < 12 ? "am" : "pm")")
+"What the day `d` is called over its stories: Today, Yesterday, or its name"
+news_day_name(d) = d == Dates.today() ? "Today" : d == Dates.today() - Day(1) ? "Yesterday" : news_day_words(d)
+
+"""
+Words in the newspaper's type that wrap to their box. `lead` is how far apart
+their lines are, by the size of the type: a headline's are close, as a
+newspaper's are, and a paragraph's further apart.
+"""
+news_text(s, size; color=colours.ink, style="", family=NEWS_TYPE, align=TextAlign.Left, lead=1.45) =
+  Box(width(grow=grow), Text(s, size=size, family=family, subfamily=style, color=color, wrap=WrapMode.words, align=align, lineheight=size * lead))
+"Words in the newspaper's type on one line"
+news_words(s, size; color=colours.ink, style="", family=NEWS_TYPE) =
+  Box(Text(s, size=size, family=family, subfamily=style, color=color, wrap=WrapMode.none))
+"A line across the page"
+news_rule(h=1px; color=colours.ink) = Box(width(grow=grow), height(h), background(color))
+"The small capitals over a headline that name its story's section"
+news_kicker(a::News.Article, z) = news_words(uppercase(a.section), 10.5px * z, color=colours.accent, style="Bold", family=NEWS_SANS)
+"Who wrote the article `a`, and when"
+news_byline(a::News.Article, z) =
+  news_words(join(filter(!isempty, [isempty(a.by) ? "" : "By $(a.by)", news_clock(a.when)]), "  ·  "), 11px * z, color=colours.dim, family=NEWS_SANS)
+
+"A story with its section, its headline in `size`, and its summary in `small`, or no summary when `small` is nothing. With `opening`, its byline and that many of its first paragraphs follow."
+news_story(v, a::News.Article, size, small, z; opening=0) = news_story!(v, a, s -> begin
+  over = ishovered(s)
+  paras = opening > 0 ? News.paragraphs(a) : String[]
+  Column(width(grow=grow), Alignment.Start, child_gap=9px * z, name="Story",
+    news_kicker(a, z),
+    news_text(a.title, size, style="Bold", color=over ? colours.accent : colours.ink, lead=1.12),
+    (small === nothing || isempty(a.summary) ? () : (news_text(a.summary, small, color=colours.dim, lead=1.35),))...,
+    (opening > 0 ? (news_byline(a, z),) : ())...,
+    (opening > 0 ? (Column(width(grow=grow), Alignment.Start, padding(0px, 6px * z), child_gap=20px * z,
+                           (news_text(p, 15.5px * z) for p in paras[1:min(end, opening)])...),) : ())...,
+    (length(paras) > opening > 0 ? (news_words("Continue reading", 13px * z, color=colours.accent, style="Bold", family=NEWS_SANS),) : ())...)
+end)
+
+"Columns with a line between each two, from the left, each as wide as one of `of` would be. A column with nothing in it isn't there."
+news_columns(cols, z; gap=22px, of=length(cols)) =
+  Row(width(grow=grow), Alignment.Start, child_gap=gap * z, border(1px, :solid, colours.line; between=true)[:between],
+      (Column(width(percent=1 / of), Alignment.Start, child_gap=0px, c...) for c in cols if !isempty(c))...)
+
+"The stories `as` in `n` columns, the first in the first column, the second in the next, and so on, with a line between two in a column"
+news_spread(v, as, n, z; size=18px, small=14px) = begin
+  cols = [Any[] for _ in 1:n]
+  for (i, a) in enumerate(as)
+    c = cols[mod1(i, n)]
+    isempty(c) || push!(c, Box(width(grow=grow), padding(0px, 12px * z), news_rule(color=colours.line)))
+    push!(c, news_story(v, a, size * z, small === nothing ? nothing : small * z, z))
+  end
+  news_columns(cols, z; of=n)
+end
+
+"What the front page `v` says over its stories about the agents of its folder: what each does, and what went wrong"
+news_status(e, v::NewsPage, z) = begin
+  lines = Any[]
+  for r in news_runs(v.path)
+    working = any(x -> x === r, NEWS_WORKING)
+    mins = round(Int, (time() - r.started) / 60)
+    words = working ? "$(r.by) is getting the news of $(r.interest.name)" * (isempty(r.step) ? "" : ": " * r.step) * (mins > 0 ? "  ·  $mins min" : "") :
+                      "The news of $(r.interest.name) waits for its turn"
+    push!(lines, news_words(words * "…", 13px * z, color=colours.dim, style="Italic"))
+  end
+  for p in v.interests
+    said = get(NEWS_SAID, p.path, nothing)
+    said === nothing && continue
+    push!(lines, news_text(said[2], 13px * z, color=said[1] == :problem ? colours.removed : colours.dim, style="Italic"))
+  end
+  isempty(lines) && return ()
+  (Column(width(grow=grow), Alignment.Start, padding(0px, 8px * z), child_gap=4px * z, lines...),)
+end
+
+"The front page's buttons: Get the News, or Stop while agents work, and New Page"
+news_buttons(e, v::NewsPage) = begin
+  v.day && return ()
+  busy = !isempty(news_runs(v.path))
+  (busy ? page_button!(v, :stop, _ -> stop_news!(v.path), icon="stop-circle", words="Stop") :
+          page_button!(v, :get, _ -> get_news!(e, v.path), icon="arrow-clockwise", words="Get the News", off=all(p -> isempty(p.words), v.interests)),
+   page_button!(v, :page, _ -> new_page!(e, v.path), icon="pencil-square", words="New Page"))
+end
+
+"What the front page `v` shows when it has no stories: how to ask for news, or that the agents are getting it"
+news_empty(e, v::NewsPage, z) = begin
+  busy = !isempty(news_runs(v.path))
+  says = isempty(v.interests) ?
+    ("What news do you want?",
+     "Write a page in this folder for each kind of news that you want. Say in your own words what to look for, and what to leave out. " *
+     "The page's name is the name of its section: AI.md for news about AI. Once a day, the agent that Settings chose reads each page, " *
+     "searches the web and writes the articles that show here. Click New Page to start one.") :
+    busy ? ("The first edition is on its way.", "An agent is reading the web for each of your pages. Its articles show here when it's done.") :
+    v.day ? ("No articles.", "This day's articles have gone.") :
+            ("No news yet.", "Click Get the News, and an agent reads the web for each of your pages.")
+  Column(width(grow=grow), Alignment.Center, padding(0px, 60px * z), child_gap=14px * z,
+    news_text(says[1], 30px * z, style="Bold", align=TextAlign.Center, lead=1.12),
+    Box(width(max=560px * z, grow=grow), news_text(says[2], 16px * z, color=colours.dim, align=TextAlign.Center)))
+end
+
+describe(v::NewsPage) = begin
+  e = editor(v)
+  news_read!(e, v)
+  news_auto!(e, v)
+  redraw_in!(e, 2)   # the folder is read again, so a new article gets its story
+  z = e.zoom
+  wide = num(text_width(e))
+  n = wide >= 980 ? 3 : wide >= 640 ? 2 : 1
+  top = v.day ? dirname(v.path) : v.path
+  newest = isempty(v.editions) ? nothing : v.editions[1]
+  day = newest === nothing ? (v.day ? something(News.edition_day(basename(v.path)), Dates.today()) : Dates.today()) : newest.day
+  sections = join((p.name for p in v.interests if !isempty(p.words)), "  ·  ")
+  keep = News.keep_days()
+  kept = keep == 0 ? "Kept for ever" : keep == 1 ? "Kept for a day" : keep == 7 ? "Kept for a week" : "Kept for $keep days"
+  head = Column(width(grow=grow), Alignment.Center, child_gap=0px,
+    Row(width(grow=grow), height(30px * z), Alignment.Center, child_gap=8px,
+      news_words(uppercase(news_day_words(day)), 11px * z, style="Bold", family=NEWS_SANS),
+      Box(width(grow=grow)), news_buttons(e, v)...),
+    # The type's box ends at its baseline, so the space under the name is more than over it
+    Box(width(grow=grow), Alignment.Center, padding(4px * z, 0px, 24px * z, 0px),
+      news_words(basename(top), 72px * z, family=NEWS_MAST)),
+    news_rule(3px), Box(height(2px)), news_rule(),
+    Row(width(grow=grow), height(28px * z), Alignment.Center, child_gap=12px,
+      news_words(news_day_name(day), 12px * z, style="Italic"), Box(width(grow=grow)),
+      news_words(uppercase(sections), 10.5px * z, color=colours.dim, style="Bold", family=NEWS_SANS),
+      Box(width(grow=grow)), news_words(kept, 12px * z, color=colours.dim, style="Italic")),
+    news_rule())
+  newest === nothing && return Column(width(grow=grow), Alignment.Start, padding(0px, 0px, 40px * z, 0px), name="Newspaper",
+                                      head, news_status(e, v, z)..., news_empty(e, v, z))
+  as = newest.articles
+  lead, side, rest = as[1], as[2:min(end, 4)], as[5:end]
+  front = if n == 1
+    Column(width(grow=grow), Alignment.Start, child_gap=18px * z,
+      news_story(v, lead, 30px * z, 17px * z, z; opening=2),
+      (Column(width(grow=grow), Alignment.Start, child_gap=0px, news_rule(color=colours.line), Box(height(14px * z)),
+              news_spread(v, as[2:end], 1, z)),)...)
+  else
+    sides = Any[]
+    for (i, a) in enumerate(side)
+      i > 1 && push!(sides, Box(width(grow=grow), padding(0px, 12px * z), news_rule(color=colours.line)))
+      push!(sides, news_story(v, a, 21px * z, 14.5px * z, z))
+    end
+    Row(width(grow=grow), Alignment.Start, child_gap=22px * z, border(1px, :solid, colours.line; between=true)[:between],
+      Column(width(percent=n == 3 ? 0.62 : 0.58), Alignment.Start, news_story(v, lead, 38px * z, 19px * z, z; opening=3)),
+      Column(width(grow=grow), Alignment.Start, child_gap=0px, sides...))
+  end
+  earlier = Any[]
+  for ed in v.editions[2:end]
+    push!(earlier, Column(width(grow=grow), Alignment.Start, padding(30px * z, 0px, 0px, 0px), child_gap=10px * z,
+      news_rule(2px), news_words(uppercase(news_day_name(ed.day)), 12px * z, style="Bold", family=NEWS_SANS),
+      news_spread(v, ed.articles, n, z; size=15.5px, small=nothing)))
+  end
+  Column(width(grow=grow), Alignment.Start, padding(0px, 0px, 40px * z, 0px), child_gap=0px, name="Newspaper",
+    head, news_status(e, v, z)..., Box(height(18px * z)), front,
+    (isempty(rest) ? () : (Box(width(grow=grow), padding(0px, 20px * z), news_rule()), news_spread(v, rest, n, z)))...,
+    earlier...)
+end
+
+cursor(::NewsPage) = :arrow
+
+# --- an article ---
+
+"The top of an article in a folder of news, in place of the card of its front matter: its section, headline, summary and byline"
+@def mutable struct NewsHead <: SemanticUI
+  said::Dict{String,String} = Dict{String,String}()   # what the front matter sets, by its keys in small letters
+end
+
+matter_view(e, ::NewsDay, ::FS.File{:md}, rows) = news_head(e, rows)
+
+"The top of an article, with what its front matter `rows` say"
+news_head(e, rows) = begin
+  h = node!(NewsHead, e, :news_head)
+  h.said = Dict(lowercase(k) => String(strip(v, ['"', '\''])) for (_, k, v) in rows)
+  h
+end
+
+describe(h::NewsHead) = begin
+  e = editor(h)
+  s = body(e).size
+  z = e.zoom
+  said = h.said
+  when = tryparse(Dates.DateTime, get(said, "date", ""))
+  by = get(said, "by", "")
+  byline = join(filter(!isempty, [isempty(by) ? "" : "By $by", when === nothing ? "" : news_day_words(when) * ", " * news_clock(when)]), "  ·  ")
+  section, summary = get(said, "section", ""), get(said, "summary", "")
+  Column(width(grow=grow), Alignment.Start, padding(s * 0.4, 0px, s * 1.1, 0px), child_gap=s * 0.6, name="Headline",
+    (isempty(section) ? () : (news_words(uppercase(section), 11px * z, color=colours.accent, style="Bold", family=NEWS_SANS),))...,
+    news_text(get(said, "title", ""), 2.1s, style="Bold", lead=1.12),
+    (isempty(summary) ? () : (news_text(summary, 1.2s, color=colours.dim, style="Italic", lead=1.35),))...,
+    (isempty(byline) ? () : (news_words(byline, 11.5px * z, color=colours.dim, family=NEWS_SANS),))...,
+    news_rule(color=colours.line))
+end
+
+onkey(h::NewsHead, ev::KeyPress{Keys.mouse_left}) = click_page!(h, ev)
+
+# --- opening the news ---
+
+"""
+Show the folder of news ~/News, and make it first when it isn't there. Its
+front page then says how to ask for news.
+"""
+open_news!(e) = begin
+  path = news_folder()
+  isdir(path) || mkpath(path)
+  open_folder!(e, path)
+  list_files!(e)
+  nothing
+end
+
+add_command!(open_news!, title="Show your newspaper: the folder News in your home folder, where agents write the news that you ask for")
+"Ask the agents for the news of each page of the folder of news that shows, now, as its button Get the News does"
+get_the_news!(e) = (o = page_object(e); o isa NewsDirectory ? get_news!(e, string(o.path)) : nothing)
+add_command!(get_the_news!, title="Ask the agents for the news of each page of the folder of news that shows, now")
+works_here(e, ::Val{:get_the_news}) = page_object(e) isa NewsDirectory
+
+# Show Folder As makes any folder one of news
+NewsDirectory in OWN_KINDS || push!(OWN_KINDS, NewsDirectory)
 
 # --- the startup page ------------------------------------------------------------------
 #
