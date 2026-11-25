@@ -630,7 +630,7 @@ wall.jl
 aspect: 5:2
 ```
 
-The code gets the names that your page's sums give, with their units. This block runs [wall.jl](wall.jl), about 60 lines of code. Its last line is `wall(l, h)`, where `l` is 16m and `h` is 2.4m, from the wall in "Sums in a line of text". The block shows what the last line comes to. Here that's the bytes of a .glb file, so the block shows a 3D model. A node draws itself, and any other value shows as text. The blue post beside the wall is as tall as a person.
+The code gets the names that your page's sums give, with their units. This block runs [wall.jl](wall.jl), about 60 lines of code. It ends by calling `wall(l, h)`, where `l` is 16m and `h` is 2.4m, from the wall in "Sums in a line of text". The block shows what the last line comes to. Here that's the bytes of a .glb file, so the block shows a 3D model. A node draws itself, and any other value shows as text. The blue post beside the wall is as tall as a person.
 
 Ladder runs the code again each time the sums change. So the model follows a number while you drag it, and it stays turned as you left it. It runs again when you save the file, and when you run your page's code with ⌘Return. While you drag, Ladder doesn't make the file's functions again, so Julia doesn't compile them again. A slow file doesn't hold the window up: the block shows what the code came to last until the new value comes.
 

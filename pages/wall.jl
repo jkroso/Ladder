@@ -64,5 +64,6 @@ wall(long, high) = begin
        (0.2, 0.3, 0.5) => box((long / 2 - 0.2, 0, 0.9), (long / 2 + 0.2, 1.75, 1.15))])
 end
 
-# The wall of the page: l and h are its sums
-wall(l, h)
+# The wall of the page: l and h are its sums. While the app is built, this file
+# is loaded with neither, so the call waits for a page.
+ccall(:jl_generating_output, Cint, ()) == 1 || wall(l, h)
