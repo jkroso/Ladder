@@ -66,10 +66,16 @@ The number is the width of the page in pixels, while the text is 17 pixels tall.
 ## Top bar
 
 ```ui
-Checkbox(label="Hide the top bar until I move the mouse to the top of the window", checked=page_hides_bar(), onchange=box -> page_hides_bar!(box.checked))
+say(text) = Text(text, size=page_text_size() * 1px)
+names = bar_hidings()
+Row(Alignment.Center, child_gap=12px, say("Hide the top bar"),
+    Box(width(200px), Dropdown(options=names, selected=something(findfirst(==(page_bar_hides()), names), length(names)),
+                               onchange=dropdown -> page_bar_hides!(names[dropdown.selected]))))
 ```
 
-With this on, the page goes up to the top of the window, as a Mac's windows do when it hides its menu bar. Rest the mouse at the top edge of the window, and the top bar slides down over the page, with the window's close, minimise and zoom buttons. The bar slides back up when you move the mouse off it. It stays while a list or a menu of the bar is open. ⌘F shows the bar too, because the search opens under it.
+These are the choices that a Mac gives for its menu bar. With Always, the top bar hides in every window. With In full screen only, it hides while a window fills the screen, after you click the green button at the top left of the window.
+
+While the bar hides, the page goes up to the top of the window. Rest the mouse at the top edge of the window, and the top bar slides down over the page, with the window's close, minimise and zoom buttons. The bar slides back up when you move the mouse off it. It stays while a list or a menu of the bar is open. ⌘F shows the bar too, because the search opens under it.
 
 ## Spelling
 
@@ -122,7 +128,7 @@ A folder of news is a newspaper that agents write for you. It has a page for eac
 
 With Once a day, the agent above reads each page the first time that you open the folder each day. It searches the web and writes the articles. With When I ask, it does that only when you click Get the News.
 
-Choose Never when an agent of your own writes the articles, like one that runs on a server. Ladder then has no Get the News button, and starts no agent. It still shows each article that the other agent writes, and deletes it when it's too old. The [Welcome](../welcome.md) page shows what an article has to be, under News from another agent.
+Choose Never when an agent of your own writes the articles, like one that runs on a server. Ladder then has no Get the News button, and starts no agent. It still shows each article that the other agent writes, and deletes it when it's too old. Ladder keeps a file called `AGENTS.md` in each folder of news, which tells the other agent what to write and where. The [Welcome](../welcome.md) page has an example of an article.
 
 To start, press ⌘⇧P and choose Open News. Ladder makes the folder News in your home folder, and shows it.
 

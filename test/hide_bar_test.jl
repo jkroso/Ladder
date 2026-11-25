@@ -1,4 +1,4 @@
-# Tests for the top bar that hides: with its setting on, the page goes up to
+# Tests for the top bar that hides: while it hides, the page goes up to
 # the top of the window, and the bar slides down over the page while the mouse
 # rests at the window's top edge. See "a top bar that hides" in main.jl. Run
 # them with `julia -O0 --project=. test/hide_bar_test.jl`. They move the mouse
@@ -39,16 +39,16 @@ put_away!() = (at(ON_PAGE); wait_for(K.BAR_STAYS); settle())
 
 frames()
 
-@testset "The bar keeps its room while the setting is off" begin
-  @test !e.hide_bar
+@testset "The bar keeps its room while the setting is Never" begin
+  @test e.hide_bar == :never
   @test page_top() == K.num(K.TOPBAR_H)
   @test K.num(bar().top) == 0
   at(ON_PAGE); wait_for(K.BAR_STAYS)
   @test shown() == 1   # it never hides
 end
 
-@testset "With the setting on, the page goes up to the top of the window" begin
-  K.hide_bar!(e, true)
+@testset "With Always, the page goes up to the top of the window" begin
+  K.hide_bar!(e, :always)
   frames()
   @test page_top() == 0
   # The bar goes a moment after the mouse leaves it
@@ -125,8 +125,35 @@ end
   e.pinned = false
 end
 
-@testset "Turning the setting off gives the bar its room again" begin
-  K.hide_bar!(e, false)
+@testset "With In full screen only, the bar hides only while the window fills the screen" begin
+  K.hide_bar!(e, :full_screen)
+  frames()
+  @test !e.full_screen   # a window that isn't on the screen keeps what a test sets
+  @test page_top() == K.num(K.TOPBAR_H)
+  @test shown() == 1
+  wait_for(K.BAR_STAYS); settle()
+  @test shown() == 1   # it never hides in a window that doesn't fill the screen
+  e.full_screen = true
+  frames()
+  @test page_top() == 0
+  put_away!()
+  @test shown() == 0
+  at(AT_EDGE); wait_for(K.BAR_WAIT); settle()
+  @test shown() == 1
+  put_away!()
+  # Out of full screen, the bar shows again, with its room
+  e.full_screen = false
+  frames()
+  @test shown() == 1
+  @test page_top() == K.num(K.TOPBAR_H)
+  @test K.num(bar().top) == 0
+end
+
+@testset "Never gives the bar its room again" begin
+  K.hide_bar!(e, :always)
+  frames()
+  @test page_top() == 0
+  K.hide_bar!(e, :never)
   frames()
   @test shown() == 1
   @test page_top() == K.num(K.TOPBAR_H)
@@ -134,9 +161,56 @@ end
 end
 
 @testset "The setting is kept in the settings file" begin
-  write(K.settings_file(), "hidebar=true\n")
-  o = K.load_settings!(K.Editor())
-  @test o.hide_bar
-  write(K.settings_file(), "hidebar=false\n")
-  @test !K.load_settings!(K.Editor()).hide_bar
+  loads(line) = (write(K.settings_file(), line * "\n"); K.load_settings!(K.Editor()).hide_bar)
+  @test loads("hidebar=full_screen") == :full_screen
+  @test loads("hidebar=always") == :always
+  @test loads("hidebar=never") == :never
+  @test loads("hidebar=sometimes") == :never   # a value it doesn't know leaves the bar as it is
+  # It was true or false before it could hide in full screen only
+  @test loads("hidebar=true") == :always
+  @test loads("hidebar=false") == :never
+end
+
+@testset "The settings page names each choice as a Mac does" begin
+  @test [K.hiding_name(how) for how in (:always, :full_screen, :never)] == ["Always", "In full screen only", "Never"]
+  @test K.hiding_named("In full screen only") == :full_screen
+  @test K.hiding_named("Never") == :never
+end
+
+
+"The first node of type `T` in the tree of `node`, as weight_test.jl finds one"
+find(T, node, seen=IdDict()) = begin
+  node isa T && return node
+  (isbits(node) || node isa Union{AbstractString,Symbol,Module,Function,Type} || haskey(seen, node)) && return nothing
+  seen[node] = true
+  if node isa Union{AbstractVector,Tuple,AbstractDict}
+    for x in values(node)
+      (f = find(T, x, seen)) === nothing || return f
+    end
+    return nothing
+  end
+  for name in fieldnames(typeof(node))
+    isdefined(node, name) || continue
+    (f = find(T, getfield(node, name), seen)) === nothing || return f
+  end
+  nothing
+end
+
+@testset "The settings page has a list of the three choices" begin
+  page = K.settings_page()
+  code = String(only(m[1] for m in eachmatch(r"## Top bar\n\n```ui\n(.*?)```"s, read(page, String))))
+  s = K.build_editor(page)
+  sw = Window(s, size=(720px, 2600px))
+  empty!(K.problems)
+  foreach(_ -> frame(sw), 1:3)
+  @test isempty(K.problems)
+  run(code) = include_string(K.sandbox(s), code)
+  Dropdown = run("Dropdown")
+  d = find(Dropdown, K.evaluate(s, code))
+  @test d.options == ["Always", "In full screen only", "Never"] && d.selected == 3
+  run("page_bar_hides!(\"In full screen only\")")
+  @test s.hide_bar == :full_screen
+  @test find(Dropdown, K.evaluate(s, code)).selected == 2
+  foreach(_ -> frame(sw), 1:3)
+  @test isempty(K.problems)
 end

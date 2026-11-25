@@ -1286,7 +1286,7 @@ end
   right::Bool = true                    # a page that has a panel at the right shows it, as a repository's page has git's panel. See `page_side`.
   own::Bool = false                     # you write the message of each commit, and the agent doesn't. See "an agent writes the commit's message".
   pinned::Bool = false                  # a click on the file's name pinned the path in the top bar open. See "the path in the top bar".
-  hide_bar::Bool = false                # the top bar hides until the mouse is at the top of the window. See "a top bar that hides".
+  hide_bar::Symbol = :never             # when the top bar hides until the mouse is at the top of the window: :always, :full_screen or :never. See "a top bar that hides".
   theme::Symbol = :sepia
   look::Symbol = :own                   # :site on a page of a blog, which looks as the blog's site does. See `page_look`.
   applied::Symbol = :none               # the theme the window was last told about
@@ -4291,9 +4291,10 @@ sandbox(e) = get!(e.nodes, :sandbox) do
   # ... and whether the caret moves to a new place in a short time, and doesn't jump there
   Core.eval(m, :(const page_glide = $(() -> (reads!(e, :glide); e.glide))))
   Core.eval(m, :(const page_glide! = $(on -> glide!(e, Bool(on)))))
-  # ... and whether the top bar hides until the mouse is at the top of the window
-  Core.eval(m, :(const page_hides_bar = $(() -> (reads!(e, :hide_bar); e.hide_bar))))
-  Core.eval(m, :(const page_hides_bar! = $(on -> hide_bar!(e, Bool(on)))))
+  # ... and when the top bar hides until the mouse is at the top of the window, by the names that the settings page gives each choice
+  Core.eval(m, :(const bar_hidings = $(() -> collect(last.(BAR_HIDINGS)))))
+  Core.eval(m, :(const page_bar_hides = $(() -> (reads!(e, :hide_bar); hiding_name(e.hide_bar)))))
+  Core.eval(m, :(const page_bar_hides! = $(name -> hide_bar!(e, hiding_named(String(name))))))
   # ... and whether the card of a link to a page shows the start of the page, while ⌘ is held
   Core.eval(m, :(const page_peeks = $(() -> (reads!(e, :peeks); e.peeks))))
   Core.eval(m, :(const page_peeks! = $(on -> peeks!(e, Bool(on)))))
@@ -29906,8 +29907,9 @@ mac_buttons_room(e) = MAC_BUTTONS_W - (MAC_BUTTONS_W - 8px) * cleared(e)
 
 # --- a top bar that hides -------------------------------------------------------------------
 #
-# With its setting on, the top bar hides as macOS can hide its menu bar. The
-# page then runs up to the top edge of the window. Rest the mouse at that edge
+# The top bar can hide as macOS can hide its menu bar: always, or only while
+# the window fills a screen of its own. The page then runs up to the top edge
+# of the window. Rest the mouse at that edge
 # and the bar slides down over the page, with the Mac's close, minimise and
 # zoom buttons. It slides back up a moment after the mouse leaves it, unless a
 # list or a menu of the bar is open. ⌘F and a rename of the file bring it out
@@ -29919,11 +29921,27 @@ const BAR_STAYS = 0.3    # seconds the bar stays after the mouse leaves it
 const BAR_BELOW = 6px    # how far under the bar the mouse can go before the bar hides
 const SIDE_GAP = 8px     # the room over the sidebar's list, and over the panel at the right, while the bar hides
 
-"Hide the top bar until the mouse is at the top of the window, or with `on` false always show it. Each window does the same."
-hide_bar!(e, on::Bool) = (e.hide_bar = on; save_settings!(e); rerun!(e, :hide_bar); e)
+"When the top bar can hide, and the settings page's name for each: always, only while the window fills a screen of its own, or never. macOS gives its menu bar the same choices."
+const BAR_HIDINGS = [:always => "Always", :full_screen => "In full screen only", :never => "Never"]
+
+"The settings page's name for `how` the top bar hides"
+hiding_name(how) = something(get(Dict(BAR_HIDINGS), how, nothing), "Never")
+
+"How the top bar hides, from its name on the settings page"
+hiding_named(name) = (i = findfirst(p -> last(p) == name, BAR_HIDINGS); i === nothing ? :never : first(BAR_HIDINGS[i]))
+
+"""
+Hide the top bar until the mouse is at the top of the window: `:always`,
+`:full_screen` while the window fills a screen of its own, or `:never`. Each
+window does the same.
+"""
+hide_bar!(e, how::Symbol) = (how in first.(BAR_HIDINGS) && (e.hide_bar = how); save_settings!(e); rerun!(e, :hide_bar); e)
+
+"True when the top bar hides now: always, or while the window fills a screen of its own"
+hides_bar(e) = e.hide_bar == :always || (e.hide_bar == :full_screen && e.full_screen)
 
 "How much room the top bar keeps at the top of the window, over the page. A bar that hides keeps none: it shows over the page."
-above_page(e) = e.hide_bar ? 0px : TOPBAR_H
+above_page(e) = hides_bar(e) ? 0px : TOPBAR_H
 
 "When the top bar that hides last started to slide in or out, and how much of it showed then, from 0 to 1"
 bar_slid(e) = get(e.nodes, :bar_slid, (1.0, 0.0))
@@ -29932,9 +29950,9 @@ bar_slid(e) = get(e.nodes, :bar_slid, (1.0, 0.0))
 bar_out(e) = get(e.nodes, :bar_out, true)
 
 "How much of the top bar shows, from 0 to 1. A bar that doesn't hide always shows."
-bar_shown(e) = e.hide_bar ? ((from, at) = bar_slid(e); eased(from, bar_out(e) ? 1.0 : 0.0, at)) : 1.0
+bar_shown(e) = hides_bar(e) ? ((from, at) = bar_slid(e); eased(from, bar_out(e) ? 1.0 : 0.0, at)) : 1.0
 
-bar_sliding(e) = e.hide_bar && time() - bar_slid(e)[2] < SLIDE_TIME
+bar_sliding(e) = hides_bar(e) && time() - bar_slid(e)[2] < SLIDE_TIME
 
 "Where the top bar's top is: 0 while the bar shows, and as far above the window as the bar is tall while it hides"
 bar_top(e) = px(round(num((bar_shown(e) - 1) * TOPBAR_H)))
@@ -29958,7 +29976,7 @@ pinned in it.
 bar_tick!(e) = begin
   w = window_of(e)
   w === nothing && return
-  e.hide_bar || return (fade_window_buttons!(w, 1); nothing)
+  hides_bar(e) || return (fade_window_buttons!(w, 1); nothing)
   if bar_wanted(e, w)
     delete!(e.nodes, :bar_leaving)
     slide_bar!(e, true)
@@ -30019,7 +30037,7 @@ colours of the sidebar, the page and the panel at the right, as a bar that
 doesn't hide has under it, with a line along its bottom.
 """
 bar_back(e) = begin
-  e.hide_bar || return ()
+  hides_bar(e) || return ()
   full = filled(e)
   side = full || lowered(e) !== nothing || as_app(e) ? 0px : panel_w(e) * opened(e)
   right = full || right_view(e) === nothing ? 0px : right_w(e) * right_opened(e)
@@ -44116,7 +44134,9 @@ load_settings!(e) = begin
     elseif name == "pinned"
       e.pinned = value == "true"
     elseif name == "hidebar"
-      e.hide_bar = value == "true"
+      # It was true or false before the bar could hide in full screen only
+      how = value == "true" ? :always : value == "false" ? :never : Symbol(value)
+      how in first.(BAR_HIDINGS) && (e.hide_bar = how)
     elseif name == "keys"
       any(b -> first(b) == value, BUNDLES) && (e.bundle = String(value))
     elseif startswith(name, "key.")
@@ -55855,7 +55875,10 @@ add_command!(show_folder_as!, title="Show a folder as a kind of folder: a deskto
 # the News asks again now, for every page. Settings can leave the daily news
 # out, so an agent works only when you click Get the News, or turn Ladder's
 # agents off, for another agent that writes the articles, like one on a
-# server. Then the page has no Get the News, and shows what that agent wrote. Each agent searches the web and
+# server. Then the page has no Get the News, and shows what that agent wrote.
+# Ladder keeps the file AGENTS.md in the folder, which tells such an agent
+# what to write and where: see `News.instructions`. A file of that name that
+# you changed stays as it is. Each agent searches the web and
 # replies with articles, which Ladder writes in the folder of the day. Three
 # agents work at once, and the others wait. Ladder stops an agent that takes
 # more than 15 minutes, and Stop stops them all. The front page says what each
@@ -56145,6 +56168,8 @@ news_read!(e, v::NewsPage) = begin
   v.read = time()
   top = v.day ? dirname(v.path) : v.path
   isempty(news_prune!(top)) || list_files!(e)
+  # The instructions for an agent of your own are there, and up to date
+  v.day || !News.write_instructions!(top; most=NEWS_MOST) || list_files!(e)
   if v.day
     d = News.edition_day(basename(v.path))
     v.editions = d === nothing ? News.Edition[] : [News.Edition(day=d, path=v.path, articles=News.day_articles(v.path, d))]
@@ -56246,8 +56271,8 @@ news_empty(e, v::NewsPage, z) = begin
   off = News.agents() == :off
   says = off ?
     ("No news yet.",
-     "Ladder starts no agent for the news, as Settings say. The articles that your own agent writes show here: each in the folder of its day, " *
-     "like $(Dates.format(Dates.today(), "yyyy-mm-dd")), with a title and a section in its front matter. The Welcome page has an example.") :
+     "Ladder starts no agent for the news, as Settings say. The articles that your own agent writes show here. " *
+     "Tell it to read $(News.INSTRUCTIONS) in this folder, which says what to write and where.") :
     isempty(v.interests) ?
     ("What news do you want?",
      "Write a page in this folder for each kind of news that you want. Say in your own words what to look for, and what to leave out. " *

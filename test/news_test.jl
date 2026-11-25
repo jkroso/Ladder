@@ -259,4 +259,28 @@ end
   shot("other-agent")
 end
 
+@testset "AGENTS.md tells an agent of your own what to write, and isn't a kind of news" begin
+  path = joinpath(news, "AGENTS.md")
+  # The front page wrote it when it first showed
+  @test isfile(path) && startswith(read(path, String), N.KEPT_LINE)
+  @test !any(p -> p.name == "AGENTS", front().interests)
+  @test !N.interest_name("AGENTS.md") && !N.interest_name("claude.md") && !N.interest_name("Readme.md") && N.interest_name("AI.md")
+  # It says the reader's time zone, how many articles to write, and how long Ladder keeps them
+  text = N.instructions(days=7, most=5, zone="Australia/Sydney")
+  @test occursin("their time zone is Australia/Sydney", text) && occursin("5 at most for each page", text)
+  @test occursin("It deletes each article 7 days after its date", text)
+  @test occursin("It keeps every article", N.instructions(days=0, zone=""))
+  @test !occursin("time zone is", N.instructions(zone=""))
+  # It follows the settings
+  m = K.sandbox(e)
+  Base.invokelatest(Core.eval, m, :(news_days!(14)))
+  again()
+  @test occursin("14 days after its date", read(path, String))
+  # A file whose first line you deleted is yours, and stays as it is
+  write(path, "Write only about rockets.\n")
+  Base.invokelatest(Core.eval, m, :(news_days!(7)))
+  again()
+  @test read(path, String) == "Write only about rockets.\n"
+end
+
 close(w)

@@ -6,7 +6,11 @@
 # reads each page, looks on the web for news of that kind, and writes an
 # article for each story. The name of the page is the name of the paper's
 # section for its news. A page called Readme isn't a kind of news: it can say
-# what the folder is for.
+# what the folder is for, and so can `CLAUDE.md`.
+#
+# Ladder keeps a file called `AGENTS.md` in the folder, which tells an agent
+# of your own how to write the articles: see `instructions`. Many agents read a
+# file of that name by themselves when they start in the folder.
 #
 # The articles of a day are in a folder that has the day's name, like
 # `2026-11-25`. Each is a page of Markdown with front matter that says its
@@ -37,6 +41,7 @@
 #     prune!(folder)                # deletes the articles that are older than the settings keep
 #     keep_days(), keep_days!(n)    # how many days Ladder keeps an article: 0 is for ever
 #     agents(), agents!(when)       # when Ladder's own agents get the news: :daily, :asked or :off
+#     write_instructions!(folder)   # writes AGENTS.md, which tells another agent what to write
 #
 # Another agent can write the articles, like one that runs on a server: Ladder
 # shows and deletes any article in a day's folder whose front matter has a
@@ -134,9 +139,12 @@ const PAGES = (".md", ".markdown")
   words::String = ""   # what the page says, without its front matter
 end
 
-"True when the file called `name` can be a page that says a kind of news: a page that isn't hidden, and isn't the folder's Readme"
+"The names of the pages of a folder of news that aren't kinds of news, in small letters: what the folder is for, and what an agent reads"
+const NOT_NEWS = ("readme", "agents", "claude")
+
+"True when the file called `name` can be a page that says a kind of news: a page that isn't hidden, and isn't the folder's Readme or an agent's instructions"
 interest_name(name::AbstractString) =
-  !startswith(name, '.') && lowercase(splitext(name)[2]) in PAGES && lowercase(splitext(name)[1]) != "readme"
+  !startswith(name, '.') && lowercase(splitext(name)[2]) in PAGES && !(lowercase(splitext(name)[1]) in NOT_NEWS)
 
 "The pages of the folder `folder` that each say a kind of news that you want, in the order of their names"
 interests(folder::AbstractString) = begin
@@ -434,4 +442,105 @@ paragraphs(a::Article) = begin
     isempty(s) || push!(out, String(s))
   end
   out
+end
+
+# --- the instructions for an agent of your own ----------------------------------------------
+
+"The file of a folder of news that tells an agent of your own how to write the articles"
+const INSTRUCTIONS = "AGENTS.md"
+
+"The first line of the instructions while Ladder keeps them up to date. Once it's gone, Ladder leaves the file as it is."
+const KEPT_LINE = "Ladder wrote this file, and keeps it up to date. To change it yourself, delete this line first."
+
+"The name of the Mac's time zone, like Australia/Sydney, or \"\" when it can't say"
+time_zone() = begin
+  link = try readlink("/etc/localtime") catch; "" end
+  m = match(r"zoneinfo/(.+)$", link)
+  m === nothing ? "" : String(m[1])
+end
+
+"""
+What `AGENTS.md` says: how an agent of your own writes the articles of a
+folder of news. `days` is how many days Ladder keeps an article, 0 for ever,
+`most` the most articles for one page, and `zone` the reader's time zone.
+"""
+instructions(; days::Integer=keep_days(), most::Integer=5, zone::AbstractString=time_zone()) = """
+$KEPT_LINE
+
+# How to write this newspaper
+
+This folder is a newspaper. You find the news and write its articles. Ladder, a Markdown app, shows them to the reader as the front page of a newspaper.
+
+## What the reader wants
+
+Each Markdown page at the top of this folder says one kind of news that the reader wants, in their own words. `AI.md` is an example. The page's name without `.md` is the name of its section in the paper: `AI`. This file, `Readme.md` and `CLAUDE.md` aren't kinds of news.
+
+## Each time you run
+
+1. Read each page at the top of this folder.
+2. For each page, search the web for news of that kind since your last run. If you don't know when that was, use the date of the newest article of that section, or else the last 2 days.
+3. Read the headlines of that section's articles in the folders of the days. Leave out a story that's there already, unless something new has happened in it.
+4. Write an article for each new story that the reader would want to know about: $most at most for each page. If there's no news of a kind, write nothing for it.
+
+## Where an article goes
+
+Put today's articles in a folder named by today's date, as YYYY-MM-DD, like `2026-11-25`. Make the folder if it isn't there. Use the date where the reader is$(isempty(zone) ? "" : ": their time zone is $zone").
+
+Name each file by its headline, with `.md` at the end, like `A rocket lands on its tower.md`. Leave `/` and `:` out of the name.
+
+## What an article holds
+
+```markdown
+---
+title: A rocket lands on its tower
+section: Space
+summary: The tower's arms caught the booster as it fell, a first for any rocket.
+importance: 7
+date: 2026-11-25T07:30
+by: Grok
+---
+
+The booster fell back to its tower, and the tower's arms caught it.
+
+The company said that it would fly the booster again within a month.
+
+## Sources
+
+- [example.com](https://example.com/rocket)
+```
+
+The front matter is between the lines of `---`:
+
+- `title` is the headline, on one line. An article must have it.
+- `section` is the name of the page that asked for the news, like `AI` for `AI.md`. An article must have it.
+- `summary` is one or two sentences that say what happened, on one line.
+- `importance` is a number from 1 to 10 for how much the story matters to the reader. The most important story leads the front page. A story without one has 5.
+- `date` is when you wrote the article, as YYYY-MM-DDTHH:MM in the reader's time zone.
+- `by` is your name, like `Grok`.
+
+Under the front matter, write 3 to 6 short paragraphs in plain words, with the most important facts first. Say only what your sources say, and name a source in the text where that matters. Put no headings in the story. End with a `## Sources` heading and a link to each web page that you used.
+
+## What Ladder does
+
+Ladder shows each article as soon as you write it. $(days > 0 ? "It deletes each article $(days == 1 ? "a day" : "$days days") after its date" : "It keeps every article"), so don't delete any. Don't change the reader's pages, an article that's there already, or this file.
+"""
+
+"""
+Write `AGENTS.md` in the folder of news `folder`, when it isn't there, or
+when Ladder wrote it and what it says has changed, as when the settings keep
+articles for longer. A file whose first line isn't `KEPT_LINE` is yours, and
+stays as it is. It's true when it wrote the file.
+"""
+write_instructions!(folder::AbstractString; most::Integer=5) = begin
+  path = joinpath(folder, INSTRUCTIONS)
+  text = instructions(; most)
+  was = try read(path, String) catch; nothing end
+  was == text && return false
+  was === nothing || startswith(was, KEPT_LINE) || return false
+  try
+    write(path, text)
+    true
+  catch
+    false
+  end
 end

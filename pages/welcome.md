@@ -1216,7 +1216,7 @@ In the path, click the › after the file's name, or after a heading, to search 
 
 The button at the right of the search chooses where to look: a heading of the path, the whole file, or a folder on the way to the file, with the folders in it. In a folder, the kind Pages finds a page by its name. ↑ and ↓ pick a row, and Return or a click shows it. Tab opens the list of kinds, and Esc closes the search.
 
-For more room for the page, turn on Hide the top bar in [Settings](settings/settings.md#top-bar). The page then goes up to the top of the window. Rest the mouse at the window's top edge, and the bar slides down over the page. It slides back up when you move the mouse off it.
+For more room for the page, choose Always or In full screen only for Hide the top bar in [Settings](settings/settings.md#top-bar). While the bar hides, the page goes up to the top of the window. Rest the mouse at the window's top edge, and the bar slides down over the page. It slides back up when you move the mouse off it.
 
 The list leaves out hidden files and folders, the ones whose names start with a dot, like `.media`. To list them too, click the eye beside the button at the top left, or press ⌘⇧. as you do in the Finder. Click the eye again to leave them out.
 
@@ -1279,7 +1279,11 @@ The front page looks like a newspaper's: the folder's name at the top, then the 
 
 ### News from another agent
 
-Another agent can write the articles, like one that runs on a server. In [Settings](settings/settings.md#news), choose "Ladder starts no agent". Then Ladder never starts an agent for the news, and the front page shows what the other agent writes. Give that agent the folder's pages, and ask it to write each article as a Markdown file in the folder of its day, like `2026-11-25/A rocket lands on its tower.md`:
+Another agent can write the articles, like one that runs on a server. In [Settings](settings/settings.md#news), set "Ladder's agent gets the news" to Never. Then Ladder never starts an agent for the news, and the front page shows what the other agent writes.
+
+Ladder keeps a file called `AGENTS.md` in the folder, which tells the other agent what to write and where. Many agents read a file of that name by themselves when they start in a folder. Tell any other agent to read it first. Ladder keeps the file up to date while its first line says so. To change the file yourself, delete that line first, and Ladder leaves it as it is.
+
+The agent writes each article as a Markdown file in the folder of its day, like `2026-11-25/A rocket lands on its tower.md`:
 
 ```markdown
 ---
@@ -1298,7 +1302,7 @@ The article's paragraphs.
 - [example.com](https://example.com/rocket)
 ```
 
-The title and the section are what make the file an article, and the section is the name of one of the folder's pages. The summary shows under the headline. The importance, from 1 to 10, puts the stories in order: the most important is the lead story. Without one, a story has 5. The date is when the agent wrote it, and Ladder deletes the article a week after that. Without a date, the article has noon of its folder's day.
+The title and the section are what make the file an article, and the section is the name of one of the folder's pages. `AGENTS.md`, `Readme.md` and `CLAUDE.md` aren't kinds of news. The summary shows under the headline. The importance, from 1 to 10, puts the stories in order: the most important is the lead story. Without one, a story has 5. The date is when the agent wrote it, and Ladder deletes the article a week after that. Without a date, the article has noon of its folder's day.
 
 You can write the file `.ladder` yourself too. It ends with a block like the one for a desktop, with `Ladder.NotesDirectory`, `Ladder.BlogDirectory`, `Ladder.DownloadsDirectory`, `Ladder.PicturesDirectory`, `Ladder.ScreenshotsDirectory` or `Ladder.NewsDirectory`. Show Folder As leaves a file that you wrote as it is.
 
