@@ -50,7 +50,7 @@ The list has only the names that code at the caret can use. A name that's made i
 Each name has paler words at its right that say what it is. A name with a value says the type of the value, like `Float64` or `Vector{Wall}`. Other names say `function`, `struct`, `module` or `macro`. The page reads these from its code, so most names have them before any code has run.
 
 ```julia
-
+area
 ```
 
 ## What a function takes
@@ -65,7 +65,7 @@ Run the first block of this page, then type `paint(` on the empty line of this b
 - After the first value, only the methods that can take one more value stay in the box.
 
 ```julia
-
+paint(area)
 ```
 
 ## Brackets and quotes
