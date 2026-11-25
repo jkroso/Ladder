@@ -592,8 +592,17 @@ fixed(w) = width(preferred=w, grow=GrowType.None)
 spacer(h) = Box(width(grow=grow), height(h))
 num(l) = Float64(convert(px, l).value)
 
-label(s, size=13px; color=colours.ink, weight="") =
-  Text(s, size=size, family=SANS, subfamily=weight, color=color, wrap=WrapMode.none)
+"""
+Words on one line in the sans-serif font. A character that the font lacks, like
+the ⚡ at the end of an email's subject, is in a font that has it (see `spared`).
+The words are then a row of parts, not one `Text`.
+"""
+label(s, size=13px; color=colours.ink, weight="") = begin
+  t = Text(s, size=size, family=SANS, subfamily=weight, color=color, wrap=WrapMode.none)
+  isascii(t.content) && return t
+  face = Face(SANS, weight, t.size, color, false)
+  hasall(face, t.content) ? t : Row(Alignment.Start, spared(t.content, face)...)
+end
 
 # --- fonts and measuring -------------------------------------------------------
 

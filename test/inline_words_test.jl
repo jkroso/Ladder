@@ -106,3 +106,17 @@ end
   @test K.stand_in_from(K.Face(K.CODE_FONT, K.CODE_STYLE, 13px, K.colours.ink, false)) == K.MONO
   @test K.stand_in_from(K.Face(K.SYMBOL_FONT, "", 13px, K.colours.ink, false)) == K.MONO
 end
+
+@testset "a label draws a character that its font lacks in a font that has it" begin
+  texts(node, out=K.Text[]) = (node isa K.Text ? push!(out, node) : node isa K.GeometricUI && foreach(n -> texts(n, out), node.children); out)
+  # An email's subject can end with an emoji, which the sans-serif font lacks
+  l = K.label("This time tomorrow, you'll be at Airwallex Shift ⚡", 13px, weight="Semibold")
+  @test !(l isa K.Text)
+  parts = texts(l)
+  @test [t.content for t in parts] == ["This time tomorrow, you'll be at Airwallex Shift ", "⚡"]
+  @test parts[1].family == K.SANS && parts[1].subfamily == "Semibold"
+  @test parts[2].family != K.SANS && K.has(K.Face(parts[2].family, "", 13px, K.colours.ink, false), '⚡')
+  # Words that the font has stay one Text, accents and signs too
+  @test K.label("Inbox", 13px) isa K.Text
+  @test K.label("Café · 25 Nov – “now”", 12px) isa K.Text
+end
