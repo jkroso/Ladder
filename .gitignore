@@ -11,3 +11,4 @@
 /pages/settings/startup.md
 /pages/settings/.media
 *.bak
+/.playwright-mcp
