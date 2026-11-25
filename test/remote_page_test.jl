@@ -647,6 +647,63 @@ end
   end
 end
 
+# A `view` block of a page from a site that runs code names a file beside the page's address. Ladder gets the file,
+# and the block shows a copy of it on the Mac: see `view_copy` in main.jl
+@testset "a view of a page from a site that runs code shows the file beside the page" begin
+  site = "https://views.example.com"
+  page!("$site/a/page.md", """
+    # Views
+
+    Say !`n = 6`.
+
+    ```view
+    model.jl
+    ```
+
+    ```view
+    gone.jl
+    ```
+    """)
+  url = "$site/a/model.jl"
+  page!(url, "view(sums) = \"n is \$(round(Int, sums[\"n\"]))\"\n"; type="text/plain")
+  views() = [it.content.node for it in e.layout if it.content isa K.Live && it.content.node isa K.ViewBlock]
+  K.site_runs!(site, true)
+  try
+    K.navigate!(e, "views.example.com/a/page.md"); frames(8)
+    @test e.buf.path == "$site/a/page.md" && length(views()) == 2
+    v, gone = views()
+    # The copy has the file's own name, and it's marked as a copy of the file at its address
+    @test v.target == K.VIEW_COPIES[url] && basename(v.target) == "model.jl" && startswith(v.target, K.view_copies_dir())
+    @test read(v.target, String) == SITE[url].text && K.copied_from(v.target) == url
+    @test K.view_made(v) && v.made.value == "n is 6"
+    # A file that the server hasn't got says so in its block
+    @test K.view_coming(e, "$site/a/gone.jl", gone.target) == "views.example.com has no gone.jl."
+    shot("remote_view.png")
+    # The block's button goes to the copy, which shows as part of the site: its path in the top bar starts with the
+    # server's name, and the window's folder stays as it was
+    folder = e.folder
+    K.go_view!(v); frames()
+    @test e.buf.path == v.target && K.web_address(e.buf.path) == url && e.folder == folder
+    @test K.trail_steps(e.buf.path) == [("views.example.com", "$site/"), ("a", "$site/a/"), ("model.jl", url)]
+    @test K.web_address(joinpath(dir, "mine.md")) == "" && K.trail_steps("$site/a/page.md")[end] == ("page.md", "$site/a/page.md")
+    @test K.go_back!(e) && e.buf.path == "$site/a/page.md"
+    frames()
+    # Reload Page asks for the file again
+    n = count(==(url), asked)
+    K.reload_page!(e); frames(8)
+    @test count(==(url), asked) == n + 1 && isfile(views()[1].target)
+    # A path of the Mac names nothing, and a page of HTML or a folder shows as a page of the web
+    @test K.view_copy(e, "file:///etc/hosts") == ""
+    @test K.view_copy(e, "other.html") == "$site/a/other.html" && K.view_copy(e, "b/") == "$site/a/b/"
+    # A page whose site may not run code shows the block as its code, and asks for no file
+    K.stop_site_code!(e); frames(4)
+    @test isempty(views()) && K.view_copy(e, "model.jl") == ""
+  finally
+    K.site_runs!(site, false)
+    K.forget_view_copies!(site)
+  end
+end
+
 # This test set is last. Once the palette has been used over a page of the Mac, the next hover on the
 # page's name starts its wait a frame late, and "the path in the top bar starts at the server's name" doesn't allow for that.
 @testset "Navigate goes to a file or a folder of the Mac" begin

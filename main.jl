@@ -1797,8 +1797,8 @@ open!(e, path; record=true) = begin
   end
   add_tab!(e)   # the file stays open as a tab in the sidebar until ⌘W closes it
   delete!(e.nodes, :new_tab)   # a file that shows in a new tab takes the tab's place
-  # The sidebar goes on listing the folder that it lists while a page from a web server shows
-  if e.folder != dirname(path) && !isremote(path)
+  # The sidebar goes on listing the folder that it lists while a page from a web server shows, or a view's copy of a file from one
+  if e.folder != dirname(path) && isempty(web_address(path))
     e.folder = dirname(path)
     list_files!(e)
   end
@@ -23310,15 +23310,93 @@ has_scheme(name::AbstractString) = occursin(r"^[a-z][a-z0-9+.-]*:"i, name)
 What the lines of a `view` block name: the whole path of a file or a folder,
 or the address of a page of the web. A name with no / at its start is beside
 the document, and one with ~ at its start is in the home folder. It's "" when
-the block names nothing.
+the block names nothing. A page from a web server names a file beside its own
+address, and the block shows a copy of it: see `view_copy`.
 """
 view_target(e, lines) = begin
-  i = findfirst(l -> !isempty(strip(l)), lines)
-  i === nothing && return ""
-  name = String(strip(lines[i]))
+  name = view_named(lines)
+  isempty(name) && return ""
+  isremote(e.buf.path) && return view_copy(e, name)
   has_scheme(name) && return name
   path = abspath(docdir(e), expanduser(name))
   length(path) > 1 ? String(rstrip(path, '/')) : path
+end
+
+"The name that the lines of a `view` block give, as it's written, or \"\" when they give none"
+view_named(lines) = (i = findfirst(l -> !isempty(strip(l)), lines); i === nothing ? "" : String(strip(lines[i])))
+
+"""
+Each file that a `view` block of a page from a web server names, by its
+address: the `Remote.Coming` while it's on its way, then the path of its copy
+on this Mac, or the `Remote.Answer` of a server that sent none. Ladder asks
+for each file once while it's open, and again when you reload its page.
+"""
+const VIEW_COPIES = Dict{String,Any}()
+
+"The folder of the copies of the files that the `view` blocks of pages from web servers show"
+view_copies_dir() = joinpath(homedir(), "Library", "Caches", "Ladder", "views")
+
+"""
+The web address that the file at `path` is, for the window: the address of a
+page from a web server, and the address of the file that a view's copy is a
+copy of. The window shows such a copy as part of its site: its path in the top
+bar starts with the server's name, and the window's folder doesn't change.
+It's "" for any other file, a copy of a page that you saved too.
+"""
+web_address(path::AbstractString) = isremote(path) ? String(path) : startswith(path, view_copies_dir() * "/") ? copied_from(path) : ""
+
+"The names in the path to `path` in the top bar, each with where it goes, from the home folder or from a server's name"
+trail_steps(path::AbstractString) = (at = web_address(path); isempty(at) ? steps(path, home_folder()) : Remote.trail(at))
+
+"""
+What a `view` block of the page from a web server that `e` shows names, when
+the block names `name`: the path of a copy on this Mac of the file `name`
+beside the page's address. The copy has the file's own name, so it shows as
+the file would. Until the file has come, `view_coming` says why the copy isn't
+there. A page of HTML and a folder are the address itself, which the block
+shows as a page of the web. It's "" for a name that's no address on the web,
+like a path of the Mac, and for a page that runs no code.
+"""
+view_copy(e, name::AbstractString) = begin
+  foreign(e.buf.path) && return ""
+  url = remote_src(e, name)
+  url === nothing && return ""
+  named = basename(Remote.unescaped(Remote.path(url)))
+  (isempty(named) || lowercase(splitext(named)[2]) in HTMLS) && return url
+  file = joinpath(view_copies_dir(), string(hash(url), base=16), named)
+  view_coming(e, url, file)
+  file
+end
+
+"""
+Why the copy at `file` of the file at the address `url` isn't there for the
+window of `e`, or nothing when it is. The first time, this asks the server for
+the file, when the window may ask the web. When the file comes, it goes in
+`file`, marked as a copy of `url`, so that it runs no code unless its site may.
+"""
+view_coming(e, url::AbstractString, file::AbstractString) = begin
+  state = get(VIEW_COPIES, url, nothing)
+  if state === nothing
+    page_online(e) || return "Ladder gets $(basename(file)) when the window shows."
+    rm(file, force=true)   # a copy from before is from an earlier time that Ladder was open
+    state = VIEW_COPIES[url] = Remote.ask(url, getter=(a...) -> PAGE_GETTER[](a...))
+  end
+  if state isa Remote.Coming
+    a = Remote.landed(state)
+    a === nothing && (redraw_in!(e, 0.1); return "Getting $(basename(file)) from $(Remote.host(url))…")
+    if Remote.ok(a)
+      mkpath(dirname(file))
+      write(file, a.bytes)
+      mark_copy!(file, url)
+      state = VIEW_COPIES[url] = file
+      redraw_in!(e, 0)
+    else
+      state = VIEW_COPIES[url] = a
+    end
+  end
+  state == file && return nothing
+  state isa Remote.Answer && state.status == 404 && return "$(Remote.host(url)) has no $(basename(file))."
+  "$(Remote.host(url)) didn't send $(basename(file))."
 end
 
 "What a tooltip calls the file or the page at `target`: its name, or the address of a page of the web"
@@ -23373,6 +23451,12 @@ describe(v::ViewBlock) = begin
   e = editor(v)
   isempty(v.target) && !v.held &&
     return Column(block_look()..., name="View", block_note("Write the name of a file in this block, like plan.pdf, or the address of a page of the web"))
+  # A page from a web server shows a copy of the file, which may still be on its way
+  if !v.held && isremote(e.buf.path) && !has_scheme(v.target)
+    url = remote_src(e, view_named(v.source))
+    why = url === nothing ? nothing : view_coming(e, url, v.target)
+    why === nothing || return Column(block_look()..., name="View", block_note(why))
+  end
   v.held || has_scheme(v.target) || ispath(v.target) ||
     return Column(block_look()..., name="View", block_note("$(basename(v.target)) isn't there"))
   with_theme(component_theme(e.zoom)) do
@@ -32390,7 +32474,7 @@ bar_name(e) = something(page_title(e), isremote(e.buf.path) ? Remote.trail(e.buf
 
 onkey(t::Title, ::KeyPress{Keys.mouse_right}) = begin
   e = editor(t)
-  isempty(e.buf.path) || isremote(e.buf.path) || file_menu!(e, window_of(t), e.buf.path; at=:title)
+  isempty(e.buf.path) || !isempty(web_address(e.buf.path)) || file_menu!(e, window_of(t), e.buf.path; at=:title)
   handled
 end
 
@@ -32669,7 +32753,7 @@ show_title_trail!(e, t, w, path) = begin
   wide = window_size(e)[1]
   # The Mac draws its close, minimise and zoom buttons over the window, so the path starts after them
   start = mac_buttons_room(e) + 4px
-  all = isremote(path) ? Remote.trail(path) : steps(path, home_folder())
+  all = trail_steps(path)
   all[end] = (bar_name(e), path)   # the file's name as the bar shows it
   parts = focus_parts(e)
   shown = title_steps(all, wide - 8px - start - trail_parts_wide(e, parts))
@@ -32812,7 +32896,7 @@ onkey(a::TitleArrow, ev::KeyPress{Keys.mouse_left}) = (open_folder_list!(editor(
 # A right-click on a name shows the menu of its folder or file, as in the sidebar. Only the file's own name can be renamed in the bar.
 onkey(c::TitleCrumb, ev::KeyPress{Keys.mouse_right}) = begin
   e = editor(c)
-  isremote(c.path) && return handled   # a page or a folder of a web server has no file menu
+  isempty(web_address(c.path)) || return handled   # a page or a folder of a web server has no file menu
   c.last ? file_menu!(e, ev.window, c.path; at=:title) : file_menu!(e, ev.window, c.path; items=filter(!=("Rename"), file_menu(c.path)))
   handled
 end
@@ -34813,7 +34897,7 @@ describe(l::TabLabel) = begin
   over && (l.close.path = l.path)
   folder = tab_folder(e, l.path)
   Row(width(grow=grow), height(grow=grow), padding(0px, 8px, 0px, 0px), child_gap=4px, clip=true, name="Tab",
-    mark(l, isempty(l.path) ? "plus-lg" : isremote(l.path) ? "globe" : file_icon(l.path)),
+    mark(l, isempty(l.path) ? "plus-lg" : isempty(web_address(l.path)) ? file_icon(l.path) : "globe"),
     # The name loses its end, and not the × after it, when it's too long for the sidebar
     Box(width(grow=grow), Alignment.Start, clip_x=true,
       Row(Alignment.Center, child_gap=6px,
@@ -44728,7 +44812,10 @@ palette_address(e, p::CommandPalette) = begin
 end
 
 "Reload Page: ask the server again for the page from the web that shows"
-reload_page!(e) = isremote(e.buf.path) ? get_page!(e, e.buf.path, record=false, again=true) : e
+reload_page!(e) = isremote(e.buf.path) ? (forget_view_copies!(web_site(e.buf.path)); get_page!(e, e.buf.path, record=false, again=true)) : e
+
+"Ask again for the files that the `view` blocks of the pages of `site` show, the next time that each shows"
+forget_view_copies!(site) = filter!(((url, _),) -> web_site(url) != site, VIEW_COPIES)
 
 "Open In Browser: show the page from the web that shows in your browser"
 open_in_browser!(e) = (isremote(e.buf.path) && BROWSER[](e.buf.path); e)
