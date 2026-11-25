@@ -51,7 +51,7 @@ shot(name) = isempty(shots) || save_png(joinpath(shots, name * ".png"), w)
   @test r !== nothing
   right_click(middle(r))
   @test menu() !== nothing
-  @test ours(menu().items) == ["Open in New Window", "Rename", "Duplicate", "Copy Path", "Copy Link", "Show in Finder", "Move to Trash"]
+  @test ours(menu().items) == ["Open in New Window", "Rename", "Duplicate", "Copy Path", "Copy Link", "Show in Finder", "Ignore", "Move to Trash"]
   key(Keys.escape)
   @test menu() === nothing
 end
@@ -152,7 +152,7 @@ end
   other = joinpath(dir, "other.md")
   label = only(n for n in K.items(K.file_tree(e)) if n.firstchild isa K.FileLabel && n.firstchild.path == other).firstchild
   right_click(middle(rect(label)))
-  @test ours(menu().items) == ["Open in New Window", "Rename", "Duplicate", "Copy Path", "Copy Link", "Show in Finder", "Move to Trash"]
+  @test ours(menu().items) == ["Open in New Window", "Rename", "Duplicate", "Copy Path", "Copy Link", "Show in Finder", "Ignore", "Move to Trash"]
   choose("Rename")
   @test K.renaming(e, :sidebar) == other && renaming() == ""
   @test K.renamer(e).text == "other.md"

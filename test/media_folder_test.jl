@@ -108,11 +108,11 @@ end
   click(b)
   @test e.hidden && ".media" in names()
   @test b.icon == "eye"
-  @test K.tip(b) == "Leave out hidden files  ⌘⇧."
+  @test K.tip(b) == "Leave out hidden and ignored files  ⌘⇧."
   shot("shown")
   click(b)
   @test !e.hidden && !(".media" in names())
-  @test K.tip(b) == "Show hidden files  ⌘⇧."
+  @test K.tip(b) == "Show hidden and ignored files  ⌘⇧."
   press(Keys.period, Keys.cmd, Keys.shft)
   @test e.hidden
   press(Keys.period, Keys.cmd, Keys.shft)

@@ -1,19 +1,23 @@
 # What Ladder knows of folders, apart from the window that shows them: the
-# folders that you chose as favourites, and when anything in each folder of a
-# folder last changed, and how big it is. main.jl draws the table of a folder,
-# which shows the times and the sizes, and the commands that use the
-# favourites.
+# folders that you chose as favourites, the files and folders that you chose to
+# ignore, and when anything in each folder of a folder last changed, and how
+# big it is. main.jl draws the table of a folder, which shows the times and the
+# sizes, and the commands that use the favourites.
 #
 #     favourites()                       # ["/Users/jake/Desktop/Canon", ...], in the order that you put them
 #     favourite!("/Users/jake/Notes")    # puts the folder at the end of the list
 #     unfavourite!("/Users/jake/Notes")  # takes it off the list
+#     ignore!("/Users/jake/Movies")      # Ladder leaves the folder out of its lists, as it does a hidden one
+#     unignore!("/Users/jake/Movies")    # and puts it back
+#     isignored("/Users/jake/Movies")
 #     newest(homedir(), folders)         # when anything in each folder last changed, at any depth
 #     sizes(homedir())                   # how many bytes each of those folders holds, at any depth
 #
-# Ladder keeps the favourites in a file of its own, in its folder in
-# ~/Library/Application Support, one folder on each line. The Finder's own
-# favourites are in a file that only the Finder writes, so Ladder's list is
-# apart from them.
+# Ladder keeps the favourites and the ignored paths in a file of its own, in
+# its folder in ~/Library/Application Support, one on each line. The Finder's
+# own favourites are in a file that only the Finder writes, so Ladder's list is
+# apart from them. Ladder never changes an ignored file or folder, so the
+# Finder and the other apps still show it.
 
 @use "github.com/jkroso/Prospects.jl" @def
 @use FileWatching
@@ -29,9 +33,10 @@ home folder's page showed the favourites when the file was first written.
 """
 file() = isempty(FILE[]) ? joinpath(homedir(), "Library", "Application Support", "Ladder", "home") : FILE[]
 
-"What the file keeps: the favourite folders in their order"
+"What the file keeps: the favourite folders in their order, and the files and folders that you chose to ignore"
 @def struct Kept
   favourites::Vector{String} = String[]
+  ignored::Set{String} = Set{String}()
 end
 
 "What was read from the file, with the time that the file had changed then"
@@ -52,9 +57,11 @@ kept() = begin
       what, where = (split(line, '\t', limit=2)..., "")[1:2]
       isempty(where) && continue
       what == "favourite" && push!(k.favourites, String(where))
+      what == "ignored" && push!(k.ignored, String(where))
     end
   catch
   end
+  READ[][2].ignored == k.ignored || (CHANGED[] = time())
   READ[] = (at, k)
   k
 end
@@ -63,7 +70,8 @@ end
 keep!(k::Kept) = begin
   path = file()
   mkpath(dirname(path))
-  write(path, join(("favourite\t$p\n" for p in k.favourites)))
+  write(path, join(("favourite\t$p\n" for p in k.favourites)) * join(("ignored\t$p\n" for p in sort!(collect(k.ignored)))))
+  READ[][2].ignored == k.ignored || (CHANGED[] = time())
   READ[] = (mtime(path), k)
   k
 end
@@ -80,16 +88,50 @@ isfavourite(path::AbstractString) = clean(path) in favourites()
 "Put the folder at `path` at the end of the favourites. A folder that's a favourite already stays where it is."
 favourite!(path::AbstractString) = begin
   p, k = clean(path), kept()
-  p in k.favourites || keep!(Kept([k.favourites; p]))
+  p in k.favourites || keep!(Kept([k.favourites; p], k.ignored))
   nothing
 end
 
 "Take the folder at `path` off the favourites"
 unfavourite!(path::AbstractString) = begin
   p, k = clean(path), kept()
-  p in k.favourites && keep!(Kept(filter(!=(p), k.favourites)))
+  p in k.favourites && keep!(Kept(filter(!=(p), k.favourites), k.ignored))
   nothing
 end
+
+# --- what you ignore ------------------------------------------------------------------------
+#
+# A file or a folder that you ignore is one that Ladder leaves out, as it
+# leaves out one whose name starts with a dot: its lists of a folder don't
+# show it, unless they show the hidden files, and its searches don't look in
+# it. It's kept by its path, so a file or a folder of the same name in another
+# folder still shows.
+
+"When the list of what you ignore last changed, in this window or in another. A list of a folder that was read before then is read again."
+const CHANGED = Ref(0.0)
+
+"The paths of the files and folders that you chose to ignore"
+ignored() = kept().ignored
+
+"True when you chose to ignore the file or the folder at `path`. `among` is what's ignored, for a caller that asks of many paths."
+isignored(path::AbstractString, among=ignored()) = !isempty(among) && clean(path) in among
+
+"Leave the file or the folder at `path` out of Ladder's lists from now on"
+ignore!(path::AbstractString) = begin
+  p, k = clean(path), kept()
+  p in k.ignored || keep!(Kept(k.favourites, union(k.ignored, [p])))
+  nothing
+end
+
+"Show the file or the folder at `path` in Ladder's lists again"
+unignore!(path::AbstractString) = begin
+  p, k = clean(path), kept()
+  p in k.ignored && keep!(Kept(k.favourites, setdiff(k.ignored, [p])))
+  nothing
+end
+
+"When the list of what you ignore last changed"
+changed() = (kept(); CHANGED[])
 
 # --- the projects -------------------------------------------------------------------------
 #
@@ -98,12 +140,12 @@ end
 #
 # A project is a git repository: a folder with a .git in it. The project
 # picker that ⌘P opens lists them. The search looks six folders down from the
-# home folder, and not in hidden folders, in Library, in node_modules or in an
-# app. It doesn't look inside a repository, so one inside another isn't a
-# project of its own. In a home folder with 76 repositories it took 0.4
-# seconds the first time and 0.05 seconds after that, so it runs on a second
-# thread each time the picker opens, and the picker shows what the last search
-# found until it ends.
+# home folder, and not in hidden folders, in folders that you ignore, in
+# Library, in node_modules or in an app. It doesn't look inside a repository,
+# so one inside another isn't a project of its own. In a home folder with 76
+# repositories it took 0.4 seconds the first time and 0.05 seconds after that,
+# so it runs on a second thread each time the picker opens, and the picker
+# shows what the last search found until it ends.
 #
 # The newest project is the one that git last wrote in: its index, which a
 # commit, `git add` and `git status` after a change write, or its HEAD, which a
@@ -113,8 +155,8 @@ end
 "The folders that the search for projects doesn't go into, by name. Hidden folders and apps are left out too."
 const NOT_SEARCHED = Set(["Library", "node_modules"])
 
-"The git repositories in the folder `root`, as far down as `depth` folders. `root` itself isn't one."
-repositories(root::AbstractString; depth::Integer=6) = begin
+"The git repositories in the folder `root`, as far down as `depth` folders, apart from those in the folders that `skip` has. `root` itself isn't one."
+repositories(root::AbstractString; depth::Integer=6, skip=ignored()) = begin
   found = String[]
   look(dir, d) = begin
     names = try readdir(dir) catch; return end
@@ -123,6 +165,7 @@ repositories(root::AbstractString; depth::Integer=6) = begin
     for name in names
       (startswith(name, ".") || name in NOT_SEARCHED || endswith(name, ".app")) && continue
       path = joinpath(dir, name)
+      path in skip && continue
       # A link to a folder isn't followed, so the search can't go round in a circle
       s = try lstat(path) catch; continue end
       isdir(s) && look(path, d + 1)
@@ -162,8 +205,9 @@ projects(root::AbstractString) = lock(SEARCH_LOCK) do
   SEARCH.root == r || forget_projects!(r)
   if SEARCH.task === nothing && time() - SEARCH.at > SEARCH_AGAIN
     SEARCH.at = time()
+    skip = ignored()   # read here, as the file can't be read on two threads at once
     SEARCH.task = Threads.@spawn begin
-      found = try newest_first(repositories(r)) catch; String[] end
+      found = try newest_first(repositories(r; skip)) catch; String[] end
       lock(SEARCH_LOCK) do
         SEARCH.root == r && (SEARCH.found = found)
         SEARCH.task = nothing

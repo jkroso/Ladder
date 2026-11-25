@@ -126,7 +126,7 @@ On a page with a `schedule` block, an item that repeats has a bar for each time 
 | ⌘W | Closes the file's tab and shows the tab under it. On the last tab, it shows the file's folder. On a folder, it shows the tab that showed last, or with no tabs it closes the folder. In a window with no file, it closes the window. |
 | ⌘\ | Shows and hides the list of files |
 | ⌘⇧\ | Gives the list of files the keyboard. Press esc to go back to the text. |
-| ⌘⇧. | Shows the hidden files in the list of files, or leaves them out again |
+| ⌘⇧. | Shows the hidden and ignored files in the list of files, or leaves them out again |
 | ⌘Z and ⌘⇧Z | Undo and redo |
 | ⌥← and ⌥→ | Move the caret a word at a time |
 | ⌘+ and ⌘- | Make the text bigger and smaller. ⌘0 puts it back to the size it started at. |
@@ -1209,6 +1209,8 @@ In the path, click the › after the file's name, or after a heading, to search 
 The button at the right of the search chooses where to look: a heading of the path, the whole file, or a folder on the way to the file, with the folders in it. In a folder, the kind Pages finds a page by its name. ↑ and ↓ pick a row, and Return or a click shows it. Tab opens the list of kinds, and Esc closes the search.
 
 The list leaves out hidden files and folders, the ones whose names start with a dot, like `.media`. To list them too, click the eye beside the button at the top left, or press ⌘⇧. as you do in the Finder. Click the eye again to leave them out.
+
+To leave out a file or a folder that you never look at, like `~/Movies`, right-click it and choose Ignore. Ladder remembers it, and treats it as a hidden file from then on: the lists of a folder leave it out, and the searches don't look in it. The eye shows the files that you ignore too, fainter than the others. Right-click one and choose Stop Ignoring to show it again. [Settings](settings/settings.md#ignored-files) lists all of them.
 
 Click a file in the list that isn't Markdown to see it in the page. Ladder shows such a file and never changes it, so the top bar has a lock. Hold the mouse over the lock and it says "Read only". A file of code shows its text, which you can select, copy and search. A picture, a model, a sound, a video, a PDF and a CSV file each show as what they are. A JSON file shows as a tree of its values. A file of text, a CSV file and a JSON file have a ladder in the top bar. Hold the mouse over the ladder and it opens into a slider with a stop for each of the file's levels: its bits, its bytes in hexadecimal, its text, and over those the table of a CSV file or the tree of a JSON file. A file of Julia code, which you can change, has a ladder too. Its levels are of what the code comes to when you run it with ⌘Return. At the top, the box after the code shows its value. Go down a level and the box shows the code as Julia infers it, then its LLVM code, then its assembly. A `julia` code block of a page has the same levels, while the caret is in it. Any other file is a binary file, and a button shows its bytes in hexadecimal. The button at the top right opens the file in the app that your Mac uses for it.
 

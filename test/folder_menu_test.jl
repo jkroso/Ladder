@@ -59,7 +59,7 @@ folder_menu(name, item) = (right_click(middle(rect(row(name)))); choose(item))
   right_click(middle(rect(row("Projects"))))
   @test menu() !== nothing
   # The Finder can show a folder, so Show in Finder isn't grey
-  @test menu().items == ["New Page", "New Folder", "New Terminal", "Open in New Window", "Add to Favourites", "Rename", "Duplicate", "Copy Path", "Show in Finder", "Move to Trash"]
+  @test menu().items == ["New Page", "New Folder", "New Terminal", "Open in New Window", "Add to Favourites", "Rename", "Duplicate", "Copy Path", "Show in Finder", "Ignore", "Move to Trash"]
   key(Keys.escape)
   @test menu() === nothing
 end

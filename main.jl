@@ -161,7 +161,12 @@
 #     move through it, → and ← show and hide what's under an item, Return
 #     opens the item and esc goes back to the text.
 #   - Click the eye beside the button that shows that list, or press ⌘⇧., to
-#     list the hidden files and folders too: the ones whose names start with a dot.
+#     list the hidden files and folders too: the ones whose names start with a
+#     dot, and the ones that you chose to ignore.
+#   - Right-click a file or a folder that you never look at, like ~/Movies, and
+#     choose Ignore. Ladder leaves it out from then on, as it leaves out a
+#     hidden one, and remembers it the next time it opens. The Settings page
+#     lists what you ignore, with a button that shows each one again.
 #   - Right-click a file or a folder in that list, or the file's name in the
 #     top bar, to rename it, duplicate it, copy its path, show it in the Finder
 #     or move it to the Trash. A folder goes to the Trash with everything in it.
@@ -1271,7 +1276,7 @@ end
   screened::Float64 = 0.0               # when the window last started or stopped filling its screen
   screened_from::Float64 = 0.0          # how far the top bar's buttons had slid into the room of the close, minimise and zoom buttons then, from 0 to 1
   side::px = PANEL_W                    # how wide the sidebar is. Drag its right edge to change it.
-  hidden::Bool = false                  # the sidebar lists the hidden files and folders too: the ones whose names start with a dot
+  hidden::Bool = false                  # the sidebar lists the hidden files and folders too: the ones whose names start with a dot, and the ones that you ignore
   right::Bool = true                    # a page that has a panel at the right shows it, as a repository's page has git's panel. See `page_side`.
   own::Bool = false                     # you write the message of each commit, and the agent doesn't. See "an agent writes the commit's message".
   pinned::Bool = false                  # a click on the file's name pinned the path in the top bar open. See "the path in the top bar".
@@ -1598,17 +1603,20 @@ end
 """
 What the sidebar lists of the directory `d`: its folders, then its files, each
 in the order of their names. A name that starts with a dot is hidden, as it is
-in the Finder, unless the sidebar shows those. .DS_Store is the Finder's own
-file, and never shows. What's neither a folder nor a file isn't listed. The
-home folder lists the Mac's Trash, whose folder is hidden, since the Finder
-has it in the Dock and Ladder has no other place for it.
+in the Finder, and so is a file or a folder that you ignore, unless the sidebar
+shows those. .DS_Store is the Finder's own file, and never shows. What's
+neither a folder nor a file isn't listed. The home folder lists the Mac's
+Trash, whose folder is hidden, since the Finder has it in the Dock and Ladder
+has no other place for it.
 """
 entries(e, d::AbstractDirectory) = begin
-  trash = Sys.isapple() && string(d.path) == homedir() ? basename(Mac.trash()) : ""
-  shows(n) = e.hidden ? n != ".DS_Store" : !ishidden(n) || n == trash
+  dir = string(d.path)
+  trash = Sys.isapple() && dir == homedir() ? basename(Mac.trash()) : ""
+  ignored = Folders.ignored()
+  shows(n) = e.hidden ? n != ".DS_Store" : !left_out(joinpath(dir, n), ignored) || n == trash
   found = FSObject[]
   # macOS doesn't let Ladder read some folders, like the Trash without Full Disk Access. Those list nothing.
-  names = try readdir(string(d.path)) catch; String[] end
+  names = try readdir(dir) catch; String[] end
   for name in sort!(names, by=lowercase)
     shows(name) || continue
     # A link that leads nowhere, a socket, and a file that left since the folder was read have no object to list
@@ -2018,8 +2026,38 @@ docdir(e) = isempty(e.buf.path) ? e.folder : dirname(e.buf.path)
 "True when the file or folder at `path` is a hidden one: its name starts with a dot"
 ishidden(path) = startswith(basename(path), '.')
 
-"Make the sidebar list the hidden files and folders too, or leave them out again"
+"""
+True when Ladder's lists leave out the file or the folder at `path`, unless
+they show the hidden files: its name starts with a dot, or you chose to ignore
+it. `ignored` is what you ignore, for a caller that asks of many paths.
+"""
+left_out(path, ignored=Folders.ignored()) = ishidden(path) || Folders.isignored(path, ignored)
+
+"""
+True when a list shows the file or the folder at `path` only because it shows
+the hidden files too: you chose to ignore it. Its row is faint, as a hidden
+one's is.
+"""
+ignored_shown(e, path) = e.hidden && Folders.isignored(path)
+
+"Make the sidebar list the hidden files and folders too, and the ones that you ignore, or leave them out again"
 hidden!(e, on::Bool) = (e.hidden = on; list_files!(e); save_settings!(e); e)
+
+"""
+Leave the file or the folder at `path` out of Ladder's lists, as a hidden one
+is, or with `on` false, show it again. Ladder remembers it. Every window lists
+its folder again at once.
+"""
+ignore!(e, path, on::Bool=true) = begin
+  on ? Folders.ignore!(path) : Folders.unignore!(path)
+  for o in unique([editors; e])
+    list_files!(o)
+    rerun!(o, :ignored)   # the list on the settings page
+    w = window_of(o)
+    w === nothing || stale!(w)
+  end
+  nothing
+end
 
 "What a click on `o` in the sidebar does: a folder shows in the sidebar, and a file shows in the page"
 open!(e, d::AbstractDirectory; record=true) = go_folder!(e, string(d.path))
@@ -4299,6 +4337,9 @@ sandbox(e) = get!(e.nodes, :sandbox) do
   Core.eval(m, :(const update_news = $(() -> update_news(e))))
   Core.eval(m, :(const update_offer = $(() -> (reads!(e, :updates); reads!(e, :update); Update.label(Update.own())))))
   Core.eval(m, :(const update! = $(() -> update_act!(e))))
+  # ... and the files and folders that you ignore: `ignored_files()` gives their paths, and `stop_ignoring!(path)` shows one again
+  Core.eval(m, :(const ignored_files = $(() -> (reads!(e, :ignored); sort!(collect(Folders.ignored()), by=lowercase)))))
+  Core.eval(m, :(const stop_ignoring! = $(path -> ignore!(e, String(path), false))))
   # ... and the names that code from the startup page adds
   foreach(f -> f(m, e), values(PAGE_NAMES))
   # The units that a sheet has, from Units.jl, so that code can work with lengths, times and so on: 12m * 2.4m.
@@ -4629,9 +4670,10 @@ steps(path, home=homedir()) = begin
   out
 end
 
-"The files and folders in `dir` that aren't hidden, folders first"
+"The files and folders in `dir` that aren't hidden or ignored, folders first"
 listing(dir) = begin
-  names = try filter(n -> !startswith(n, "."), readdir(dir)) catch; String[] end
+  ignored = Folders.ignored()
+  names = try filter(n -> !left_out(joinpath(dir, n), ignored), readdir(dir)) catch; String[] end
   sort!(names, by=n -> (!isdir(joinpath(dir, n)), lowercase(n)))
 end
 
@@ -18497,7 +18539,8 @@ end
 "The folders that the list can look in: the folders beside the page, and the one that the block names now"
 search_folders(v::SearchView) = begin
   dir = docdir(editor(v))
-  found = isdir(dir) ? sort!([f for f in readdir(dir) if !startswith(f, '.') && f != "node_modules" && isdir(joinpath(dir, f))], by=lowercase) : String[]
+  ignored = Folders.ignored()
+  found = isdir(dir) ? sort!([f for f in readdir(dir) if !left_out(joinpath(dir, f), ignored) && f != "node_modules" && isdir(joinpath(dir, f))], by=lowercase) : String[]
   folder = v.data.folder
   isempty(folder) || folder in found || pushfirst!(found, folder)
   found
@@ -18664,15 +18707,17 @@ onkey(v::SearchView, ev::KeyPress{Keys.enter}) = unmodified(ev) ? (focus(editor(
 """
 The Markdown files in `folder`, then those of each folder in it, in the order
 of their names, and whether that's all of them. A folder whose name starts
-with a dot is left out. A folder with a great many files in it, like a whole
-disk, is read for a part of a second only, so that the window doesn't stop.
+with a dot is left out, and so is a file or a folder that you ignore. A folder
+with a great many files in it, like a whole disk, is read for a part of a
+second only, so that the window doesn't stop.
 """
 pages_under(folder; budget=FIND_BUDGET) = begin
   out, whole, started = String[], true, time()
+  ignored = Folders.ignored()
   for (root, dirs, files) in walkdir(folder, onerror=_ -> nothing)
-    filter!(d -> !startswith(d, '.') && d != "node_modules", dirs)
+    filter!(d -> !left_out(joinpath(root, d), ignored) && d != "node_modules", dirs)
     sort!(dirs, by=lowercase)
-    append!(out, (joinpath(root, f) for f in sort(files, by=lowercase) if ismarkdown(f) && !startswith(f, '.')))
+    append!(out, (joinpath(root, f) for f in sort(files, by=lowercase) if ismarkdown(f) && !left_out(joinpath(root, f), ignored)))
     (length(out) > FIND_PAGES || time() - started > budget) && (whole = false; break)
   end
   first(out, FIND_PAGES), whole
@@ -19034,7 +19079,8 @@ found!(v::GalleryView) = begin
   s = v.shown
   s !== nothing && s.key == key && time() < s.next && return s.found
   started = time()
-  found = Galleries.items(v.data, dir, pictures=GALLERY_KINDS, skip=(e.buf.path,))
+  # The page itself isn't in its gallery, and nor is what you ignore
+  found = Galleries.items(v.data, dir, pictures=GALLERY_KINDS, skip=(e.buf.path, Folders.ignored()...))
   v.shown = (key=key, next=time() + max(GALLERY_EVERY, 20 * (time() - started)), found=found)
   found
 end
@@ -27874,20 +27920,22 @@ end
 """
 The file under `root` whose path ends with one of `names`, like `Ideas.md` or
 `notes/Ideas.md`, in any case, or nothing. A file in a folder near the top
-comes before one in a folder deeper down. Hidden folders and `node_modules` are
-left out, and the look stops after a part of a second, as the `find` block's does.
+comes before one in a folder deeper down. Hidden folders, the ones that you
+ignore and `node_modules` are left out, and the look stops after a part of a
+second, as the `find` block's does.
 """
 find_named(root, names; budget=FIND_BUDGET) = begin
   ends = ["/" * lowercase(n) for n in names]
   started = time()
   level = [root]
+  ignored = Folders.ignored()
   while !isempty(level) && time() - started < budget
     deeper = String[]
     for dir in level
       found = try sort!(readdir(dir), by=lowercase) catch; String[] end
       for name in found
-        startswith(name, '.') && continue
         path = joinpath(dir, name)
+        left_out(path, ignored) && continue
         if isdir(path)
           name == "node_modules" || push!(deeper, path)
         elseif any(t -> endswith(lowercase(path), t), ends)
@@ -30245,7 +30293,7 @@ const COMMAND_GROUPS = with_added([
     Command(:sidebar, "Show or hide the sidebar", :window, "cmd+backslash", (e, w, _) -> toggle_panel!(e)),
     Command(:sidebar_keys, "Give the sidebar the keyboard", :window, "cmd+shift+backslash", (e, w, _) -> focus_panel!(e)),
     Command(:plain, "Go down a level in the part that the caret is in, or up again", :window, "cmd+e", (e, w, _) -> level!(e)),
-    Command(:hidden_files, "Show or hide the hidden files in the sidebar", :window, "cmd+shift+period", (e, w, _) -> hidden!(e, !e.hidden)),
+    Command(:hidden_files, "Show or hide the hidden and ignored files in the sidebar", :window, "cmd+shift+period", (e, w, _) -> hidden!(e, !e.hidden)),
     Command(:bigger, "Make the text bigger", :window, "cmd+equal", (e, w, _) -> zoom!(e, zoom_for(text_size(e) + 1))),
     Command(:smaller, "Make the text smaller", :window, "cmd+minus", (e, w, _) -> zoom!(e, zoom_for(text_size(e) - 1))),
     Command(:usual_size, "Put the text back to its usual size", :window, "cmd+0", (e, w, _) -> zoom!(e, 1.0)),
@@ -30993,7 +31041,7 @@ tip(b::ToolButton) = begin
     return "$(uppercasefirst(first(ws).name)) waits for $(basename(first(ws).page))  ·  Show sidebar" * hint(e, :sidebar)
   end
   b.action == :marks && return marking(e) ? "Hide $(whose(e)) changes" : "Show $(whose(e)) changes"
-  b.action == :hidden && return (e.hidden ? "Leave out hidden files" : "Show hidden files") * hint(e, :hidden_files)
+  b.action == :hidden && return (e.hidden ? "Leave out hidden and ignored files" : "Show hidden and ignored files") * hint(e, :hidden_files)
   if b.action == :back
     to = step_words(e)
     return to === nothing ? "No file to go back to" : "Back to $to" * hint(e, :back)
@@ -32914,10 +32962,11 @@ for, as a link to it is: its page shows when it has one in Markdown.
 """
 title_go!(e, w, path) = (close_folder_lists!(e, w); close_popup!(w, :title_trail); isremote(path) ? get_page!(e, path) : open_folder!(e, path); nothing)
 
-"What's in the folder `dir`, by name, its folders first, or nothing when it can't be read. Hidden ones show while the sidebar shows them."
+"What's in the folder `dir`, by name, its folders first, or nothing when it can't be read. Hidden ones, and the ones that you ignore, show while the sidebar shows them."
 title_listing(e, dir) = begin
   names = try readdir(dir) catch; return nothing end
-  filter!(n -> n != ".DS_Store" && (e.hidden || !startswith(n, '.')), names)
+  ignored = Folders.ignored()
+  filter!(n -> n != ".DS_Store" && (e.hidden || !left_out(joinpath(dir, n), ignored)), names)
   folder(n) = (p = joinpath(dir, n); isdir(p) && !ispackage(p))
   kinds = Dict(n => folder(n) for n in names)
   sort!(names, by=n -> (!kinds[n], lowercase(n)))
@@ -33797,10 +33846,10 @@ describe(l::FileLabel) = begin
   name = renaming(e, :sidebar) == l.path ?
     Box(width(grow=grow), height(22px), padding(5px, 0px), radius(4px), Alignment.Start, background(colours.bg),
         border(1px, :solid, colours.accent), renamer(e)) :
-    # A hidden folder or page is fainter than the others, as it is in the Finder
-    folder ? Box(width(grow=grow), Alignment.Start, label(entry_name(o), color=ishidden(entry_name(o)) ? colours.dim : colours.ink)) :
+    # A hidden folder or page is fainter than the others, as it is in the Finder, and so is one that you ignore
+    folder ? Box(width(grow=grow), Alignment.Start, label(entry_name(o), color=ishidden(entry_name(o)) || ignored_shown(e, l.path) ? colours.dim : colours.ink)) :
     ismarkdown(l.path) ?
-    Box(width(grow=grow), Alignment.Start, label(basename(l.path), color=ishidden(l.path) && l.path != e.buf.path ? colours.dim : colours.ink,
+    Box(width(grow=grow), Alignment.Start, label(basename(l.path), color=(ishidden(l.path) || ignored_shown(e, l.path)) && l.path != e.buf.path ? colours.dim : colours.ink,
                                                  weight=l.path == e.buf.path ? "Semibold" : "")) :
     # A file that Ladder only shows has its whole name, and it's fainter until it's the file that shows
     Box(width(grow=grow), Alignment.Start, label(basename(l.path), color=l.path == e.buf.path ? colours.ink : colours.dim,
@@ -34151,11 +34200,14 @@ in the app that the Mac uses for it, unless that's Ladder.
 """
 file_menu(path) = begin
   isdir(path) && return ["New Page", "New Folder", "New Terminal", "-", "Open in New Window", favourite_item(path), "-", "Rename", "Duplicate", "-",
-                         "Copy Path", "Show in Finder", "-", "Move to Trash"]
+                         "Copy Path", "Show in Finder", "-", ignore_item(path), "Move to Trash"]
   app = opener(path)
   outside = isempty(app) || app_name(app) == "Ladder" ? String[] : ["Open in $(app_name(app))"]
-  ["Open in New Window", outside..., "-", "Rename", "Duplicate", "-", "Copy Path", "Copy Link", "Show in Finder", "-", "Move to Trash"]
+  ["Open in New Window", outside..., "-", "Rename", "Duplicate", "-", "Copy Path", "Copy Link", "Show in Finder", "-", ignore_item(path), "Move to Trash"]
 end
+
+"The item of a file's menu that leaves the file or the folder at `path` out of Ladder's lists, or shows it again"
+ignore_item(path) = Folders.isignored(path) ? "Stop Ignoring" : "Ignore"
 
 "The menu of the sidebar's own folder, for a right-click under the files that it lists"
 const FOLDER_MENU = ["New Page", "New Folder", "New Terminal", "-", "Copy Path", "Show in Finder"]
@@ -34172,8 +34224,8 @@ or its icon on a `:desktop`. Rename puts the text field there.
 """
 file_menu!(e, w, path; at=:sidebar, items=file_menu(path)) = begin
   act(i) = file_act!(e, path, get(items, i, ""); at)
-  # A new file that isn't saved yet isn't on the disk, so the Finder can't show it, and there's nothing to copy or to open
-  off = ispath(path) ? Int[] : findall(in(("Open in New Window", "Duplicate", "Show in Finder")), items)
+  # A new file that isn't saved yet isn't on the disk, so the Finder can't show it, and there's nothing to copy, to open or to ignore
+  off = ispath(path) ? Int[] : findall(in(("Open in New Window", "Duplicate", "Show in Finder", "Ignore")), items)
   system_menu(w, items, act; off) || drawn_menu!(w, items, act; off)
   nothing
 end
@@ -34192,6 +34244,8 @@ file_act!(e, path, name; at=:sidebar) =
   name == "Show in Finder" ? show_in_finder(path) :
   name == "Add to Favourites" ? Folders.favourite!(path) :
   name == "Remove from Favourites" ? Folders.unfavourite!(path) :
+  name == "Ignore" ? ignore!(e, path) :
+  name == "Stop Ignoring" ? ignore!(e, path, false) :
   name == "Move to Trash" ? trash!(e, path) : nothing
 
 "Open a Finder window on the folder of the file at `path`, with the file selected"
@@ -50333,16 +50387,21 @@ wallpaper_key() = begin
   key
 end
 
-"The folders and files of the desktop `v` that have an icon: the ones that the Finder shows, and the hidden ones too when the sidebar shows those"
+"""
+The folders and files of the desktop `v` that have an icon: the ones that the
+Finder shows, apart from those that you ignore, and the hidden and ignored ones
+too when the sidebar shows those
+"""
 desktop_names(e, v::DesktopView) = begin
   found = try readdir(v.path) catch; String[] end
-  shows(n) = n != ".DS_Store" && (e.hidden || !Desks.facts(joinpath(v.path, n)).hidden)
+  ignored = Folders.ignored()
+  shows(n) = n != ".DS_Store" && (e.hidden || !(Desks.facts(joinpath(v.path, n)).hidden || Folders.isignored(joinpath(v.path, n), ignored)))
   String[n for n in found if shows(n) && ispath(joinpath(v.path, n))]
 end
 
 "Read the folder of the desktop `v` again, a second after it was last read. An icon whose file left is no longer chosen, and its place is forgotten."
 desktop_read!(e, v::DesktopView) = begin
-  time() - v.read < 1 && return
+  time() - v.read < 1 && v.read > Folders.changed() && return
   v.read = time()
   v.names = desktop_names(e, v)
   intersect!(v.chosen, v.names)
@@ -53409,7 +53468,7 @@ const FULL_ACCESS_SETTINGS = "x-apple.systempreferences:com.apple.preference.sec
 
 "Read the folder of the list `v` again, a second after it was last read"
 filelist_read!(e, v::FileList) = begin
-  time() - v.read < 1 && return
+  time() - v.read < 1 && v.read > Folders.changed() && return
   v.read = time()
   names = try
     v.problem = ""
@@ -53419,8 +53478,9 @@ filelist_read!(e, v::FileList) = begin
                           "Ladder can't read this folder."
     String[]
   end
-  # The Trash shows all that's in it. Any other folder leaves its hidden files out, as the sidebar does.
-  shows(n) = n != ".DS_Store" && n != ".localized" && (v.trash || e.hidden || !ishidden(n))
+  # The Trash shows all that's in it. Any other folder leaves its hidden files out, and the ones that you ignore, as the sidebar does.
+  ignored = Folders.ignored()
+  shows(n) = n != ".DS_Store" && n != ".localized" && (v.trash || e.hidden || !left_out(joinpath(v.path, n), ignored))
   items = [filelist_fact(joinpath(v.path, n)) for n in names if shows(n)]
   sort!(items, by=it -> -it.when, alg=MergeSort)
   v.origins = v.trash ? Mac.origins(v.path, disk=TRASH_DISK[]) : Dict{String,Mac.Origin}()
@@ -53727,7 +53787,7 @@ const TILES_KEPT = 400       # how many small pictures stay in memory
 
 "Read the folder of the grid `v` again, 2 seconds after it was last read"
 tiles_read!(e, v::TilesView) = begin
-  time() - v.read < 2 && return
+  time() - v.read < 2 && v.read > Folders.changed() && return
   v.read = time()
   names = try
     v.problem = ""
@@ -53737,8 +53797,9 @@ tiles_read!(e, v::TilesView) = begin
     String[]
   end
   tiles = Tile[]
+  ignored = Folders.ignored()
   for n in names
-    (n == ".DS_Store" || n == ".localized" || (!e.hidden && ishidden(n))) && continue
+    (n == ".DS_Store" || n == ".localized" || (!e.hidden && left_out(joinpath(v.path, n), ignored))) && continue
     path = joinpath(v.path, n)
     st = try stat(path) catch; continue end
     ext = lowercase(splitext(n)[2])
@@ -54266,7 +54327,7 @@ It also adds up what the whole folder holds, as the Finder does, with the
 hidden folders and files that the table leaves out.
 """
 folder_items!(e, t::FolderTable) = begin
-  time() - t.read < 1 && t.hidden == e.hidden && return t.items
+  time() - t.read < 1 && t.hidden == e.hidden && t.read > Folders.changed() && return t.items
   t.read, t.hidden = time(), e.hidden
   d = try object(e, t.path) catch; nothing end
   found = d isa AbstractDirectory ? entries(e, d) : FSObject[]
@@ -54639,7 +54700,7 @@ folder_item_row(t::FolderTable, e, it::FolderItem) = begin
   page_row!(t, (:item, it.path), _ -> (open_folder!(e, it.path); nothing),
     Box(width(FOLDER_ICON_W), Icon(entry_icon(o), size=14px, color=colours.dim)),
     Row(width(grow=grow), height(grow=grow), clip=true, child_gap=8px,
-      Box(label(name, 13px, color=ishidden(name) ? colours.dim : colours.ink)), entry_marks(e, o)...),
+      Box(label(name, 13px, color=ishidden(name) || ignored_shown(e, it.path) ? colours.dim : colours.ink)), entry_marks(e, o)...),
     # Each at the right of its column, under its heading. A Box of their own keeps the words from filling the column.
     Box(fixed(FOLDER_COL_W), Alignment.End, Box(label(size_cell(it), 12px, color=colours.faint))),
     Box(fixed(FOLDER_COL_W), Alignment.End, Box(label(!it.known ? "Reading…" : it.when > 0 ? Git.ago(it.when) : "", 12px, color=colours.faint))))

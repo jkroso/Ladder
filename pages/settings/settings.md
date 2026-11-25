@@ -121,6 +121,18 @@ app == "Ladder" ? say("Ladder opens the Markdown files on this Mac.") :
 
 The default app is the one that opens a Markdown file when you double-click it in the Finder. macOS asks you to confirm the change.
 
+## Ignored files
+
+```ui
+say(text) = Text(text, size=page_text_size() * 1px)
+paths = ignored_files()
+isempty(paths) ? say("You don't ignore any files or folders.") :
+  Column(Alignment.Start, child_gap=8px,
+         [Row(Alignment.Center, child_gap=12px, say(Base.Filesystem.contractuser(p)), Button(label="Stop Ignoring", onclick=button -> stop_ignoring!(p))) for p in paths]...)
+```
+
+To ignore a file or a folder that you never look at, right-click it in the sidebar and choose Ignore. Ladder then leaves it out, as it leaves out the files whose names start with a dot. The sidebar, the folder pages and the searches don't show it. Ladder doesn't change the file, so the Finder still shows it. To see the files that you ignore, press ⌘⇧. as you do for hidden files.
+
 ## Updates
 
 ```ui

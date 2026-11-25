@@ -18,6 +18,7 @@
 # whose pages are the same reads only the folder's list.
 
 @use "github.com/jkroso/Prospects.jl" @def
+@use "./folders" => Folders
 
 "The endings of the files that are pages"
 const PAGES = (".md", ".markdown", ".mdx")
@@ -81,10 +82,11 @@ end
 "What each page links to, by its path, with when its file had changed. A page is read again when its file changes."
 const READ = Dict{String,Tuple{Float64,Vector{String}}}()
 
-"The files of the pages under `root`, the ones nearest the top first. Hidden folders and `node_modules` are left out."
+"The files of the pages under `root`, the ones nearest the top first. Hidden folders, the ones that you ignore and `node_modules` are left out."
 pages(root::AbstractString) = begin
   found = String[]
   level = [String(root)]
+  ignored = Folders.ignored()
   while !isempty(level) && length(found) < MOST
     deeper = String[]
     for dir in level
@@ -92,6 +94,7 @@ pages(root::AbstractString) = begin
       for name in names
         startswith(name, '.') && continue
         path = joinpath(dir, name)
+        Folders.isignored(path, ignored) && continue
         if isdir(path)
           name == "node_modules" || push!(deeper, path)
         elseif ispage(name)
