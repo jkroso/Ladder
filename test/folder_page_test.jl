@@ -64,8 +64,11 @@ e.panel || K.toggle_panel!(e)
 kind(path) = nameof(typeof(K.object(e, path)))
 "The name of the icon of the folder or file `name` in the sidebar's folder"
 icon(name) = K.entry_icon(K.object(e, joinpath(e.folder, name)))
-"What the window says under its top bar about a folder's page that stopped, or \"\""
-said() = any(p -> p.key == :folder_page, popups(w)) ? K.FOLDER_PAGE_STOPPED[][1] : ""
+"What the window's toast about the page of the notes says, its title and then why, or \"\" when it shows none"
+said() = begin
+  i = findfirst(it -> it.key == notes, K.TOASTS)
+  i === nothing || !any(p -> p.key == :toasts, popups(w)) ? "" : K.TOASTS[i].title * ". " * K.TOASTS[i].words
+end
 
 @testset "a folder's page runs after Ladder first meets the folder, and gives the folder its kind" begin
   # The sidebar listed the folder, and its page waits for the frame
@@ -91,7 +94,7 @@ end
   @test RUNS[] == 2 && icon("notes") == "archive" && typeof(K.object(e, notes)) !== was
 end
 
-@testset "code that fails leaves the folder plain, and the window says which line failed" begin
+@testset "code that fails leaves the folder plain, and a toast says which line failed" begin
   page!(notes, "Notes.\n\n```julia\nconst before = 1\nnothing_called_this()\n```\n")
   K.list_files!(e); frames()
   @test kind(notes) == :Directory && icon("notes") == "folder"
@@ -100,16 +103,17 @@ end
   page!(notes, "```julia\n1 + 1\n```\n")
   K.list_files!(e); frames()
   @test kind(notes) == :Directory && occursin("gave 2, which isn't a kind of folder", said())
-  # The words go after a while
+  # The toast stays after a while, since it can say so before the window opens or while you look elsewhere
   K.FOLDER_PAGE_STOPPED[] = (K.FOLDER_PAGE_STOPPED[][1], time() - K.STARTUP_SHOWS - 1)
   frames()
-  @test said() == ""
+  @test occursin("gave 2", said())
 end
 
 @testset "a page with no code, and a folder that loses its page, are plain" begin
   page!(notes, notes_page("box"))
   K.list_files!(e); frames()
-  @test kind(notes) == :NotesDirectory
+  # A page that runs with nothing wrong takes its toast away
+  @test kind(notes) == :NotesDirectory && said() == "" && !any(it -> it.key == notes, K.TOASTS)
   page!(notes, "Only words.\n")
   K.list_files!(e); frames()
   @test kind(notes) == :Directory && said() == ""
@@ -119,6 +123,13 @@ end
   rm(joinpath(notes, ".ladder"))
   K.list_files!(e); frames()
   @test kind(notes) == :Directory && icon("notes") == "folder" && !haskey(K.FOLDER_PAGE_KINDS, notes)
+  # A folder whose page failed and then went loses the page's toast
+  page!(notes, "```julia\nnothing_called_this()\n```\n")
+  K.list_files!(e); frames()
+  @test occursin("nothing_called_this", said())
+  rm(joinpath(notes, ".ladder"))
+  K.list_files!(e); frames()
+  @test said() == "" && !any(it -> it.key == notes, K.TOASTS)
 end
 
 @testset "a link to a folder runs the folder's page first, and does what the kind says" begin

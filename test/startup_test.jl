@@ -1,6 +1,6 @@
 # Tests for the startup page of main.jl: the page that Ladder writes the first
-# time, the Julia code of the page that runs when Ladder starts, and what the
-# window says when that code fails. Run them with
+# time, the Julia code of the page that runs when Ladder starts, and the toast
+# that says when that code fails. Run them with
 # `julia -O0 --project=. test/startup_test.jl`. The page is in a folder of the
 # test's own, not in the folder of the settings, and the window isn't on the
 # screen.
@@ -8,9 +8,20 @@
 @use Test: @test, @testset
 @use "../main" => K
 K.RUN_WAIT[] = Inf   # the code runs in a thread of its own, and each result is there when the key's handler ends
-@use "github.com/jkroso/MiniFB.jl" Window
-@use "github.com/jkroso/UI.jl/Interface/draw" frame popups
+@use "github.com/jkroso/MiniFB.jl" Window KeyPress KeyRelease MouseMove Keys onkey onmouse
+@use "github.com/jkroso/UI.jl/Interface/draw" frame popups rect
+@use GeometryBasics: Vec2
 const px = K.px
+
+"A click of the window `w` on the middle of `node`"
+click!(w, node) = begin
+  r = rect(node)
+  x, y = r.left + r.width / 2, r.top + r.height / 2
+  w.mouse = typeof(w.mouse)(x, y)
+  onmouse(w, MouseMove(Vec2{px}(x, y), w)); frame(w)
+  w.keys |= Keys.mouse_left; onkey(w, KeyPress{Keys.mouse_left}(0, w)); frame(w)
+  w.keys ⊻= Keys.mouse_left; onkey(w, KeyRelease{Keys.mouse_left}(0, w)); frame(w); frame(w)
+end
 
 K.STARTUP_FOLDER[] = joinpath(mktempdir(), "startup")
 const page = K.startup_page()
@@ -83,7 +94,7 @@ end
   @test (K.run_startup!(joinpath(K.STARTUP_FOLDER[], "none.md")); K.STARTUP[][1] == "")
 end
 
-@testset "code that fails stops what's after it, and the window says which line failed" begin
+@testset "code that fails stops what's after it, and a toast says which line failed until it's closed" begin
   write(page, """
     # Home
 
@@ -105,19 +116,55 @@ end
   words, since = K.STARTUP[]
   @test isdefined(m, :before) && isdefined(m, :here) && !isdefined(m, :after) && !isdefined(m, :later)
   @test startswith(words, "Line 9 of startup.md: ") && occursin("nothing_called_this", words) && time() - since < 5
+  toast = only(K.TOASTS)
+  @test toast.key == :startup && toast.title == "The startup page stopped" && toast.words == words
   e = K.build_editor(page)
   w = Window(e, size=(900px, 700px))
+  shown() = any(p -> p.key == :toasts, popups(w))
   frame(w); frame(w)
-  @test any(p -> p.key == :startup, popups(w))
-  # The words go after a while, and don't come back
+  @test shown()
+  # It's at the bottom right of the window, as wide as a toast is
+  r = rect(K.node!(K.Toasts, e, :toasts))
+  @test r.width == K.TOAST_W && r.left + r.width == 900px - K.TOAST_EDGE && r.top + r.height == 700px - K.TOAST_EDGE
+  # It stays after the time that the words of a command show for, since it can fail before the window opens
   K.STARTUP[] = (words, since - K.STARTUP_SHOWS - 1)
   frame(w); frame(w)
-  @test !any(p -> p.key == :startup, popups(w))
-  # A start with nothing wrong says nothing
+  @test shown()
+  # A click on its × closes it, and it doesn't come back
+  click!(w, K.node!(K.Toasts, e, :toasts).closes[:startup])
+  @test isempty(K.TOASTS) && !shown()
+  frame(w); frame(w)
+  @test !shown()
+  # A start that fails again shows it again, and a start with nothing wrong takes it away
+  K.run_startup!()
+  frame(w); frame(w)
+  @test shown() && length(K.TOASTS) == 1
   write(page, "# Home\n")
   K.run_startup!()
   frame(w); frame(w)
-  @test !any(p -> p.key == :startup, popups(w))
+  @test isempty(K.TOASTS) && !shown()
+end
+
+@testset "a toast shows what Julia says of a file that doesn't parse, with the mark under the place that's wrong" begin
+  home = homedir()
+  words = """
+    Line 4 of startup.md: LoadError: ParseError:
+    # Error @ $home/x/view.jl:2:30
+    const S = (paid=(1, 2), quote=(3, 4))
+    #$(" "^28)╙ ── unexpected `=`
+    in expression starting at $home/x/view.jl:2"""
+  lines = K.toast_lines(words)
+  @test first.(lines) == ["Line 4 of startup.md: ParseError:", "# Error @ ~/x/view.jl:2:30", "const S = (paid=(1, 2), quote=(3, 4))",
+                          "#$(" "^28)╙ ── unexpected `=`"]
+  # Julia's words wrap, and the lines of code that it quotes don't
+  @test last.(lines) == [true, true, false, false]
+  # In a toast with room for 20 characters, the lines of code start further in, and the mark stays under the =
+  narrow = K.toast_lines(words, 20)
+  code, mark = narrow[3][1], narrow[4][1]
+  @test startswith(code, "…") && startswith(mark, "…") && narrow[1:2] == lines[1:2]
+  @test code[nextind(code, 0, length(mark, 1, findfirst('╙', mark)))] == '='
+  # A page's module is named for the page, without the ⭒ that the font of code doesn't have
+  @test K.toast_lines("UndefVarError: `f` not defined in `⭒$home/n/.ladder`") == [("UndefVarError: `f` not defined in `~/n/.ladder`", true)]
 end
 
 @testset "code of the page that runs in the window runs where Ladder ran it, with the name Ladder" begin

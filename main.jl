@@ -50299,8 +50299,8 @@ end
 # starts, and the folder is the same kind of folder on each Mac that opens it.
 #
 # A page that's saved again runs again, in a new module, and a folder that
-# loses its page is plain. Code that fails leaves the folder plain, and the
-# window says which line of the page failed, under its top bar. A kind that
+# loses its page is plain. Code that fails leaves the folder plain, and a
+# toast says which line of the page failed: see "toasts". A kind that
 # code gave the folder by its path, in `FS.kinds`, comes before the page's. A
 # folder of a kind doesn't ask the pages of the folders in it: the kind says
 # what they are, with its method of `FS.kind`.
@@ -50341,8 +50341,8 @@ page_kind(path::AbstractString) = begin
   st = try stat(joinpath(path, FOLDER_PAGE)) catch; nothing end
   kept = get(FOLDER_PAGE_KINDS, path, nothing)
   if st === nothing || !isfile(st)
-    # The folder lost its page, so it's plain from now on
-    kept === nothing || (delete!(FOLDER_PAGE_KINDS, path); FOLDER_PAGES_RAN[] += 1)
+    # The folder lost its page, so it's plain from now on, and a toast about the page goes
+    kept === nothing || (delete!(FOLDER_PAGE_KINDS, path); FOLDER_PAGES_RAN[] += 1; untoast!(path))
     return nothing
   end
   if (kept === nothing || kept[1] != mtime(st)) && !(path in FOLDER_PAGES_DUE)
@@ -50384,9 +50384,11 @@ run_folder_pages!() = begin
       value = Base.invokelatest(page_value, code_module!(file), file)
       value === nothing || (value isa Type && value <: AbstractDirectory) ||
         error("The last `julia` block of the page gave $(Base.invokelatest(repr, value)), which isn't a kind of folder.")
+      untoast!(path)
       value
     catch err
       FOLDER_PAGE_STOPPED[] = ("The $FOLDER_PAGE page of $(basename(path)) stopped. " * trouble(err), time())
+      toast!(path, "The $FOLDER_PAGE page of $(basename(path)) stopped", trouble(err))
       nothing
     end
     FOLDER_PAGE_KINDS[path] = (at, kind)
@@ -50633,9 +50635,11 @@ run_web_folder_pages!() = begin
       value = Base.invokelatest(page_value, code_module!(address), address, p.lines)
       value === nothing || (value isa Type && value <: AbstractDirectory) ||
         error("The last `julia` block of the page gave $(Base.invokelatest(repr, value)), which isn't a kind of folder.")
+      untoast!(f)
       value
     catch err
       FOLDER_PAGE_STOPPED[] = ("The $FOLDER_PAGE page of $(Remote.label(f)) stopped. " * trouble(err), time())
+      toast!(f, "The $FOLDER_PAGE page of $(Remote.label(f)) stopped", trouble(err))
       nothing
     end
     p.ran = true
@@ -57825,7 +57829,8 @@ NewsDirectory in OWN_KINDS || push!(OWN_KINDS, NewsDirectory)
 # it, when you run it: see "ask for a change to a thing".
 #
 # Code that fails stops the code after it, and Ladder opens all the same. The
-# window then says which line of the page failed, under its top bar.
+# window then says which line of the page failed, in a toast that stays until
+# you close it: see "toasts".
 
 "A folder for the startup page that isn't the folder of the settings. A test names a folder of its own here."
 const STARTUP_FOLDER = Ref("")
@@ -57864,7 +57869,7 @@ end
 
 "What failed in the code of the startup page when Ladder started, or \"\", and when Ladder started"
 const STARTUP = Ref(("", 0.0))
-const STARTUP_SHOWS = 12.0   # seconds that the window says what failed
+const STARTUP_SHOWS = 12.0   # seconds that the window says what a command of the page gave back
 
 """
 A new module for the code of the startup page, or of a folder's page, at
@@ -57905,6 +57910,9 @@ run_startup!(path=startup_page()) = begin
   catch err
     (trouble(err), time())
   end
+  # A window says so with a toast, which stays until it's closed: the code runs before the first window opens
+  words = STARTUP[][1]
+  isempty(words) ? untoast!(:startup) : toast!(:startup, "The startup page stopped", words)
   m
 end
 
@@ -57946,13 +57954,8 @@ end
 "Say what a command of the page gave back, under the top bar, for a while"
 result_tick!(e) = (r = get(e.nodes, :result, nothing); r === nothing || stopped_tick!(e, :result, r...))
 
-"Say what failed in the code of the startup page, under the top bar, for a while after Ladder starts. A folder's page that failed is said the same way."
-startup_tick!(e) = begin
-  words, since = STARTUP[]
-  stopped_tick!(e, :startup, isempty(words) ? "" : "The startup page stopped. " * words, since)
-  stopped_tick!(e, :folder_page, FOLDER_PAGE_STOPPED[]...)
-  result_tick!(e)
-end
+"Show the toasts that say what failed in the code of the startup page or of a folder's page, and what a command of the page gave back"
+startup_tick!(e) = (toasts_tick!(e); result_tick!(e))
 
 "Say `words` under the top bar for a while after the time `since`. `key` names what failed, and \"\" says nothing."
 stopped_tick!(e, key::Symbol, words, since) = begin
@@ -57970,6 +57973,132 @@ stopped_tick!(e, key::Symbol, words, since) = begin
            anchor=spot, placement=:bottom, gap=6px, key=key, input=false)
     redraw_in!(e, left)
   end
+  nothing
+end
+
+# --- toasts ---------------------------------------------------------------------------
+#
+# Code that Ladder runs by itself, the startup page's and a folder's own page's,
+# has no window of its own to say that it failed in, and it can fail before a
+# window opens. So each window says so with a toast: a card at its bottom
+# right, in the colours of the toast that Centient shows for an error. It says
+# what stopped and why, as Julia says it.
+#
+# A toast stays until you close it with its ×, or until the same page runs
+# again with nothing wrong. Every window shows the same toasts, so a toast
+# that's closed in one window is closed in all of them.
+
+"The toasts that each window shows, the oldest first: what each is about (`key`), what stopped (`title`) and why (`words`)"
+const TOASTS = NamedTuple{(:key, :title, :words),Tuple{Any,String,String}}[]
+
+"How wide a toast is: wider than Centient's, which are 360px, so that a line of code that Julia quotes fits"
+const TOAST_W = 480px
+"How far a toast is from the window's right and bottom edges"
+const TOAST_EDGE = 16px
+"The most lines of what went wrong that a toast shows"
+const TOAST_LINES = 8
+"The colours of a toast for an error on a light page and on a dark one, which are Centient's"
+const TOAST_LIGHT = (bg=colorant"#fee2e2", line=colorant"#dc2626", ink=colorant"#991b1b", hover=RGBA(0.6, 0.106, 0.106, 0.1))
+const TOAST_DARK = (bg=colorant"#341a1d", line=colorant"#f87171", ink=colorant"#fca5a5", hover=RGBA(0.988, 0.647, 0.647, 0.12))
+
+"Show a toast in each window that says `title`, and why in `words`. It takes the place of the toast about the same `key`."
+toast!(key, title::AbstractString, words::AbstractString) = begin
+  filter!(it -> it.key != key, TOASTS)
+  push!(TOASTS, (key=key, title=String(title), words=String(words)))
+  foreach(e -> redraw_in!(e, 0), editors)
+  nothing
+end
+
+"Close the toast about `key` in every window, if there's one"
+untoast!(key) = begin
+  any(it -> it.key == key, TOASTS) || return nothing
+  filter!(it -> it.key != key, TOASTS)
+  foreach(e -> redraw_in!(e, 0), editors)
+  nothing
+end
+
+"The toasts of a window, a card for each, one over the other at the bottom right"
+@def mutable struct Toasts <: SemanticUI
+  closes::Dict{Any,Any} = Dict{Any,Any}()   # the × of each toast, by its key
+end
+
+"The × of the toast about `key`, which closes it"
+@def mutable struct ToastClose <: SemanticUI
+  key::Any = nothing
+end
+
+"The colours of a toast on the page that shows"
+toast_colours() = dark_page() ? TOAST_DARK : TOAST_LIGHT
+
+"""
+The lines that a toast shows of what went wrong, each with whether it wraps:
+as many as fit, and … for the rest. A file in the home folder starts with ~,
+and the words that say only where Julia was, `LoadError:` and `in expression
+starting at`, go, as does the ⭒ of the name of a page's module, which the font
+of code doesn't have. The lines of code that Julia quotes after `# Error @` don't
+wrap, so that the mark under the place that's wrong stays under it. When the
+mark is further in than `room` characters, each of those lines starts further
+in, after …, so that the place shows.
+"""
+toast_lines(words, room=typemax(Int)) = begin
+  out = Tuple{String,Bool}[]
+  code = false
+  for line in split(rstrip(replace(words, homedir() => "~", "LoadError: " => "", "⭒" => "")), '\n')
+    startswith(line, "in expression starting at") && continue
+    push!(out, (String(rstrip(line)), !code || startswith(line, "# Error @")))
+    startswith(line, "# Error @") ? (code = true) : (code && startswith(line, '#') && (code = false))
+  end
+  mark = findfirst(((s, wraps),) -> !wraps && startswith(s, '#') && '╙' in s, out)
+  if mark !== nothing
+    at = length(out[mark][1], 1, findfirst('╙', out[mark][1]))
+    if at > room - 8
+      cut = at - room ÷ 2
+      out = [wraps ? (s, wraps) : (length(s) > cut ? "…" * s[nextind(s, 0, cut + 1):end] : "", wraps) for (s, wraps) in out]
+    end
+  end
+  length(out) > TOAST_LINES ? [first(out, TOAST_LINES); ("…", true)] : out
+end
+
+describe(t::Toasts) = begin
+  c = toast_colours()
+  filter!(((key, _),) -> any(it -> it.key == key, TOASTS), t.closes)
+  cards = map(TOASTS) do it
+    x = get!(() -> own!(t, ToastClose(key=it.key)), t.closes, it.key)
+    face = Face(codefont(), codestyle(), 12px, c.ink, false)
+    room = floor(Int, num(TOAST_W - 24px) / num(measure(face, "0")))   # how many characters of code fit across the toast
+    lines = [Box(width(grow=grow), Alignment.Start, Text(line, size=12px, family=codefont(), subfamily=codestyle(), color=c.ink,
+                                                         wrap=wraps ? WrapMode.words : WrapMode.none))
+             for (line, wraps) in toast_lines(it.words, room)]
+    Box(width(TOAST_W), padding(14px, 12px, 12px, 12px), radius(12px), border(1px, :solid, c.line), background(c.bg), lifted,
+      Column(width(grow=grow), Alignment.Start, child_gap=6px,
+        # A Box of its own keeps the title from taking half of the row
+        Row(width(grow=grow), Alignment.Center, child_gap=8px, Box(width(grow=grow), Alignment.Start, omni_label(it.title, 15, c.ink, weight="SemiBold")), x),
+        # A line that's too long for the toast goes past its right edge, out of sight
+        Box(width(grow=grow), Alignment.Start, clip_x=true, Column(width(grow=grow), Alignment.Start, child_gap=6px, lines...))))
+  end
+  Column(width(grow=grow), Alignment.End, child_gap=8px, name="Toasts", cards...)
+end
+
+describe(x::ToastClose) = (c = toast_colours();
+  Box(fixed(20px), radius(10px), Alignment.Center, background(ishovered(x) ? c.hover : clear), Icon("x-lg", size=12px, color=c.ink)))
+cursor(::ToastClose) = :hand
+onmouse(::ToastClose, ::MouseMove) = handled
+onkey(x::ToastClose, ::KeyPress{Keys.mouse_left}) = (untoast!(x.key); handled)
+
+"""
+Show the toasts at the bottom right of the window of `e`, or none when there
+are none. While the palette of commands shows, they're over its bar.
+"""
+toasts_tick!(e) = begin
+  win = window_of(e)
+  win === nothing && return
+  isempty(TOASTS) && return close_popup!(win, :toasts)
+  wide, high = window_size(e)
+  bottom = high - TOAST_EDGE
+  e.popup == :commands && (bottom = min(bottom, px(palette_plan(e, palette(e)).band.y) - TOAST_EDGE))
+  t = node!(Toasts, e, :toasts)
+  # Under the toasts the mouse is theirs, and anywhere else it's the window's: a click elsewhere leaves them
+  popup!(win, t, anchor=(wide - TOAST_EDGE - TOAST_W, bottom, TOAST_W, 0px), placement=:top, width=TOAST_W, key=:toasts, modal=false)
   nothing
 end
 

@@ -1337,6 +1337,8 @@ The title and the section are what make the file an article, and the section is 
 
 You can write the file `.ladder` yourself too. It ends with a block like the one for a desktop, with `Ladder.NotesDirectory`, `Ladder.BlogDirectory`, `Ladder.DownloadsDirectory`, `Ladder.PicturesDirectory`, `Ladder.ScreenshotsDirectory` or `Ladder.NewsDirectory`. Show Folder As leaves a file that you wrote as it is.
 
+If the code of a `.ladder` page, or of your [startup page](settings/startup.md), stops with an error, a red toast at the bottom right of the window says which line stopped and why. The toast stays until you click its ×, or until the page runs again with nothing wrong.
+
 A zip file shows what it holds, without being unpacked: its folders and files, each file with its size and when it changed. Click a folder to open it, and click a file to see that one file. Ladder doesn't change a file that it shows from a zip file. Click Unpack to unpack the whole file beside itself, as two clicks in the Finder do.
 
 A SolidCraft design, a file whose name ends in `.sc`, opens in an editor of its own: see [SolidCraft designs](#solidcraft-designs).
