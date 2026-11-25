@@ -12489,7 +12489,8 @@ end
 """
 True when the chart `v` shows its three buttons: while the mouse is on the
 chart, or one of their lists is open. At other times its bar shows only its
-title, so the title has the whole bar.
+title, so the title has the whole bar. A chart with no title has no bar at
+those times.
 """
 chart_buttons_shown(v::ChartView) = ishovered(v) || chart_list_open(v)
 
@@ -12501,12 +12502,16 @@ describe(v::ChartView) = begin
     # would clip the tails of letters like p and y, which hang under the text's box.
     title = isempty(v.spec.title) ? () : (Row(width(grow=grow), height(grow=grow), padding(6px, 0px), Alignment.Center, clip=true,
                                               Box(label(v.spec.title, 13px, weight="Semibold"))),)
-    bar = chart_buttons_shown(v) ?
+    buttons = chart_buttons_shown(v)
+    bar = buttons ?
       block_bar(chart_menu_button(v, :kind), Box(width(4px)), source_button(v), Box(width(4px)), chart_menu_button(v, :columns),
                 (isempty(title) ? () : (rule(), title...))...) :
       block_bar(title...)
-    Column(block_look()..., clip=true, name="Chart", bar, (v.sourcing ? from_picker_section(v) : ())...,
-           isempty(d.problem) ? block_part!(() -> PlotArea(of=v), v, :area) : block_note(d.problem))
+    plot = isempty(d.problem) ? block_part!(() -> PlotArea(of=v), v, :area) : block_note(d.problem)
+    # A chart with no title has no room kept for its bar. The buttons lie over the top of the chart while the mouse is on it.
+    # The list of tables and files goes under the bar, so while it's open the bar has its own room.
+    isempty(title) && !v.sourcing && return Stack(block_look()..., clip=true, name="Chart", plot, (buttons ? (bar,) : ())...)
+    Column(block_look()..., clip=true, name="Chart", bar, (v.sourcing ? from_picker_section(v) : ())..., plot)
   end
 end
 

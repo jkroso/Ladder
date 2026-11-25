@@ -267,11 +267,14 @@ end
   onkey(w, KeyPress{Keys.escape}(0, w)); frames()
   at(off); frames()
   @test rect(v.parts[:kind]) === nothing
-  # A chart with no title keeps its bar while the mouse is off it, so the page doesn't move when the mouse comes
+  # A chart with no title keeps no room for its bar. The buttons lie over the top of the chart while the mouse is on it,
+  # so the page doesn't move when the mouse comes
   K.write_block!(v, K.CHART, String[]); frames()
-  top = rect(v.parts[:area]).top
-  @test rect(v.parts[:kind]) === nothing
+  top, tall = rect(v.parts[:area]).top, rect(v).height
+  @test rect(v.parts[:kind]) === nothing && top - rect(v).top < 5px
   at(on); frames()
-  @test rect(v.parts[:kind]) !== nothing && rect(v.parts[:area]).top == top
+  @test rect(v.parts[:kind]) !== nothing && rect(v.parts[:area]).top == top && rect(v).height == tall
+  @test rect(v.parts[:kind]).top < top + 38px
+  shot("no-title.png")
   K.write_block!(v, K.CHART, ["title: Sales and costs"]); frames()
 end
