@@ -672,7 +672,7 @@ end
     ```
     """)
   url = "$site/a/model.jl"
-  page!(url, "view(sums) = \"n is \$(round(Int, sums[\"n\"]))\"\n"; type="text/plain")
+  page!(url, "twice(n) = 2n\n"; type="text/plain")
   views() = [it.content.node for it in e.layout if it.content isa K.Live && it.content.node isa K.ViewBlock]
   K.site_runs!(site, true)
   try
@@ -682,7 +682,8 @@ end
     # The copy has the file's own name, and it's marked as a copy of the file at its address
     @test v.target == K.VIEW_COPIES[url] && v.target == joinpath(dir, "Browser", "views.example.com", "a", "model.jl")
     @test read(v.target, String) == SITE[url].text && K.copied_from(v.target) == url
-    @test K.view_made(v) && v.made.value == "n is 6"
+    # A Julia file in a view shows its code
+    @test v.crumb !== nothing && v.crumb.at == v.target
     # A file that the server hasn't got says so in its block
     @test K.view_coming(e, "$site/a/gone.jl", gone.target) == "views.example.com has no gone.jl."
     shot("remote_view.png")

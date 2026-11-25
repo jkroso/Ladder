@@ -1,16 +1,16 @@
-# A view that code makes. A `view` block that names this file shows a wall as
-# a 3D model, as long and as high as the sums of its page say:
+# A model that code makes. A `result` block that names this file shows a wall
+# as a 3D model, as long and as high as the sums of its page say:
 #
-#     ```view
+#     ```result
 #     wall.jl
 #     ```
 #
-# Ladder calls the function `view` with the page's sums, and again each time
-# they change, as while you drag a number. Each sum that gives a name is there
-# under that name, as a number in SI units. So a page with !`l = 16m` gives
-# `sums["l"] == 16.0`. What `view` gives back here is the bytes of a .glb
-# file, the kind of file that holds a 3D model with its colours. Ladder shows
-# them in its model viewer. See welcome.md.
+# The file gets the names that the page's sums give, with their units. So a
+# page with !`l = 16m` and !`h = 2.4m` gives it `l`, which is 16m, and `h`.
+# The block shows what the last line comes to. Here that's the bytes of a .glb
+# file, the kind of file that holds a 3D model with its colours, and Ladder
+# shows them in its model viewer. It runs the file again each time the sums
+# change, as while you drag a number. See welcome.md.
 
 "The corners of the triangles of a box from the corner `lo` to the corner `hi`, three for each triangle. Each triangle faces out."
 box(lo, hi) = begin
@@ -50,13 +50,19 @@ glb(parts) = begin
   take!(io)
 end
 
+"A length in metres: 2.4m and 2.4 are both 2.4"
+metres(x) = Float64(convert(Float64, x))
+
 """
-The model of a wall that's `sums["l"]` metres long and `sums["h"]` metres
-high, with a person 1.75 metres tall beside it, so that you can see how big it
-is. A model has y up.
+The model of a wall that's `long` long and `high` high, with a person 1.75
+metres tall beside it, so that you can see how big it is. A length has a unit,
+like 16m, or is a number of metres. A model has y up.
 """
-view(sums) = begin
-  long, high = clamp(Float64(get(sums, "l", 16.0)), 0.5, 500), clamp(Float64(get(sums, "h", 2.4)), 0.2, 100)
+wall(long, high) = begin
+  long, high = clamp(metres(long), 0.5, 500), clamp(metres(high), 0.2, 100)
   glb([(0.72, 0.36, 0.26) => box((0, 0, 0), (long, high, 0.2)),
        (0.2, 0.3, 0.5) => box((long / 2 - 0.2, 0, 0.9), (long / 2 + 0.2, 1.75, 1.15))])
 end
+
+# The wall of the page: l and h are its sums
+wall(l, h)

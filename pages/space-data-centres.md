@@ -132,7 +132,7 @@ satellite.sc
 aspect: 16:9
 ```
 
-```view
+```result
 satellite.jl
 aspect: 16:9
 ```

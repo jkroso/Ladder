@@ -571,7 +571,7 @@ What shows depends on the kind of file:
 - A SolidCraft design shows alone, without its editor: see [SolidCraft designs](#solidcraft-designs).
 - A terminal's file shows its last lines: see [Terminals](#terminals).
 - A folder shows its files and folders. Click one to go to it.
-- A Julia file with a function called `view` shows what that function makes: see [A view that code makes](#a-view-that-code-makes).
+- A Julia file shows its code. A `result` block shows what the code comes to: see [What code comes to](#what-code-comes-to).
 
 While the mouse is over the block, two buttons show beside its top right corner. The first makes what the block shows fill the window: a page, a model, a video, a picture or a PDF file. Your page is still the file that's open, and Esc puts it back. A view that would show no more that way, like a table or a folder, doesn't have this button. The second button goes to the file. The window shows the file, as it does when you click a link to it, and ⌘⌥← comes back to your page. A click on the block with ⌘ held does the same.
 
@@ -621,18 +621,26 @@ The scripts of the page can read the document's sums. `ladder.sums` has the valu
 
 A block in the language `web` is a `view` block too: `web` is the name that it had before.
 
-## A view that code makes
+## What code comes to
 
-A `view` block can name a Julia file that makes what the block shows. The file has a function called `view`. Ladder gives that function your page's sums, and shows what it makes. When the function gives the bytes of a .glb file, the block shows them as a 3D model. A node draws itself, and any other value shows as text.
+A `result` block shows what Julia code comes to. Write the code in the block, or the name of a Julia file beside your page:
 
-The sums come as they do to a web page's scripts. Each sum that gives a name is there under that name, as a number in SI units, so `sums["l"]` is 16.0 for a wall of 16m. Ladder calls the function again each time the sums change. So the model follows a number while you drag it, and it stays turned as you left it. This block follows the wall in "Sums in a line of text". The blue post beside the wall is as tall as a person.
-
-```view
+```result
 wall.jl
 aspect: 5:2
 ```
 
-The first button beside the block makes the model fill the window, where any scroll brings it nearer. The second goes to [wall.jl](wall.jl), which is about 60 lines of code. When you save a change to the file, the block shows what the new code makes. A slow function doesn't hold the window up: the block shows what the function made last until the new one comes.
+The code gets the names that your page's sums give, with their units. This block runs [wall.jl](wall.jl), about 60 lines of code. Its last line is `wall(l, h)`, where `l` is 16m and `h` is 2.4m, from the wall in "Sums in a line of text". The block shows what the last line comes to. Here that's the bytes of a .glb file, so the block shows a 3D model. A node draws itself, and any other value shows as text. The blue post beside the wall is as tall as a person.
+
+Ladder runs the code again each time the sums change. So the model follows a number while you drag it, and it stays turned as you left it. It runs again when you save the file, and when you run your page's code with ⌘Return. While you drag, Ladder doesn't make the file's functions again, so Julia doesn't compile them again. A slow file doesn't hold the window up: the block shows what the code came to last until the new value comes.
+
+A block can hold the code itself. That code runs with your page's code, so it can use the names that your `julia` blocks make too:
+
+```result
+l * h
+```
+
+The first button beside a model makes it fill the window, where any scroll brings it nearer. A block that names a file has a second button, which goes to the file. A line like `aspect: 5:2` sets the shape of the model, as it does in a `view` block.
 
 The page [space-data-centres.md](space-data-centres.md) shows its satellite this way too, from the file `satellite.jl` beside it, with the Sun and the Earth round it.
 

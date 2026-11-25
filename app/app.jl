@@ -178,7 +178,7 @@ check_pages(dir) = begin
     end
     isempty(problems) || error("A live block in $name failed: ", join(unique(problems), "\n"))
   end
-  # A view of a Julia file, like the welcome page's wall.jl, runs the file's code in a task, and the last task
+  # A `result` block, like the welcome page's wall, runs its code in a task, and the last task
   # stays in LAST_RUN. Julia can't write a task into the app, so the build failed with "Task cannot be serialized".
   run = LAST_RUN[]
   run === nothing || (try wait(run) catch end; LAST_RUN[] = nothing)

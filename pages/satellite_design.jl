@@ -3,14 +3,15 @@
 # The design is the file satellite.sc beside this one. It opens in SolidCraft,
 # and in Ladder's own editor of designs.
 #
-# In Ladder, a `view` block that names this file shows the design as a model:
+# In Ladder, a `result` block like this one shows the design as a model, with
+# the sizes that the page's sums give:
 #
-#     ```view
-#     satellite_design.jl
+#     ```result
+#     @use "./satellite_design" model page_numbers
+#     model(page_numbers(@__MODULE__))
 #     ```
 #
-# Ladder calls `view` with the page's sums. `view` gives the sizes to
-# SolidCraft's hidden program, which makes every part again, in a second or
+# `model` gives the sizes to SolidCraft's hidden program, which makes every part again, in a second or
 # two. Then it asks the program for the triangles of each part, and makes a
 # model of them with the materials, the Sun and the sky that satellite.jl has.
 #
@@ -34,7 +35,7 @@
 #
 # SolidCraft has z up and works in mm: the wings go along x, the cells face -y
 # and the radiator reaches along +y. A model has y up and metres.
-@use "./satellite" sizes satellite glb sky VIEW_SKY Shape CELL noise tinted dot cross unit FIRST LIMITS
+@use "./satellite" sizes satellite glb sky VIEW_SKY Shape CELL noise tinted dot cross unit FIRST LIMITS page_numbers
 @use "../cad/engine" => Engines
 @use "../cad/json" => JSON
 
@@ -511,22 +512,20 @@ made(s) = lock(BUSY) do
 end
 
 """
-The model of the satellite that the sums `sums` make, as the bytes of a .glb
-file. Ladder calls this for a `view` block that names this file, with the sums
-of the block's page: each name with its number in SI units.
+The model of the satellite that the numbers `given` make, as the bytes of a
+.glb file. `given` has a number in SI units for each name of the page's first
+numbers that it has, as `page_numbers` gives them. With none, the satellite
+has the page's first numbers.
 """
-view(sums) = (s = sizes(sums); glb(made(s), sky(s.alt, VIEW_SKY)))
-
-"The model at the page's first numbers"
-view() = view(Dict{String,Any}())
+model(given=Dict{String,Any}()) = (s = sizes(given); glb(made(s), sky(s.alt, VIEW_SKY)))
 
 if abspath(PROGRAM_FILE) == @__FILE__
   n = build()
   println("Built $(relpath(DESIGN)): $n bodies")
   if !isempty(ARGS)
-    model = made(sizes())
-    write(ARGS[1], view())
-    println("Wrote $(ARGS[1]): $(sum(length(s.corners) ÷ 3 for (_, shapes) in model for (_, s) in shapes)) triangles, $(filesize(ARGS[1]) ÷ 1000) KB")
+    parts = made(sizes())
+    write(ARGS[1], model())
+    println("Wrote $(ARGS[1]): $(sum(length(s.corners) ÷ 3 for (_, shapes) in parts for (_, s) in shapes)) triangles, $(filesize(ARGS[1]) ÷ 1000) KB")
     shut!()
   end
 end

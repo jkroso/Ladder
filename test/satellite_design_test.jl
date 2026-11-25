@@ -122,18 +122,18 @@ if Engines.available()
     end
   end
 
-  @testset "the view follows the page's sums" begin
+  @testset "the model follows the page's sums" begin
     D.shut!(); D.MADE[] = nothing
-    bytes = D.view(Dict{String,Any}())
+    bytes = D.model(Dict{String,Any}())
     @test bytes[1:4] == b"glTF" && D.OPEN[] !== nothing
     first_parts = D.MADE[][2]
     @test near(box(first_parts)[2][1:1], (35.06,), 0.02)
     # The same sums again ask SolidCraft for nothing
     asked = D.OPEN[][1].asked
-    D.view(Dict{String,Any}("span" => 70.0))
+    D.model(Dict{String,Any}("span" => 70.0))
     @test D.OPEN[][1].asked == asked && D.MADE[][2] === first_parts
     # A wider span makes each wing longer, and its cells less tall, since their area stays
-    D.view(Dict{String,Any}("span" => 100.0))
+    D.model(Dict{String,Any}("span" => 100.0))
     lo, hi = box(D.MADE[][2])
     @test D.MADE[][2] !== first_parts && near((hi[1],), (50.06,), 0.02)
     # A size that SolidCraft can't build gives the model of satellite.jl, and the next size works again

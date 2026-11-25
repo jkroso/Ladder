@@ -213,3 +213,38 @@ end
   frames()
   @test view(7).target == table && haskey(K.fills(e), objectid(view(7))) && view(7).crumb.text isa K.FileTable
 end
+
+@testset "a line `aspect:` sets the shape of a page and of a model" begin
+  @test K.aspect_of("16:9") ≈ 16 / 9 && K.aspect_of("16/9") ≈ 16 / 9 && K.aspect_of("2") == 2 && K.aspect_of("1.5") == 1.5
+  @test K.aspect_of("wide") == 0 && K.aspect_of("0:1") == 0 && K.aspect_of("2:0") == 0
+  # A setting is no name of a file, and a line of a page's HTML is no setting
+  @test K.view_parts(["model.glb", "aspect: 2:1"]) == (source=["model.glb"], settings=["aspect: 2:1"])
+  @test K.view_parts(["aspect: 3", "<p>", "aspect: 1", "</p>"]) == (source=["<p>", "aspect: 1", "</p>"], settings=["aspect: 3"])
+  cp(joinpath(K.pages_dir[], "satellite.glb"), joinpath(dir, "model.glb"))
+  write(joinpath(dir, "page.html"), "<p>A page</p>")
+  shapes = joinpath(dir, "shapes.md")
+  write(shapes, "```view\nmodel.glb\naspect: 2:1\n```\n\n```view\naspect: 16/9\nmodel.glb\n```\n\n```view\npage.html\naspect: 4\n```\n\n```view\nmodel.glb\n```\n")
+  e3 = K.build_editor(shapes)
+  w3 = Window(e3, size=(900px, 1600px))
+  foreach(_ -> frame(w3), 1:3)
+  v3(n) = e3.nodes[(:block, K.VIEW_BLOCK, shapes, n)]
+  wide, tall, html, plain = v3(1), v3(2), v3(3), v3(4)
+  @test wide.aspect == 2 && tall.aspect ≈ 16 / 9 && html.aspect == 4 && plain.aspect == 0
+  # The viewer's frame and the rounding to a whole pixel take up to 3 pixels from the shape
+  r = rect(wide.crumb.viewer)
+  @test abs(r.height - r.width / 2) <= 3px
+  r = rect(tall.crumb.viewer)
+  @test abs(r.height - r.width * 9 / 16) <= 3px
+  # A page is as tall as its shape says, whatever it shows
+  b = html.browser
+  @test b !== nothing && abs(b.high - b.wide / 4) <= 3px
+  # With no such line, a model is as tall as it always was
+  @test plain.crumb.viewer.height == K.MODEL_HEIGHT
+  # Take the line away, and the model is that tall again
+  i = findfirst(==("aspect: 2:1"), e3.buf.lines)
+  K.edit!(e3.buf, (i, 0), (i, length(e3.buf.lines[i])), "", typing=true)
+  # The caret leaves the block, so the page shows the view again and not its lines
+  e3.buf.caret = e3.buf.anchor = (length(e3.buf.lines), 0)
+  foreach(_ -> frame(w3), 1:3)
+  @test wide.aspect == 0 && wide.crumb.viewer.height == K.MODEL_HEIGHT
+end

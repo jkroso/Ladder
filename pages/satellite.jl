@@ -1,14 +1,15 @@
 # One satellite of the fleet on the page "Data centres in space", as a 3D model
 # with materials. Its sizes come from the page's sums.
 #
-# In Ladder, a `view` block that names this file shows the model:
+# In Ladder, a `result` block that names this file shows the model:
 #
-#     ```view
+#     ```result
 #     satellite.jl
 #     ```
 #
-# Ladder calls `view` with the page's sums, and again each time they change, as
-# while a number is dragged. So the model follows the page.
+# The file gets the names that the page's sums give, like `span`, and its last
+# line makes the model from them. Ladder runs the file again each time they
+# change, as while a number is dragged. So the model follows the page.
 #
 #     julia --project=. pages/satellite.jl
 #
@@ -678,18 +679,25 @@ glb(parts, sky) = begin
 end
 
 """
-The model of the satellite that the sums `sums` make, as the bytes of a .glb
-file. Ladder calls this for a `view` block that names this file, with the sums
-of the block's page: each name with its number in SI units. With no sums, the
-satellite has the page's first numbers.
+The model of the satellite that the numbers `given` make, as the bytes of a
+.glb file, with the sky `wide` pixels across. `given` has a number in SI units
+for each name of `FIRST` that it has, as `page_numbers` gives them. With none,
+the satellite has the page's first numbers.
 """
-view(sums) = (s = sizes(sums); glb(satellite(s), sky(s.alt, VIEW_SKY)))
+model(given=Dict{String,Any}(); wide=VIEW_SKY) = (s = sizes(given); glb(satellite(s), sky(s.alt, wide)))
 
-"The model at the page's first numbers, with the sky at its full size, as the file satellite.glb has it"
-view() = (s = sizes(); glb(satellite(s), sky(s.alt)))
+"""
+The numbers that the sums of the page give the module `m`, in SI units, by the
+names of `FIRST`: !`loop_d = 30mm` gives "loop_d" => 0.03. A name that the page
+doesn't give is left out, as they all are when this file runs by itself.
+"""
+page_numbers(m::Module=@__MODULE__) = Dict{String,Any}(String(n) => Float64(convert(Float64, getglobal(m, n))) for n in keys(FIRST) if isdefined(m, n))
 
 if abspath(PROGRAM_FILE) == @__FILE__
   path = joinpath(@__DIR__, "satellite.glb")
-  write(path, view())
+  write(path, model(wide=SKY_WIDE))
   println("Wrote $(relpath(path)): $(sum(length(s.corners) ÷ 3 for (_, shapes) in satellite(sizes()) for (_, s) in shapes)) triangles, $(filesize(path) ÷ 1000) KB")
 end
+
+# The satellite of the page, which a `result` block shows
+model(page_numbers())
