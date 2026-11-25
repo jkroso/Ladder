@@ -294,6 +294,15 @@ else
   holding(f, held...) = (was = w.keys; foreach(h -> w.keys |= h, held); try f() finally w.keys = was end)
   "Where the point `p` of the design shows in the window"
   shows(p) = V.shown_at(view(), p)
+  "The colour of the design's picture where the point `p` of the design shows: its red, green and blue"
+  seen(p) = begin
+    v = view()
+    at = shows(p)
+    dense = v.stage.wide / v.area[3]
+    x, y = round(Int, (at[1] - v.area[1]) * dense), round(Int, (at[2] - v.area[2]) * dense)
+    i = 4 * (y * v.stage.wide + x) + 1
+    (v.stage.pixels[i], v.stage.pixels[i+1], v.stage.pixels[i+2])
+  end
   frame(w)
   settle()
 
@@ -367,6 +376,117 @@ else
     key(Keys.z, Keys.cmd)
     settle()
     @test length(Models.timeline(v.model)) == 2 && length(v.model.shapes[1].flat) == 6
+  end
+
+  @testset "Measure shows what it measures at once, with a line between two things" begin
+    v = view()
+    m = v.model
+    undos = Models.undos(m)
+    V.start!(v, "inspect.measure")
+    frame(w)
+    @test v.form.spec.title == "Measure" && v.form.active == "items"
+    said() = Dict(V.measure_lines(v, V.measured(v).answer)[1])
+    # One face: its own sizes
+    click(shows((0.0, 0.0, 10.0)))                 # the top of the block, 40 by 20
+    settle()
+    @test said()["Area"] == "800 mm²" && said()["Perimeter"] == "120 mm"
+    # A second thing: what's between the two, and a line in the design from one to the other
+    click(shows((0.0, -10.0, 0.0)))                # the front's bottom edge
+    settle()
+    @test [p.kind for p in v.form.shows["items"]] == [:face, :edge]
+    @test V.count_words(v.form.spec.fields[1], v.form.shows["items"]) == "1 face, 1 edge"
+    @test said()["Closest"] == "10 mm" && said()["Along Z"] == "10 mm"
+    line = V.measure_line(V.measured(v).answer)
+    @test isapprox(line.gap, 10.0, atol=1e-6) && isapprox(abs(line.from[3] - line.to[3]), 10.0, atol=1e-6)
+    shot("design-measure.png")
+    # A third thing starts again with it alone
+    click(shows((0.0, -10.0, 5.0)))                # the front, 40 by 10
+    settle()
+    @test length(v.form.shows["items"]) == 1 && said()["Area"] == "400 mm²"
+    # A body's line in the browser puts the body in, and it's measured as a body
+    click(v.parts[((:field, "inspect.measure", "items"), :clear)])
+    @test isempty(v.form.shows["items"])
+    click(v.parts[(:body, m.shapes[1].name)])
+    settle()
+    @test isempty(v.picked) && only(v.form.shows["items"]).kind == :body
+    @test said()["Volume"] == "8,000 mm³" && said()["Size"] == "40 × 20 × 10 mm"
+    # Measure changes nothing, and Return closes it
+    key(Keys.enter)
+    @test v.form === nothing && Models.undos(m) == undos && isempty(m.said)
+  end
+
+  @testset "the Inspect tab: Mass Centre, Properties, Section and Interference" begin
+    v = view()
+    m = v.model
+    undos = Models.undos(m)
+    v.tab = "Inspect"
+    frame(w)
+    @test all(id -> haskey(v.parts, (:tool, id)), ["inspect.measure", "inspect.center_of_mass", "component.properties", "inspect.section", "inspect.interference"])
+    # Mass Centre is on or off, and marks the centre of mass of the bodies
+    click(v.parts[(:tool, "inspect.center_of_mass")])
+    settle()
+    @test V.in_use(v, "inspect.center_of_mass") && isapprox(v.parts[:mass_centre].answer["center"], [0.0, 0.0, 5.0], atol=1e-6)
+    shot("design-mass-centre.png")
+    click(v.parts[(:tool, "inspect.center_of_mass")])
+    @test !V.in_use(v, "inspect.center_of_mass")
+    # Properties: what all the bodies come to together
+    click(v.parts[(:tool, "component.properties")])
+    settle()
+    total = v.parts[:properties].answer["total"]
+    @test isapprox(total["volume_mm3"], 8000, rtol=1e-6) && isapprox(total["center_of_mass"], [0.0, 0.0, 5.0], atol=1e-6)
+    @test length(V.properties_rows(v, v.form)) > 12
+    shot("design-properties.png")
+    key(Keys.enter)
+    @test v.form === nothing
+    # Section: Ladder cuts the picture along the plane as the form changes, and OK keeps the cut
+    before = seen((15.0, -10.0, 5.0))             # the front of the block, on the side that the cut takes away
+    click(v.parts[(:tool, "inspect.section")])
+    frame(w)
+    f = v.form
+    f.values["plane"] = "YZ"                      # as the plane's menu chooses it
+    push!(f.shows["plane"], (kind=:plane, of="YZ", n=0, at=(0.0, 0.0, 0.0)))
+    frame(w)
+    s = V.shown_section(v)
+    @test s.origin == (0.0, 0.0, 0.0) && s.normal == (1.0, 0.0, 0.0) && s.words == "X 0 mm · hatch"
+    @test seen((15.0, -10.0, 5.0)) != before
+    # The face of the cut shows, in the body's colour, hatched. (Its half where y > 0 is under the plane's own square.)
+    @test length(Set(seen((0.0, y, 6.0)) for y in -9.0:0.25:-2.0)) >= 2
+    f.values["hatch"] = false
+    frame(w)
+    body = only(x for x in V.things(v, (v.area[3], v.area[4]), 1.0, V.theme(v)) if x isa V.GLs.Solid).colour
+    @test maximum(abs.(Int.(collect(seen((0.0, -7.0, 7.0)))) .- round.(Int, collect(body[1:3]) .* 0.8 .* 255))) <= 3
+    f.values["hatch"] = true
+    V.set_text!(v.parts[(:field, "inspect.section", "distance")], "5mm")
+    frame(w)
+    @test V.shown_section(v).origin == (-5.0, 0.0, 0.0) && V.shown_section(v).words == "X -5 mm · hatch"
+    shot("design-section.png")
+    click(v.parts[(:form, :ok)])
+    @test v.form === nothing && V.in_use(v, "inspect.section") && haskey(v.parts, :section_chip)
+    shot("design-section-on.png")
+    # Its eye hides it, and its chip's button turns it off
+    click(v.parts[(:eye, :section)])
+    @test V.shown_section(v) === nothing
+    click(v.parts[(:section, :off)])
+    @test V.section_cut(v) === nothing && seen((15.0, -10.0, 5.0)) == before
+    # Interference: Compute checks the bodies. A box that overlaps the block shows red.
+    click(v.parts[(:tool, "inspect.interference")])
+    frame(w)
+    click(v.parts[(:form, :compute)])
+    settle()
+    @test V.interference(v).answer["bodies"] == 1 && isempty(V.interference(v).answer["overlaps"]) && isempty(V.clashing(v))
+    Models.change!(m, "solid.box", JSON.Object("length" => "10 mm", "width" => "10 mm", "height" => "10 mm", "center" => Any[20, 0, 5], "operation" => "new"))
+    settle()
+    click(v.parts[(:form, :compute)])
+    settle()
+    @test length(V.interference(v).answer["overlaps"]) == 1 && length(V.clashing(v)) == 2
+    shot("design-interference.png")
+    key(Keys.enter)
+    key(Keys.z, Keys.cmd)
+    settle()
+    # Nothing but the box changed the design
+    @test v.form === nothing && Models.undos(m) == undos && isempty(m.said) && length(m.shapes) == 1
+    v.tab = "Model"
+    frame(w)
   end
 
   @testset "an extrude of a flat face of a body" begin

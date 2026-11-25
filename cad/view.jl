@@ -98,6 +98,7 @@
 @use "./expressions" => Expressions
 @use "../zip" => Zips
 @use "github.com/jkroso/UI.jl/Interface/Specific" text_width
+@use InteractiveUtils: clipboard
 
 const grow = GrowType.Grow
 const clear = RGBA(0.0, 0.0, 0.0, 0.0)
@@ -842,6 +843,7 @@ describe(v::DesignView) = begin
   editing = Designs.editing(m) !== nothing
   editing ? (v.tab = "Sketch") : v.tab == "Sketch" && (v.tab = "Model"; v.tool = nothing; empty!(v.clicks))
   preview!(v)
+  inspect!(v)
   offers!(v)
   left_row!(v)
   scene = part!(() -> Scene(of=v), v, :scene)
@@ -852,7 +854,7 @@ describe(v::DesignView) = begin
       said(v)...,
       Row(width(grow=grow), height(grow=grow), Alignment.Start, child_gap=8px,
         browser(v),
-        Box(width(grow=grow)),
+        Row(width(grow=grow), justify=Alignment.Center, section_chip(v)...),
         side(v)...),
       Row(width(grow=grow), justify=Alignment.Center, views(v)),
       history(v)))
@@ -911,7 +913,8 @@ end
 "Is the command `id` the one in use?"
 in_use(v::DesignView, id) =
   (v.form !== nothing && v.form.spec.command == id) || (v.tool isa Commands.Tool && v.tool.command == id) ||
-  (v.tool isa Symbol && id == "sketch." * String(v.tool)) || (id == "parameters" && v.panel == :params)
+  (v.tool isa Symbol && id == "sketch." * String(v.tool)) || (id == "parameters" && v.panel == :params) ||
+  (id == "inspect.center_of_mass" && mass_centre(v)) || (id == "inspect.section" && section_cut(v) !== nothing)
 
 tool_button(v::DesignView, id) = begin
   t = theme(v)
@@ -1092,6 +1095,13 @@ browser(v::DesignView) = begin
       eye=eye(v, (:eye, :origin, name), shown, () -> show_origin!(v, name, !shown)),
       act=icon == "plane" ? (e -> pick!(v, (kind=:plane, of=name, n=0, at=(0.0, 0.0, 0.0)), Keys.shft in e.window.keys)) : nothing))
   end
+  # The section that's on, as SolidCraft lists it
+  cut_ = section_cut(v)
+  if cut_ !== nothing
+    push!(rows, folder(v, "Analysis"; icon="section", shown=cut_.shown, show=() -> show_section!(v, !cut_.shown)))
+    "Analysis" in v.closed || push!(rows, browser_row(v, (:analysis, 1), 1, "section", "Section 1"; dim=!cut_.shown,
+      eye=eye(v, (:eye, :analysis, 1), cut_.shown, () -> show_section!(v, !cut_.shown))))
+  end
   bodies = Designs.bodies(m)
   if !isempty(bodies)
     any_shown = any(b -> get(b, "visible", true) === true, bodies)
@@ -1102,7 +1112,7 @@ browser(v::DesignView) = begin
       push!(rows, browser_row(v, (:body, name), 1, "body", name; dim=!shown, on=any(p -> p.kind == :body && p.of == name, v.picked),
         tint=(own = get(m.colours, name, nothing); own === nothing ? nothing : RGB(own...)),
         eye=eye(v, (:eye, :body, name), shown, () -> Designs.show!(m, !shown; items=Any[name])),
-        act=e -> pick!(v, (kind=:body, of=name, n=0, at=(0.0, 0.0, 0.0)), Keys.shft in e.window.keys),
+        act=e -> body_clicked!(v, (kind=:body, of=name, n=0, at=(0.0, 0.0, 0.0)), Keys.shft in e.window.keys),
         twice=e -> rename!(v, e.window, (:body, name), name, new -> Designs.change!(m, "body.rename", JSON.Object("body" => name, "name" => new)))))
     end
   end
@@ -1551,6 +1561,13 @@ const KEYS_OF = Dict{String,String}(id => uppercase(string(k)) for (k, id) in me
 
 same(a, b) = a.kind == b.kind && a.of == b.of && a.n == b.n
 
+"A click on a body's line in the browser: it goes in the form's lit field when that takes bodies, as Measure's does, or else selects the body"
+body_clicked!(v::DesignView, what, more) = begin
+  field = wanted(v)
+  field !== nothing && sketch(v) === nothing && suits(field, what) && return (take!(v.form, field, what); v)
+  pick!(v, what, more)
+end
+
 "Select `what`. With `more`, it's selected with what's selected already, or no longer selected if it was."
 pick!(v::DesignView, what, more=false) = begin
   i = findfirst(p -> same(p, what), v.picked)
@@ -1571,6 +1588,8 @@ chosen(v::DesignView, kinds=(:point, :curve)) = String[p.of for p in v.picked if
 start!(v::DesignView, id, window=nothing) = begin
   m = v.model
   id == "parameters" && return (v.panel = v.panel == :params ? :none : :params; v)
+  # Mass Centre is on or off, as SolidCraft's is: it has no form
+  id == "inspect.center_of_mass" && return (v.parts[:mass_centre_on] = !mass_centre(v); v)
   if id in ("sketch.finish", "sketch.cancel")
     leave!(v)
     empty!(v.picked)
@@ -1661,6 +1680,7 @@ open_form!(v::DesignView, id) = begin
     end
   end
   spec = c === nothing ? Commands.SPECS[id] : Commands.spec(c, get(v.described, id, nothing))
+  delete!(v.parts, :interference)
   keep = v.picked
   leave!(v)
   forget!(v, :field)
@@ -1670,13 +1690,15 @@ open_form!(v::DesignView, id) = begin
     f.values[field.key] = field.kind == :plane ? field.default : Any[]
     f.shows[field.key] = field.kind == :plane && field.default isa String ? Any[(kind=:plane, of=field.default, n=0, at=(0.0, 0.0, 0.0))] : Any[]
   end
-  # What's selected fills the fields that it suits
-  for p in keep, field in spec.fields
-    suits = (field.kind == :edges && p.kind == :edge) || (field.kind in (:faces, :face) && p.kind == :face) || (field.kind in (:bodies, :body) && p.kind == :body) ||
-            (field.kind == :plane && p.kind == :plane) || (field.kind == :profiles && flat_face(v.model, p))
-    suits || continue
-    (Commands.many(field) || field.kind == :plane || isempty(f.values[field.key])) && take!(f, field, p)
-    break
+  # What's selected fills the fields that it suits: each thing goes in the first field that takes it.
+  # (A `break` in `for p in keep, field in spec.fields` would end both loops, so only one thing would go in.)
+  for p in keep
+    for field in spec.fields
+      # A place on a face isn't taken from what's selected: it's where the face is clicked
+      field.kind != :spot && (suits(field, p) || (field.kind == :profiles && flat_face(v.model, p))) || continue
+      (Commands.many(field) || field.kind == :plane || isempty(f.values[field.key])) && take!(f, field, p)
+      break
+    end
   end
   # In a sketch, a command like Fillet goes on what's selected there
   if startswith(id, "sketch.")
@@ -1693,8 +1715,17 @@ open_form!(v::DesignView, id) = begin
   v
 end
 
+"""
+True when a click on `p` can go in the field `field`. Measure's items are
+faces, edges and bodies.
+"""
+suits(field::Commands.Field, p) =
+  field.kind == :edges ? p.kind == :edge : field.kind in (:bodies, :body) ? p.kind == :body : field.kind == :plane ? p.kind in (:face, :plane) :
+  field.kind == :items ? p.kind in (:face, :edge, :body) : field.kind in (:faces, :face, :spot) ? p.kind == :face : false
+
 "What a click on `p` sends for the field `field`"
 sent(field::Commands.Field, p) =
+  field.kind == :items ? (p.kind == :body ? JSON.Object("type" => "body", "name" => p.of) : JSON.Object("type" => String(p.kind), "body" => p.of, "point" => Any[p.at...])) :
   field.kind in (:bodies, :body) ? p.of :
   field.kind == :profiles ? (p.kind == :face ? Any[p.at...] : JSON.Object("point" => Any[p.at[1], p.at[2]])) :
   field.kind == :plane ? (p.kind == :plane ? p.of : JSON.Object("face" => Any[p.at...])) : Any[p.at...]
@@ -1717,7 +1748,9 @@ take!(f::Form, field::Commands.Field, p) = begin
     deleteat!(shows, i)
     deleteat!(f.values[field.key], i)
   else
-    alone = !Commands.many(field) || (field.kind == :profiles && (!all(q -> together(q, p), shows) || (p.kind == :face && f.spec.command == "solid.revolve")))
+    # Measure takes two things at most, as SolidCraft's does: a third starts again with it alone
+    alone = !Commands.many(field) || (field.kind == :profiles && (!all(q -> together(q, p), shows) || (p.kind == :face && f.spec.command == "solid.revolve"))) ||
+            (field.kind == :items && length(shows) >= 2)
     alone && (empty!(shows); empty!(f.values[field.key]))
     push!(shows, p)
     push!(f.values[field.key], sent(field, p))
@@ -1780,10 +1813,12 @@ request(v::DesignView, f::Form) = begin
   (f.spec.command, params, readings)
 end
 
-"Run the command of the form that's open"
+"Run the command of the form that's open. Measure has nothing to run: what it measures shows as soon as it's picked, so it closes."
 apply!(v::DesignView) = begin
   f, m = v.form, v.model
   f === nothing && return v
+  shows_only(f) && return (v.form = nothing; v)
+  form_of(f, "inspect.section") && return (keep_section!(v, f); v)
   want = request(v, f)
   want === nothing && return (v.form = nothing; v)
   want isa String && return (f.problem = want; v)
@@ -1834,6 +1869,597 @@ preview!(v::DesignView) = begin
   Designs.try!(m, key, want[1], want[2])
   redraw_in!(v, 0.016)
   nothing
+end
+
+# --- the Inspect tab ------------------------------------------------------------------
+#
+# Measure, Mass Centre, Properties, Section and Interference, as SolidCraft has
+# them. Each but Section asks SolidCraft's program a question that changes
+# nothing, and shows the answer: in its form, and drawn over the design.
+# SolidCraft keeps a section only in its own window, not in the design, so
+# Ladder works out and draws Section's cut by itself.
+
+"Is the form `f` the form of the command `id`?"
+form_of(f, id) = f !== nothing && f.step === nothing && f.spec.command == id
+
+"Is `f` Measure's form? What it measures shows as soon as it's picked."
+measuring(f) = form_of(f, "inspect.measure")
+
+"""
+True for a form that only shows what SolidCraft finds, so it has only Close:
+Measure, Properties and Interference, as SolidCraft's own have
+"""
+shows_only(f) = measuring(f) || form_of(f, "component.properties") || form_of(f, "inspect.interference")
+
+"""
+Ask SolidCraft's program `command` with `params`, unless the part `part` of
+the editor already has the answer to the question `key`. The answer goes in
+`v.parts[part]` as `(key, answer, problem)`: `answer` is nothing till it has
+come, and then `problem` says why when there's none.
+"""
+ask_once!(v::DesignView, part, key, command, params=JSON.Object()) = begin
+  was = get(v.parts, part, nothing)
+  was !== nothing && was.key == key && return
+  v.parts[part] = (key=key, answer=nothing, problem="")
+  Designs.ask!(v.model, command, params) do answer, problem
+    now = get(v.parts, part, nothing)
+    (now === nothing || now.key != key) && return
+    got = answer isa AbstractDict
+    v.parts[part] = (key=key, answer=got ? answer : nothing, problem=got ? "" : something(problem, "SolidCraft gave no answer."))
+  end
+  nothing
+end
+
+"""
+Ask what the Inspect tab shows, when the design or what's asked has changed:
+Measure's and Properties' answers while their forms are open, and the centre
+of mass while Mass Centre is on. Interference asks only when Compute is clicked.
+"""
+inspect!(v::DesignView) = begin
+  m = v.model
+  m === nothing && return
+  version = string(m.version)
+  measure!(v)
+  form_of(v.form, "component.properties") && ask_once!(v, :properties, version, "component.properties")
+  mass_centre(v) && ask_once!(v, :mass_centre, version, "inspect.center_of_mass")
+  nothing
+end
+
+"""
+Ask SolidCraft to measure what Measure's form holds, when that has changed.
+The answer shows in the form (`measure_rows`) and in the design
+(`draw_measure`). One body is measured as a body: its volume, area and mass.
+Anything else, two bodies too, is measured as one or two items: a length, an
+area, or what's between two things.
+"""
+measure!(v::DesignView) = begin
+  f, m = v.form, v.model
+  (measuring(f) && m !== nothing) || return
+  items = get(f.values, "items", Any[])
+  isempty(items) && return (delete!(v.parts, :measured); nothing)
+  body = length(items) == 1 && items[1]["type"] == "body"
+  params = body ? JSON.Object("bodies" => Any[items[1]["name"]]) : JSON.Object("items" => items)
+  ask_once!(v, :measured, JSON.json(items) * " " * string(m.version), "inspect.measure", params)
+end
+
+"What Measure measured, while its form is open: `(key, answer, problem)`, or nothing"
+measured(v::DesignView) = measuring(v.form) ? get(v.parts, :measured, nothing) : nothing
+
+"How many mm each unit of a design is"
+const UNIT_MM = Dict("mm" => 1.0, "cm" => 10.0, "m" => 1000.0, "in" => 25.4, "ft" => 304.8)
+
+"""
+A number as the Inspect tab shows it: `places` places after the point at
+most, none from 100,000 on, and commas between thousands
+"""
+figure(x::Real; places=3) = begin
+  places = abs(x) >= 1e5 ? 0 : places
+  r = round(abs(x), digits=places)
+  r == 0 && return "0"
+  whole = floor(Int, r)
+  part = round(Int, (r - whole) * 10^places)
+  part == 10^places && (whole += 1; part = 0)
+  text = replace(string(whole), r"(?<=\d)(?=(\d{3})+$)" => ",")
+  part > 0 && (text *= "." * rstrip(lpad(string(part), places, '0'), '0'))
+  (x < 0 ? "-" : "") * text
+end
+
+"""
+A number with just `places` places after the point, as the columns of
+Properties show them: from 10 million on, four figures and a power of ten
+"""
+fixed(x::Real, places=2) = begin
+  abs(x) >= 1e7 && return string(round(x, sigdigits=4))
+  n = round(Int, abs(x) * 10^places)
+  text = lpad(string(n), places + 1, '0')
+  (x < 0 && n > 0 ? "-" : "") * text[1:end-places] * (places > 0 ? "." * text[end-places+1:end] : "")
+end
+
+"The design's unit of length, as the Inspect tab shows lengths in"
+design_unit(v::DesignView) = (unit = String(get(v.model.doc, "units", "mm")); haskey(UNIT_MM, unit) ? unit : "mm")
+
+"A length that SolidCraft gives in mm, in the design's units. `power` is 2 for an area and 3 for a volume."
+amount(v::DesignView, mm::Real, power=1) = begin
+  unit = design_unit(v)
+  figure(mm / UNIT_MM[unit]^power) * " " * unit * (power == 2 ? "²" : power == 3 ? "³" : "")
+end
+
+"A mass that SolidCraft gives in grams"
+mass_words(g::Real) = abs(g) >= 1000 ? figure(g / 1000) * " kg" : figure(g) * " g"
+
+"True for three numbers, as SolidCraft gives a point"
+three(p) = p isa AbstractVector && length(p) == 3 && all(x -> x isa Real, p)
+
+"A point that SolidCraft gives in mm, as SolidCraft shows one: (22.52, 15.68, 10.71) mm, in the design's units"
+coords(v::DesignView, p) = (unit = design_unit(v); "(" * join((figure(x / UNIT_MM[unit]; places=2) for x in p), ", ") * ") " * unit)
+
+"The size of a box that SolidCraft gives in mm, as 45 × 50 × 40 mm, in the design's units"
+size_words(v::DesignView, box) = begin
+  (box isa AbstractDict && three(get(box, "min", nothing)) && three(get(box, "max", nothing))) || return nothing
+  unit = design_unit(v)
+  join((figure((box["max"][i] - box["min"][i]) / UNIT_MM[unit]; places=2) for i in 1:3), " × ") * " " * unit
+end
+
+"""
+The lines that Measure's form shows of SolidCraft's answer `a`: each a name
+and what it came to, and a note or "". Two things give what's between them:
+first the distance that SolidCraft says to read, from centre to centre or
+the closest. One thing gives its own sizes.
+"""
+measure_lines(v::DesignView, a::AbstractDict) = begin
+  out = Pair{String,String}[]
+  num(d, k) = (x = get(d, k, nothing); x isa Real ? Float64(x) : nothing)
+  add(label, x, show=x -> amount(v, x)) = x === nothing || push!(out, label => show(x))
+  if haskey(a, "bodies")
+    bodies = get(a, "bodies", Any[])
+    b = isempty(bodies) ? JSON.Object() : bodies[1]
+    haskey(b, "error") && return (out, String(b["error"]))
+    add("Volume", num(b, "volume_mm3"), x -> amount(v, x, 3))
+    add("Area", num(b, "area_mm2"), x -> amount(v, x, 2))
+    add("Mass", num(b, "mass_g"), mass_words)
+    box = size_words(v, get(b, "bbox", nothing))
+    box === nothing || push!(out, "Size" => box)
+    centre = get(b, "center_of_mass", nothing)
+    three(centre) && push!(out, "Centre of mass" => coords(v, centre))
+    material = get(b, "material", nothing)
+    material isa String && push!(out, "Material" => material)
+    return (out, get(b, "closed", true) === false ? "The body encloses no volume, so it has no volume or mass." : "")
+  end
+  items = get(a, "items", Any[])
+  if length(items) >= 2
+    closest, centres = something(num(a, "distance_mm"), num(a, "min"), Some(nothing)), num(a, "center_distance")
+    by_centres = get(a, "measure", nothing) == "center" && centres !== nothing
+    if by_centres
+      add("Centre to centre", centres)
+      add("Closest", closest)
+    else
+      add("Closest", closest)
+      add("Centre to centre", centres)
+    end
+    add("Angle", num(a, "angle_deg"), x -> figure(x) * "°")
+    delta = get(a, by_centres ? "center_delta" : "delta", nothing)
+    if delta isa Vector && length(delta) == 3
+      for (axis, x) in zip(("X", "Y", "Z"), delta)
+        x isa Real && push!(out, "Along $axis" => amount(v, abs(x)))
+      end
+    end
+    note = get(a, "closest_exact", nothing) === false ? "The closest distance is approximate: " * String(something(get(a, "closest_note", nothing), "SolidCraft measured it on the triangles.")) : ""
+    return (out, note)
+  end
+  isempty(items) && return (out, "")
+  # One thing: its own sizes, which are also at the top of the answer
+  d = JSON.Object()
+  for (k, x) in a
+    k == "items" || (d[k] = x)
+  end
+  merge!(d, items[1])
+  add("Length", num(d, "length_mm"))
+  add("Area", num(d, "area_mm2"), x -> amount(v, x, 2))
+  if num(d, "inner_perimeter_mm") !== nothing
+    add("Outer perimeter", num(d, "outer_perimeter_mm"))
+    add("Inner perimeter", num(d, "inner_perimeter_mm"))
+  else
+    add("Perimeter", num(d, "perimeter_mm"))
+  end
+  add("Diameter", num(d, "diameter"))
+  add("Radius", num(d, "radius"))
+  add("Circumference", num(d, "circumference"))
+  add("Arc length", num(d, "arc_length"))
+  add("Angle", num(d, "angle_deg"), x -> figure(x) * "°")
+  slot = get(d, "slot", nothing)
+  if slot isa AbstractDict
+    add("Slot width", num(slot, "width"))
+    add("Slot length", num(slot, "overall_length"))
+    add("Between ends", num(slot, "center_distance"))
+  end
+  add("Volume", num(d, "volume_mm3"), x -> amount(v, x, 3))
+  centre = get(d, "center", nothing)
+  three(centre) && push!(out, "Centre" => coords(v, centre))
+  position = get(d, "position", nothing)
+  three(position) && push!(out, "Position" => coords(v, position))
+  (out, "")
+end
+
+"Words in a form of the Inspect tab, like what to click: dim, or in `colour`"
+note_row(v::DesignView, text, colour=theme(v).dim) = Box(width(grow=grow), Alignment.Start, Text(text, size=11.5px, color=colour))
+
+"A line of what the Inspect tab found: its name at the left, dim, and what it came to"
+result_row(v::DesignView, label, value; label_w=112px) = begin
+  t = theme(v)
+  Row(width(grow=grow), child_gap=8px,
+    Row(width(label_w), justify=Alignment.Start, clip_x=true, words(label, 12px, color=t.dim)),
+    Box(width(grow=grow), Alignment.Start, words(value, 12px)))
+end
+
+"A thin line across a form, over what it found"
+rule_row(v::DesignView) = Box(width(grow=grow), height(1px), background(Ink.faded(theme(v).line, 0.8)))
+
+"""
+What a form of the Inspect tab shows while SolidCraft's answer `got` hasn't
+come, or says why there's none: a row, or nothing when the answer is there
+"""
+waiting_row(v::DesignView, got, doing="Measuring…") =
+  got === nothing || (got.answer === nothing && isempty(got.problem)) ? note_row(v, doing) :
+  got.answer === nothing ? note_row(v, got.problem, WRONG) : nothing
+
+"The rows of Measure's form under its field: what to click, or what was measured"
+measure_rows(v::DesignView, f::Form) = begin
+  isempty(get(f.values, "items", Any[])) && return Any[note_row(v, "Click one or two faces or edges in the design, or bodies in the browser.")]
+  got = measured(v)
+  wait = waiting_row(v, got)
+  wait === nothing || return Any[wait]
+  lines, note = measure_lines(v, got.answer)
+  rows = Any[rule_row(v)]
+  isempty(lines) && push!(rows, note_row(v, "SolidCraft gave no sizes for this."))
+  append!(rows, [result_row(v, label, value) for (label, value) in lines])
+  isempty(note) || push!(rows, note_row(v, note))
+  rows
+end
+
+"""
+The line between the two things that Measure measured, from where its first
+distance starts to where it ends, with that distance at its middle
+"""
+measure_line(a::AbstractDict) = begin
+  items = get(a, "items", Any[])
+  length(items) >= 2 || return nothing
+  centre = get(a, "measure", nothing) == "center" && get(a, "center_distance", nothing) isa Real
+  from, to = get(a, centre ? "center_from" : "from", nothing), get(a, centre ? "center_to" : "to", nothing)
+  gap = get(a, centre ? "center_distance" : "distance_mm", nothing)
+  ok(p) = p isa Vector && length(p) == 3 && all(x -> x isa Real, p)
+  (ok(from) && ok(to) && gap isa Real) || return nothing
+  (from=Tuple(Float64.(from)), to=Tuple(Float64.(to)), gap=Float64(gap))
+end
+
+"Draw what Measure measured between two things over the picture: a line with a dot at each end, and its length"
+draw_measure(ctx, v::DesignView, t) = begin
+  got = measured(v)
+  (got === nothing || got.answer === nothing) && return
+  line = measure_line(got.answer)
+  line === nothing && return
+  a, b = shown_at(v, line.from), shown_at(v, line.to)
+  (a === nothing || b === nothing) && return
+  colour = t.accent
+  hypot((a .- b)...) > 1 && Ink.line(ctx, a, b, colour, 1.6)
+  for p in (a, b)
+    Ink.circle(ctx, p, 3.5, colour)
+    Ink.circle(ctx, p, 3.5, colorant"white", 1.2)
+  end
+  tag(ctx, t, amount(v, line.gap), ((a[1] + b[1]) / 2, (a[2] + b[2]) / 2), colour)
+end
+
+"Words in a box with round corners over the picture, at `at`: its middle, or with `at=:left` its left end's middle"
+tag(ctx, t, text, at, colour; side=:middle) = begin
+  wide = Ink.wide(text, 11.5; family=t.mono)
+  left = side == :middle ? at[1] - wide / 2 - 5 : at[1]
+  Ink.box(ctx, left, at[2] - 10, wide + 10, 20, Ink.faded(RGB(palette(t).back...), 0.9); radius=4.0)
+  Ink.box(ctx, left, at[2] - 10, wide + 10, 20, colour; radius=4.0, width=1.0)
+  Ink.words(ctx, text, left + 5, at[2], 11.5, colour; family=t.mono)
+end
+
+"SolidCraft's mark of a centre of mass at `at` in the picture: a circle with a cross, two of its quarters filled"
+draw_centre_mark(ctx, at, colour) = begin
+  r = 7.0
+  Ink.circle(ctx, at, r, colorant"white")
+  for from in (180.0, 0.0)
+    Ink.through(ctx, vcat([at], [(at[1] + r * cosd(a), at[2] + r * sind(a)) for a in from:10.0:from+90]), colour, 1.0; closed=true, fill=true)
+  end
+  Ink.circle(ctx, at, r, colour, 1.4)
+  Ink.line(ctx, (at[1] - r - 4, at[2]), (at[1] + r + 4, at[2]), colour, 1.2)
+  Ink.line(ctx, (at[1], at[2] - r - 4), (at[1], at[2] + r + 4), colour, 1.2)
+end
+
+# --- Mass Centre
+
+"Is Mass Centre on? Its button turns it on and off, as SolidCraft's does."
+mass_centre(v::DesignView) = get(v.parts, :mass_centre_on, false) === true
+
+"While Mass Centre is on, draw the centre of mass of all the design's bodies, and where it is"
+draw_mass_centre(ctx, v::DesignView, t) = begin
+  mass_centre(v) || return
+  got = get(v.parts, :mass_centre, nothing)
+  (got === nothing || got.answer === nothing) && return
+  c = get(got.answer, "center", nothing)
+  three(c) || return
+  at = shown_at(v, Tuple(Float64.(c)))
+  at === nothing && return
+  draw_centre_mark(ctx, at, t.text)
+  tag(ctx, t, "Centre of mass " * coords(v, c), (at[1] + 14, at[2] - 16), t.text; side=:left)
+end
+
+# --- Properties
+
+"How wide the names of the lines of Properties are"
+const PROPERTY_W = 156px
+
+"A line of Properties with three numbers in columns, like a row of the moment of inertia"
+numbers_row(v::DesignView, label, xs; places=2) = begin
+  t = theme(v)
+  Row(width(grow=grow), child_gap=8px,
+    Row(width(PROPERTY_W), justify=Alignment.Start, clip_x=true, words(label, 12px, color=t.dim)),
+    (Box(width(grow=grow), Alignment.Start, Text(fixed(x, places), size=11.5px, family=t.mono, color=t.text, wrap=WrapMode.none)) for x in xs)...)
+end
+
+"Three rows of three numbers, as text to paste: what Copy matrix puts on the clipboard"
+matrix_text(m) = join((join((string(x) for x in row), "\t") for row in m), "\n")
+
+"""
+The rows of Properties: what SolidCraft says of all the design's bodies
+together (`component.properties`), as SolidCraft's own Properties shows it
+"""
+properties_rows(v::DesignView, f::Form) = begin
+  got = get(v.parts, :properties, nothing)
+  wait = waiting_row(v, got)
+  wait === nothing || return Any[wait]
+  a = got.answer
+  total = get(a, "total", JSON.Object())
+  bodies = [b for b in get(a, "bodies", Any[]) if b isa AbstractDict]
+  isempty(bodies) && return Any[note_row(v, "The design has no bodies.")]
+  rows = Any[]
+  line(label, value) = value === nothing || push!(rows, result_row(v, label, value; label_w=PROPERTY_W))
+  num(k) = (x = get(total, k, nothing); x isa Real ? Float64(x) : nothing)
+  materials = unique(String(get(b, "material", "")) for b in bodies)
+  line("Material", length(materials) == 1 ? materials[1] : "$(length(materials)) materials")
+  densities = unique(Float64(b["density_g_cm3"]) for b in bodies if get(b, "density_g_cm3", nothing) isa Real)
+  length(densities) == 1 && line("Density", fixed(densities[1], 3) * " g/cm³")
+  num("mass_g") === nothing || line("Mass", mass_words(num("mass_g")))
+  num("volume_mm3") === nothing || line("Volume", amount(v, num("volume_mm3"), 3))
+  num("area_mm2") === nothing || line("Area", amount(v, num("area_mm2"), 2))
+  three(get(total, "center_of_mass", nothing)) && line("Centre of mass", coords(v, total["center_of_mass"]))
+  line("Bounding box", size_words(v, get(total, "bbox", nothing)))
+  counts = [get(total, k, nothing) for k in ("faces", "edges", "vertices")]
+  all(x -> x isa Real, counts) && line("Faces / edges / vertices", join(Int.(counts), " / "))
+  moments = get(total, "first_moment_g_mm", nothing)
+  three(moments) && line("First moments", "(" * join((figure(x; places=2) for x in moments), ", ") * ") g·mm")
+  skipped = get(total, "open_bodies_skipped", 0)
+  skipped isa Real && skipped > 0 &&
+    push!(rows, note_row(v, "$(Int(skipped)) of the bodies enclose no volume, so they aren't in the mass, the volume or the centre of mass."))
+  inertia = get(total, "inertia_g_mm2", nothing)
+  if inertia isa AbstractVector && length(inertia) == 3 && all(three, inertia)
+    push!(rows, section_head(v, f, "Moment of inertia"))
+    if !("Moment of inertia" in f.closed)
+      push!(rows, note_row(v, "About the centre of mass, in world axes (g·mm²)"))
+      for (row, label) in zip(inertia, ("Ixx, Ixy, Ixz", "Iyx, Iyy, Iyz", "Izx, Izy, Izz"))
+        push!(rows, numbers_row(v, label, row))
+      end
+      push!(rows, Row(width(grow=grow), child_gap=8px, Box(width(PROPERTY_W)),
+        word_button(v, (:form, :copy_matrix), "Copy matrix"; act=e -> clipboard(matrix_text(inertia)), tip="Copy the moment of inertia as three lines of numbers")))
+      principal = get(total, "principal_moments_g_mm2", nothing)
+      three(principal) && push!(rows, numbers_row(v, "Principal moments", principal))
+      ways = get(total, "principal_axes", nothing)
+      if ways isa AbstractVector && length(ways) == 3 && all(three, ways)
+        for (i, way) in enumerate(ways)
+          push!(rows, numbers_row(v, "Principal axis $i", way; places=4))
+        end
+      end
+    end
+  end
+  rows
+end
+
+"While Properties is open, draw the centre of mass of the bodies and their three principal axes through it, as SolidCraft does"
+draw_properties(ctx, v::DesignView, t) = begin
+  form_of(v.form, "component.properties") || return
+  got = get(v.parts, :properties, nothing)
+  (got === nothing || got.answer === nothing) && return
+  total = get(got.answer, "total", JSON.Object())
+  c, ways, box = get(total, "center_of_mass", nothing), get(total, "principal_axes", nothing), get(total, "bbox", nothing)
+  three(c) || return
+  centre = Tuple(Float64.(c))
+  if ways isa AbstractVector && length(ways) == 3 && all(three, ways) && box isa AbstractDict && three(get(box, "min", nothing)) && three(get(box, "max", nothing))
+    reach = 0.6 * maximum(box["max"][i] - box["min"][i] for i in 1:3)
+    for (i, (way, colour)) in enumerate(zip(ways, AXIS_COLOURS))
+      a, b = shown_at(v, centre .- Tuple(Float64.(way)) .* reach), shown_at(v, centre .+ Tuple(Float64.(way)) .* reach)
+      (a === nothing || b === nothing) && continue
+      Ink.line(ctx, a, b, colour, 1.6)
+      Ink.words(ctx, string(i), b[1] + 4, b[2] - 6, 11.5, colour; style="Bold")
+    end
+  end
+  at = shown_at(v, centre)
+  at === nothing || draw_centre_mark(ctx, at, t.text)
+end
+
+"The colours of the X, Y and Z axes, and of the first, second and third principal axes"
+const AXIS_COLOURS = (colorant"rgb(226,72,72)", colorant"rgb(70,176,84)", colorant"rgb(72,116,232)")
+
+# --- Section
+
+"The section that's on: `(origin, normal, hatch, words, shown)`, or nothing. It hides what's on the side of its plane that `normal` faces."
+section_cut(v::DesignView) = get(v.parts, :section, nothing)
+
+"The way that a flat face of a body faces, out of the body, or nothing"
+face_normal(m, p) = begin
+  i = findfirst(s -> s.name == p.of, m.shapes)
+  i === nothing && return nothing
+  shape = m.shapes[i]
+  (1 <= p.n <= length(shape.flat) && shape.flat[p.n]) || return nothing
+  k = findfirst(==(p.n), shape.face)
+  k === nothing && return nothing
+  n = shape.normals[3k-2]
+  l = sqrt(Scenes.dot(n, n))
+  l > 0 ? Tuple(Float64.(n ./ l)) : nothing
+end
+
+"""
+The cut that Section's form `f` asks for, as SolidCraft makes it: `(origin,
+normal, hatch, words)`, or words that say what's wrong, or nothing while no
+plane is chosen. A plane of the origin faces along its axis: XY along Z. A
+face faces out of its body. The cut hides what's on the side that the plane
+faces, and Distance moves it the other way, so that more is cut away. Flip
+hides the other side. `words` are what the section's chip says, like
+"X 22.5 mm · hatch": for a plane of the origin, where the cut is on its axis.
+"""
+section_from(v::DesignView, f::Form) = begin
+  m = v.model
+  plane = get(f.values, "plane", nothing)
+  plane === nothing && return nothing
+  box = get(v.parts, (:field, f.spec.command, "distance"), nothing)
+  r = read_code(v, box === nothing ? "" : text_of(box), :length, "Distance")
+  r isa String && return r
+  offset = r === nothing ? 0.0 : r.kind == "length" ? r.number : r.number * UNIT_MM[design_unit(v)]
+  if plane isa String && plane in ("XY", "XZ", "YZ")
+    axis = plane == "XY" ? "Z" : plane == "XZ" ? "Y" : "X"
+    n = axis == "Z" ? (0.0, 0.0, 1.0) : axis == "Y" ? (0.0, 1.0, 0.0) : (1.0, 0.0, 0.0)
+    origin, place = (0.0, 0.0, 0.0), axis * " " * amount(v, -offset)
+  elseif plane isa String
+    i = findfirst(p -> p.name == plane, m.planes)
+    i === nothing && return "There's no plane named $plane."
+    origin, n, place = m.planes[i].point, m.planes[i].normal, plane * ", " * amount(v, offset)
+  else
+    shows = get(f.shows, "plane", Any[])
+    p = isempty(shows) ? nothing : shows[1]
+    (p === nothing || p.kind != :face) && return nothing
+    n = face_normal(m, p)
+    n === nothing && return "Choose a flat face."
+    origin, place = Tuple(Float64.(p.at)), "Face, " * amount(v, offset)
+  end
+  flip, hatch = f.values["flip"] === true, f.values["hatch"] === true
+  (origin=Tuple(Float64.(origin .- n .* offset)), normal=Tuple(Float64.(flip ? n .* -1.0 : n)), hatch=hatch,
+   words=place * (flip ? " · flipped" : "") * (hatch ? " · hatch" : ""))
+end
+
+"Keep the cut that Section's form `f` asks for, and close the form: OK does"
+keep_section!(v::DesignView, f::Form) = begin
+  c = section_from(v, f)
+  c === nothing && return (f.problem = "Choose the plane to cut along."; v)
+  c isa String && return (f.problem = c; v)
+  v.parts[:section] = (; c..., shown=true)
+  v.form = nothing
+  v
+end
+
+"Show or hide the section that's on, as its eye does"
+show_section!(v::DesignView, shown) = (s = section_cut(v); s === nothing || (v.parts[:section] = (; s..., shown)); v)
+
+"The section that shows now: what Section's open form asks for, else the one that's on, unless it's hidden"
+shown_section(v::DesignView) = begin
+  if form_of(v.form, "inspect.section")
+    c = section_from(v, v.form)
+    c isa NamedTuple && return c
+  end
+  s = section_cut(v)
+  s !== nothing && s.shown ? s : nothing
+end
+
+"The planes that cut the picture, as a point on each and the way it faces: a sketch's Slice, and the section that shows"
+cuts(v::DesignView) = begin
+  out = Any[]
+  slice = cut(v)
+  slice === nothing || push!(out, slice)
+  s = shown_section(v)
+  s === nothing || push!(out, (s.origin, s.normal))
+  isempty(out) ? nothing : out
+end
+
+"""
+The chip over the design while a section is on, as SolidCraft's: its eye, what
+it cuts along, and a button that turns it off
+"""
+section_chip(v::DesignView) = begin
+  s = section_cut(v)
+  s === nothing && return ()
+  t = theme(v)
+  chip = card!(v, :section_chip) do
+    Row(height(36px), padding(6px, 0px), child_gap=6px, panel_look(t)..., radius(18px),
+      eye(v, (:eye, :section), s.shown, () -> show_section!(v, !s.shown)),
+      Box(words("Section", 12.5px, weight="Semibold")),
+      Box(Text(s.words, size=11.5px, family=t.mono, color=t.dim, wrap=WrapMode.none)),
+      icon_button(v, (:section, :off), "x-lg", "Turn off the section"; act=e -> delete!(v.parts, :section), size=11px))
+  end
+  (chip,)
+end
+
+# --- Interference
+
+"""
+Check the bodies of Interference's form for overlaps, and find how near each
+is to the others: Compute does. With no bodies picked, it checks them all.
+"""
+interfere!(v::DesignView) = begin
+  f, m = v.form, v.model
+  form_of(f, "inspect.interference") || return v
+  bodies = get(f.values, "bodies", Any[])
+  box = get(v.parts, (:field, f.spec.command, "clearance"), nothing)
+  r = read_code(v, box === nothing ? "" : text_of(box), :length, "Clearance")
+  r isa String && return (f.problem = r; v)
+  gap = r === nothing ? 0.0 : r.kind == "length" ? r.number : r.number * UNIT_MM[design_unit(v)]
+  params = JSON.Object("nearest" => 1)
+  isempty(bodies) || (params["bodies"] = Any[bodies...])
+  gap > 0 && (params["clearance"] = gap)
+  f.problem = ""
+  # Each click asks again
+  ask_once!(v, :interference, (params=JSON.json(params), at=time()), "inspect.clearance", params)
+  v.parts[:interference_gap] = gap
+  v
+end
+
+"What Interference found, while its form is open: `(key, answer, problem)`, or nothing"
+interference(v::DesignView) = form_of(v.form, "inspect.interference") ? get(v.parts, :interference, nothing) : nothing
+
+"The bodies that overlap others, by what Interference found: they show red while its form is open"
+clashing(v::DesignView) = begin
+  got = interference(v)
+  (got === nothing || got.answer === nothing) && return Set{String}()
+  Set{String}(String(o[k]) for o in get(got.answer, "overlaps", Any[]) if o isa AbstractDict for k in ("a", "b") if get(o, k, nothing) isa String)
+end
+
+"The rows of Interference's form under its fields: Compute, and what it found"
+interference_rows(v::DesignView, f::Form) = begin
+  t = theme(v)
+  rows = Any[Row(width(grow=grow), justify=Alignment.End, word_button(v, (:form, :compute), "Compute"; act=e -> interfere!(v)))]
+  got = interference(v)
+  got === nothing && return push!(rows, note_row(v, "Compute checks the bodies for overlaps, and finds how near each is to the others. With no bodies picked, it checks them all."))
+  wait = waiting_row(v, got, "Checking…")
+  wait === nothing || return push!(rows, wait)
+  a = got.answer
+  push!(rows, rule_row(v))
+  checked = get(a, "bodies", nothing)
+  checked isa Real && push!(rows, result_row(v, "Checked", "$(Int(checked)) $(checked == 1 ? "body" : "bodies")"))
+  overlaps = get(a, "overlaps", Any[])
+  push!(rows, result_row(v, "Overlaps", isempty(overlaps) ? "no interference" : "$(length(overlaps)) $(length(overlaps) == 1 ? "pair" : "pairs")"))
+  gap = get(v.parts, :interference_gap, 0.0)
+  near = get(a, "near", Any[])
+  gap > 0 && push!(rows, result_row(v, "Closer than " * amount(v, gap), "$(length(near)) $(length(near) == 1 ? "pair" : "pairs")"))
+  unchecked = get(a, "unchecked", Any[])
+  isempty(unchecked) || push!(rows, note_row(v, "$(length(unchecked)) $(length(unchecked) == 1 ? "pair" : "pairs") couldn't be checked: $(get(unchecked[1], "reason", "SolidCraft gave no reason")).", WRONG))
+  nearest = get(a, "nearest", nothing)
+  if nearest isa AbstractDict && !isempty(nearest)
+    push!(rows, Row(width(grow=grow), child_gap=8px, Box(width(grow=grow), Alignment.Start, words("Nearest", 12px, color=t.dim)),
+                    Box(words("Distance", 12px, color=t.dim, weight="Semibold"))))
+    for name in sort(collect(keys(nearest)))
+      list = nearest[name]
+      (list isa AbstractVector && !isempty(list) && list[1] isa AbstractDict) || continue
+      other, gap_ = String(get(list[1], "body", "")), get(list[1], "distance_mm", nothing)
+      gap_ isa Real || continue
+      # A click selects the two bodies, so that they show
+      push!(rows, press!(v, (:nearest, name); act=e -> (empty!(v.picked); push!(v.picked, (kind=:body, of=String(name), n=0, at=(0.0, 0.0, 0.0)), (kind=:body, of=other, n=0, at=(0.0, 0.0, 0.0))))) do hovered
+        Row(width(grow=grow), height(24px), padding(4px, 0px), radius(4px), child_gap=8px, background(hovered ? t.hover : clear),
+          Row(width(grow=grow), justify=Alignment.Start, clip_x=true, words("$name → $other", 12px)),
+          Box(words(amount(v, gap_), 12px)))
+      end)
+    end
+  end
+  rows
 end
 
 "Open the step `id` of the history to change it: a sketch to draw in, and any other step as a form of its lengths"
@@ -1981,6 +2607,8 @@ count_words(field::Commands.Field, shows) = begin
   n = length(shows)
   n == 0 && return "Select"
   field.kind == :plane && return shows[1].kind == :plane ? String(shows[1].of) : "1 face"
+  field.kind == :items && return join(["$(count(p -> p.kind == k, shows)) $(count(p -> p.kind == k, shows) == 1 ? String(k) : k == :body ? "bodies" : String(k) * "s")"
+                                       for k in unique(p.kind for p in shows)], ", ")
   one = field.kind in (:faces, :face) ? "face" : field.kind == :edges ? "edge" : field.kind in (:bodies, :body) ? "body" :
         field.kind == :profiles ? (shows[1].kind == :face ? "face" : "profile") : "place"
   n == 1 ? "1 $one" : "$n $(one == "body" ? "bodies" : one * "s")"
@@ -2016,7 +2644,7 @@ field_row(v::DesignView, f::Form, field::Commands.Field) = begin
     end,) : ()
     clicked = press!(v, key; act=e -> (f.active = field.key)) do hovered
       Row(width(grow=grow), field_look(t, active, hovered)..., padding(0px, 3px, 0px, 9px),
-        Box(words(count_words(field, shows), 12px, color=n == 0 ? t.dim : t.text)), Box(width(grow=grow)),
+        Box(words(n == 0 && form_of(f, "inspect.interference") ? "All bodies" : count_words(field, shows), 12px, color=n == 0 ? t.dim : t.text)), Box(width(grow=grow)),
         (n == 0 || flat ? () : (icon_button(v, (key, :clear), "x", "Clear"; size=12px, act=e -> begin
           empty!(shows)
           f.values[field.key] = Any[]
@@ -2048,6 +2676,9 @@ form_card(v::DesignView) = begin
       push!(get!(() -> Any[], parts, Commands.section(field)), field_row(v, f, field))
     end
     append!(rows, get(parts, "", Any[]))
+    measuring(f) && append!(rows, measure_rows(v, f))
+    form_of(f, "component.properties") && append!(rows, properties_rows(v, f))
+    form_of(f, "inspect.interference") && append!(rows, interference_rows(v, f))
     any(field -> field.kind == :profiles, f.spec.fields) && isempty(m.sketches) &&
       push!(rows, Box(width(grow=grow), Alignment.Start, Text("Click a flat face of a body. To use a sketch, click the eye beside it in the browser, then click a profile of it.", size=11.5px, color=t.dim)))
   else
@@ -2079,11 +2710,16 @@ form_card(v::DesignView) = begin
     # What SolidCraft says of the command as the form has it now, before OK is clicked
     push!(foot, Box(width(grow=grow), Alignment.Start, Text(trial.problem, size=11.5px, color=t.dim)))
   end
-  ready = !(request(v, f) isa String)
-  push!(foot, Row(width(grow=grow), justify=Alignment.End, child_gap=8px,
-    word_button(v, (:form, :cancel), "Cancel"; act=e -> (v.form = nothing)),
-    word_button(v, (:form, :ok), "OK"; act=e -> apply!(v), strong=true, faint=!ready, tip="Return")))
-  side_card(v, :form, f.spec.icon, f.spec.title, e -> (v.form = nothing), rows...; foot, wide=side_width!(v, form_fields(v, f)))
+  # Measure, Properties and Interference have only Close, as SolidCraft's have: they change nothing
+  ready = shows_only(f) || (form_of(f, "inspect.section") ? section_from(v, f) isa NamedTuple : !(request(v, f) isa String))
+  push!(foot, shows_only(f) ? Row(width(grow=grow), justify=Alignment.End, word_button(v, (:form, :close), "Close"; act=e -> (v.form = nothing), tip="Return")) :
+    Row(width(grow=grow), justify=Alignment.End, child_gap=8px,
+      word_button(v, (:form, :cancel), "Cancel"; act=e -> (v.form = nothing)),
+      word_button(v, (:form, :ok), "OK"; act=e -> apply!(v), strong=true, faint=!ready, tip="Return")))
+  # Properties has columns of numbers, so it's wider, as SolidCraft's is
+  wide = side_width!(v, form_fields(v, f))
+  form_of(f, "component.properties") && (v.parts[:side_w] = max(num(wide), 440.0); wide = px(v.parts[:side_w]))
+  side_card(v, :form, f.spec.icon, f.spec.title, e -> (v.form = nothing), rows...; foot, wide)
 end
 
 "The fields to type in that the form `f` shows, each with how much of the panel's width is beside it"
@@ -2694,6 +3330,7 @@ things(v::DesignView, size, dense, t) = begin
   length(v.faces) > 4000 && empty!(v.faces)
   h = v.hover
   visible = Designs.shows(m)
+  clash = clashing(v)
   # What Ladder made itself for the form, when it did: see preview.jl
   made = trial === nothing ? nothing : trial.made
   for s in m.shapes
@@ -2717,6 +3354,8 @@ things(v::DesignView, size, dense, t) = begin
     # A body with a colour of its own in the design shows in it. Any other is the grey that suits the page.
     own = get(m.colours, s.name, nothing)
     base = own === nothing ? RGB(c.body[1:3]...) : RGB(own...)
+    # A body that overlaps another shows red while Interference shows what it found, as in SolidCraft
+    s.name in clash && (base = Ink.mixed(base, WRONG, 0.7))
     # A body that a piece is cut from shows faintly, so that the piece shows in it
     solid = get(m.opacity, s.name, 1.0) * (made !== nothing && s.name in made.ghost ? GHOST : 1.0)
     body = rgba(whole ? Ink.mixed(base, t.accent, 0.45) : over ? Ink.mixed(base, t.accent, 0.2) : base, solid)
@@ -2836,14 +3475,20 @@ draw(ctx, size, ui::ConcreteRect, scene::Scene) = begin
   direct = stage!(v, gpu === nothing ? C_NULL : GLs.current())
   c = palette(t)
   if v.stage !== false
-    of = (m.version, v.eye, w, h, v.hover, hash(v.picked), v.form === nothing ? UInt(0) : hash((v.form.shows, v.form.active, v.form.key)), c, t.accent, Designs.editing(m), v.slice, v.stage)
+    section = shown_section(v)
+    clash = (got = interference(v); got === nothing ? nothing : (got.key, got.answer === nothing))
+    of = (m.version, v.eye, w, h, v.hover, hash(v.picked), v.form === nothing ? UInt(0) : hash((v.form.shows, v.form.active, v.form.key)), c, t.accent, Designs.editing(m), v.slice, v.stage,
+          section, clash)
+    # Where a section cuts a body, the face of the cut shows, hatched as SolidCraft hatches it
+    capped = section === nothing ? nothing : (section.origin, section.normal)
+    hatch = section === nothing || !section.hatch ? 0.0 : 7.0 * dense
     if shot.of != of
       list = things(v, area, dense, t)
       if direct
-        GLs.picture!(v.stage, w, h, v.eye, list, c.back; reach=far(v), cut=cut(v), read=false)
+        GLs.picture!(v.stage, w, h, v.eye, list, c.back; reach=far(v), cut=cuts(v), capped, hatch, read=false)
         shot.image == C_NULL || (Skia.sk_image_unref(shot.image); shot.image = C_NULL)
       else
-        pixels = GLs.picture!(v.stage, w, h, v.eye, list, c.back; reach=far(v), cut=cut(v))
+        pixels = GLs.picture!(v.stage, w, h, v.eye, list, c.back; reach=far(v), cut=cuts(v), capped, hatch)
         shot.image == C_NULL || Skia.sk_image_unref(shot.image)
         info = Ref(Skia.sk_image_info_t(C_NULL, Skia.SK_COLOR_TYPE_RGBA_8888, Skia.SK_ALPHA_TYPE_OPAQUE, w, h))
         GC.@preserve info pixels begin
@@ -2888,6 +3533,9 @@ draw(ctx, size, ui::ConcreteRect, scene::Scene) = begin
   active = Designs.editing(m)
   active !== nothing && haskey(m.sketches, active) && draw_sketch(ctx, v, m.sketches[active], true, t)
   draw_tool(ctx, v, t)
+  draw_measure(ctx, v, t)
+  draw_properties(ctx, v, t)
+  draw_mass_centre(ctx, v, t)
   draw_origin(ctx, v, t)
   draw_pivot(ctx, v)
   draw_axes(ctx, v, t)
@@ -3318,7 +3966,7 @@ under(v::DesignView, at) = begin
   if flat_one !== nothing && ((kind == :plane && (hit === nothing || flat_one[2] < hit.far)) || (kind == :any && hit === nothing))
     return flat_one[1]
   end
-  if kind in (:any, :edges)
+  if kind in (:any, :edges, :items)
     e = Scenes.edge_at(m.shapes, v.eye, size, at, hit; shown)
     e === nothing || return (kind=:edge, of=m.shapes[e[1]].name, n=e[2], at=e[3])
     kind == :edges && return nothing
@@ -3450,9 +4098,7 @@ click!(v::DesignView, what, more) = begin
   field = wanted(v)
   if field !== nothing && sketch(v) === nothing
     what === nothing && return v
-    suits = field.kind == :edges ? what.kind == :edge : field.kind == :profiles ? what.kind in (:region, :face) :
-            field.kind in (:bodies, :body) ? what.kind == :body : field.kind == :plane ? what.kind in (:face, :plane) : what.kind == :face
-    suits && take!(v.form, field, what)
+    (field.kind == :profiles ? what.kind in (:region, :face) : suits(field, what)) && take!(v.form, field, what)
     return v
   end
   what === nothing ? (more || empty!(v.picked)) : pick!(v, what, more)

@@ -131,7 +131,8 @@ flat in float of;
 uniform vec4 tint;
 uniform float only;
 uniform float plain;
-uniform vec4 cut;
+uniform vec4 cuts[2];
+uniform vec2 cap;
 uniform vec3 depth;
 out vec4 colour;
 $DEPTH
@@ -139,8 +140,14 @@ void main() {
   // Before any discard, since the slope needs the pixels round this one
   gl_FragDepth = depth_of(away, depth);
   if (only >= 0.0 && abs(of - only) > 0.5) discard;
-  // What's on the eye's side of the plane that cuts the picture doesn't show. With no cut, the plane is (0, 0, 0, -1).
-  if (dot(world, cut.xyz) + cut.w > 0.0) discard;
+  // What's on the side that a plane that cuts the picture faces doesn't show. A plane that cuts nothing is (0, 0, 0, -1).
+  for (int i = 0; i < 2; i++) if (dot(world, cuts[i].xyz) + cuts[i].w > 0.0) discard;
+  // The face of a cut (see `cap!`) is flat, in the body's colour, with hatch lines `cap.y` pixels apart, or none for 0
+  if (cap.x > 0.5) {
+    float hatch = cap.y > 0.0 && mod(gl_FragCoord.x + gl_FragCoord.y, cap.y) < max(cap.y * 0.2, 1.0) ? 0.62 : 1.0;
+    colour = vec4(tint.rgb * hatch, tint.a);
+    return;
+  }
   vec3 n = normalize(facing);
   if (n.z < 0.0) n = -n;
   // A lamp over the eye, and a weaker one to its left, so that the top of a block is brighter than its sides and the sides differ
@@ -190,13 +197,13 @@ in float away;
 uniform vec4 tint;
 uniform vec3 fade_at;
 uniform vec2 fade;
-uniform vec4 cut;
+uniform vec4 cuts[2];
 uniform vec3 depth;
 out vec4 colour;
 $DEPTH
 void main() {
   gl_FragDepth = depth_of(away, depth);
-  if (dot(world, cut.xyz) + cut.w > 0.0) discard;
+  for (int i = 0; i < 2; i++) if (dot(world, cuts[i].xyz) + cuts[i].w > 0.0) discard;
   colour = tint;
   if (fade.y > 0.0) colour.a *= 1.0 - smoothstep(fade.x, fade.y, distance(world, fade_at));
 }
@@ -280,10 +287,11 @@ size!(s::Stage, w, h) = begin
   glBindRenderbuffer(GL_RENDERBUFFER, s.mscolour)
   glRenderbufferStorageMultisample(GL_RENDERBUFFER, 4, GL_RGBA8, w, h)
   glBindRenderbuffer(GL_RENDERBUFFER, s.msdepth)
-  glRenderbufferStorageMultisample(GL_RENDERBUFFER, 4, GL_DEPTH_COMPONENT32F, w, h)
+  # With a stencil, which counts the faces of a body in front of each pixel: see `cap!`
+  glRenderbufferStorageMultisample(GL_RENDERBUFFER, 4, GL_DEPTH32F_STENCIL8, w, h)
   glBindFramebuffer(GL_FRAMEBUFFER, s.msfbo)
   glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, s.mscolour)
-  glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, s.msdepth)
+  glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, s.msdepth)
   resize!(s.pixels, 4w * h)
   nothing
 end
@@ -383,12 +391,42 @@ uniform(p, name) = get!(() -> glGetUniformLocation(p, name), PLACES, (current(),
 
 const NO_CUT = (0f0, 0f0, 0f0, -1f0)
 
-draw!(s::Stage, t::Solid, mvp, look, lift, cut=NO_CUT) = begin
+"""
+How the picture is cut: the planes that cut it, two at most (the plane of a
+sketch's Slice, and a Section's), and the one whose cut shows a face where it
+opens a body. A plane is `(a, b, c, d)`, and what has `a x + b y + c z + d > 0`
+doesn't show.
+"""
+struct Cutting
+  planes::Vector{Float32}       # two planes, four numbers each
+  list::Vector{Any}             # the same planes, each as a point on it and the way it faces
+  capped::Any                   # the one of them whose cut has a face, or nothing
+  hatch::Float32                # how far apart the hatch lines of that face are, in pixels, or 0 for none
+end
+const UNCUT = Cutting(Float32[NO_CUT..., NO_CUT...], Any[], nothing, 0f0)
+
+"The planes of `planes`, four numbers each, as the shaders take two of them"
+plane_numbers(planes) = begin
+  out = Float32[]
+  for c in planes
+    length(out) < 8 && append!(out, (Float32.(c[2])..., Float32(-dot(c[1], c[2]))))
+  end
+  while length(out) < 8
+    append!(out, NO_CUT)
+  end
+  out
+end
+
+"Give the program `p` the planes that cut the picture"
+cuts!(p, c::Cutting) = glUniform4fv(uniform(p, "cuts"), 2, c.planes)
+
+draw!(s::Stage, t::Solid, mvp, look, lift, cut=UNCUT) = begin
   k = kept!(s, t)
   k.count == 0 && return
   p = s.solid
   glUseProgram(p)
-  glUniform4f(uniform(p, "cut"), cut...)
+  cuts!(p, cut)
+  glUniform2f(uniform(p, "cap"), 0f0, 0f0)
   glUniformMatrix4fv(uniform(p, "mvp"), 1, GL_FALSE, mvp)
   glUniformMatrix3fv(uniform(p, "look"), 1, GL_FALSE, look)
   glBindVertexArray(k.vao)
@@ -422,12 +460,13 @@ draw!(s::Stage, t::Solid, mvp, look, lift, cut=NO_CUT) = begin
   glDepthMask(GL_TRUE)
 end
 
-draw!(s::Stage, t::Sheet, mvp, look, lift, cut=NO_CUT) = begin
+draw!(s::Stage, t::Sheet, mvp, look, lift, cut=UNCUT) = begin
   k = kept!(s, t)
   k.count == 0 && return
   p = s.solid
   glUseProgram(p)
-  glUniform4f(uniform(p, "cut"), NO_CUT...)
+  cuts!(p, UNCUT)
+  glUniform2f(uniform(p, "cap"), 0f0, 0f0)
   glUniformMatrix4fv(uniform(p, "mvp"), 1, GL_FALSE, mvp)
   glUniformMatrix3fv(uniform(p, "look"), 1, GL_FALSE, look)
   depth!(p, lift)
@@ -442,12 +481,12 @@ draw!(s::Stage, t::Sheet, mvp, look, lift, cut=NO_CUT) = begin
   glDepthMask(GL_TRUE)
 end
 
-draw!(s::Stage, t::Lines, mvp, look, lift, cut=NO_CUT) = begin
+draw!(s::Stage, t::Lines, mvp, look, lift, cut=UNCUT) = begin
   k = kept!(s, t)
   k.count == 0 && return
   p = s.lines
   glUseProgram(p)
-  glUniform4f(uniform(p, "cut"), (t.cut ? cut : NO_CUT)...)
+  cuts!(p, t.cut ? cut : UNCUT)
   glUniformMatrix4fv(uniform(p, "mvp"), 1, GL_FALSE, mvp)
   glUniform2f(uniform(p, "view"), Float32(s.wide), Float32(s.high))
   glUniform1f(uniform(p, "width"), t.width)
@@ -465,11 +504,90 @@ draw!(s::Stage, t::Lines, mvp, look, lift, cut=NO_CUT) = begin
 end
 
 """
+Draw the face of the cut that the plane `cut.capped` makes in the body `t`,
+as SolidCraft's Section does: flat, in the body's colour, a little darker,
+and hatched. The stencil counts the faces of what's left of the body in
+front of each pixel. Where that's odd, the plane is inside the body there, so
+a square on the plane is drawn there, as wide as `reach` round the point of
+the plane nearest `target`. The square is as far away as the plane is, so
+what's behind it, like the edges inside the body, doesn't show through.
+
+The stencil is 0 everywhere before the first body: the square puts it back
+to 0 wherever it was odd, so the next body needs no clear of its own. (A
+square that the plane can't reach is inside no body: everything is within
+`reach` of `target`.) Only when another plane cuts the square too is the
+stencil cleared for each body.
+"""
+cap!(s::Stage, t::Solid, mvp, look, lift, cut::Cutting, target, reach) = begin
+  k = kept!(s, t)
+  k.count == 0 && return
+  origin, n = cut.capped
+  p = s.solid
+  glUseProgram(p)
+  glUniformMatrix4fv(uniform(p, "mvp"), 1, GL_FALSE, mvp)
+  glUniformMatrix3fv(uniform(p, "look"), 1, GL_FALSE, look)
+  depth!(p, lift)
+  glUniform1f(uniform(p, "only"), -1f0)
+  # Count the faces: each one flips the stencil, so its lowest bit is 1 where there's an odd number
+  glEnable(GL_STENCIL_TEST)
+  glStencilMask(0xff)
+  length(cut.list) > 1 && glClear(GL_STENCIL_BUFFER_BIT)
+  glStencilFunc(GL_ALWAYS, 0, 0xff)
+  glStencilOp(GL_KEEP, GL_KEEP, GL_INVERT)
+  glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE)
+  glDepthMask(GL_FALSE)
+  glDisable(GL_DEPTH_TEST)
+  cuts!(p, cut)
+  glUniform2f(uniform(p, "cap"), 0f0, 0f0)
+  glBindVertexArray(k.vao)
+  glDrawArrays(GL_TRIANGLES, 0, k.count)
+  # The square, where the count is odd. The other plane still cuts it, but not its own.
+  glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE)
+  glDepthMask(GL_TRUE)
+  glEnable(GL_DEPTH_TEST)
+  glDepthFunc(GL_LEQUAL)
+  glStencilFunc(GL_EQUAL, 1, 1)
+  glStencilOp(GL_KEEP, GL_ZERO, GL_ZERO)
+  glUniform4fv(uniform(p, "cuts"), 2, plane_numbers([c for c in cut.list if c !== cut.capped]))
+  glUniform2f(uniform(p, "cap"), 1f0, cut.hatch)
+  glUniform4f(uniform(p, "tint"), (t.colour[1:3] .* 0.8f0)..., 1f0)
+  square = square_on(origin, n, target, reach)
+  q = kept!(s, Solid((:cap, square), square, (0f0, 0f0, 0f0, 1f0)))
+  glBindVertexArray(q.vao)
+  glDrawArrays(GL_TRIANGLES, 0, q.count)
+  glDisable(GL_STENCIL_TEST)
+end
+
+"""
+Two triangles that make a square on the plane through `origin` that faces
+`n`, `reach` from its middle to each side, round the point of the plane
+nearest `target`: corners as a `Solid` has them
+"""
+square_on(origin, n, target, reach) = begin
+  middle = target .- n .* dot(target .- origin, n)
+  # Two ways along the plane, at right angles
+  other = abs(n[1]) < 0.9 ? (1.0, 0.0, 0.0) : (0.0, 1.0, 0.0)
+  u = (n[2] * other[3] - n[3] * other[2], n[3] * other[1] - n[1] * other[3], n[1] * other[2] - n[2] * other[1])
+  u = u ./ sqrt(dot(u, u))
+  w = (n[2] * u[3] - n[3] * u[2], n[3] * u[1] - n[1] * u[3], n[1] * u[2] - n[2] * u[1])
+  r = 1.05 * reach
+  corner(a, b) = middle .+ u .* (a * r) .+ w .* (b * r)
+  data = Float32[]
+  for c in (corner(-1, -1), corner(1, -1), corner(1, 1), corner(-1, -1), corner(1, 1), corner(-1, 1))
+    append!(data, Float32.(c)); append!(data, Float32.(n)); push!(data, 0f0)
+  end
+  data
+end
+
+"""
 Draw `things` as the eye `e` sees them, in a picture of `w` by `h` pixels on
 the colour `background`, and give its pixels: red, green, blue and alpha
 bytes, a row at a time from the top. `reach` is how far from the eye's target
-the things go. `cut` is a plane, as a point on it and the way it faces:
-the part of each body that's on the side that it faces doesn't show.
+the things go. `cut` is a plane, as a point on it and the way it faces, or a
+list of two at most: the part of each body that's on the side that a plane
+faces doesn't show. `capped` is one of those planes, whose cut shows a face
+where it opens a body, as SolidCraft's Section does, with hatch lines `hatch`
+pixels apart (0 for none).
 
 With `read=false` the pixels stay on the graphics card, in the stage's
 renderbuffer, and this gives nothing. A context that shares with the stage
@@ -477,14 +595,15 @@ shows them: see `over!`. Reading them took longer than drawing them: the CPU
 waited for the graphics card to finish, then for the bytes, and then sent
 them back to the card to draw the window.
 """
-picture!(s::Stage, w::Int, h::Int, e::Eye, things, background; reach=1000.0, cut=nothing, read=true) = begin
+picture!(s::Stage, w::Int, h::Int, e::Eye, things, background; reach=1000.0, cut=nothing, capped=nothing, hatch=0.0, read=true) = begin
   was = current()
   setcurrent(s.cgl)
   try
     size!(s, w, h)
     s.frame += 1
     mvp, look, lift = matrices(e, w, h, reach)
-    plane = cut === nothing ? NO_CUT : (Float32.(cut[2])..., Float32(-dot(cut[1], cut[2])))
+    planes = cut === nothing ? () : cut isa Tuple ? (cut,) : cut
+    plane = Cutting(plane_numbers(planes), collect(Any, planes), capped, Float32(hatch))
     glBindFramebuffer(GL_FRAMEBUFFER, s.msfbo)
     glViewport(0, 0, w, h)
     glDisable(GL_SCISSOR_TEST)
@@ -503,6 +622,14 @@ picture!(s::Stage, w::Int, h::Int, e::Eye, things, background; reach=1000.0, cut
     for t in things
       t isa Solid && !t.through && t.bare && draw!(s, t, mvp, look, lift, plane)
     end
+    if capped !== nothing
+      glStencilMask(0xff)
+      glClearStencil(0)
+      glClear(GL_STENCIL_BUFFER_BIT)
+      for t in things
+        t isa Solid && !t.through && !t.bare && cap!(s, t, mvp, look, lift, plane, e.target, reach)
+      end
+    end
     for t in things
       t isa Lines && draw!(s, t, mvp, look, lift, plane)
     end
@@ -513,6 +640,7 @@ picture!(s::Stage, w::Int, h::Int, e::Eye, things, background; reach=1000.0, cut
       t isa Solid && t.through && draw!(s, t, mvp, look, lift, plane)
     end
     glBindVertexArray(0)
+    glDisable(GL_STENCIL_TEST)
     glBindFramebuffer(GL_READ_FRAMEBUFFER, s.msfbo)
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, s.fbo)
     glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST)

@@ -23,7 +23,7 @@
 struct Field
   key::String                     # the name of the parameter
   label::String
-  kind::Symbol                    # :length :angle :count :number :text :json :choice :flag :vector, or what's clicked: :faces :face :edges :bodies :body :profiles :plane :spot
+  kind::Symbol                    # :length :angle :count :number :text :json :choice :flag :vector, or what's clicked: :faces :face :edges :bodies :body :profiles :plane :spot :items
   default::Any
   options::Vector{Pair{Any,String}}   # for a :choice: each value that's sent, and what the form calls it
   optional::Bool
@@ -40,8 +40,11 @@ Options. What's seldom changed is under Advanced, which is closed at first.
 """
 section(f::Field) = f.section !== nothing ? f.section : f.kind == :flag ? "Options" : f.optional ? "Advanced" : ""
 
-"True for a field that's filled by clicks in the design"
-picks(f::Field) = f.kind in (:faces, :face, :edges, :bodies, :body, :profiles, :plane, :spot)
+"""
+True for a field that's filled by clicks in the design. A field of `:items`
+takes one or two faces, edges or bodies, as Measure does.
+"""
+picks(f::Field) = f.kind in (:faces, :face, :edges, :bodies, :body, :profiles, :plane, :spot, :items)
 """
 True for a field that takes Julia code, like `4.5cm + 2mm*1.5`: a length, an
 angle, a count, any other number, or three of them. See expressions.jl.
@@ -49,7 +52,7 @@ angle, a count, any other number, or three of them. See expressions.jl.
 iscode(f::Field) = f.kind in (:length, :angle, :count, :number, :vector)
 
 "True for a field that takes any number of clicks"
-many(f::Field) = f.kind in (:faces, :edges, :bodies, :profiles)
+many(f::Field) = f.kind in (:faces, :edges, :bodies, :profiles, :items)
 
 "The form of a command"
 struct Spec
@@ -214,6 +217,19 @@ const SPECS = Dict{String,Spec}(s.command => s for s in [
     Field("flip", "Other side", :flag)]),
   Spec("sketch.chamfer.equal_distance", "Sketch Chamfer", "chamfer", [
     Field("distance", "Distance", :length, default="2 mm")]),
+  # The forms of the Inspect tab, as SolidCraft's own. Measure, Properties and Interference show what they find in the form,
+  # and have only Close. Section's cut is drawn by Ladder, as the form changes. See "the Inspect tab" in view.jl.
+  Spec("inspect.measure", "Measure", "measure", [
+    Field("items", "Items", :items)]),
+  Spec("component.properties", "Properties", "properties", Field[]),
+  Spec("inspect.section", "Section Analysis", "section", [
+    Field("plane", "Plane", :plane, default=nothing),
+    Field("distance", "Distance", :length, default="0 mm"),
+    Field("flip", "Flip", :flag),
+    Field("hatch", "Hatch", :flag, default=true)]),
+  Spec("inspect.interference", "Interference", "interference", [
+    Field("bodies", "Bodies", :bodies, optional=true, section=""),
+    Field("clearance", "Clearance", :length, default="0 mm")]),
 ])
 
 "The kind of field for the parameter `name` of a command, as SolidCraft's own description `about` has it"
@@ -223,7 +239,9 @@ field_kind(name, about::AbstractDict) = begin
   name == "face" && return :face
   name in ("bodies", "tools", "targets", "participants") && return :bodies
   name in ("body", "target") && return :body
-  get(about, "type", nothing) == "boolean" && return :flag
+  # A yes or no that can also be left out has the types boolean and null
+  kind = get(about, "type", nothing)
+  (kind == "boolean" || (kind isa Vector && "boolean" in kind)) && return :flag
   haskey(about, "enum") && return :choice
   # A number, or text that SolidCraft reads as one like "w / 2", is Julia code in the form
   kinds = get(about, "type", nothing)
@@ -459,8 +477,11 @@ const TABS = [
     Group("Create", ["sheet.flange", "sheet.hem", "sheet.convert"], ["sheet.path_flange", "sheet.perforate", "sheet.fold", "sheet.flat_pattern"]),
     Group("Modify", ["sheet.unfold", "sheet.refold"], String[]),
   ],
+  # As SolidCraft's own Inspect tab has them
   "Inspect" => [
-    Group("Inspect", ["inspect.measure", "inspect.section", "inspect.interference"], ["assembly.mass_properties", "inspect.center_of_mass"]),
+    Group("Measure", ["inspect.measure", "inspect.center_of_mass", "component.properties"], String[]),
+    Group("Section", ["inspect.section"], String[]),
+    Group("Check", ["inspect.interference"], String[]),
   ],
   "Sketch" => [
     Group("Create", ["sketch.line", "sketch.rectangle.two_point", "sketch.circle.center", "sketch.arc.three_point"],
@@ -485,7 +506,7 @@ tried(id) = id == "parameters.change" || any(p -> startswith(id, p), ("solid.", 
 const SHORT = Dict("sketch.create" => "New Sketch", "solid.pattern.rectangular" => "Pattern", "solid.move" => "Move / Copy", "construct.plane.offset" => "Plane",
   "sketch.rectangle.two_point" => "Rectangle", "sketch.circle.center" => "Circle", "sketch.arc.three_point" => "Arc", "sketch.finish" => "Finish Sketch",
   "sketch.cancel" => "Cancel", "parameters" => "Parameters", "sketch.dimension" => "Dimension", "sketch.fillet" => "Fillet", "inspect.measure" => "Measure", "inspect.section" => "Section",
-  "inspect.interference" => "Interference", "sheet.convert" => "Convert", "surface.extrude" => "Extrude", "surface.revolve" => "Revolve")
+  "inspect.interference" => "Interference", "inspect.center_of_mass" => "Mass Centre", "component.properties" => "Properties", "sheet.convert" => "Convert", "surface.extrude" => "Extrude", "surface.revolve" => "Revolve")
 
 "The icon of the editor's own buttons and of the commands whose SolidCraft icon the editor draws another way"
 const BUTTON_ICONS = Dict("parameters" => "params", "sketch.finish" => "check-lg", "sketch.cancel" => "x-lg", "sketch.create" => "sketch",
