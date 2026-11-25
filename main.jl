@@ -30331,19 +30331,41 @@ indent!(e, out::Bool, ::Type{CodeBlock}) = begin
   b = e.buf
   tab = indentation(e, CodeBlock)   # as many spaces as the settings page says
   out || selecting(b) || return type!(e, " " ^ (length(tab) - b.caret[2] % length(tab)))
+  shift_lines!(e, out, tab, ==(Kind.code))
+end
+
+"""
+Move each line that the caret or the selection is on in by `step`, or with
+`out` back out by as much of `step` as it starts with. Only the lines whose
+kind `takes` move, and a line with nothing in it stays as it is.
+"""
+shift_lines!(e, out::Bool, step::AbstractString, takes) = begin
+  b = e.buf
   ends = Dict(:caret => b.caret, :anchor => b.anchor)
   lo, hi = minmax(b.caret, b.anchor)
   for i in lo[1]:hi[1]
-    kinds(b)[i].kind == Kind.code || continue
-    n = out ? min(length(tab), length(match(r"^ *", b.lines[i]).match)) : length(tab)
-    isempty(b.lines[i]) && continue
-    edit!(b, (i, 0), (i, out ? n : 0), out ? "" : tab)
+    takes(kinds(b)[i].kind) || continue
+    n = out ? min(length(step), length(match(r"^ *", b.lines[i]).match)) : length(step)
+    (isempty(b.lines[i]) || n == 0) && continue
+    edit!(b, (i, 0), (i, out ? n : 0), out ? "" : step)
     for (name, (l, col)) in ends
       l == i && (ends[name] = (i, max(0, col + (out ? -n : n))))
     end
   end
   b.caret, b.anchor = ends[:caret], ends[:anchor]
   touch!(e)
+end
+
+"""
+What ⌘] and ⌘[ do: they move the lines that the caret or the selection is on
+in or out a step, wherever the caret is in the line. In code a step is the
+indent that the settings page gives, and in a list it's a level of the list.
+"""
+indent_lines!(e, out::Bool) = begin
+  b = e.buf
+  t = block(b, b.caret[1])
+  t === CodeBlock ? shift_lines!(e, out, indentation(e, CodeBlock), ==(Kind.code)) :
+  t === List ? shift_lines!(e, out, STEP, in((Kind.bullet, Kind.ordered, Kind.todo))) : nothing
 end
 
 # In a list, Tab moves the item in and shift-Tab moves it back out
@@ -31462,7 +31484,9 @@ const COMMAND_GROUPS = with_added([
     Command(:delete_line, "Delete the line", :edit, "cmd+shift+k", (e, w, _) -> delete_lines!(e)),
     Command(:comment, "Make a line of code a comment, or code again", :edit, "cmd+slash", (e, w, _) -> toggle_comment!(e)),
     Command(:indent, "Indent, or go to the next cell of a table", :type, "tab", (e, w, _) -> indent!(e, false)),
-    Command(:outdent, "Take an indent away, or go back a cell", :type, "shift+tab", (e, w, _) -> indent!(e, true))],
+    Command(:outdent, "Take an indent away, or go back a cell", :type, "shift+tab", (e, w, _) -> indent!(e, true)),
+    Command(:indent_line, "Move the line in a step, wherever the caret is", :edit, "cmd+right_bracket", (e, w, _) -> indent_lines!(e, false)),
+    Command(:outdent_line, "Move the line out a step, wherever the caret is", :edit, "cmd+left_bracket", (e, w, _) -> indent_lines!(e, true))],
   "The caret" => [
     Command(:left, "Left", :move, "left", (e, w, select) -> (e.by_step = true; caret_step!(e, -1, select))),
     Command(:right, "Right", :move, "right", (e, w, select) -> (e.by_step = true; caret_step!(e, 1, select))),

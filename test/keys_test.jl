@@ -135,6 +135,38 @@ end
   @test !e.panel
 end
 
+@testset "⌘[ and ⌘] move the line out and in, wherever the caret is in it" begin
+  e, w = window("```python\nfoo()\n  bar()\n```\n\n- a\n  - b\n\nSome words")
+  b = e.buf
+  tab = K.indentation(e, K.CodeBlock)
+  # In code, from the middle of a word, as in the startup page's `  Books.start(Ladder)`
+  caret!(e, w, 3, 4)
+  press(w, Keys.left_bracket, cmd)
+  @test b.lines[3] == "bar()" && b.caret == (3, 2)
+  press(w, Keys.left_bracket, cmd)                 # a line with no indent stays
+  @test b.lines[3] == "bar()" && b.caret == (3, 2)
+  press(w, Keys.right_bracket, cmd)
+  @test b.lines[3] == tab * "bar()" && b.caret == (3, 2 + length(tab))
+  # Each line of a selection moves, and the fence doesn't
+  b.anchor, b.caret = (1, 2), (3, 1); K.touch!(e); frame(w)
+  press(w, Keys.right_bracket, cmd)
+  @test b.lines[1:3] == ["```python", tab * "foo()", tab * tab * "bar()"]
+  press(w, Keys.left_bracket, cmd)
+  press(w, Keys.left_bracket, cmd)
+  @test b.lines[1:3] == ["```python", "foo()", "bar()"]
+  # In a list, the item moves a level
+  caret!(e, w, 7, 4)
+  press(w, Keys.left_bracket, cmd)
+  @test b.lines[7] == "- b" && b.caret == (7, 2)
+  press(w, Keys.right_bracket, cmd)
+  @test b.lines[7] == "  - b" && b.caret == (7, 4)
+  # A paragraph has no steps, and the keys type nothing in it
+  caret!(e, w, 9, 4)
+  press(w, Keys.right_bracket, cmd)
+  press(w, Keys.left_bracket, cmd)
+  @test b.lines[9] == "Some words"
+end
+
 @testset "the commands for whole lines" begin
   e, w = window("a\nb\nc\nd")
   b = e.buf

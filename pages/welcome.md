@@ -116,6 +116,7 @@ On a page with a `schedule` block, an item that repeats has a bar for each time 
 | ⌘⌥← and ⌘⌥→ | Go back to the line or the file that showed before, and forward again |
 | ⌘F | Searches the page from the top bar, with the words you selected. In a file of code, it opens a bar that finds text, and Return goes to the next place that has it. |
 | ⌘E | Shows the markup of the part of the page that the caret is in, or hides it again |
+| ⌘] and ⌘[ | Move the line that the caret is on in a step, and back out again, wherever the caret is in the line. They move each line of a selection. They work in a list and in a code block. |
 | ⌘⌥P | Prints the page, or saves it as a PDF |
 | ⌘⇧E | Saves the page as a page of HTML, for a website |
 | ⌘Return | Sends the page to an agent that waits for it |
