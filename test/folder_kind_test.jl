@@ -122,8 +122,8 @@ end
   K.page_fills(e, ::NotesDirectory) = true
   page() = texts(K.describe(e.nodes[(:fileview, e.buf.path)]))
   K.open!(e, notes); frames()
-  # The folder is what the page shows, and the sidebar lists the folder that it's in, as it does for a file
-  @test e.buf.path == notes && e.buf.view == :file && e.folder == dir
+  # The folder is what the page shows, and the sidebar lists the folder itself, so its path ends where the top bar's does
+  @test e.buf.path == notes && e.buf.view == :file && e.folder == notes
   @test page() == ["The notes of notes"]
   @test K.page_object(e) isa NotesDirectory
   @test K.own_page(e)

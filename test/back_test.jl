@@ -297,3 +297,25 @@ end
   # No button stays down after it
   @test !(Keys.mouse_back in w.keys) && !(Keys.mouse_forward in w.keys)
 end
+
+@testset "going back to a folder's page lists the folder in the sidebar, as opening it does" begin
+  # The sidebar's path and the path in the top bar both end with the folder, so the two don't disagree
+  e, w, folder = window("a.md")
+  inner = mkpath(joinpath(folder, "Inner"))
+  write(joinpath(inner, "x.md"), "# x\n")
+  elsewhere = mktempdir(dir)
+  write(joinpath(elsewhere, "y.md"), "# y\n")
+  K.open_folder!(e, inner); frames(w)
+  @test e.buf.path == inner && e.folder == inner
+  K.open!(e, joinpath(elsewhere, "y.md")); frames(w)
+  @test e.folder == elsewhere
+  K.go_back!(e); frames(w)
+  @test e.buf.path == inner
+  @test e.folder == inner
+  @test last(K.trail_names(e.folder, 1000px))[2] == inner
+  K.go_forward!(e); frames(w)
+  @test e.folder == elsewhere
+  # A file still lists the folder that it's in
+  K.go_back!(e); K.go_back!(e); frames(w)
+  @test showing(e) == "a.md" && e.folder == folder
+end

@@ -1830,7 +1830,9 @@ end
 Show the file at `path`. A file that's already open keeps its changes. The
 file that leaves goes on the list that `go_back!` reads, unless `record` is false.
 A folder shows too, when its kind has a method of `page_view`. The sidebar
-then lists the folder that it's in, as it does for a file. A file that shows
+then lists the folder itself, as a click on it in the sidebar does, so the
+sidebar's path and the top bar's end with the same folder, as going back to it
+shows too. For a file, the sidebar lists the folder that it's in. A file that shows
 gets a tab in the sidebar, if it hasn't one: see "the files that are open, as tabs".
 """
 open!(e, path; record=true) = begin
@@ -1844,9 +1846,11 @@ open!(e, path; record=true) = begin
   end
   add_tab!(e)   # the file stays open as a tab in the sidebar until ⌘W closes it
   delete!(e.nodes, :new_tab)   # a file that shows in a new tab takes the tab's place
-  # The sidebar goes on listing the folder that it lists while a page from a web server shows, or a view's copy of a file from one
-  if e.folder != dirname(path) && isempty(web_address(path))
-    e.folder = dirname(path)
+  # The sidebar lists a folder that shows, so its path ends where the top bar's does, and the folder that a file is in. It goes on
+  # listing the folder that it lists while a page from a web server shows, or a view's copy of a file from one.
+  at = isdir(path) ? path : dirname(path)
+  if e.folder != at && isempty(web_address(path))
+    e.folder = at
     list_files!(e)
   end
   e.scroll.offset = e.buf.offset
