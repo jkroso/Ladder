@@ -176,8 +176,8 @@ end
   @test asked == ["https://example.com/notes.md"]
   @test b.path == "https://example.com/notes.md" && b.view == :markdown
   @test b.lines[5] == "# Notes" && b.lines[end-1] == "The end."
-  # It's read, and not changed: it has no caret and it's never written
-  @test b.fixed && K.caretless(b) && !K.writes(b) && !K.dirty(b)
+  # It has no caret until a click puts one in it, and it's never written to the server
+  @test !b.fixed && K.caretless(b) && !K.writes(b) && !K.dirty(b)
   # The top bar calls it by its address, and the sidebar's folder is as it was
   @test K.name(b) == "example.com/notes.md" && e.folder == ""
   # The front matter shows as a card, and the table as a table
@@ -702,6 +702,45 @@ end
     K.site_runs!(site, false)
     K.forget_view_copies!(site)
   end
+end
+
+# You can change a page from a web server, as a page of your own, but Ladder never writes it to the server.
+# A click on a link still opens it.
+@testset "you can change a page from a server, and the window keeps the changes" begin
+  K.navigate!(e, "example.com/notes.md"); frames()
+  b = e.buf
+  @test b.path == "https://example.com/notes.md" && !K.dirty(b) && K.caretless(b)
+  was = copy(b.lines)
+  # A click on words that aren't a link puts the caret there, and the keys type
+  i = findfirst(l -> occursin("[link beside]", l), b.lines)
+  it = K.item(e, i)
+  line = it.content.lines[1]
+  seg = line.segs[1]
+  K.press!(e, (e.origin[1] + seg.x + 1px, e.origin[2] + it.top + it.content.above + line.top + line.high / 2)); frames()
+  @test !K.caretless(b) && b.caret[1] == i && e.buf === b
+  b.caret = b.anchor = (i, 0)
+  typed("Mine. ")
+  @test b.lines[i] == "Mine. " * was[i] && K.dirty(b)
+  # Nothing writes it anywhere: not ⌘S in a window that has no panel, and not leaving the window with autosave on
+  autosave = e.autosave
+  e.autosave = true
+  try
+    K.left!(e); K.save!(b); K.save_page!(e); frames()
+  finally
+    e.autosave = autosave
+  end
+  @test K.dirty(b) && !ispath("https:") && !ispath(joinpath(dir, "https:")) && K.copying(e) === nothing
+  # Another page and back, by a link or by ⌘⌥←, shows the page as you changed it, and asks the server for nothing
+  K.follow!(e, "prices.md"); frames()
+  @test e.buf.path == "https://example.com/prices.md"
+  n = length(asked)
+  K.get_page!(e, "https://example.com/notes.md"); frames()
+  @test e.buf === b && b.lines[i] == "Mine. " * was[i] && length(asked) == n
+  K.follow!(e, "prices.md"); frames()
+  @test K.go_back!(e) && e.buf === b && length(asked) == n + 1
+  # Reload Page asks again, and the page is as the server has it
+  K.reload_page!(e); frames()
+  @test e.buf.path == "https://example.com/notes.md" && e.buf.lines == was && !K.dirty(e.buf) && length(asked) == n + 2
 end
 
 # This test set is last. Once the palette has been used over a page of the Mac, the next hover on the

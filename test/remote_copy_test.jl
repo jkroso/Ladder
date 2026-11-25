@@ -124,7 +124,7 @@ end
 @testset "a page from a web server has a Save button" begin
   K.navigate!(e, "example.com/docs/")
   frames()
-  @test e.buf.path == "https://example.com/docs/" && e.buf.fixed
+  @test e.buf.path == "https://example.com/docs/" && !K.writes(e.buf)
   @test length(K.copy_part(e)) == 1
   @test occursin("Save a copy", K.BUTTONS[:save_copy].tip(e))
   # A window that isn't on the screen has no panel to ask where the copy goes, so ⌘S does nothing there
@@ -202,6 +202,25 @@ end
   mine = joinpath(dir, "mine.md")
   write(mine, "# Mine\n")
   @test !K.foreign(mine)
+end
+
+# You can change a page from a web server in the window. A copy has your changes, in the page that you save and in
+# each other page of the copy that you changed.
+@testset "a copy has the changes that you made in the window" begin
+  ending(b, words) = (n = length(b.lines); K.edit!(b, (n, length(b.lines[n])), (n, length(b.lines[n])), words))
+  K.navigate!(e, "example.com/docs/guide.html"); frames()
+  g = e.buf
+  @test K.isremote(g.path) && occursin("# Guide", join(g.lines, "\n"))
+  ending(g, "\nMine too.")
+  K.navigate!(e, "example.com/docs/"); frames()
+  b = e.buf
+  @test b.path == "https://example.com/docs/" && b !== g
+  ending(b, "\nA line of mine.")
+  mine = joinpath(dir, "mine", "example.com")
+  K.copy_site!(e, mine); copied!()
+  @test occursin("A line of mine.", read(joinpath(mine, "docs/index.md"), String))
+  @test occursin("Mine too.", read(joinpath(mine, "docs/guide.md"), String))
+  @test isfile(joinpath(mine, "docs/Sub Part/deep.md"))   # a page that you didn't change comes from the server
 end
 
 @testset "a copy stops at $(K.COPY_MOST) pages and files" begin

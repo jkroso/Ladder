@@ -927,6 +927,9 @@ page_site(path::AbstractString) = isremote(path) ? web_site(path) : (from = copi
 "True when the page shows no caret and no key changes it: after Escape, and all the time in a page that's never changed"
 caretless(b::Buffer) = b.reading || b.fixed
 
+"True when a click with no key held on a link of the page `b` opens the link: in a page that's never changed, and in a page from a web server"
+follows_links(b::Buffer) = b.fixed || isremote(b.path)
+
 const stamp = Ref(0)
 
 load(path) = begin
@@ -1190,8 +1193,10 @@ redo!(b::Buffer) = isempty(b.redo) || (push!(b.undo, snapshot(b)); restore!(b, p
 True when the lines of `b` are what its file holds, so they can be written to
 it. The lines of a file that's only shown can be a part of the file, or its
 bytes. The lines of an email are the email as a page, which isn't what its file holds.
+A page from a web server has no file: you can change it, but Ladder never writes
+it to the server. ⌘S saves a copy of it on the Mac instead: see `save_copy!`.
 """
-writes(b::Buffer) = !(isempty(b.path) || readonly(b) || b.fixed || Eml.isemail(b.path))
+writes(b::Buffer) = !(isempty(b.path) || readonly(b) || b.fixed || Eml.isemail(b.path) || isremote(b.path))
 
 save!(b::Buffer) = begin
   writes(b) || return
@@ -22822,7 +22827,7 @@ describe(c::LinkCard) = begin
 end
 
 "True when a click on the card now opens its address: ⌘ alone is held, or the page is one that's never changed and no key is held"
-opening(c::LinkCard) = only_held(c, Keys.cmd) || (editor(c).buf.fixed && unmodified(c))
+opening(c::LinkCard) = only_held(c, Keys.cmd) || (follows_links(editor(c).buf) && unmodified(c))
 
 cursor(c::LinkCard) = opening(c) ? :hand : :arrow
 # A click with ⌘ held opens the address. Any other click goes to the page, which puts the caret on the card as a whole.
@@ -27068,7 +27073,7 @@ cursor(d::Document) = begin
   # ⌘ with another key held, like ⇧ or ⌃, does neither, so the mouse isn't a hand.
   cmd = only_held(w, Keys.cmd)
   cmd && link_at(e, w.mouse) === nothing && Base.invokelatest(definition, e, locate(e, w.mouse)) !== nothing && return :hand
-  (cmd && link_at(e, w.mouse) !== nothing) || (e.buf.fixed && unmodified(w) && link_on(e, w.mouse) !== nothing) ? :hand : :ibeam
+  (cmd && link_at(e, w.mouse) !== nothing) || (follows_links(e.buf) && unmodified(w) && link_on(e, w.mouse) !== nothing) ? :hand : :ibeam
 end
 
 """
@@ -27696,8 +27701,9 @@ press!(e, pos) = begin
     url === nothing || return follow!(e, url)
     # In Julia code, a click on a name goes to where the name is defined
     it.content isa Flow && Base.invokelatest(definition!, e, locate(e, pos)) === true && return
-  elseif b.fixed && only_held(e, Keys(0))
-    # A page that's never changed has no caret for a click to place, so a click with no key held on a link opens it
+  elseif follows_links(b) && only_held(e, Keys(0))
+    # A page that's never changed has no caret for a click to place, so a click with no key held on a link opens it.
+    # So does one in a page from a web server, as in a browser. A click anywhere else puts the caret there.
     url = link_on(e, pos)
     url === nothing || return follow!(e, url)
   end
@@ -31475,8 +31481,8 @@ describe(t::TopBar) = begin
                       mode...,
                       outside...) :
                      (more..., job_part(e)..., agent_part(e)..., checks..., diff_part(e)..., commit_part(e)..., mode...,
-                      # A page that's never changed has a lock at the end. A page from a web server has a button after
-                      # that, which saves a copy that you can change.
+                      # A page that's never changed has a lock at the end. A page from a web server has a button that
+                      # saves a copy on the Mac, with your changes.
                       (b.fixed ? (lock_part(e),) : ())...,
                       copy_part(e)...))...))
 end
@@ -44566,6 +44572,14 @@ on its way takes its place.
 """
 get_page!(e, address; record=true, else_browser=false, again=false) = begin
   hosted(e) === nothing || return get_page!(top_editor(e), address; record, else_browser, again)   # a link in a part of another page
+  # A page that you changed in the window shows as you changed it, and the server isn't asked. Reload Page asks again.
+  had = get(e.buffers, Remote.bare(address), nothing)
+  if !again && had !== nothing && dirty(had)
+    open!(e, had.path; record)
+    heading = Remote.place(address)
+    isempty(heading) || go_heading!(e, had.path, heading)
+    return e
+  end
   e.nodes[:page_asked] = PageAsked(String(strip(address)), nothing, record, else_browser, again, time())
   redraw_in!(e, 0)
   e
@@ -44660,14 +44674,16 @@ place_page!(e, a::PageAsked, b::Buffer) = begin
 end
 
 """
-The page that the server's answer `got` holds, as a page that's read and not
-changed. Its path is the address that the answer came from, which the page's
-links and pictures are from. The caret's place is after any front matter, as
-it is in a file, so the front matter shows as a card.
+The page that the server's answer `got` holds. Its path is the address that
+the answer came from, which the page's links and pictures are from. You can
+change it, but Ladder never writes it to the server: see `writes`. It shows no
+caret until a click puts one in it, so the keys scroll it, as a browser's do.
+The caret's place is after any front matter, as it is in a file, so the front
+matter shows as a card.
 """
 remote_buffer(got) = begin
   lines = Remote.lines(got)
-  b = Buffer(path=got.address, lines=lines, disk=copy(lines), told=copy(lines), fixed=true)
+  b = Buffer(path=got.address, lines=lines, disk=copy(lines), told=copy(lines), reading=true)
   b.sent = b.told
   # No page that was at the address before has this version, so nothing that was laid out for one is used for this
   b.version = b.saved = (stamp[] += 1)
@@ -45113,6 +45129,14 @@ it links to, in `folder`. The copy goes on in each frame: see `copy_tick!`.
 copy_site!(e, folder) = begin
   copyable(e) || return e
   c = SiteCopy(e.buf.path, abspath(expanduser(folder)))
+  # Another page of the copy that you changed in the window goes in it as you changed it, and isn't asked for.
+  # These come first, as the page's links would ask for them.
+  for (address, b) in e.buffers
+    (b !== e.buf && isremote(address) && b.view == :markdown && dirty(b) && Remote.site(address) == Remote.site(c.start) &&
+     Remote.inside(address, c.start) && !(Remote.bare(address) in c.seen)) || continue
+    push!(c.seen, Remote.bare(address))
+    take_page!(c, address, address, copy(b.lines))
+  end
   take_page!(c, e.buf.path, e.buf.path, copy(e.buf.lines))
   e.nodes[:site_copy] = c
   redraw_in!(e, 0)
@@ -55904,7 +55928,7 @@ page of the window that has changes is written to its file.
 left!(e) = begin
   e.autosave || return e
   write_blocks!(e)   # a block's own changes count as changes to the page
-  dirty(e.buf) && save_page!(e)
+  dirty(e.buf) && writes(e.buf) && save_page!(e)   # a page from a web server keeps its changes in the window
   foreach(b -> b === e.buf || !dirty(b) || save!(b), values(e.buffers))
   redraw_in!(e, 0)   # the top bar no longer says that the page has changes
   e
