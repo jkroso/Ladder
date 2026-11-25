@@ -1872,7 +1872,8 @@ end
 # ⌘W closes the file that the window shows, and its tab in the sidebar. The
 # tab under it shows, or the one above when it was the last tab. ⌘W on the
 # last tab shows the folder that its file is in, as a click on that folder in
-# the sidebar's trail does. ⌘W on a folder's page shows the tab that showed
+# the sidebar's trail does, but it opens no file: a blog's folder shows only
+# its list, not its Readme. ⌘W on a folder's page shows the tab that showed
 # last, and with no tabs open it closes the folder, and the window stays open
 # with no file in it. ⌘W in a window that shows no file closes the window, and
 # Ladder quits when its last window closes. So three presses of ⌘W close the
@@ -1906,7 +1907,8 @@ close_file!(e) = begin
   next = tab_after_close!(e)
   next === nothing || return show_tab_page!(e, next)
   folder = closes_to(e)
-  folder === nothing || return open_folder!(e, folder)
+  # The folder shows its list, not a file of its own like a blog's Readme, or ⌘W on that Readme would show it again
+  folder === nothing || return open_folder!(e, folder, own=false)
   show_no_file!(e)
 end
 
@@ -29736,9 +29738,13 @@ follow_folder!(e, path) = begin
   was = e.buf.path
   o = try object(e, path) catch; nothing end
   o isa AbstractDirectory ? open!(e, o) : go_folder!(e, path)
-  e.buf.path == was && show_beside!(e, path)
+  # A blog's Readme that already showed is the folder's own page, so it stays
+  e.buf.path == was && !on_own_page(e, o) && show_beside!(e, path)
   e
 end
+
+"True when the page shows the folder `o`'s own page, when that's a file in it, like a blog's Readme"
+on_own_page(e, o) = false
 
 drag!(e, pos) = begin
   haskey(e.nodes, :scrub) && held(e, Keys.mouse_left) && return scrub_to!(e, pos)
@@ -36308,16 +36314,18 @@ cursor(t::TrailName) = goes(t) ? :hand : :arrow
 onkey(t::TrailName, ::KeyPress{Keys.mouse_left}) = goes(t) ? (open_folder!(editor(t), t.path); handled) : nothing
 
 """
-Open the folder at `path` in the page: its own page, like the home folder's or
-a desktop's, or else a list of what's in it. The sidebar lists the folder, and
-a sidebar that's hidden stays hidden. The trail at the top of the sidebar, the
-path in the top bar and the home folder's page open a folder this way.
+Open the folder at `path` in the page: its own page, like the home folder's,
+a desktop's or a blog's Readme, or else a list of what's in it. The sidebar
+lists the folder, and a sidebar that's hidden stays hidden. The trail at the
+top of the sidebar, the path in the top bar and the home folder's page open a
+folder this way. With `own` false, a folder whose own page is a file in it,
+like a blog, shows only its list: ⌘W does that, so it opens no file.
 """
-open_folder!(e, path) = begin
+open_folder!(e, path; own=true) = begin
   (isdir(path) && !ispackage(path)) || return show_path!(e, path)
   # The folder's own page says its kind, and loads the code of the kind. It runs now if it hasn't.
   folder_pages!(path)
-  Base.invokelatest(show_folder!, e, path)
+  Base.invokelatest(own ? follow_folder! : show_folder!, e, path)
 end
 
 show_folder!(e, path) = (go_folder!(e, path); show_beside!(e, path); e)
@@ -55800,8 +55808,9 @@ end
 # as its site shows it: its Readme, or the blog's index.md, and under it a list
 # of the folder's files and folders, with what each is about, how big it is,
 # and when it was made and last saved. blog.jl says what the list leaves out.
-# A click on a folder in the sidebar shows that folder's page, and the sidebar
-# lists the folder. A folder with no Readme shows only its list. A section with
+# A click on a folder in the sidebar, in the list or in the path in the top bar
+# shows that folder's page, and the sidebar lists the folder. ⌘W on the last
+# tab shows only the list. A folder with no Readme shows only its list. A section with
 # its own index.md shows only that page, with no list, as its site does. Every
 # page of the blog has the look of the site: see "the look of a blog's site".
 #
@@ -56148,6 +56157,8 @@ front_page(d::SectionFolder) = begin
   k === nothing && (k = findfirst(Blogs.isreadme, names))
   k === nothing ? "" : joinpath(folder, names[k])
 end
+
+on_own_page(e, d::BlogFolder) = (top = front_page(d); !isempty(top) && e.buf.path == top)
 
 "True for a section of a blog with its own index.md, which its site shows alone, with no list"
 section_index(d::SectionFolder) = Blogs.isindex(basename(front_page(d)))

@@ -394,4 +394,24 @@ matter_hidden() = (it = e.layout[1]; it.first == 1 && it.last == K.front_matter(
   @test matter_hidden()
 end
 
+@testset "the path in the top bar shows a folder of the blog as a click in the list does" begin
+  # The blog's own folder and a section show their Readme, with the list under it. A section with no Readme shows its list.
+  Base.invokelatest(K.title_go!, e, w, canon); frames()
+  @test e.buf.path == joinpath(canon, "Readme.md") && e.folder == canon
+  @test K.page_foot(e, K.page_blog_folder(e), K.text_object(e)) === e.nodes[(:listing, canon)]
+  # Another click on it, while its Readme shows, keeps the Readme
+  Base.invokelatest(K.title_go!, e, w, canon); frames()
+  @test e.buf.path == joinpath(canon, "Readme.md")
+  Base.invokelatest(K.title_go!, e, w, humans); frames()
+  @test e.buf.path == joinpath(humans, "Readme.md") && e.folder == humans
+  Base.invokelatest(K.title_go!, e, w, city); frames()
+  @test e.buf.path == city && e.buf.view == :file
+  # ⌘W on the Readme, when it's the last tab, shows the blog's list, and not the Readme again
+  empty!(K.tabs(e))
+  Base.invokelatest(K.title_go!, e, w, canon); frames()
+  @test K.tabs(e) == [joinpath(canon, "Readme.md")]
+  Base.invokelatest(K.close_file!, e); frames()
+  @test e.buf.path == canon && e.buf.view == :file && isempty(K.tabs(e))
+end
+
 close(w)
