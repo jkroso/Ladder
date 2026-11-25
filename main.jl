@@ -336,7 +336,7 @@
 @use "github.com/jkroso/UI.jl/Interface/Specific" skia_cap_height
 @use "github.com/jkroso/UI.jl/Interface/abstract" tabstop tabbed! USUAL_PX
 @use "github.com/jkroso/UI.jl/Interface/draw" scene
-@use "github.com/jkroso/UI.jl/Interface/abstract" SemanticUI GeometricUI WrapMode Theme with_theme adopt_theme! light describe describe! reuse! detach! add_child! window_of focus handled carry! inputs version
+@use "github.com/jkroso/UI.jl/Interface/abstract" SemanticUI GeometricUI WrapMode Theme with_theme adopt_theme! light describe describe! reuse! detach! add_child! window_of focus handled carry! inputs version onblur
 @use "github.com/jkroso/UI.jl/Interface/draw" ui draw ishovered cursor open_url viewport show_tooltip! hide_tooltip! hittest show_menu! hide_menu! redraw_in! rect popup! close_popup! MouseScroll Pinch onpinch Changed onchanged placed! with_clip with_round_clip clipboard!
 @use "github.com/jkroso/UI.jl/Interface/objc" libobjc cls sel msg nsstring jstring with_pool send
 @use "github.com/jkroso/UI.jl/Interface/fonts" skia_font register_font weight_of weight_name isitalic installed_faces
@@ -909,8 +909,8 @@ Base.@kwdef mutable struct Buffer
   sent::Vector{String} = [""]           # the text as it was when you last sent it to an agent, or when the file was opened
 end
 
-"True when the file is only shown. Ladder changes Markdown files and the files of code in `CODE_FILES`, and no others."
-readonly(b::Buffer) = !(b.view in (:markdown, :code))
+"True when the file is only shown. Ladder changes Markdown files, the files of code in `CODE_FILES` and CSV files, and no others."
+readonly(b::Buffer) = !(b.view in (:markdown, :code) || table_text(b))
 
 """
 True when Ladder shows the file at `path` as a page and never changes it: the
@@ -1176,6 +1176,13 @@ end
 "Replace the text from `lo` to `hi` with `new`, and put the caret after it"
 edit!(b::Buffer, lo::Pos, hi::Pos, new::AbstractString; typing=false) = begin
   (readonly(b) || b.fixed) && return b   # nothing changes a file that's only shown, an email, or a file that's read-only
+  # No key types in the lines of a CSV file while its table shows. The table changes them with `table_edit!`.
+  b.view == :file && return b
+  replace_text!(b, lo, hi, new; typing)
+end
+
+"Replace the text from `lo` to `hi` with `new`, and put the caret after it, so that ⌘Z puts it back. `edit!` says what may be changed."
+replace_text!(b::Buffer, lo::Pos, hi::Pos, new::AbstractString; typing=false) = begin
   # Letters typed one after another undo together
   if !(typing && time() - b.typed < 1 && !isempty(b.undo))
     push!(b.undo, snapshot(b))
@@ -1213,10 +1220,19 @@ writes(b::Buffer) = !(isempty(b.path) || readonly(b) || b.fixed || Eml.isemail(b
 save!(b::Buffer) = begin
   writes(b) || return
   refresh!(b)   # a change that something else made to the file a moment ago is kept
-  write(b.path, join(b.lines, "\n"))
+  # A file whose lines end as Windows ends them keeps them that way, so a change to one line changes no others
+  write(b.path, join(b.lines, crlf(b.path) ? "\r\n" : "\n"))
   READ[b.path] = mtime(b.path)
   b.disk = copy(b.lines)
   b.saved = b.version
+end
+
+"True when the lines of the file at `path` end with a carriage return and a line feed, as Windows ends them. Its first line says."
+crlf(path) = begin
+  isfile(path) || return false
+  start = open(io -> read(io, 65_536), path)
+  i = findfirst(==(0x0a), start)
+  i !== nothing && i > 1 && start[i-1] == 0x0d
 end
 
 # --- the app -------------------------------------------------------------------------
@@ -5344,7 +5360,9 @@ end
 "The buffer that shows the file at `path`, which isn't Markdown. A JSON file shows as a tree and an HTML file as its page, or with `tree` false as their text."
 look(path; tree=true) = begin
   ext = lowercase(splitext(path)[2])
-  if ext in ZIPS
+  if table_edits(path)
+    return table_look(path)   # a CSV file that its table changes: see "changing a CSV file"
+  elseif ext in ZIPS
     return Buffer(path=path, view=:file)   # the list of what it holds: see "a zip file"
   elseif tree && ext in JSONS && json_of(path) !== nothing
     return Buffer(path=path, view=:file)
@@ -5448,6 +5466,7 @@ bytes as bits, :hex for its bytes in hexadecimal, :text for its text, and
 CSV file. A file that has no text shows as `look` shows it.
 """
 look(path, view::Symbol) = begin
+  view in (:file, :text) && table_edits(path) && return table_look(path, view)
   view == :bits && return Buffer(path=path, view=:bits, lines=bitlines(path), about=bits_about(path))
   view == :hex && return Buffer(path=path, view=:hex, lines=hexlines(path), about=hex_about(path))
   # A terminal's file is read each time, since its shell writes it while it shows
@@ -5920,6 +5939,11 @@ end
 "Show the file of the page at the level `view`: :bits, :hex, :text, or :file for the tree of a JSON file and the table of a CSV file"
 file_level!(e, view::Symbol) = begin
   b = e.buf
+  # A CSV file's table and its text are the same lines, so a change at one level shows at the other. Its bytes are
+  # the file's, so a change that isn't saved is written first. See "changing a CSV file".
+  table_text(b) && view in (:file, :text) && return table_level!(e, view)
+  table_text(b) && b.saved != b.version && save!(b)
+  edits = table_text(b)
   at = place_in_file(e)
   # A terminal writes its file a moment after its shell writes. It writes it now, so that the file's text is what the terminal shows.
   term_page(b) && (v = get(e.nodes, (:term, b.path), nothing); v === nothing || Terms.save!(v))
@@ -5927,6 +5951,9 @@ file_level!(e, view::Symbol) = begin
   b.lines, b.about, b.view = shown.lines, shown.about, shown.view
   b.caret = b.anchor = (1, 0)
   b.saved = b.version += 1
+  # A step back from the bytes to the text, or on, would put lines of one level in place of the other's
+  (edits || table_text(b)) && (empty!(b.undo); empty!(b.redo))
+  table_text(b) && (b.disk = copy(b.lines))
   e.scroll.offset = 0px
   # The window stays at the same place in the file, between its bits, its bytes and its text
   line = line_of_byte(b, at)
@@ -6874,7 +6901,9 @@ describe(v::FileView) = begin
   isdir(v.path) && return Box(width(grow=grow), Alignment.Start, node!(() -> FolderPage(path=v.path), e, (:folder_page, v.path)))
   isfile(v.path) || return words((label("$(basename(v.path)) isn't there any more", 15px),))
   about = bytes(filesize(v.path)) * "  ·  Changed " * Libc.strftime("%-d %b %Y, %H:%M", mtime(v.path))
-  filesize(v.path) == 0 && return words((label("$(basename(v.path)) is empty", 15px), label(about, 12px, color=colours.dim)))
+  # An empty CSV file that the page changes shows a table to write in
+  filesize(v.path) == 0 && !(e.buf.path == v.path && table_text(e.buf)) &&
+    return words((label("$(basename(v.path)) is empty", 15px), label(about, 12px, color=colours.dim)))
   # A model and a player are components, so they get the colours and the text size that a live block gives them
   with_theme(component_theme(e.zoom)) do
     content = try
@@ -6910,18 +6939,28 @@ end
 # the top of the window while the rows scroll under it. A thin line with round
 # corners goes round the table.
 #
-# A click on a heading opens a menu. Its first part puts the rows in the order
-# of that column, A to Z or Z to A, and a click on the order that the rows have
-# now puts them back in the file's order. A column of numbers goes in the order
-# of its numbers. Empty cells go last in both orders.
+# Ladder works out what kind of thing each column holds: numbers, days, yes
+# or no, or text. csv.jl says how. The heading of a column of numbers, days or
+# yes or no has a small picture of its kind before its name.
 #
-# The menu's second part shows fewer rows. A column with no more than
-# `FEW_VALUES` different values lists them, each with how many rows have it. A
-# click on a value ticks it, and only the rows with a ticked value show. Any
-# other column has a field, and only the rows with its words in that column
-# show. Return keeps what the field holds, and esc puts back what it held
-# before. The heading of a column that shows fewer rows is in the accent
-# colour, with a funnel beside it. The top bar says how big the file is, when
+# A click on a heading opens a menu. Its first part puts the rows in the order
+# of that column, and a click on the order that the rows have now puts them
+# back in the file's order. Each kind has its own order: text goes A to Z,
+# with the numbers in it by their size, so Item 2 comes before Item 10.
+# Numbers go by their size, days by their time, the oldest first or the
+# newest, and yes before no or no before yes. Empty cells go last in both
+# orders, and so do cells that aren't of the column's kind.
+#
+# The menu's second part shows fewer rows. A column of numbers or days has two
+# fields, and only the rows from the first to the second show: 10 and 50, or
+# 1 Nov and today. Either can be empty. A day is typed as a field of a form
+# reads it, like 2026-11-25, 25 Nov, yesterday or fri. A column with no more
+# than `FEW_VALUES` different values lists them, each with how many rows have
+# it. A click on a value ticks it, and only the rows with a ticked value show.
+# Any other column of text has a field, and only the rows with its words in
+# that column show. Return keeps what the fields hold, and esc puts back what
+# they held before. The heading of a column that shows fewer rows is in the
+# accent colour, with a funnel beside it. The top bar says how big the file is, when
 # it last changed, and how many rows show. It's there and not over the table,
 # so the words stay in sight while the table scrolls. The table starts nearer
 # the top bar than the text of a page does, so the window shows more rows.
@@ -6950,7 +6989,7 @@ const SHEET_KEY = :sheet_column
 "The table of a CSV file that the page shows, and what's chosen for it"
 mutable struct FileSheet
   table::Csvs.Table
-  at::Float64                      # when the file last changed, when it was read
+  at::Any                          # what it was read from: the version of the page's lines, or when the file last changed
   natural::Vector{px}              # how wide each column needs to be, up to WIDEST_CELL
   widths::Vector{px}               # how wide each column is in the page
   wide::px                         # how wide the page was when the widths were worked out
@@ -6966,31 +7005,58 @@ mutable struct FileSheet
   parts::Dict{Any,Any}             # the headings and the lines of the menu, kept between frames
   across::px                       # how far the table is scrolled to the right
   cut::Dict{Tuple{Int,Int},Tuple{px,String}}   # the text of a cell as it shows, with the width that it was cut short for
+  kinds::Vector{Symbol}            # what each column holds: :number, :day, :yesno or :text. See csv.jl.
+  firstday::Vector{Bool}           # for each column, whether its days that are written with numbers, like 3/4/2026, have the day first
+  bounds::Dict{Int,Tuple{String,String}}   # the first and the last value that show, as they're typed, for each column of numbers or days that has some
+  upto::Any                        # the menu's second field, for the last value that shows
+  lines::Vector{UnitRange{Int}}    # the lines of the page that each row is on, when the page changes the file. Row 1 is the headings.
+  mark::Char                       # the mark between two cells
+  editing::Any                     # the row and the column of the cell that's being changed, or nothing. See "changing a CSV file".
+  input::Any                       # the field that changes it
 end
 
 "The font of a cell, or of a heading with `bold`"
 cell_face(bold=false) = Face(SANS, bold ? "Semibold" : "", 12px, colours.ink, false)
 
 """
-The table in the CSV file at `path`, read for the page. When `old` is the
-table that the file had before and the headings are the same, the new one
-keeps its order, what it shows, and how far it's scrolled.
+The table in the CSV file at `path`, read for the page: from the lines `lines`
+of the page, when the page changes the file, or else from the file. `at` says
+which: see `FileSheet`. When `old` is the table that the file had before and
+it has as many columns, the new one keeps its order, what it shows, and how far
+it's scrolled. When it has as many rows as before, they show in the same
+places, so a row that you change stays where it is.
 """
-file_sheet(path, old) = begin
-  t = Csvs.load(path, most=FILE_ROWS, upto=FILE_BYTES)
+file_sheet(path, old, at, lines=nothing) = begin
+  t, places = lines === nothing ? (Csvs.load(path, most=FILE_ROWS, upto=FILE_BYTES), UnitRange{Int}[]) : Csvs.table(lines, most=FILE_ROWS)
+  # A CSV file with nothing in it yet has one heading with no name, for you to name
+  lines !== nothing && isempty(t.rows) && (t = Csvs.Table([[""]], [false], false, ""))
   rows = t.rows
   head, plain = cell_face(true), cell_face()
-  # A heading has room for the arrow of its order beside it
-  need(r, c) = measure(r == 1 ? head : plain, first(celltext(rows[r][c]), 300)) + (r == 1 ? 14px : 0px)
+  # A heading has room for the picture of its column's kind and the arrow of its order beside it
+  need(r, c) = measure(r == 1 ? head : plain, first(celltext(rows[r][c]), 300)) + (r == 1 ? 28px : 0px)
   natural = [clamp(maximum(r -> need(r, c), 1:min(length(rows), 200)), 24px, WIDEST_CELL) + 2CELL_PAD for c in eachindex(t.numbers)]
-  s = FileSheet(t, mtime(path), natural, copy(natural), 0px, nothing, Dict{Int,String}(), Dict{Int,Set{String}}(), nothing, Int[],
-                Dict{Int,Any}(), 0, nothing, nothing, Dict{Any,Any}(), 0px, Dict{Tuple{Int,Int},Tuple{px,String}}())
-  if old isa FileSheet && !isempty(rows) && !isempty(old.table.rows) && old.table.rows[1] == rows[1]
-    s.sort, s.filters, s.picks, s.across = old.sort, old.filters, old.picks, old.across
-    s.asking, s.was, s.field, s.parts = old.asking, old.was, old.field, old.parts
+  # A few thousand rows are enough to say what kind of thing each column holds
+  sample = @view rows[1:min(length(rows), KIND_ROWS)]
+  mark = isempty(places) ? (lowercase(splitext(path)[2]) == ".tsv" ? '\t' : ',') : Csvs.mark(lines[first(places[1])])
+  s = FileSheet(t, at, natural, copy(natural), 0px, nothing, Dict{Int,String}(), Dict{Int,Set{String}}(), nothing, Int[],
+                Dict{Int,Any}(), 0, nothing, nothing, Dict{Any,Any}(), 0px, Dict{Tuple{Int,Int},Tuple{px,String}}(),
+                Csvs.kinds(sample), Csvs.dayfirsts(sample), Dict{Int,Tuple{String,String}}(), nothing, places, mark, nothing, nothing)
+  if old isa FileSheet
+    # The fields of the menus and of a cell are kept, and so is the cell that's being changed
+    s.field, s.upto, s.input, s.editing = old.field, old.upto, old.input, old.editing
+    if !isempty(rows) && !isempty(old.table.rows) && length(old.table.rows[1]) == length(rows[1])
+      s.sort, s.filters, s.picks, s.bounds, s.across = old.sort, old.filters, old.picks, old.bounds, old.across
+      s.asking, s.was, s.parts = old.asking, old.was, old.parts
+      # The rows stay in their places
+      length(rows) == length(old.table.rows) && ((s.sought, s.found) = (old.sought, old.found))
+    end
+    # The columns share the page's width as they did, so a cell can be shown before the next frame
+    old.wide > 0px && spread!(s, old.wide)
   end
   s
 end
+
+const KIND_ROWS = 2000   # how many rows of a table say what kind of thing each column holds
 
 "Share the page's width `wide` among the columns of `s`. A table that's narrower than the page grows, each column by its share."
 spread!(s::FileSheet, wide) = begin
@@ -7003,15 +7069,54 @@ spread!(s::FileSheet, wide) = begin
 end
 
 "True when column `c` of `s` shows only some rows"
-narrowed(s::FileSheet, c::Int) = haskey(s.filters, c) || haskey(s.picks, c)
+narrowed(s::FileSheet, c::Int) = haskey(s.filters, c) || haskey(s.picks, c) || haskey(s.bounds, c)
 "True when some column of `s` shows only some rows"
-narrowed(s::FileSheet) = !isempty(s.filters) || !isempty(s.picks)
+narrowed(s::FileSheet) = !isempty(s.filters) || !isempty(s.picks) || !isempty(s.bounds)
 
 "Keep only the rows that have `words` in column `column`. No words takes that away."
 keep!(s::FileSheet, column::Int, words) = begin
   words = String(strip(words))
   isempty(words) ? delete!(s.filters, column) : (s.filters[column] = words)
   s
+end
+
+"True when column `c` of `s` holds numbers or days, so its menu has two fields that show the rows from one value to another"
+ranged(s::FileSheet, c::Int) = s.kinds[c] in (:number, :day)
+
+"Keep only the rows of column `c` from the value typed as `from` to the one typed as `to`. With both fields empty, every row shows."
+hold!(s::FileSheet, c::Int, from, to) = begin
+  from, to = String(strip(from)), String(strip(to))
+  isempty(from) && isempty(to) ? delete!(s.bounds, c) : (s.bounds[c] = (from, to))
+  s
+end
+
+"""
+What the cell `text` of column `c` of `s` comes to, to put it in order and to
+keep it between two values: a number, a time, or true for yes. It's nothing in
+a column of text, and for a cell that isn't of its column's kind.
+"""
+worth(s::FileSheet, c::Int, text::AbstractString) = begin
+  kind = s.kinds[c]
+  kind == :number ? (n = Charts.number(text); n === nothing ? nothing : n[1]) :
+  kind == :day ? Csvs.when(text, dayfirst=s.firstday[c]) :
+  kind == :yesno ? Csvs.yesno(text) : nothing
+end
+
+"""
+The value that `text`, typed in a field of the menu of column `c`, names: a
+number, or the first moment of a day, or with `last` its last moment. A day is
+read as a field of a form reads it, like 25 Nov, yesterday or fri, or as a cell
+is read. It's nothing when the text names no value, so the field keeps no row
+out while you type in it. A number alone names no day there, since it's the
+start of a day that you're typing.
+"""
+typed_worth(s::FileSheet, c::Int, text::AbstractString; last=false) = begin
+  isempty(strip(text)) && return nothing
+  s.kinds[c] == :number && return (n = Charts.number(text); n === nothing ? nothing : n[1])
+  occursin(r"^\s*\+?\d{1,4}\s*$", text) && return nothing
+  day = Forms.day(text)
+  day === nothing || return last ? Dates.DateTime(day + Day(1)) - Dates.Millisecond(1) : Dates.DateTime(day)
+  Csvs.when(text, dayfirst=s.firstday[c])
 end
 
 """
@@ -7026,42 +7131,65 @@ values_of(s::FileSheet, c::Int) = get!(s.values, c) do
     counts[value] = get(counts, value, 0) + 1
     length(counts) > FEW_VALUES && return nothing
   end
-  [(value, counts[value]) for value in in_order(s.table, collect(keys(counts)), c, :asc, value -> value)]
+  [(value, counts[value]) for value in in_order(s, collect(keys(counts)), c, :asc, value -> value)]
 end
 
 """
-`items` in the order of column `c` of `t`, A to Z with `way` :asc and Z to A
-with :desc. `cell(item)` is the text of the item's cell. In a column of
-numbers, the cells that are numbers go in the order of their numbers, and come
-before the rest. Empty cells go last whichever way.
+The text of the least and of the greatest value in column `c` of `s`, as the
+file writes them, or "" when it has none. The fields of the column's menu show
+them before you type.
 """
-in_order(t::Csvs.Table, items, c, way, cell) = begin
+extent(s::FileSheet, c::Int) = begin
+  lo = hi = nothing
+  for r in 2:length(s.table.rows)
+    text = s.table.rows[r][c]
+    v = worth(s, c, text)
+    v === nothing && continue
+    (lo === nothing || v < lo[1]) && (lo = (v, text))
+    (hi === nothing || v > hi[1]) && (hi = (v, text))
+  end
+  (lo === nothing ? "" : lo[2], hi === nothing ? "" : hi[2])
+end
+
+"""
+`items` in the order of column `c` of `s`, with `way` :asc or :desc.
+`cell(item)` is the text of the item's cell. Text goes A to Z, or Z to A, with
+the numbers in it by their size. Numbers go by their size, days by their time,
+and yes before no. A cell that isn't of its column's kind goes after the ones
+that are, A to Z. Empty cells go last whichever way.
+"""
+in_order(s::FileSheet, items, c, way, cell) = begin
   rev = way == :desc
   blank = [x for x in items if isempty(cell(x))]
-  full = [(x, lowercase(cell(x))) for x in items if !isempty(cell(x))]
-  if t.numbers[c]
-    found = [(x, Charts.number(cell(x))) for (x, _) in full]
-    numbers = sort!([(x, n[1]) for (x, n) in found if n !== nothing], by=last, rev=rev)
-    words = sort!([(x, lowercase(cell(x))) for (x, n) in found if n === nothing], by=last, rev=rev)
-    return [first.(numbers); first.(words); blank]
-  end
-  [first.(sort!(full, by=last, rev=rev)); blank]
+  full = [x for x in items if !isempty(cell(x))]
+  text(x) = (x, Csvs.sortkey(cell(x)))
+  kind = s.kinds[c]
+  kind == :text && return [first.(sort!(map(text, full), by=last, rev=rev)); blank]
+  found = [(x, worth(s, c, cell(x))) for x in full]
+  # Yes is false here, so it comes first
+  known = sort!([(x, kind == :yesno ? !v : v) for (x, v) in found if v !== nothing], by=last, rev=rev)
+  others = sort!([text(x) for (x, v) in found if v === nothing], by=last, rev=rev)
+  [first.(known); first.(others); blank]
 end
 
 """
 The rows of `s` that show, in the order that they show in: the rows that have
-each column's words in that column and one of its ticked values, in the order
-of the column that's chosen. When they change, a page that was scrolled down
-the table goes back to the top of the table.
+each column's words in that column, one of its ticked values, and a value
+between its two values, in the order of the column that's chosen. When they
+change, a page that was scrolled down the table goes back to the top of the
+table.
 """
 sheet_rows!(e, s::FileSheet) = begin
-  key = (s.sort, copy(s.filters), Dict(c => copy(p) for (c, p) in s.picks))
+  key = (s.sort, copy(s.filters), Dict(c => copy(p) for (c, p) in s.picks), copy(s.bounds))
   key == s.sought && return s.found
   rows = s.table.rows
   words = [(c, lowercase(w)) for (c, w) in s.filters]
+  ranges = [(c, typed_worth(s, c, a), typed_worth(s, c, z, last=true)) for (c, (a, z)) in s.bounds]
+  between(r, (c, lo, hi)) = (lo === nothing && hi === nothing) ||
+    (v = worth(s, c, rows[r][c]); v !== nothing && (lo === nothing || v >= lo) && (hi === nothing || v <= hi))
   keep = [r for r in 2:length(rows) if all(((c, w),) -> occursin(w, lowercase(rows[r][c])), words) &&
-                                       all(((c, p),) -> rows[r][c] in p, s.picks)]
-  s.sort === nothing || (keep = in_order(s.table, keep, s.sort[1], s.sort[2], r -> rows[r][s.sort[1]]))
+                                       all(((c, p),) -> rows[r][c] in p, s.picks) && all(t -> between(r, t), ranges)]
+  s.sort === nothing || (keep = in_order(s, keep, s.sort[1], s.sort[2], r -> rows[r][s.sort[1]]))
   s.sought === nothing || (e.scroll.offset = min(e.scroll.offset, sheet_top()))
   s.sought, s.found = key, keep
   keep
@@ -7087,6 +7215,25 @@ end
 sheet_part!(make, v, key) = get!(() -> own!(v, make()), (v.table::FileSheet).parts, key)
 
 """
+The table of the CSV file that `v` shows, as the file is now. A file that the
+page changes is read from the page's lines, each time they change, and any
+other from the file, each time it changes.
+"""
+current_sheet!(v, e) = begin
+  b = e.buf
+  lines = b.path == v.path && table_text(b)
+  at = lines ? (:lines, b.version) : (:file, mtime(v.path))
+  (v.table isa FileSheet && v.table.at == at) || (v.table = file_sheet(v.path, v.table, at, lines ? b.lines : nothing))
+  v.table::FileSheet
+end
+
+"True when a new row is being written after the last row of `s`"
+new_row(s::FileSheet) = s.editing !== nothing && s.editing[1] > length(s.table.rows)
+
+"True when the table of `v` shows an empty row after its last, to write a new row in: it has only its headings, and it changes its file"
+blank_row(v, s::FileSheet) = new_row(s) || (length(s.table.rows) == 1 && sheet_edits(v) && sheet_whole(v))
+
+"""
 The table of the CSV file that `v` shows, or nothing when the file has no
 table. It's as wide as the page and as tall as all the rows that show, but only
 the rows in the window are made. The headings stay at the top of the window
@@ -7094,12 +7241,14 @@ while the page is scrolled down the table. `note(words)` adds to what the top
 bar says of the file.
 """
 sheet_view(v, e, note) = begin
-  at = mtime(v.path)
-  (v.table isa FileSheet && v.table.at == at) || (v.table = file_sheet(v.path, v.table))
-  s = v.table::FileSheet
+  s = current_sheet!(v, e)
   isempty(s.table.problem) || return nothing
-  # What the field of a heading's menu holds is what its column keeps, as it's typed
-  s.asking > 0 && s.field !== nothing && values_of(s, s.asking) === nothing && keep!(s, s.asking, s.field.text)
+  # What the fields of a heading's menu hold is what its column keeps, as it's typed
+  c = s.asking
+  if c > 0 && s.field !== nothing
+    ranged(s, c) ? hold!(s, c, s.field.text, s.upto === nothing ? "" : s.upto.text) :
+      values_of(s, c) === nothing && keep!(s, c, s.field.text)
+  end
   found = sheet_rows!(e, s)
   n, total = length(found), length(s.table.rows) - 1
   held = s.table.more ? "the first $(commas(total)) rows" : "$(commas(total)) row$(total == 1 ? "" : "s")"
@@ -7109,31 +7258,40 @@ sheet_view(v, e, note) = begin
   room = sum(s.widths, init=0px)
   s.across = clamp(s.across, 0px, max(0px, room - wide))
   _, h = window_size(e)
+  # A new row that's being written shows after the others, and so does an empty row under headings with no rows
+  shown = n + (blank_row(v, s) ? 1 : 0)
   into = e.scroll.offset - sheet_top()   # how far the top of the window is past the top of the table
-  lo = clamp(floor(Int, (into - HEAD_H) / ROW_H) - 4, 0, n)
-  hi = min(n, lo + ceil(Int, h / ROW_H) + 8)
+  lo = clamp(floor(Int, (into - HEAD_H) / ROW_H) - 4, 0, shown)
+  hi = min(shown, lo + ceil(Int, h / ROW_H) + 8)
   plain = cell_face()
-  row(k) = (r = found[k];
+  cell(r, c, w) = s.editing == (r, c) ? editing_cell(s, w, ROW_H) :
+    Row(fixed(w), height(ROW_H), padding(CELL_PAD, 0px), Alignment.Center, clip=true,
+        label(r <= length(s.table.rows) ? shown_cell(s, r, c, w - 2CELL_PAD, plain) : "", 12px))
+  row(k) = (r = k <= n ? found[k] : length(s.table.rows) + 1;
     Row(fixed(room), height(ROW_H), Alignment.Start, background(iseven(k) ? colours.stripe : clear),
-      [Row(fixed(w), height(ROW_H), padding(CELL_PAD, 0px), Alignment.Center, clip=true, label(shown_cell(s, r, c, w - 2CELL_PAD, plain), 12px))
-       for (c, w) in enumerate(s.widths)]...))
-  none = n == 0 ? (Box(fixed(min(room, wide)), height(2ROW_H), label("No row has what the headings keep.", 12px, color=colours.dim)),) : ()
-  rows = Column(fixed(room), Alignment.Start, spacer(HEAD_H + ROW_H * lo), [row(k) for k in lo+1:hi]..., spacer(ROW_H * (n - hi)), none...)
+      [cell(r, c, w) for (c, w) in enumerate(s.widths)]...))
+  none = shown == 0 && total > 0 ? (Box(fixed(min(room, wide)), height(2ROW_H), label("No row has what the headings keep.", 12px, color=colours.dim)),) : ()
+  rows = Column(fixed(room), Alignment.Start, spacer(HEAD_H + ROW_H * lo), [row(k) for k in lo+1:hi]..., spacer(ROW_H * (shown - hi)), none...)
   heads = Row(fixed(room), height(HEAD_H), Alignment.Start, background(colours.head),
     [sheet_part!(() -> SheetHead(of=v, column=c), v, (:head, c)) for c in eachindex(s.widths)]...)
   # The headings are over the rows, and move down with the window until the rows end
-  stick = clamp(into, 0px, ROW_H * max(n - 1, 0))
+  stick = clamp(into, 0px, ROW_H * max(shown - 1, 0))
   table = Stack(fixed(room), Alignment.Start, rows, Box(Alignment.Start, offset_y=stick, heads))
   frame = sheet_part!(() -> SheetFrame(of=v), v, :frame)
   frame.wide, frame.inside = e.width, Box(Alignment.Start, offset_x=-s.across, table)
   frame
 end
 
+"The cell of `s` that's being changed, `w` wide and `tall` tall: its field, in a box with a line round it in the accent colour"
+editing_cell(s::FileSheet, w, tall) = Box(fixed(w), height(tall), padding(CELL_PAD - 2px, 0px), Alignment.Center, background(colours.bg),
+                                          border(2px, :solid, colours.accent), s.input)
+
 "The line round a CSV file's table, which has round corners. The table scrolls sideways inside it."
 @def mutable struct SheetFrame <: SemanticUI
   of::Any = nothing       # the FileView
   wide::px = 0px          # how wide it is, with its line
   inside::Any = nothing   # what's in it in this frame: the table, as far to the left as it's scrolled
+  rect::NTuple{4,px} = (0px, 0px, 0px, 0px)   # where it was drawn in the window, to find the cell under the mouse
 end
 
 describe(f::SheetFrame) = Row(fixed(f.wide), Alignment.Start, padding(SHEET_LINE), clip_x=true, name="Table frame", detach!(f.inside))
@@ -7142,6 +7300,7 @@ cursor(::SheetFrame) = :arrow
 # The rows of the table have square ends, so the page's colour goes over what of them is outside the
 # round corners. The line goes round on top of that.
 draw(ctx, size, ui::ConcreteRect, f::SheetFrame) = begin
+  f.rect = (ui.left, ui.top, ui.width, ui.height)
   x, y, w, h, r = num(ui.left), num(ui.top), num(ui.width), num(ui.height), num(SHEET_ROUND)
   shape = Skia.sk_path_new()
   rect = Ref(Skia.sk_rect_t(Float32(x), Float32(y), Float32(x + w), Float32(y + h)))
@@ -7169,7 +7328,7 @@ end
   of::Any = nothing   # the FileView
   column::Int = 1
 end
-"The menu of a column of a CSV file's table: its two orders, and what shows fewer rows"
+"The menu of a column of a CSV file's table: its two orders, what shows fewer rows, and what changes the column"
 @def mutable struct SheetMenu <: SemanticUI
   of::Any = nothing
   column::Int = 1
@@ -7185,41 +7344,67 @@ end
   value::String = ""
   count::Int = 0
 end
+"A line in the menu of a column that changes the file: Rename Column, Add Column or Delete Column. See \"changing a CSV file\"."
+@def mutable struct SheetAction <: SemanticUI
+  of::Any = nothing
+  what::Symbol = :rename
+end
+
+"The picture before the name of a column that holds numbers, days, or yes or no. A column of text has none."
+const KIND_ICONS = Dict(:number => "hash", :day => "calendar3", :yesno => "check2-square")
+"The words of the two orders of a column of each kind"
+const ORDER_WORDS = Dict(:text => ("A–Z", "Z–A"), :number => ("Smallest first", "Largest first"),
+                         :day => ("Oldest first", "Newest first"), :yesno => ("Yes first", "No first"))
 
 describe(h::SheetHead) = begin
   s = h.of.table::FileSheet
   c = h.column
   w = s.widths[c]
+  s.editing == (1, c) && return editing_cell(s, w, HEAD_H)
   way = s.sort !== nothing && s.sort[1] == c ? s.sort[2] : nothing
   lit = ishovered(h) || s.asking == c
   fewer = narrowed(s, c)
   colour = fewer ? colours.accent : colours.ink
+  kind = get(KIND_ICONS, s.kinds[c], nothing)
+  icon = kind === nothing ? () : (Icon(kind, size=10px, color=colours.faint),)
   # The funnel of a column that shows fewer rows, and the arrow of its order. With neither, the mouse over the heading shows that it opens.
   marks = ((fewer ? (Icon("funnel-fill", size=9px, color=colours.accent),) : ())...,
            (way !== nothing ? (Icon(way == :asc ? "chevron-up" : "chevron-down", size=9px, color=colours.ink),) :
             lit && !fewer ? (Icon("chevron-down", size=9px, color=colours.faint),) : ())...)
-  room = w - 2CELL_PAD - 13px * length(marks)
+  room = w - 2CELL_PAD - 13px * (length(marks) + length(icon))
   Row(fixed(w), height(HEAD_H), padding(CELL_PAD, 0px), child_gap=4px, Alignment.Center, clip=true,
       background(lit ? colours.hover : clear),
-    Box(label(shown_cell(s, 1, c, max(room, 12px)), 12px, color=colour, weight="Semibold")), marks...)
+    icon..., Box(label(shown_cell(s, 1, c, max(room, 12px)), 12px, color=colour, weight="Semibold")), marks...)
 end
 
 cursor(::SheetHead) = :hand
 onmouse(::SheetHead, ::MouseMove) = handled
 
+"Put `text` in the field `f`, with the caret after it, and `words` in it while it's empty"
+fill_field!(f, text, words) = (f.text = text; f.placeholder = words; f.cursor = f.anchor = length(text); f.scroll = 0px; f)
+
 onkey(h::SheetHead, ev::KeyPress{Keys.mouse_left}) = begin
   v = h.of
+  # A cell that's being changed keeps what was typed in it
+  stop_edit!(v)
   s = v.table::FileSheet
   c = h.column
   listed = values_of(s, c) !== nothing
   s.asking = c
-  s.was = listed ? (haskey(s.picks, c) ? copy(s.picks[c]) : nothing) : get(s.filters, c, "")
-  # The menu's field starts with what the column keeps, which esc puts back
-  if !listed
-    s.field === nothing && (s.field = own!(v, TextInput(placeholder="Contains…", font_family=SANS, font_size=13px,
-                                                        look=(_, text) -> Row(width(grow=grow), height(grow=grow), clip=true, text))))
-    s.field.text = s.was
-    s.field.cursor = s.field.anchor = length(s.was)
+  # What esc puts back: the column's words, its ticked values and its two values
+  s.was = (get(s.filters, c, nothing), haskey(s.picks, c) ? copy(s.picks[c]) : nothing, get(s.bounds, c, nothing))
+  field() = own!(v, TextInput(placeholder="", font_family=SANS, font_size=13px,
+                              look=(_, text) -> Row(width(grow=grow), height(grow=grow), clip=true, text)))
+  s.field === nothing && (s.field = field())
+  s.upto === nothing && (s.upto = field())
+  # The fields start with what the column keeps. Those of a column of numbers or days show its least and greatest value while they're empty.
+  if ranged(s, c)
+    least, most = extent(s, c)
+    from, to = get(s.bounds, c, ("", ""))
+    fill_field!(s.field, from, least)
+    fill_field!(s.upto, to, most)
+  elseif !listed
+    fill_field!(s.field, get(s.filters, c, ""), "Contains…")
   end
   menu = sheet_part!(() -> SheetMenu(of=v), v, :menu)
   menu.column = c
@@ -7227,7 +7412,7 @@ onkey(h::SheetHead, ev::KeyPress{Keys.mouse_left}) = begin
   # A click outside the menu closes it and keeps what's chosen
   popup!(ev.window, menu, anchor=h, placement=:below, gap=4px, width=SHEET_MENU_W, key=SHEET_KEY,
          onclose=() -> (v.table isa FileSheet && (v.table.asking = 0); focus(e)), theme=component_theme(e.zoom))
-  listed || focus(s.field)
+  (ranged(s, c) || !listed) && focus(s.field)
   handled
 end
 
@@ -7243,41 +7428,54 @@ end
 describe(m::SheetMenu) = begin
   v, c = m.of, found_colours()
   s = v.table::FileSheet
+  col = m.column
   section(words) = Row(width(grow=grow), height(22px), padding(8px, 0px), Alignment.Center, label(words, 10px, color=c.dim, weight="Semibold"))
   order(way) = sheet_part!(() -> SheetOrder(of=v, way=way), v, (:sort, way))
-  values = values_of(s, m.column)
-  value(text, count) = (r = sheet_part!(() -> SheetValue(of=v, value=text), v, (:value, m.column, text)); r.count = count; r)
-  fewer = values === nothing ?
-    (section("FILTER FOR"),
-     Box(width(grow=grow), padding(4px, 2px),
-       Box(width(grow=grow), height(28px), padding(8px, 0px), radius(6px), border(1px, :solid, c.line), background(c.frame), s.field))) :
-    (section("SHOW"), [value(text, count) for (text, count) in values]...)
+  values = values_of(s, col)
+  value(text, count) = (r = sheet_part!(() -> SheetValue(of=v, value=text), v, (:value, col, text)); r.count = count; r)
+  field(f) = Box(width(grow=grow), height(28px), padding(8px, 0px), radius(6px), border(1px, :solid, c.line), background(c.frame), f)
+  rule() = Box(width(grow=grow), height(13px), Alignment.Center, Box(width(grow=grow), height(1px), background(c.rule)))
+  # A column of numbers or days shows the rows between two values, and one with few values lists them
+  between = ranged(s, col) ? (section("BETWEEN"), Row(width(grow=grow), padding(4px, 2px), child_gap=6px, Alignment.Center,
+                                                      field(s.field), Box(label("–", 13px, color=c.dim)), field(s.upto))) : ()
+  listed = values === nothing ? () : (section("SHOW"), [value(text, count) for (text, count) in values]...)
+  contains = !ranged(s, col) && values === nothing ? (section("FILTER FOR"), Box(width(grow=grow), padding(4px, 2px), field(s.field))) : ()
+  # A file that the page changes can have its columns changed here
+  changes = sheet_edits(v) && sheet_whole(v) ?
+    (rule(), [sheet_part!(() -> SheetAction(of=v, what=a), v, (:action, a)) for a in COLUMN_ACTIONS if a != :delete || length(s.widths) > 1]...) : ()
   Box(width(grow=grow), padding(6px), radius(8px), background(c.frame), border(1px, :solid, c.line),
       shadow(0, 6, 16, RGBA(60 / 255, 45 / 255, 20 / 255, 0.2)), name="Column menu",
     Column(width(grow=grow), Alignment.Start,
-      section("SORT"), order(:asc), order(:desc),
-      Box(width(grow=grow), height(13px), Alignment.Center, Box(width(grow=grow), height(1px), background(c.rule))),
-      fewer...))
+      section("SORT"), order(:asc), order(:desc), rule(), between..., listed..., contains..., changes...))
 end
 
-# The menu sees a key before its text field does. Return keeps what's chosen, and esc puts back what the column kept before.
+# The menu sees a key before its text fields do. Return keeps what's chosen, and esc puts back what the column kept before.
 onkey(m::SheetMenu, ev::KeyPress{Keys.enter}) = unmodified(ev) ? close_sheet_menu!(m.of) : nothing
 onkey(m::SheetMenu, ev::KeyPress{Keys.escape}) = begin
   unmodified(ev) || return nothing
   s = m.of.table::FileSheet
-  if values_of(s, m.column) === nothing
-    keep!(s, m.column, s.was)
-  else
-    s.was === nothing ? delete!(s.picks, m.column) : (s.picks[m.column] = s.was)
-  end
+  c = m.column
+  words, ticked, range = s.was
+  words === nothing ? delete!(s.filters, c) : (s.filters[c] = words)
+  ticked === nothing ? delete!(s.picks, c) : (s.picks[c] = ticked)
+  range === nothing ? delete!(s.bounds, c) : (s.bounds[c] = range)
   close_sheet_menu!(m.of)
 end
+# Tab goes between the two fields of a column of numbers or days
+onkey(m::SheetMenu, ev::KeyPress{Keys.tab}) = begin
+  s = m.of.table::FileSheet
+  (ranged(s, m.column) && s.upto !== nothing) || return handled
+  focus(ev.window.focus === s.field ? s.upto : s.field)
+  handled
+end
+# What's typed in a field has no step back of its own, and the page's steps back are for its cells
+onkey(::SheetMenu, ev::KeyPress{Keys.z}) = Keys.cmd in ev.window.keys ? handled : nothing
 
 describe(r::SheetOrder) = begin
   s, c = r.of.table::FileSheet, found_colours()
   on = s.sort == (s.asking, r.way)
-  numbers = s.asking > 0 && s.table.numbers[s.asking]
-  words = numbers ? (r.way == :asc ? "Smallest first" : "Largest first") : (r.way == :asc ? "A–Z" : "Z–A")
+  kind = s.asking > 0 ? s.kinds[s.asking] : :text
+  words = ORDER_WORDS[kind][r.way == :asc ? 1 : 2]
   Row(width(grow=grow), height(28px), padding(8px, 0px), radius(6px), child_gap=8px, Alignment.Center,
       background(on || ishovered(r) ? c.pick : c.frame),
     Icon(r.way == :asc ? "chevron-up" : "chevron-down", size=10px, color=on ? c.ink : c.dim),
@@ -7310,6 +7508,366 @@ onkey(r::SheetValue, ::KeyPress{Keys.mouse_left}) = begin
   ticked = get!(Set{String}, s.picks, c)
   r.value in ticked ? delete!(ticked, r.value) : push!(ticked, r.value)
   (isempty(ticked) || length(ticked) == length(values_of(s, c))) && delete!(s.picks, c)
+  handled
+end
+
+# --- changing a CSV file ----------------------------------------------------------------------
+#
+# A CSV file that the page has whole, no longer than `MOST_PAGE`, is yours to
+# change. Its text is the page's lines, as a Markdown file's text is, and the
+# table is made from them. So a change goes in the page's lines, ⌘Z takes it
+# back, and ⌘S writes the file, as does leaving the window when the settings
+# say so. A longer file, and one that your Mac marks as read-only, is only
+# shown, with the lock in the top bar.
+#
+#   - A click on a cell opens a field over it, with the cell's text selected,
+#     so what you type takes its place. Return keeps what you typed and goes to
+#     the cell below, and ⇧Return to the cell above. ↓ and ↑ do the same. Tab
+#     goes to the cell on the right, and from the end of a row to the start of
+#     the next. ⇧Tab goes back. Esc puts back what the cell held. A click
+#     anywhere else keeps what you typed.
+#   - Return in the last row opens a new row under it, when the table shows
+#     every row of the file in the file's order. The row goes in the file once
+#     you type in it, so a new row that you leave empty doesn't.
+#   - A right-click on a row offers Add Row Above, Add Row Below and Delete Row.
+#   - A heading's menu has Rename Column, which opens a field over the heading,
+#     Add Column, which adds an empty column after it and opens a field for its
+#     name, and Delete Column.
+#   - A change writes only the cell that changed. The rest of the row stays as
+#     the file has it, quotes and all, and a cell that needs quotes gets them.
+#   - A row that you change stays where it is, though the table is in the order
+#     of a column or shows fewer rows. The rows are put in order and found
+#     again when you change the order or what a column keeps.
+#   - ⌘E goes down to the file's text, which you can change too. The bytes in
+#     hexadecimal and the bits are the file's, so a change that isn't saved is
+#     written before they show.
+
+"""
+True when the CSV or TSV file at `path` is one that its page changes: a file
+of text no longer than `MOST_PAGE`, so the page has all of it, or an empty file.
+"""
+table_edits(path) = lowercase(splitext(path)[2]) in TABLES && isfile(path) && (n = filesize(path); n == 0 || n <= MOST_PAGE && text_file(path))
+
+"True when `b` shows the table or the text of a CSV file that its page changes"
+table_text(b::Buffer) = b.view in (:file, :text) && table_edits(b.path)
+
+"The buffer of a CSV file that the page changes. Its lines are the file's text, and with `view` :file it shows the table, or with :text the text."
+table_look(path, view::Symbol=:file) = begin
+  lines = text(path)
+  b = Buffer(path=path, lines=lines, disk=copy(lines), told=copy(lines), view=view, fixed=protected(path))
+  b.sent = b.told   # nothing has changed from outside yet
+  b
+end
+
+"Show the table of the page's CSV file, with `view` :file, or its text, with :text. They're the same lines, so a change that isn't saved stays."
+table_level!(e, view::Symbol) = begin
+  b = e.buf
+  v = get(e.nodes, (:fileview, b.path), nothing)
+  v isa FileView && end_edit!(v)
+  saved = b.saved == b.version
+  b.view = view
+  b.about = ""   # the table says again what it says of the file
+  b.caret = b.anchor = (1, 0)
+  b.version = (stamp[] += 1)
+  saved && (b.saved = b.version)
+  e.scroll.offset = 0px
+  focus(e)
+  e
+end
+
+"True when the table of `v` changes its file: the page shows the table of a CSV file that the page changes"
+sheet_edits(v) = (b = editor(v).buf; b.path == v.path && b.view == :file && table_text(b) && !b.fixed && v.table isa FileSheet)
+
+"True when the table of `v` has every row of its file, so a row can go after the last and a column can be added or taken away"
+sheet_whole(v) = v.table isa FileSheet && !v.table.table.more
+
+"The text of a row with nothing in its cells, for a table `wide` columns wide. A row of one column has a cell in quotes, since an empty line is no row."
+empty_row(s::FileSheet, wide=length(s.widths)) = wide <= 1 ? "\"\"" : string(s.mark)^(wide - 1)
+
+"""
+Open the field that changes the cell in row `r`, column `c` of the table of
+`v`, with the cell's text in it, selected. Row 1 is the headings, and a row
+after the last is a new row. A cell that was being changed keeps what was typed.
+"""
+edit_cell!(v, r, c) = begin
+  end_edit!(v)
+  sheet_edits(v) || return handled
+  s = v.table::FileSheet
+  frame = sheet_part!(() -> SheetFrame(of=v), v, :frame)
+  s.input === nothing && (s.input = own!(frame, TextInput(placeholder="", font_family=SANS, font_size=12px,
+                                                          look=(_, text) -> Row(width(grow=grow), height(grow=grow), Alignment.Center, clip=true, text))))
+  text = r <= length(s.table.rows) ? s.table.rows[r][c] : ""
+  s.input.text = text
+  s.input.anchor, s.input.cursor, s.input.scroll = 0, length(text), 0px
+  s.editing = (r, c)
+  show_cell!(v, r, c)
+  focus(s.input)
+  handled
+end
+
+"Close the field of the cell of `v` that's being changed. With `keep`, what was typed goes in the cell. It doesn't move the keyboard: see `stop_edit!`."
+end_edit!(v; keep=true) = begin
+  s = v.table
+  (s isa FileSheet && s.editing !== nothing) || return v
+  r, c = s.editing
+  s.editing = nothing
+  keep && s.input !== nothing && put_cell!(v, r, c, s.input.text)
+  v
+end
+
+"Close the field of the cell of `v` that's being changed, keep what was typed, and give the keyboard back to the page"
+stop_edit!(v; keep=true) = begin
+  s = v.table
+  (s isa FileSheet && s.editing !== nothing) || return v
+  end_edit!(v; keep)
+  focus(editor(v))
+  v
+end
+
+"""
+Write `text` in the cell in row `r`, column `c` of the table of `v`, in the
+page's lines. A row after the last is a new row, which goes in the file when
+`text` has something in it.
+"""
+put_cell!(v, r, c, text) = begin
+  sheet_edits(v) || return v
+  e = editor(v)
+  b = e.buf
+  s = current_sheet!(v, e)
+  text = String(strip(text))
+  if r <= length(s.lines)
+    s.table.rows[r][c] == text && return v
+    at = s.lines[r]
+    table_edit!(b, (first(at), 0), (last(at), length(b.lines[last(at)])), Csvs.with_cell(join(b.lines[at], "\n"), s.mark, c, text))
+  else
+    (isempty(text) || !sheet_whole(v)) && return v
+    # A file with nothing in it gets a row of headings with no names first, when the new row isn't the headings
+    if isempty(s.lines) && r > 1
+      add_line!(b, 0, empty_row(s))
+      s = current_sheet!(v, e)
+    end
+    add_line!(b, isempty(s.lines) ? 0 : last(s.lines[end]), Csvs.with_cell(empty_row(s), s.mark, c, text))
+  end
+  current_sheet!(v, e)
+  v
+end
+
+"Put `text` in place of the text of `b` from `lo` to `hi`, for the table of a CSV file, so that ⌘Z puts it back"
+table_edit!(b::Buffer, lo, hi, text) = (table_text(b) && !b.fixed && replace_text!(b, lo, hi, text); b)
+
+"Put the line `text` after line `i` of `b`, or before the first with `i` 0. A last line with nothing on it, after the file's last line break, stays last."
+add_line!(b::Buffer, i, text) = i < length(b.lines) ? table_edit!(b, (i + 1, 0), (i + 1, 0), text * "\n") :
+                                                      table_edit!(b, (i, length(b.lines[i])), (i, length(b.lines[i])), "\n" * text)
+
+"Take away row `r` of the table of `v`, and the lines that it's on"
+delete_row!(v, r) = begin
+  sheet_edits(v) || return v
+  e = editor(v)
+  b = e.buf
+  s = current_sheet!(v, e)
+  2 <= r <= length(s.lines) || return v
+  at = s.lines[r]
+  n = length(b.lines)
+  last(at) < n ? table_edit!(b, (first(at), 0), (last(at) + 1, 0), "") :
+  first(at) > 1 ? table_edit!(b, (first(at) - 1, length(b.lines[first(at)-1])), (n, length(b.lines[n])), "") :
+                  table_edit!(b, (1, 0), (n, length(b.lines[n])), "")
+  current_sheet!(v, e)
+  v
+end
+
+"Add a row with nothing in it over row `r` of the table of `v`, or under it with `below`, and open the field of its first cell"
+add_row!(v, r, below) = begin
+  sheet_edits(v) || return v
+  e = editor(v)
+  b = e.buf
+  s = current_sheet!(v, e)
+  1 <= r <= length(s.lines) || return v
+  add_line!(b, below ? last(s.lines[r]) : first(s.lines[r]) - 1, empty_row(s))
+  sheet_rows!(e, current_sheet!(v, e))
+  edit_cell!(v, below ? r + 1 : r, 1)
+end
+
+"Give the text of each row of the table of `v` to `f`, and put what it gives in its place. It's one change, which ⌘Z takes back."
+each_row!(v, f) = begin
+  (sheet_edits(v) && sheet_whole(v)) || return v
+  e = editor(v)
+  b = e.buf
+  s = current_sheet!(v, e)
+  isempty(s.lines) && return v
+  out = copy(b.lines)
+  # From the last row up, so that the lines of the rows above stay where they are
+  for at in reverse(s.lines)
+    splice!(out, at, String.(split(f(join(b.lines[at], "\n")), '\n')))
+  end
+  n = length(b.lines)
+  table_edit!(b, (1, 0), (n, length(b.lines[n])), join(out, "\n"))
+  current_sheet!(v, e)
+  v
+end
+
+"Add a column with no name after column `c` of the table of `v`, and open the field of its heading"
+add_column!(v, c) = begin
+  mark = (v.table::FileSheet).mark
+  each_row!(v, row -> Csvs.with_new_cell(row, mark, c, ""))
+  sheet_rows!(editor(v), v.table::FileSheet)
+  edit_cell!(v, 1, c + 1)
+end
+
+"Take away column `c` of the table of `v`"
+delete_column!(v, c) = (mark = (v.table::FileSheet).mark; each_row!(v, row -> Csvs.without_cell(row, mark, c)))
+
+"""
+Scroll the page, and the table sideways, so that the cell in row `r`, column
+`c` of the table of `v` shows in the window. The headings always show.
+"""
+show_cell!(v, r, c) = begin
+  e = editor(v)
+  s = v.table::FileSheet
+  left = sum(s.widths[1:c-1], init=0px)
+  s.across = max(0px, min(left, max(s.across, left + s.widths[c] - s.wide)))
+  r == 1 && return v
+  k = something(findfirst(==(r), s.found), length(s.found) + 1)
+  top = sheet_top() + HEAD_H + ROW_H * (k - 1)   # from the top of the page
+  _, h = window_size(e)
+  # The row shows under the headings, which stay at the top of the window, and over the window's foot
+  e.scroll.offset = max(0px, min(max(e.scroll.offset, TOPBAR_H + top + ROW_H - h), top - HEAD_H))
+  v
+end
+
+"""
+The row and the column of the cell of the table of `v` at (`x`, `y`) in the
+window, or nothing. The row is the table's: row 1 is the headings, and a row
+after the last is the new row that's being written.
+"""
+cell_at(v, x, y) = begin
+  s = v.table::FileSheet
+  f = get(s.parts, :frame, nothing)
+  f === nothing && return nothing
+  left, top = f.rect[1] + SHEET_LINE, f.rect[2] + SHEET_LINE
+  k = floor(Int, (y - top - HEAD_H) / ROW_H) + 1
+  n = length(s.found)
+  r = 1 <= k <= n ? s.found[k] : k == n + 1 && blank_row(v, s) ? length(s.table.rows) + 1 : nothing
+  r === nothing && return nothing
+  at, edge = x - left + s.across, 0px
+  for (c, w) in enumerate(s.widths)
+    edge += w
+    at < edge && return (r, c)
+  end
+  nothing
+end
+
+# A click on a cell opens its field. A table that's only shown has no use for it.
+onkey(f::SheetFrame, ev::KeyPress{Keys.mouse_left}) = begin
+  v = f.of
+  sheet_edits(v) || return nothing
+  at = cell_at(v, ev.window.mouse[1], ev.window.mouse[2])
+  at === nothing ? (stop_edit!(v); handled) : edit_cell!(v, at...)
+end
+
+"The menu of a row of a CSV file's table"
+const ROW_MENU = ["Add Row Above", "Add Row Below", "-", "Delete Row"]
+
+onkey(f::SheetFrame, ev::KeyPress{Keys.mouse_right}) = begin
+  v = f.of
+  sheet_edits(v) || return nothing
+  at = cell_at(v, ev.window.mouse[1], ev.window.mouse[2])
+  stop_edit!(v)
+  (at === nothing || !(2 <= at[1] <= length((v.table::FileSheet).table.rows))) && return handled
+  r = at[1]
+  act(i...) = (item = get(ROW_MENU, last(i), "");
+               item == "Delete Row" ? delete_row!(v, r) : item in ("Add Row Above", "Add Row Below") ? add_row!(v, r, item == "Add Row Below") : nothing)
+  system_menu(ev.window, ROW_MENU, act) || drawn_menu!(ev.window, ROW_MENU, act)
+  handled
+end
+
+"""
+The cell that the field of the table of `v` goes to from row `r`, column `c`,
+when it goes `way`: :up, :down, :left or :right. Up and down go by the rows as
+they show. Right goes on from the end of a row to the start of the next, and
+left back from the start of a row. Down from the last row is a new row, when
+the table shows every row of the file in its order. It's nothing past the
+headings, and after a new row that was left empty.
+"""
+next_cell(v, r, c, way) = begin
+  s = v.table::FileSheet
+  found = sheet_rows!(editor(v), s)
+  wide = length(s.widths)
+  way == :right && c < wide && return (r, c + 1)
+  way == :left && c > 1 && return (r, c - 1)
+  order = [1; found]
+  k = findfirst(==(r), order)
+  k === nothing && return nothing
+  step = way in (:down, :right) ? 1 : -1
+  col = way == :right ? 1 : way == :left ? wide : c
+  1 <= k + step <= length(order) && return (order[k+step], col)
+  step == 1 && sheet_whole(v) && s.sort === nothing && !narrowed(s) && return (length(s.table.rows) + 1, col)
+  nothing
+end
+
+"Keep what's typed in the cell of `f`'s table that's being changed, and open the field of the cell `way` from it, if there's one"
+edit_on!(f::SheetFrame, way) = begin
+  v = f.of
+  s = v.table
+  (s isa FileSheet && s.editing !== nothing) || return nothing
+  r, c = s.editing
+  end_edit!(v)
+  next = next_cell(v, r, c, way)
+  next === nothing ? focus(editor(v)) : edit_cell!(v, next...)
+  handled
+end
+
+# The keys that the field of a cell has no use for come here
+onkey(f::SheetFrame, ev::KeyPress{Keys.enter}) = unmodified(ev) ? edit_on!(f, :down) : only_held(ev, Keys.shft) ? edit_on!(f, :up) : nothing
+onkey(f::SheetFrame, ev::KeyPress{Keys.tab}) = unmodified(ev) ? edit_on!(f, :right) : only_held(ev, Keys.shft) ? edit_on!(f, :left) : nothing
+onkey(f::SheetFrame, ev::KeyPress{Keys.down}) = unmodified(ev) ? edit_on!(f, :down) : nothing
+onkey(f::SheetFrame, ev::KeyPress{Keys.up}) = unmodified(ev) ? edit_on!(f, :up) : nothing
+onkey(f::SheetFrame, ev::KeyPress{Keys.escape}) = begin
+  s = f.of.table
+  (unmodified(ev) && s isa FileSheet && s.editing !== nothing) || return nothing
+  stop_edit!(f.of, keep=false)
+  handled
+end
+# ⌘Z puts back what the cell held before you typed. With nothing typed, it closes the field, and the page takes back its last change.
+onkey(f::SheetFrame, ev::KeyPress{Keys.z}) = begin
+  s = f.of.table
+  (only_held(ev, Keys.cmd) && s isa FileSheet && s.editing !== nothing) || return nothing
+  r, c = s.editing
+  was = r <= length(s.table.rows) ? s.table.rows[r][c] : ""
+  s.input.text == was || (fill_field!(s.input, was, ""); return handled)
+  stop_edit!(f.of, keep=false)
+  nothing
+end
+# Any other key with ⌘ held, like ⌘S, is the page's. What was typed goes in the cell first.
+onkey(f::SheetFrame, ev::KeyPress) = (Keys.cmd in ev.window.keys && stop_edit!(f.of); nothing)
+
+# A click anywhere else keeps what was typed in the cell
+onblur(f::SheetFrame, from) = begin
+  s = f.of.table
+  (s isa FileSheet && from === s.input && s.editing !== nothing) || return nothing
+  end_edit!(f.of)
+  handled
+end
+
+"The menu items that change a column, in their order"
+const COLUMN_ACTIONS = (:rename, :add, :delete)
+const ACTION_WORDS = Dict(:rename => ("pencil", "Rename Column"), :add => ("plus-lg", "Add Column"), :delete => ("trash3", "Delete Column"))
+
+describe(a::SheetAction) = begin
+  c = found_colours()
+  icon, words = ACTION_WORDS[a.what]
+  Row(width(grow=grow), height(28px), padding(8px, 0px), radius(6px), child_gap=8px, Alignment.Center,
+      background(ishovered(a) ? c.pick : c.frame),
+    Icon(icon, size=10px, color=c.dim), label(words, 13px, color=c.ink))
+end
+
+cursor(::SheetAction) = :hand
+onmouse(::SheetAction, ::MouseMove) = handled
+onkey(a::SheetAction, ::KeyPress{Keys.mouse_left}) = begin
+  v = a.of
+  c = (v.table::FileSheet).asking
+  close_sheet_menu!(v)
+  c > 0 || return handled
+  a.what == :rename ? edit_cell!(v, 1, c) : a.what == :add ? add_column!(v, c) : delete_column!(v, c)
   handled
 end
 
@@ -26912,7 +27470,8 @@ layout!(e, width=text_width(e)) = begin
   columns = page_columns!(e)   # the blocks that show side by side after a `columns` block, or nothing when the page has none
   # A file that's only shown is one viewer, or lines of text that are laid out once and kept
   b.view == :file && return e.layout = [file_item(e, b)]
-  readonly(b) && return e.layout = file_lines(e, b)
+  # The text of a CSV file is lines of text too, which a key can change
+  (readonly(b) || b.view == :text) && return e.layout = file_lines(e, b)
   # A file of code is lines of text too, which a key can change
   b.view == :code && columns === nothing && lowered(e) === nothing && return e.layout = slide_items(e, file_lines(e, b))
   items = Item[]
@@ -31846,11 +32405,13 @@ describe(t::TopBar) = begin
   more = (bar_parts(e)..., blog_part(e)...)
   checks = check_part(e)
   mode = mode_part(e)
-  outside = readonly(b) ? outside_button(e) : ()
+  # A CSV file's table has the bar of a file that's only shown, with no lock: see "changing a CSV file"
+  shown = readonly(b) || table_text(b)
+  outside = shown ? outside_button(e) : ()
   # What a file that's only shown says of itself, like how many rows a CSV file has, can need more room than that.
   # The words move aside as the slider of the levels opens, so then they need its room too.
   grown = isempty(mode) ? 0px : slider_grown(e)
-  said = readonly(b) && !isempty(b.about) ? spared_width(b.about, said_face()) + LOCK_W + 70px + grown : 0px
+  said = shown && !isempty(b.about) ? spared_width(b.about, said_face()) + LOCK_W + 70px + grown : 0px
   side = max(isempty(more) && isempty(checks) ? 250px : 330px, said) + (isempty(mode) ? 0px : MODE_W)
   ended_rename!(e)
   # The two ends of the bar are as wide as each other, so the file's name is in the middle of the space beside
@@ -31903,8 +32464,8 @@ describe(t::TopBar) = begin
       # A page that has a panel at the right has the button that hides it, at the end
       (page_covered(e) || nofile(e) ? right_part(e) :
        readonly(b) && page_object(e) isa BlogFolder ? (more..., mode..., outside...) :
-       readonly(b) ? ((isempty(b.about) ? () : (said_part(b.about, side - LOCK_W - (isempty(outside) ? 0px : 40px) - (isempty(mode) ? 0px : MODE_W + grown)),))...,
-                      (term_shown(e) ? () : (lock_part(e),))...,   # a terminal is yours to type in
+       shown ? ((isempty(b.about) ? () : (said_part(b.about, side - LOCK_W - (isempty(outside) ? 0px : 40px) - (isempty(mode) ? 0px : MODE_W + grown)),))...,
+                      (term_shown(e) || !(readonly(b) || b.fixed) ? () : (lock_part(e),))...,   # a terminal is yours to type in, and so is a CSV file
                       mode...,
                       outside...) :
                      (more..., job_part(e)..., agent_part(e)..., checks..., diff_part(e)..., commit_part(e)..., mode...,

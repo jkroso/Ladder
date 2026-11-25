@@ -93,9 +93,9 @@ column(c) = [sheet().table.rows[r][c] for r in sheet().found]
   @test K.num(rect(frame_of(v)).top) ≈ K.num(K.TOPBAR_H) + 12
   bar = texts(K.describe(e.nodes[:topbar]))
   @test any(t -> occursin("300 rows", t) && occursin("Changed", t), bar)
-  # A lock after those words says that the file is only shown. Its tooltip says so in words.
+  # The file is yours to change, so the bar has no lock. See test/csv_edit_test.jl.
   @test !any(t -> occursin("Read only", t), bar)
-  @test has_node(K.describe(e.nodes[:topbar]), K.ReadOnly) && K.tip(e.nodes[:read_only]) == "Read only"
+  @test !has_node(K.describe(e.nodes[:topbar]), K.ReadOnly)
   @test !any(t -> occursin("300 rows", t), texts(K.describe(v)))
   @test K.num(r.left) ≈ K.num(K.text_left(e) + K.SHEET_LINE)
   # A line with round corners goes round it. Outside the round corner is the page, not the headings.
@@ -144,10 +144,10 @@ end
   @test s.sort === nothing && column(1)[1:3] == ["Business 1", "Business 2", "Business 3"]
   key(Keys.enter)
   @test !menu() && s.asking == 0
-  # Names that are text go A to Z
+  # Names that are text go Z to A, with the numbers in them by their size
   click(middle(rect(head(1))))
   press(s.parts[(:sort, :desc)])
-  @test issorted(lowercase.(column(1)), rev=true)
+  @test issorted(column(1), by=K.Csvs.sortkey, rev=true) && column(1)[1:2] == ["Business 300", "Business 299"]
   press(s.parts[(:sort, :desc)])
   key(Keys.enter)
 end

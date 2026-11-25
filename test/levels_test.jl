@@ -310,7 +310,8 @@ end
   write(prices, "Item,Price\nPaint,45\n")
   K.READ[prices] = 0.0
   K.refresh!(e.buf); frames()
-  @test e.buf.view == :text && e.buf.lines == ["Item,Price", "Paint,45"]
+  # A CSV file's text is yours to change, so it's the file's text exactly, with the line after its last line break
+  @test e.buf.view == :text && e.buf.lines == ["Item,Price", "Paint,45", ""]
   leave()
 end
 
