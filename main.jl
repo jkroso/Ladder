@@ -944,7 +944,7 @@ you let the page's site run code. A block that would run code, like a `ui`
 block or a sum in a line of text, shows as its code. See "a copy of a page
 from a web server" and "a web folder's own page".
 """
-foreign(path::AbstractString) = is_reply(path) || Eml.isemail(path) ||
+foreign(path::AbstractString) = Eml.isemail(path) ||
   ((isremote(path) || in_browser(path) || !isempty(copied_from(path))) && site_runs(page_site(path)) !== true)
 
 "The site that the page at `path` is from, like https://example.com: the site of a page from a web server or of a copy of one, or \"\""
@@ -1052,7 +1052,7 @@ kinds(b::Buffer) = begin
   elseif b.kinds_at != b.version
     b.kinds = classify(b.lines)
     # A page that somebody else wrote, like an email, shows the code of a block that would run code or read the Mac's files
-    foreign(b.path) && shown_only!(b.kinds, is_reply(b.path) ? REPLY_BLOCKS : SHOWN_BLOCKS) && code_waits!(b.path)
+    foreign(b.path) && shown_only!(b.kinds) && code_waits!(b.path)
     b.kinds_at = b.version
   end
   b.kinds
@@ -1187,9 +1187,16 @@ restore!(b::Buffer, (lines, caret, anchor, version, rest)) = begin
   b.typed = 0.0
 end
 
-"Replace the text from `lo` to `hi` with `new`, and put the caret after it"
-edit!(b::Buffer, lo::Pos, hi::Pos, new::AbstractString; typing=false) = begin
-  (readonly(b) || b.fixed) && return b   # nothing changes a file that's only shown, an email, or a file that's read-only
+"""
+True when a part of the page of `b` may change the page's text, like a number
+that you drag or a block that writes its lines: in a page that you can change,
+and in a reply of an agent, which no key changes.
+"""
+parts_change(b::Buffer) = !readonly(b) && (!b.fixed || is_reply(b.path))
+
+"Replace the text from `lo` to `hi` with `new`, and put the caret after it. With `part`, a part of the page makes the change, and not a key: see `parts_change`."
+edit!(b::Buffer, lo::Pos, hi::Pos, new::AbstractString; typing=false, part=false) = begin
+  (part ? !parts_change(b) : readonly(b) || b.fixed) && return b   # nothing changes a file that's only shown, an email, or a file that's read-only
   # No key types in the lines of a CSV file while its table shows. The table changes them with `table_edit!`.
   b.view == :file && return b
   replace_text!(b, lo, hi, new; typing)
@@ -3451,7 +3458,7 @@ end
 # its fence language in `BLOCKS`. Behaviour is defined by methods on that type
 # (and on view instances), matching Ladder's folder dispatch (`AbstractDirectory`):
 # `block_name`, `block_icon`, `block_insert`, `block_is_whole`, `block_is_code`,
-# `block_safe`, `block_reply`, `block_outline`, `block_layout`, `block_html`,
+# `block_safe`, `block_outline`, `block_layout`, `block_html`,
 # `block_tables!`, `block_table_kind`, `block_names`, `block_places`, `reread!`,
 # `block_tick!`, `before_save!`, `full!`.
 #
@@ -3496,9 +3503,6 @@ block_is_code(T) = false
 
 "True when the block is shown on foreign pages without trust"
 block_safe(T) = false
-
-"True when the block is shown in agent replies (`block_safe` blocks are always shown too)"
-block_reply(T) = block_safe(T)
 
 "True when clicking the block's sidebar outline entry puts the caret inside (`i + 1`) instead of after (`close + 1`)"
 block_outline_inside(T) = false
@@ -3614,7 +3618,7 @@ write_block!(v, lang, new::Vector{String}; typing=false, reread::Bool=true) = be
   old = b.lines[i+1:t-1]
   new == old && return (reread ? reread!(v, new) : (v.lines = new; v))
   caret, anchor = b.caret, b.anchor
-  edit!(b, line_end(b, i), line_end(b, t - 1), isempty(new) ? "" : "\n" * join(new, "\n"); typing)
+  edit!(b, line_end(b, i), line_end(b, t - 1), isempty(new) ? "" : "\n" * join(new, "\n"); typing, part=true)
   by = length(new) - length(old)
   moved(p) = p[1] >= t ? (p[1] + by, p[2]) : p[1] > i ? (i, 0) : p
   b.caret, b.anchor = moved(caret), moved(anchor)
@@ -13411,7 +13415,6 @@ BLOCKS[CHART] = ChartView
 block_name(::Type{ChartView}) = "Chart"
 block_icon(::Type{ChartView}) = "bar-chart"
 block_insert(::Type{ChartView}) = ("Chart", ["```$CHART", "```", "", ""], (4, 0))
-block_reply(::Type{ChartView}) = true
 block_html(e, v::ChartView) = chart_html(e, v)
 
 # --- a filter of a table's rows ----------------------------------------------------------------
@@ -25632,7 +25635,7 @@ what the row comes to. Nothing when the place has no such number.
 """
 scrub_at(e, pos) = begin
   b = e.buf
-  (isempty(e.layout) || readonly(b) || b.fixed || b.view != :markdown) && return nothing
+  (isempty(e.layout) || !parts_change(b) || b.view != :markdown) && return nothing
   dx, dy = pos[1] - e.origin[1], pos[2] - e.origin[2]
   (dy >= 0px && pos[2] >= above_page(e)) || return nothing
   it = e.layout[item_under(e, dx, dy)]
@@ -25671,7 +25674,7 @@ so that it reads as a number to take hold of. The page's text is at `ui`.
 """
 underline_scrubs(ctx, e, ui) = begin
   b = e.buf
-  (readonly(b) || b.fixed || b.view != :markdown) && return
+  (!parts_change(b) || b.view != :markdown) && return
   for it in e.layout[e.shown]
     f = it.content
     (f isa Flow && !f.raw && occursin(INLINE, b.lines[it.first])) || continue
@@ -26018,7 +26021,7 @@ scrub_to!(e, pos) = begin
   (steps == s.steps || !(1 <= s.line <= length(b.lines))) && return e
   new = nudged(s.text, steps)
   caret, anchor = b.caret, b.anchor
-  edit!(b, (s.line, s.lo), (s.line, s.hi), new, typing=true)
+  edit!(b, (s.line, s.lo), (s.line, s.hi), new, typing=true, part=true)
   by = length(new) - (s.hi - s.lo)
   kept(p) = p[1] == s.line && p[2] >= s.hi ? (p[1], p[2] + by) : p
   b.caret, b.anchor = kept(caret), kept(anchor)
@@ -28759,7 +28762,7 @@ with their text.
 tick_item!(b::Buffer, i::Int, done::Bool) = begin
   new, z = Repeats.tick(b.lines, i, done; today=calendar_today())
   caret, anchor = b.caret, b.anchor
-  edit!(b, (i, 0), line_end(b, z), join(new, "\n"))
+  edit!(b, (i, 0), line_end(b, z), join(new, "\n"), part=true)
   grow = length(new) - (z - i + 1)
   # A line after the item moves down or up with the line that went in or out. One that went takes it to the item's last line.
   keep((l, c)) = l > z ? (l + grow, c) : l < i + length(new) ? (l, min(c, length(b.lines[l]))) : line_end(b, i + length(new) - 1)
@@ -48952,9 +48955,11 @@ end
 # time, so they show as the agent writes them. The session starts in the top
 # folder of the file's repository.
 #
-# What the agent says runs no code. A reply is a page that somebody else
-# wrote (see `foreign`), so a block that would run code shows as its code.
-# Diagrams, maths and charts draw, since they only show what's written.
+# What the agent says is a page, and its code runs as a page's code does: a
+# sum in a line shows what it comes to, a `ui` block shows what it makes, and
+# a block that a file of the session's folder defines draws. A drag on a
+# number, a click on a to-do box and a block that writes its lines change the
+# reply, as they change a page. No key changes it. See `reply_tick!`.
 #
 # The agent's pane has the sidebar's place. It always shows: the agent is
 # what agent mode is for, so the top bar has no button that hides it, and the
@@ -48984,9 +48989,6 @@ const SEND_GROWS = 0.16                  # seconds that the send button takes to
 const SEND_ROOM = 36px                   # the room at the right of the words that you type: the send button, and the gap before it
 const REPLY_SIZE = 14px                  # how tall the text of the agent's pane is, before the page's zoom
 const REPLY_NAME = ".ladder-reply.md"    # the name of the page that holds a reply of the agent. No file has it.
-
-"The blocks that show in what an agent says in a session: the ones that only draw what's written. Any other shows as its code."
-const REPLY_BLOCKS = (SHOWN_BLOCKS..., (l for (l, T) in BLOCKS if !block_safe(T) && block_reply(T))...)
 
 "The path of a page that holds what an agent said in a session that runs in the folder `dir`. Its pictures and links are from that folder."
 reply_page(dir) = joinpath(dir, REPLY_NAME)
@@ -49073,7 +49075,7 @@ end
 const SESSION_COMMAND = Ref{Any}(nothing)
 
 "What every session is told of how Ladder shows the agent's words"
-const BRIEF_SHOWS = "Ladder draws what you say as a page, not as a terminal's text: Markdown with headings, lists, tables, to-do boxes, maths, `mermaid` diagrams and `chart` blocks. So answer as a short page, and use a table, a diagram or a chart where it says a thing better than words. A chart is a `chart` code block: a line `kind: bars`, `kind: lines` or `kind: pie`, an empty line, then rows with ` | ` between the cells, and the names of the columns in the first row. Ladder draws these kinds of Mermaid diagram and no others: flowchart, sequenceDiagram, stateDiagram-v2, classDiagram, pie, mindmap, erDiagram, gantt and timeline. If you have a skill for Ladder's pages, it says more about what a page can show. Code in your answers shows as code and doesn't run."
+const BRIEF_SHOWS = "Ladder draws what you say as a page, not as a terminal's text: Markdown with headings, lists, tables, to-do boxes, maths, `mermaid` diagrams and `chart` blocks. So answer as a short page, and use a table, a diagram or a chart where it says a thing better than words. A chart is a `chart` code block: a line `kind: bars`, `kind: lines` or `kind: pie`, an empty line, then rows with ` | ` between the cells, and the names of the columns in the first row. Ladder draws these kinds of Mermaid diagram and no others: flowchart, sequenceDiagram, stateDiagram-v2, classDiagram, pie, mindmap, erDiagram, gantt and timeline. Your answers can also have the parts of a page that run code, and they work as they do in a page. A sum in a line of text is a `!` and then Julia code between backticks, like !`area = 4m * 2.5m`: Ladder shows what it comes to, the user can drag a number in it, like the 4m, and each sum that uses its name follows. A number can have a unit of Units.jl, like m, kg, hr or USD. Write 70% as 0.7. A `sheet` block is a list of rows, each a name, `=`, and a number or a sum, like `Width = 4m`. A `ui` block holds Julia code that makes one of UI.jl's components, like `ProgressBar(value=0.7)`, and shows it. A block in a language that a Julia file of the folder you started in defines, like `progress` for progress.jl, shows what that file makes. A `julia` block shows as code and doesn't run. If you have a skill for Ladder's pages, it says more about what a page can show."
 
 """
 What the agent is told of where it is, on top of what it's always told: that
@@ -50085,10 +50087,11 @@ end
 
 "Put the words of the reply `it` in its editor `sub`, when they changed since it last showed them"
 show_reply!(sub, it::AgentReply) = begin
+  sub.nodes[:reply] = it
   get(sub.nodes, :shown, -1) == it.n && return sub
   b = sub.buf
   b.lines = String.(split(rstrip(it.text), '\n'))
-  b.version += 1
+  b.version = (stamp[] += 1)   # a number that no other version has had, as an edit gives
   b.caret = b.anchor = (1, 0)
   sub.nodes[:span] = (1, length(b.lines))
   sub.nodes[:shown] = it.n
@@ -50690,8 +50693,29 @@ pane_tick!(p::AgentPane, e) = begin
     yield()
     redraw_in!(e, 0.05)
   end
+  for (key, sub) in p.parts
+    key isa Tuple && first(key) == :reply && reply_tick!(p, sub)
+  end
   s.version == p.seen || (p.seen = s.version; redraw_in!(e, SOON))
   nothing
+end
+
+"""
+What happens in each frame to the reply `sub` of the pane `p`, as to a page:
+a number that you drag in it changes, its sums run again, and its blocks
+write their lines. Once the agent has said the whole reply, what you changed
+in it is the reply, so a session's file keeps it.
+"""
+reply_tick!(p::AgentPane, sub) = begin
+  blocks_tick!(sub)
+  scrub_tick!(sub)
+  inline_tick!(sub)
+  it, s = get(sub.nodes, :reply, nothing), p.session
+  if it isa AgentReply && it.whole && s !== nothing && get(sub.nodes, :shown, -1) == it.n
+    text = join(sub.buf.lines, "\n")
+    text == rstrip(it.text) || (it.text = text; s.version += 1)
+  end
+  sub
 end
 
 "Keep the newest words of the pane `p` in sight, until you scroll up from them. Back at the end, it follows them again."

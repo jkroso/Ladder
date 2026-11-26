@@ -383,10 +383,9 @@ try
     # The table is a table, not its text
     @test any(it -> !(it.content isa K.Flow), sub.layout)
     @test named("Reply") !== nothing && named("You said") !== nothing
-    # What the agent says runs no code: a `ui` block shows as code, and so does a sum in a line
-    @test K.foreign(sub.buf.path)
-    @test !any(l -> l.lang == K.LIVE, K.kinds(sub.buf))
-    @test K.made(sub, "!1+1", 1) == ("!1+1", false)
+    # What the agent says runs as a page does: a sum in a line shows what it comes to. agent_session_test has more.
+    @test !K.foreign(sub.buf.path)
+    @test K.made(sub, "1 + 1", 1) == ("2", false)
   end
 
   @testset "The panes are dark whatever colours the page has, and the page keeps its own" begin

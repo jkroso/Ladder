@@ -1119,7 +1119,7 @@ An agent like Claude Code can write a page and show it to you here: a plan with 
 
 To talk with an agent beside the page, with no terminal, press ⌘⇧P and run Agent Mode. The window grows wider. The agent's pane is at the left, the page is in the middle on a card in the shape of a sheet of paper, and the page's outline is at the right. Type at the foot of the agent's pane and press Return. ⇧Return starts a new line.
 
-- What the agent says shows as a page, not as a terminal's text: headings, lists, tables, maths, diagrams and charts. Code in it shows as code and doesn't run.
+- What the agent says shows as a page, not as a terminal's text: headings, lists, tables, maths, diagrams and charts. Its sums in a line of text, sheets, `ui` blocks and blocks of your own work as they do in a page. Drag a number in what the agent said, and the sums that use it follow. A `julia` block shows as code and doesn't run.
 - Each step that the agent takes is a line, like "Reading plan.md". More than three steps in a row fold into one line, which a click opens.
 - When Claude wants to do something that your settings make it ask for, the pane asks you. Click Allow or Refuse. Claude changes the window's file without asking. Codex, Gemini and Grok can't ask from here: they change files without asking, and their own settings say what else they may do.
 - The round button at the foot sends your words. Rest the mouse on it, and it opens to show what goes to the agent with them: the heading that the caret is under, and whether text is selected. While the agent works, the button stops the agent, and what the agent changed so far stays.

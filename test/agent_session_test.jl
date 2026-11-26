@@ -373,6 +373,66 @@ try
     p = e.nodes[(:chat, moved)]
     @test K.chat_shown(e) && p.session.dir == inner && e.buf.about == "Claude in pages"
   end
+
+  @testset "What the agent says runs as a page does: sums, a block of your own and a ui block work, and a drag on a number stays in the file" begin
+    folder = joinpath(dir, "parts")
+    mkpath(folder)
+    cp(joinpath(@__DIR__, "..", "pages", "progress.jl"), joinpath(folder, "progress.jl"))
+    kept_file = joinpath(folder, "keep.txt")
+    write(kept_file, "")
+    said = joinpath(folder, "Parts.chat")
+    s = K.AgentSession(agent="Claude", dir=folder)
+    push!(s.items, K.YouSaid(words="Show me"), K.AgentReply(text="""
+      A wall that is !`l = 16m` long and 2.4m high has an area of !`area = l * 2.4m`.
+
+      ```progress
+      done: 0.25
+      label: Framing
+      ```
+
+      ```ui
+      ProgressBar(value = 0.5)
+      ```
+
+      ```julia
+      rm("$kept_file")
+      ```""", whole=true, n=1))
+    write(said, K.talk_text(s))
+    K.open!(e, said)
+    frames(w, 4)
+    p = e.nodes[(:chat, said)]
+    it = p.session.items[2]
+    sub = p.parts[(:reply, objectid(it))]
+    made(code) = K.made(sub, code, 1)[1]
+    @test !K.foreign(sub.buf.path)
+    @test made("l = 16m") == "16m" && made("area = l * 2.4m") == "38.4m²"
+    # The block that progress.jl defines draws its bar, and the ui block shows what its code makes
+    @test [v.state for v in K.file_blocks(sub)] == [:made]
+    @test count(x -> x.content isa K.Live, sub.layout) == 2
+    # A julia block shows its code, and doesn't run
+    @test isfile(kept_file)
+    # A drag on the number changes it, and the sum that uses its name follows
+    line = K.item(sub, 1)
+    seg, vl = first((seg, vl) for vl in line.content.lines for seg in vl.segs if seg.atomic && seg.node === nothing)
+    start = (sub.origin[1] + seg.x + seg.w / 2, sub.origin[2] + line.top + line.content.above + vl.top + vl.high / 2)
+    @test K.scrub_at(sub, start) == (1, 21, 23)
+    at(pos) = (w.mouse = typeof(w.mouse)(pos...); onmouse(w, MouseMove(w.mouse, w)); frames(w, 1))
+    at(start)
+    w.keys |= Keys.mouse_left; onkey(w, KeyPress{Keys.mouse_left}(0, w)); frames(w, 1)
+    at(start .+ (10px, 0px))
+    @test occursin("!`l = 18m`", sub.buf.lines[1]) && made("area = l * 2.4m") == "43.2m²"
+    w.keys ⊻= Keys.mouse_left; onkey(w, KeyRelease{Keys.mouse_left}(0, w)); frames(w, 2)
+    @test !haskey(sub.nodes, :scrub)
+    # The reply is what the drag left, and the file keeps it
+    @test occursin("!`l = 18m`", it.text)
+    ok = until(() -> occursin("!`l = 18m`", read(said, String)))
+    @test ok
+    # No key changes what the agent said, even while it has the keyboard
+    K.focus(sub)
+    @test w.focus === sub
+    ontype(w, Typed('x', w)); press(Keys.backspace)
+    @test occursin("!`l = 18m`", sub.buf.lines[1]) && sub.buf.lines == split(rstrip(it.text), '\n')
+  end
 finally
   K.SESSION_COMMAND[] = nothing
   K.TURN_COMMAND[] = nothing
