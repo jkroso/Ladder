@@ -1,5 +1,5 @@
 # Tests for the window of a kind of folder: `window_view` makes all that the
-# window shows, `side_menu` what the sidebar holds, and `bread_crumb` the
+# window shows, `side_menu` a side menu in the sidebar's place, and `bread_crumb` the
 # middle of the top bar. Each asks the object of the file or the folder that
 # the window shows. See "the whole window" in main.jl. Run them with
 # `julia -O0 --project=. test/window_view_test.jl`. They draw a window that
@@ -25,7 +25,7 @@ write(joinpath(shop, "bank.md"), "# Bank\n")
 write(joinpath(shop, "sales", "june.md"), "# June\n")
 write(joinpath(dir, "page.md"), "# A page\n")
 
-# A kind of folder with a menu of its own in the sidebar, as code from the
+# A kind of folder with a side menu of its own in the sidebar's place, as code from the
 # startup page would make it. Its folders are of the kind too. While the
 # window shows a thing that the folder holds, the top bar has the kind's own path.
 @def struct ShopDirectory <: K.AbstractDirectory end
@@ -62,39 +62,56 @@ names(node, out=String[]) = begin
   foreach(n -> names(n, out), node.children)
   out
 end
-side() = K.describe(e.nodes[:sidebar])
+"What's at the left of the window: Ladder's sidebar, or the side menu that a kind of folder has in its place"
+side() = (part = K.side_part(e); part isa K.Sidebar ? K.describe(part) : part)
+"The rectangle of the box called `name` in the window as it was last drawn, or nothing"
+drawn(name, r=K.rect(e)) = begin
+  hasproperty(r.from, :name) && r.from.name == name && return r
+  hasproperty(r, :children) || return nothing
+  for child in r.children
+    found = drawn(name, child)
+    found === nothing || return found
+  end
+  nothing
+end
+const room = Ref(0px)   # how wide the room of a kind's own path in the top bar was
 bar() = texts(K.describe(e.nodes[:topbar]))
 whole() = K.window_view(e, K.window_object(e))
 
 @testset "the window of a plain file is Ladder's own" begin
   @test K.window_object(e) isa FS.File{:md} && string(K.window_object(e).path) == joinpath(dir, "page.md")
-  @test K.side_menu(e, K.window_object(e)) isa K.FileMenu
+  @test K.side_menu(e, K.window_object(e)) === e.nodes[:sidebar] && !K.own_side_menu(e)
   @test K.bread_crumb(e, K.window_object(e)) === e.nodes[:title]
   # the sidebar holds the tab of the file, the path of its folder and the folder's list
-  @test "File menu" in names(side()) && "Folder" in names(side()) && "Tabs" in names(side())
+  @test "Files" in names(side()) && "Folder" in names(side()) && "Tabs" in names(side())
   @test "page.md" in texts(side()) && "shop" in texts(side())
   @test K.files_listed(e) && K.hidden_button(e) != ()
   @test K.bar_name(e) in bar()
   @test names(whole())[1] == "Editor" && "Files" in names(whole()) && "TopBar" in names(whole())
 end
 
-@testset "a kind of folder fills the sidebar with a menu of its own" begin
+@testset "a kind of folder has a side menu of its own in the sidebar's place" begin
   K.open!(e, shop); frames()
-  @test K.window_object(e) isa ShopDirectory
+  @test K.window_object(e) isa ShopDirectory && K.own_side_menu(e)
   @test texts(side()) == ["Sales", "Bank", "Shop settings"]
-  # the tabs, the folder's path and the tree of files are Ladder's own menu, so they aren't there
-  @test "Shop menu" in names(side()) && !("File menu" in names(side())) && !("Folder" in names(side())) && !("Tabs" in names(side()))
-  # the sidebar is still the sidebar: as wide as it was, and the menu starts under the top bar
-  @test "Files" in names(side())
-  r = K.rect(e.nodes[:sidebar])
-  @test r.width == K.panel_w(e)
+  # nothing of Ladder's sidebar is there: not its box with its colour and its line, its tabs, the folder's path or the tree of files
+  @test "Shop menu" in names(side()) && !any(n -> n in names(side()), ["Files", "Folder", "Tabs"])
+  @test drawn("Files") === nothing
+  # the menu has the sidebar's room: from the window's top left corner to its bottom, as wide as the sidebar
+  r = drawn("Shop menu")
+  @test r.left == 0px && r.top == 0px && r.width == K.panel_w(e) && r.height == 700px
+  # it goes and comes with the sidebar's own command
+  K.toggle_panel!(e); sleep(0.3); frames()
+  @test drawn("Shop menu") === nothing
+  K.toggle_panel!(e); sleep(0.3); frames()
+  @test drawn("Shop menu").left == 0px && drawn("Shop menu").width == K.panel_w(e)
   # the button that shows the hidden files is for Ladder's tree of files, so it goes
   @test !K.files_listed(e) && K.hidden_button(e) == ()
   # the kind said nothing of the top bar for the folder itself, so the bar has the folder's name
   @test K.bread_crumb(e, K.window_object(e)) === e.nodes[:title] && K.bar_name(e) in bar()
 end
 
-@testset "it fills the sidebar for each thing that it holds, and names it in the top bar" begin
+@testset "the side menu is there for each thing that the folder holds, which the kind names in the top bar" begin
   K.open!(e, joinpath(shop, "bank.md")); frames()
   @test K.window_object(e) isa FS.File{:md} && K.window_object(e).parent isa ShopDirectory
   @test texts(side()) == ["Sales", "Bank", "Shop settings"]
@@ -103,13 +120,18 @@ end
   K.open!(e, joinpath(shop, "sales", "june.md")); frames()
   @test K.window_object(e).parent isa ShopDirectory && string(K.window_object(e).parent.path) == joinpath(shop, "sales")
   @test texts(side()) == ["Sales", "Bank", "Shop settings"] && "Shop › june.md" in bar()
+  # the kind's path has all the room from the sidebar's edge to the buttons at the bar's right end
+  room[] = e.nodes[:title_room]
+  @test room[] > 400px
 end
 
 @testset "a file of a plain folder gets Ladder's sidebar and top bar back" begin
   K.open!(e, joinpath(dir, "page.md")); frames()
-  @test "File menu" in names(side()) && "page.md" in texts(side()) && !("Sales" in texts(side()))
+  @test "Files" in names(side()) && "page.md" in texts(side()) && !("Sales" in texts(side())) && drawn("Files") !== nothing
   @test K.files_listed(e) && K.hidden_button(e) != ()
   @test K.bar_name(e) in bar() && !any(t -> startswith(t, "Shop ›"), bar())
+  # Ladder's own name is in the middle of the bar, so the bar's left end takes as much room as its right end
+  @test e.nodes[:title_room] < room[] - 100px
 end
 
 @testset "a kind of folder makes the whole window" begin

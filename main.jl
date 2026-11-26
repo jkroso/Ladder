@@ -1366,7 +1366,7 @@ end
 
 @def mutable struct TopBar <: SemanticUI end
 @def mutable struct Sidebar <: SemanticUI end    # the list of files down the left of the window
-@def mutable struct FileMenu <: SemanticUI end   # what the sidebar holds, unless a kind of folder fills it: see `side_menu`
+
 @def mutable struct Page <: SemanticUI end       # the scrolling area around the text
 @def mutable struct Document <: SemanticUI end   # the text itself
 @def mutable struct Backdrop <: SemanticUI end   # catches clicks outside a popup
@@ -1612,8 +1612,8 @@ end
 # page asks too: `page_view` gives what it shows for a file or a folder of a
 # kind, `page_fills` says whether that's as wide as the window, and
 # `page_covers` says whether it covers the page's whole space, as a desktop does.
-# And the window asks: `window_view` makes all of it, `side_menu` what the
-# sidebar holds and `bread_crumb` the middle of the top bar. See "the whole window".
+# And the window asks: `window_view` makes all of it, `side_menu` a side menu
+# in the sidebar's place and `bread_crumb` the middle of the top bar. See "the whole window".
 #
 #     @def struct NotesDirectory <: Ladder.AbstractDirectory end
 #     Ladder.FS.kinds[fs"/Users/jake/Notes"] = NotesDirectory
@@ -30838,7 +30838,8 @@ doesn't hide has under it, with a line along its bottom.
 bar_back(e) = begin
   hides_bar(e) || return ()
   full = filled(e)
-  side = full || lowered(e) !== nothing || as_app(e) ? 0px : panel_w(e) * opened(e)
+  # A side menu that a kind of folder made has no colour of Ladder's over its top
+  side = full || lowered(e) !== nothing || as_app(e) || own_side_menu(e) ? 0px : panel_w(e) * opened(e)
   right = full || right_view(e) === nothing ? 0px : right_w(e) * right_opened(e)
   line = border(1px, :solid, colours.line)
   (Row(width(grow=grow), height(TOPBAR_H), Alignment.Start, offset_y=bar_top(e), background(colours.bg), line[:bottom],
@@ -32703,15 +32704,19 @@ describe(t::TopBar) = begin
   # button when there are no arrows. The dot beside the sidebar's button has room of its own.
   need = mac_buttons_room(e) + 32px * length(buttons) + (isempty(arrows) ? 8px : 72px) + (!full && waiting_dot(e) ? DOT_GAP + DOT_W : 0px)
   over = max(need, panel_w(e) * showing)
-  left = max(150px * (1 - showing), need - panel_w(e) * showing, min(side, wide - panel_w(e) * showing - side - TITLE_ROOM))
+  # Ladder's own name is in the middle of the bar, so the left end is as wide as the right. A kind of folder's own
+  # path has all the room from the buttons over the sidebar, so it can start at the page's left edge.
+  crumb = bread_crumb(e, window_object(e))
+  own = !(crumb isa Title)
+  left = own ? max(need - panel_w(e) * showing, 0px) :
+               max(150px * (1 - showing), need - panel_w(e) * showing, min(side, wide - panel_w(e) * showing - side - TITLE_ROOM))
   # The slider never pushes the right end out of a narrow window, so the ladder stays under the mouse. The words
   # before the slider lose their start then: see `said_part`.
   side = min(side, max(side - grown, wide - panel_w(e) * showing - left))
   beside > 0px && (side = max(side, min(left, wide - panel_w(e) * showing - left)))
   e.nodes[:title_room] = wide - panel_w(e) * showing - left - side   # the name is cut short to fit in it
-  crumb = bread_crumb(e, window_object(e))
   # The path that Ladder's own name opens into goes when a kind of folder shows something else there
-  crumb isa Title || (w = window_of(e); w !== nothing && any(p -> p.key == :title_trail, popups(w)) && close_popup!(w, :title_trail))
+  own && (w = window_of(e); w !== nothing && any(p -> p.key == :title_trail, popups(w)) && close_popup!(w, :title_trail))
   # The top bar lies over the top of the sidebar. The file's name is in the
   # middle of the space beside the sidebar, so it moves as the sidebar slides.
   Row(width(grow=grow), height(TOPBAR_H), name="TopBar", offset_y=bar_top(e),
@@ -32747,7 +32752,10 @@ What the middle of the top bar shows while the window is about `o`: a node.
 Ladder's own is the name of the file, which opens into the file's path while
 the mouse is over it. A kind of folder has a method of this to show its own
 path there: `bread_crumb(e, d)` for the folder, and `bread_crumb(e, d, o)`
-for each thing `o` that it holds. `e.nodes[:title_room]` is how wide its room is.
+for each thing `o` that it holds. Its room starts where the buttons over the
+sidebar end, which is the sidebar's edge while the sidebar is open, and ends
+at the buttons of the bar's right end. `e.nodes[:title_room]` is how wide
+that was in the last frame.
 """
 bread_crumb(e, o) = bread_crumb(e, o.parent, o)
 bread_crumb(e, ::Nothing) = bread_crumb(e, nothing, nothing)
@@ -36254,56 +36262,68 @@ end
 
 """
 The sidebar keeps its width as it slides in and out from the left edge of the
-window, so only its right part shows while it's partly out. Under the top bar
-it holds what `side_menu` gives for the object that the window is about.
+window, so only its right part shows while it's partly out. At its top are the
+tabs of the files that are open. Under them, it lists the folder's files, and
+under each file that's open in the list, that file's headings and components.
 """
 describe(s::Sidebar) = begin
   e = editor(s)
   wide = panel_w(e)
   shows = wide * opened(e)
-  menu = side_menu(e, window_object(e))
-  e.nodes[:own_side_menu] = !(menu isa FileMenu)
-  Row(fixed(shows), height(grow=grow), Alignment.Start, clip=true,
-    Column(fixed(wide), height(grow=grow), Alignment.Start, background(colours.panel), name="Files",
-           border(1px, :solid, colours.line)[:right], offset_x=shows - wide,
-      Box(width(grow=grow), height(max(above_page(e), SIDE_GAP))),   # under the top bar
-      menu))
-end
-
-"""
-What the sidebar holds while the window is about `o`, from under the top bar
-to the bottom of the window: a node. Ladder's own is a `FileMenu`. A kind of
-folder has a method of this to fill the sidebar itself: `side_menu(e, d)` for
-the folder, and `side_menu(e, d, o)` for each thing `o` that it holds. The
-sidebar keeps its width, its colour, its slide and the edge that you drag.
-"""
-side_menu(e, o) = side_menu(e, o.parent, o)
-side_menu(e, ::Nothing) = side_menu(e, nothing, nothing)
-side_menu(e, d, o) = node!(FileMenu, e, :file_menu)
-
-"True when the sidebar shows Ladder's own tree of the folder's files, and not a list or a menu that a kind of folder made"
-files_listed(e) = !get(e.nodes, :own_side_menu, false) && folder_view(e, directory(e)).list === nothing
-
-"""
-Ladder's own menu in the sidebar. At its top are the tabs of the files that
-are open. Under them are the path of the sidebar's folder and the list of that
-folder's files, and under each file that's open in the list, that file's
-headings and components.
-"""
-describe(m::FileMenu) = begin
-  e = editor(m)
   # A folder shows as a tree of its files, unless code from the startup page lists it another way, as a folder of emails is listed
   own = folder_view(e, directory(e))
   list = own.list === nothing ? Column(width(grow=grow), Alignment.Start, padding(0px, 8px, 12px, 8px),
                                        with_theme(() -> describe!(fill_tree!(e, file_tree(e))), panel_theme())) : own.list
   own_scroll!(e.files_scroll)   # the tabs' scroll comes and goes over it
-  Column(width(grow=grow), height(grow=grow), Alignment.Start, name="File menu",
-    tab_list(e)...,                            # the files that are open, over the folder
-    Row(width(grow=grow), height(30px), padding(16px, 0px), Alignment.Center, clip=true, name="Folder",
-      folder_trail(e, panel_w(e) - 32px)...),
-    (own.bar === nothing ? () : (own.bar,))...,
-    reuse!(e.files_scroll, list))
+  Row(fixed(shows), height(grow=grow), Alignment.Start, clip=true,
+    Column(fixed(wide), height(grow=grow), Alignment.Start, background(colours.panel), name="Files",
+           border(1px, :solid, colours.line)[:right], offset_x=shows - wide,
+      Box(width(grow=grow), height(max(above_page(e), SIDE_GAP))),   # under the top bar
+      tab_list(e)...,                            # the files that are open, over the folder
+      Row(width(grow=grow), height(30px), padding(16px, 0px), Alignment.Center, clip=true, name="Folder",
+        folder_trail(e, wide - 32px)...),
+      (own.bar === nothing ? () : (own.bar,))...,
+      reuse!(e.files_scroll, list)))
 end
+
+"""
+The side menu of the window while it's about `o`: a node. Ladder's own is its
+sidebar. A kind of folder has a method of this to have a side menu of its own
+in the sidebar's place: `side_menu(e, d)` for the folder, and
+`side_menu(e, d, o)` for each thing `o` that it holds. Ladder's sidebar isn't
+there then: nothing of it shows, not its colour, its line, its tabs or its
+list. So the kind's menu draws all of itself, on the page's colour.
+
+The kind's menu has the sidebar's room. It's as wide as the sidebar, which you
+drag, and it runs from the top of the window to the bottom, so the window's
+buttons and the left end of the top bar lie over its top: `above_page(e)` is
+how tall that part is. It slides in and out as the sidebar does.
+"""
+side_menu(e, o) = side_menu(e, o.parent, o)
+side_menu(e, ::Nothing) = side_menu(e, nothing, nothing)
+side_menu(e, d, o) = node!(Sidebar, e, :sidebar)
+
+"""
+What's at the left of the window of `e` while the sidebar is open: Ladder's
+sidebar, or the side menu that a kind of folder has in its place, in the
+sidebar's room.
+"""
+side_part(e) = begin
+  menu = side_menu(e, window_object(e))
+  e.nodes[:own_side_menu] = !(menu isa Sidebar)
+  menu isa Sidebar && return menu
+  wide = panel_w(e)
+  shows = wide * opened(e)
+  # The menu keeps its width while it slides, as the sidebar does. Once it's open nothing clips it, so a shadow of its own shows whole.
+  Row(fixed(shows), height(grow=grow), Alignment.Start, clip=opened(e) < 1, name="Side menu",
+    Column(fixed(wide), height(grow=grow), Alignment.Start, offset_x=shows - wide, menu))
+end
+
+"True when the window has a side menu that a kind of folder made, in the place of Ladder's sidebar"
+own_side_menu(e) = get(e.nodes, :own_side_menu, false) === true
+
+"True when the sidebar shows Ladder's own tree of the folder's files, and not a list or a menu that a kind of folder made"
+files_listed(e) = !own_side_menu(e) && folder_view(e, directory(e)).list === nothing
 
 # --- the edge of the sidebar ----------------------------------------------------------
 #
@@ -44619,8 +44639,8 @@ end
 # that the window shows. So a kind of folder, or a kind of file, can have a
 # window of its own, as it can have a page of its own with `page_view`. Two
 # parts of Ladder's own window are functions of the object too, for a kind that
-# wants only that part its own way: `side_menu` is what the sidebar holds, and
-# `bread_crumb` is what the middle of the top bar shows.
+# wants only that part its own way: `side_menu` is the side menu, which takes
+# the sidebar's place, and `bread_crumb` is what the middle of the top bar shows.
 #
 #     @def struct ShopDirectory <: Ladder.AbstractDirectory end
 #     Ladder.side_menu(e, d::ShopDirectory) = shop_menu(e, d)        # while the window shows the folder
@@ -44659,7 +44679,7 @@ top of the sidebar and the page.
 """
 window_body(e) = Row(width(grow=grow), height(grow=grow), Alignment.Start, background(colours.bg),
   # The lines of a block that fill the window take the sidebar's room too
-  (opened(e) > 0 && lowered(e) === nothing && !as_app(e) ? (node!(Sidebar, e, :sidebar),) : ())...,
+  (opened(e) > 0 && lowered(e) === nothing && !as_app(e) ? (side_part(e),) : ())...,
   Column(width(grow=grow), height(grow=grow), Alignment.Start,
     Box(width(grow=grow), height(above_page(e))),   # under the top bar
     node!(Page, e, :page)),
