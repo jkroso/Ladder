@@ -36,8 +36,12 @@
 #
 # LADDER_UPDATE_FEED gives the app another address for latest.txt, to try an
 # update without a release. The new version must still pass the rule above.
+#
+# The app gets the new code of its extensions too, like Mail.lad: see "the
+# extensions' updates", at the end of this file.
 
 @use "github.com/jkroso/UI.jl/Interface/objc" cls msg nsstring jstring with_pool
+@use LibGit2: LibGit2
 
 "The GitHub repo whose releases the app looks at. release.jl publishes to it."
 const REPO = "jkroso/Ladder"
@@ -414,6 +418,279 @@ quit!(u::Updater) = begin
   (u.staged !== nothing && (u.auto || u.again) && isempty(blocked(u))) || return false
   try
     run(pipeline(detach(install(u, getpid())), stdin=devnull, stdout=devnull, stderr=devnull), wait=false)
+    true
+  catch
+    false
+  end
+end
+
+# --- the extensions' updates ----------------------------------------------------------------
+#
+# An extension is code that Ladder got from GitHub: a kind of folder, like
+# github.com/jkroso/Media.lad, a kind of block, or code that the startup page
+# uses. Kip clones each one into its folder of repositories, at `user/repo`,
+# the first time that Ladder needs it. Kip never looks for new commits after
+# that. So the app looks for them, as it looks for a newer version of itself:
+# when it opens, and once a day after that, while the box on the settings page
+# is on.
+#
+# A task on a thread that isn't the window's fetches each clone's new commits
+# from GitHub. They wait in the clone's `.git` folder while Ladder runs, and
+# each clone moves up to them when you quit Ladder. Kip loads an extension from
+# a copy of the commit that its clone was at, so the code that's loaded now
+# stays as it is. The new code loads the next time that Ladder opens. Ladder
+# can't load it while it runs, since the new code's types aren't the old
+# code's types, and the old code's values use them.
+#
+# Ladder leaves these clones as they are:
+#
+# - a link to a folder on this Mac, as `Kip.link` makes for an extension that
+#   you write. Ladder uses that folder as it is.
+# - a clone with changes of its own, which a move to the new commits would lose
+# - a clone that isn't on a branch, like one that a `@use` with a version holds at a tag
+# - a clone with commits that GitHub doesn't have
+#
+#     x = extensions()      # the extensions' updater of the app that's running
+#     tick!(x)              # call it in each frame, as for the app's updater
+#     says(x), action(x)    # what the settings page shows, and what its button does
+#     act!(x)               # what happens when you click that button
+#     quit!(x)              # call it when the last window has closed
+#     reopen!(x)            # and this after it, to open Ladder again after Restart Ladder
+
+mutable struct Extensions
+  app::String                  # the app that's running, or "" when Ladder runs from its source
+  repos::String                # Kip's folder of repositories, which has a clone of each extension at `user/repo`
+  auto::Bool                   # look for new code, and get it, without being asked
+  task::Union{Nothing,Task}    # the task that fetches the new commits, while it runs
+  ready::Vector{String}        # the name of each extension whose new code waits, like "Mail.lad"
+  looked::Bool                 # the clones have been read for new code that waited from the last run
+  checked::Bool                # Ladder has looked on GitHub since it opened
+  problem::String              # why the last look failed, or ""
+  next::Float64                # the time of the next look, for `auto`
+  again::Bool                  # open the app again once Ladder has quit
+  changed::Int                 # goes up whenever what `says` and `action` give may have changed
+end
+
+"The extensions' updater of the app at `app`, whose clones are in `repos`"
+Extensions(app, repos) = Extensions(app, repos, true, nothing, String[], false, false, "", 0.0, false, 0)
+
+"The extensions' updater of the app that's running"
+const extensions_updater = Ref{Union{Nothing,Extensions}}(nothing)
+extensions() = begin
+  extensions_updater[] === nothing || return extensions_updater[]
+  x = Extensions(own().app, Kip.repos)
+  # While the app is built, this code runs in Julia's own program. The app must look again when it opens.
+  ccall(:jl_generating_output, Cint, ()) == 1 || (extensions_updater[] = x)
+  x
+end
+
+changed!(x::Extensions) = (x.changed += 1; x)
+
+"Why the app can't update its extensions, or an empty string when it can"
+blocked(x::Extensions) = isempty(x.app) ? "Ladder runs from its source here. Only the Ladder app gets new code for its extensions." : ""
+
+"""
+Each extension in `repos` that has a clone, as `user/repo`, and whether it's a
+link to a folder on this Mac. A folder of code that the app wrote there, which
+isn't a clone, isn't an extension.
+"""
+clones(repos) = begin
+  found = Tuple{String,Bool}[]
+  isdir(repos) || return found
+  for user in sort!(readdir(repos))
+    folder = joinpath(repos, user)
+    (isdir(folder) && !islink(folder)) || continue
+    for name in sort!(readdir(folder))
+      dir = joinpath(folder, name)
+      isdir(joinpath(dir, ".git")) && push!(found, (joinpath(user, name), islink(dir)))
+    end
+  end
+  found
+end
+
+"The name that the settings page gives an extension: its repository's, like Mail.lad"
+named(clone) = basename(clone)
+
+"""
+The commit that the clone at `dir` can move up to: the newest commit of its
+branch that Ladder has fetched from GitHub. It's nothing when the clone has
+that commit already, has changes of its own, isn't on a branch, or has commits
+that GitHub doesn't.
+"""
+newer(dir) = try
+  LibGit2.with(LibGit2.GitRepo(dir)) do repo
+    (LibGit2.isattached(repo) && !LibGit2.isdirty(repo)) || return nothing
+    branch = LibGit2.lookup_branch(repo, "origin/" * LibGit2.headname(repo), true)
+    branch === nothing && return nothing
+    got, at = LibGit2.GitHash(branch), LibGit2.head_oid(repo)
+    got != at && LibGit2.is_ancestor_of(string(at), string(got), repo) ? got : nothing
+  end
+catch
+  nothing
+end
+
+"The name of each extension in `repos` whose new code waits"
+waiting(repos) = [named(c) for (c, linked) in clones(repos) if !linked && newer(joinpath(repos, c)) !== nothing]
+
+"""
+Fetch the new commits of each clone in `repos` that isn't a link. It gives the
+name of each extension whose commits Ladder couldn't get. It runs in a task,
+so it changes nothing that the window reads.
+"""
+fetch_all(repos) = begin
+  failed = String[]
+  for (c, linked) in clones(repos)
+    linked && continue
+    try
+      LibGit2.with(LibGit2.fetch, LibGit2.GitRepo(joinpath(repos, c)))
+    catch
+      push!(failed, named(c))
+    end
+  end
+  failed
+end
+
+"""
+Move each clone in `repos` up to the new commits that wait in it. It gives the
+name of each extension that moved. Kip loads each one's new code the next
+time that a program needs it.
+"""
+apply!(repos) = begin
+  moved = String[]
+  for (c, linked) in clones(repos)
+    linked && continue
+    dir = joinpath(repos, c)
+    to = newer(dir)
+    to === nothing && continue
+    try
+      LibGit2.with(repo -> LibGit2.reset!(repo, to, LibGit2.Consts.RESET_HARD), LibGit2.GitRepo(dir))
+      push!(moved, named(c))
+    catch
+    end
+  end
+  moved
+end
+
+"Read the clones for new code that waits in them since the last run, like one that a crash didn't let Ladder move up"
+look!(x::Extensions) = (x.looked = true; x.ready = waiting(x.repos); changed!(x))
+
+"Start to fetch the new commits of every extension. `tick!` takes the end of it."
+check!(x::Extensions) = begin
+  (isempty(blocked(x)) && x.task === nothing) || return x
+  x.looked || look!(x)
+  x.problem = ""
+  repos = x.repos
+  x.task = Threads.@spawn fetch_all(repos)
+  changed!(x)
+end
+
+"Take the end of a fetch: which extensions have new code now, and which Ladder couldn't reach"
+fetched!(x::Extensions) = begin
+  failed = try
+    fetch(x.task)
+  catch
+    [named(c) for (c, linked) in clones(x.repos) if !linked]
+  end
+  x.task = nothing
+  x.checked = true
+  look!(x)
+  x.problem = isempty(failed) ? "" : "Ladder couldn't get the new code of $(join(failed, ", ", " and ")) from GitHub."
+  x.next = time() + (isempty(failed) ? EVERY : RETRY)
+  changed!(x)
+end
+
+"""
+Do what's due now: take the end of a fetch, and with `auto`, start one when
+it's time. Each window calls this in each frame. It gives the seconds until it
+wants the next call, which is `Inf` while no fetch runs.
+"""
+tick!(x::Extensions) = begin
+  isempty(blocked(x)) || return Inf
+  x.looked || look!(x)
+  if x.task !== nothing
+    istaskdone(x.task) && fetched!(x)
+  elseif x.auto && time() >= x.next
+    check!(x)
+  end
+  x.task === nothing ? Inf : POLL
+end
+
+"Wait until the fetch that's running has ended, and take its end. For a script or a test."
+finish!(x::Extensions) = (x.task === nothing || (wait(x.task); fetched!(x)); x)
+
+"One or two sentences on the extensions' new code, for the settings page"
+says(x::Extensions) = begin
+  no = blocked(x)
+  isempty(no) || return no
+  found = clones(x.repos)
+  cloned = [named(c) for (c, linked) in found if !linked]
+  links = [named(c) for (c, linked) in found if linked]
+  left = isempty(links) ? "" :
+    " Ladder leaves $(join(links, ", ", " and ")) as $(length(links) == 1 ? "it is, since it's a link" : "they are, since each is a link") to a folder on this Mac."
+  isempty(cloned) && return (isempty(links) ? "Ladder has no extensions from GitHub." : String(lstrip(left)))
+  said = if x.task !== nothing
+    "Ladder is looking for new code for $(join(cloned, ", ", " and "))…"
+  elseif !isempty(x.ready)
+    "New code for $(join(x.ready, ", ", " and ")) is ready." * (x.auto ? " It loads the next time that Ladder opens." : "")
+  elseif !isempty(x.problem)
+    x.problem * (x.auto ? " Ladder tries again in an hour." : "")
+  elseif x.checked
+    length(cloned) == 1 ? "$(cloned[1]) has the newest code from GitHub." : "$(join(cloned, ", ", " and ")) have the newest code from GitHub."
+  else
+    "Ladder hasn't looked for new code for $(join(cloned, ", ", " and ")) since it opened."
+  end
+  said * left
+end
+
+"""
+What the button on the settings page does now: `:check` looks for new code,
+and `:restart` closes Ladder and opens it again, with the new code. It's
+`:none` when there's nothing to do.
+"""
+action(x::Extensions) = begin
+  (isempty(blocked(x)) && x.task === nothing) || return :none
+  any(c -> !last(c), clones(x.repos)) || return :none
+  isempty(x.ready) ? :check : :restart
+end
+
+"What the button says for each `action`"
+label(x::Extensions) = (a = action(x); a === :restart ? "Restart Ladder" : a === :check ? "Check now" : "")
+
+"Do the `action`. After `:restart`, `x.again` is true: close every window, and `quit!` and `reopen!` do the rest."
+act!(x::Extensions) = begin
+  a = action(x)
+  a === :check && check!(x)
+  a === :restart && (x.again = true)
+  x
+end
+
+"""
+Call this when the last window has closed. With `auto` on, or after you
+clicked Restart Ladder, each clone moves up to the new commits that wait in
+it. It gives the name of each extension that moved.
+"""
+quit!(x::Extensions) = begin
+  x.task !== nothing && istaskdone(x.task) && fetched!(x)
+  (isempty(blocked(x)) && (x.auto || x.again)) || return String[]
+  apply!(x.repos)
+end
+
+# Opens the app once the Ladder that asked has quit
+const REOPEN = raw"""
+pid="$1"; app="$2"; n=0
+while kill -0 "$pid" 2>/dev/null && [ $n -lt 300 ]; do sleep 0.1; n=$((n+1)); done
+/usr/bin/open "$app"
+"""
+
+"""
+After Restart Ladder, start a program that outlives Ladder and opens the app
+again once Ladder has quit. Call it when the app's own `quit!` didn't start a
+program that does that. It's true when it started the program.
+"""
+reopen!(x::Extensions) = begin
+  (x.again && isempty(blocked(x))) || return false
+  try
+    run(pipeline(detach(`/bin/sh -c $REOPEN sh $(getpid()) $(x.app)`), stdin=devnull, stdout=devnull, stderr=devnull), wait=false)
     true
   catch
     false

@@ -430,4 +430,233 @@ end
   end
 end
 
+# --- the extensions' updates --------------------------------------------------------------
+#
+# Each test makes a folder of repositories as Kip has it, with clones of
+# repositories that stand in for GitHub. They're folders in the test's own
+# folder, so the tests use no network.
+
+@use LibGit2: LibGit2
+
+const SIGNER = LibGit2.Signature("Test", "test@example.com")
+
+"Write `text` into `file` in the repository at `dir`, and commit it. It gives the commit."
+commit!(dir, text; file="main.jl") = LibGit2.with(LibGit2.GitRepo(dir)) do repo
+  write(joinpath(dir, file), text)
+  LibGit2.add!(repo, file)
+  LibGit2.commit(repo, "Write $text"; author=SIGNER, committer=SIGNER)
+end
+
+"A repository at `dir` that stands in for one on GitHub, with one commit"
+origin(dir) = (LibGit2.close(LibGit2.init(dir)); commit!(dir, "one\n"); dir)
+
+"The text of the extension's main file in the clone at `dir`"
+code(dir) = read(joinpath(dir, "main.jl"), String)
+
+"The commit that the repository at `dir` is at"
+at(dir) = LibGit2.with(LibGit2.head_oid, LibGit2.GitRepo(dir))
+
+"""
+A folder of repositories, as Kip has it, with a clone of `Ext.lad` and of
+`Other.lad`, a link to a folder of `Mine.lad`, and a folder that isn't a
+clone. It gives the folder and the repository that each clone came from.
+"""
+repositories() = begin
+  dir = mktempdir(root)
+  hub = Dict(name => origin(joinpath(dir, "hub", name)) for name in ("Ext.lad", "Other.lad", "Mine.lad"))
+  repos = joinpath(dir, "repos")
+  for name in ("Ext.lad", "Other.lad")
+    LibGit2.close(LibGit2.clone(hub[name], joinpath(repos, "sam", name)))
+  end
+  # An extension that you write, which Kip.link links to your own folder of it
+  mine = joinpath(dir, "work", "Mine.lad")
+  LibGit2.close(LibGit2.clone(hub["Mine.lad"], mine))
+  symlink(mine, joinpath(repos, "sam", "Mine.lad"))
+  # The app writes its own code here too, which isn't a clone
+  mkpath(joinpath(repos, "jkroso", "UI.jl"))
+  write(joinpath(repos, "jkroso", "UI.jl", "Project.toml"), "name = \"UI\"\n")
+  (repos, hub)
+end
+
+@testset "an extension is a clone in Kip's folder" begin
+  repos, _ = repositories()
+  @test Update.clones(repos) == [("sam/Ext.lad", false), ("sam/Mine.lad", true), ("sam/Other.lad", false)]
+  @test Update.clones(joinpath(repos, "none")) == []
+end
+
+@testset "a clone moves up to the new commits that Ladder fetched" begin
+  repos, hub = repositories()
+  ext = joinpath(repos, "sam", "Ext.lad")
+  was = at(ext)
+  new = commit!(hub["Ext.lad"], "two\n")
+  # Nothing waits until Ladder fetches
+  @test Update.waiting(repos) == []
+  @test Update.apply!(repos) == []
+  @test Update.fetch_all(repos) == []
+  @test Update.waiting(repos) == ["Ext.lad"]
+  # The fetch changed nothing that a program loads
+  @test at(ext) == was
+  @test code(ext) == "one\n"
+  @test Update.apply!(repos) == ["Ext.lad"]
+  @test at(ext) == new
+  @test code(ext) == "two\n"
+  @test Update.waiting(repos) == []
+  @test Update.apply!(repos) == []
+end
+
+@testset "Ladder leaves a link, a clone with changes, one at a tag and one with commits of its own" begin
+  repos, hub = repositories()
+  foreach(name -> commit!(hub[name], "two\n"), ("Ext.lad", "Other.lad", "Mine.lad"))
+  # A link to your own folder isn't fetched
+  mine = joinpath(repos, "sam", "Mine.lad")
+  @test Update.fetch_all(repos) == []
+  @test LibGit2.with(r -> LibGit2.GitHash(LibGit2.lookup_branch(r, "origin/main", true)), LibGit2.GitRepo(mine)) == at(mine)
+  # A change of your own, which a move would lose
+  ext = joinpath(repos, "sam", "Ext.lad")
+  write(joinpath(ext, "main.jl"), "mine\n")
+  @test Update.newer(ext) === nothing
+  # A clone that isn't on a branch, as Kip leaves one that a `@use` holds at a tag
+  other = joinpath(repos, "sam", "Other.lad")
+  LibGit2.with(r -> LibGit2.checkout!(r, string(at(other))), LibGit2.GitRepo(other))
+  @test Update.newer(other) === nothing
+  @test Update.waiting(repos) == []
+  @test Update.apply!(repos) == []
+  @test code(ext) == "mine\n"
+  # A clone with a commit that GitHub doesn't have
+  write(joinpath(ext, "main.jl"), "one\n")
+  commit!(ext, "local\n")
+  @test Update.newer(ext) === nothing
+end
+
+"An updater of the extensions in `repos`, for an app that isn't there"
+updater(repos) = Update.Extensions(joinpath(root, "Applications", "Fixture.app"), repos)
+
+@testset "the updater looks, says what it found, and moves the clones when Ladder quits" begin
+  repos, hub = repositories()
+  x = updater(repos)
+  # It looks when Ladder opens
+  @test Update.tick!(x) == Update.POLL
+  @test x.task !== nothing
+  @test startswith(Update.says(x), "Ladder is looking for new code for Ext.lad and Other.lad…")
+  @test Update.action(x) === :none
+  Update.finish!(x)
+  @test Update.says(x) == "Ext.lad and Other.lad have the newest code from GitHub. Ladder leaves Mine.lad as it is, since it's a link to a folder on this Mac."
+  @test Update.label(x) == "Check now"
+  # And again a day later
+  @test Update.tick!(x) == Inf
+  @test x.next > time() + Update.EVERY - 60
+  new = commit!(hub["Ext.lad"], "two\n")
+  Update.act!(x)                     # Check now
+  Update.finish!(x)
+  @test x.ready == ["Ext.lad"]
+  @test startswith(Update.says(x), "New code for Ext.lad is ready. It loads the next time that Ladder opens.")
+  @test Update.label(x) == "Restart Ladder"
+  # Ladder quits, and the clone moves up
+  ext = joinpath(repos, "sam", "Ext.lad")
+  @test at(ext) != new
+  @test Update.quit!(x) == ["Ext.lad"]
+  @test at(ext) == new
+  @test !Update.reopen!(x)            # Ladder doesn't open again after a plain quit
+end
+
+@testset "with the box off, a clone moves only after Restart Ladder" begin
+  repos, hub = repositories()
+  x = updater(repos)
+  x.auto = false
+  @test Update.tick!(x) == Inf
+  @test x.task === nothing
+  @test startswith(Update.says(x), "Ladder hasn't looked for new code for Ext.lad and Other.lad since it opened.")
+  commit!(hub["Other.lad"], "two\n")
+  Update.act!(x)                     # Check now
+  Update.finish!(x)
+  @test startswith(Update.says(x), "New code for Other.lad is ready. Ladder leaves")
+  @test Update.quit!(x) == []
+  @test Update.act!(x).again          # Restart Ladder
+  @test Update.quit!(x) == ["Other.lad"]
+end
+
+@testset "new code that waited from the last run is ready when Ladder opens" begin
+  repos, hub = repositories()
+  commit!(hub["Ext.lad"], "two\n")
+  Update.fetch_all(repos)
+  x = updater(repos)
+  x.auto = false
+  Update.tick!(x)
+  @test x.ready == ["Ext.lad"]
+end
+
+@testset "a fetch that fails" begin
+  repos, hub = repositories()
+  rm(hub["Other.lad"], recursive=true)
+  x = updater(repos)
+  Update.tick!(x)
+  Update.finish!(x)
+  @test startswith(Update.says(x), "Ladder couldn't get the new code of Other.lad from GitHub. Ladder tries again in an hour.")
+  @test x.next < time() + Update.RETRY + 60
+end
+
+@testset "only the app updates its extensions" begin
+  repos, _ = repositories()
+  x = Update.Extensions("", repos)
+  @test Update.tick!(x) == Inf
+  @test x.task === nothing
+  @test Update.says(x) == "Ladder runs from its source here. Only the Ladder app gets new code for its extensions."
+  @test Update.action(x) === :none
+  @test Update.quit!(x) == []
+  @test Update.extensions().app == ""
+end
+
+@testset "with no extensions" begin
+  x = updater(mktempdir(root))
+  Update.tick!(x)
+  @test Update.says(x) == "Ladder has no extensions from GitHub."
+  @test Update.action(x) === :none
+end
+
+@testset "the settings page shows the extensions' new code and offers the button" begin
+  was = Update.extensions_updater[]
+  try
+    repos, hub = repositories()
+    x = updater(repos)
+    x.auto = false
+    Update.extensions_updater[] = x
+    e = K.build_editor(K.settings_page())
+    e.remember = false
+    w = K.window!(e, title="test", size=(720px, 2400px))
+    frame(w)
+    ask(name, args...) = Base.invokelatest(getglobal(K.sandbox(e), name), args...)
+    @test startswith(ask(:extension_news), "Ladder hasn't looked for new code for Ext.lad and Other.lad")
+    @test ask(:extension_offer) == "Check now"
+    commit!(hub["Ext.lad"], "two\n")
+    ask(:update_extensions!)           # Check now
+    Update.finish!(x)
+    @test startswith(ask(:extension_news), "New code for Ext.lad is ready.")
+    @test ask(:extension_offer) == "Restart Ladder"
+    # The box turns the extensions' updates on and off too
+    ask(:app_updates!, true)
+    @test x.auto
+    ask(:app_updates!, false)
+    @test !x.auto
+    # A page with changes that aren't saved stops the restart
+    page = joinpath(mktempdir(root), "notes.md")
+    write(page, "# Notes\n")
+    o = K.build_editor(page)
+    ow = K.window!(o, title="test", size=(800px, 600px))
+    frame(ow)
+    K.ontype(o, K.Typed('a', ow))
+    ask(:update_extensions!)
+    @test !x.again
+    @test startswith(ask(:extension_news), "Save your changes first.")
+    K.save!(o.buf)
+    delete!(e.nodes, :extensions_held)
+    # With them saved, every window closes, and the quit that follows moves the clone and opens Ladder again
+    ask(:update_extensions!)
+    @test x.again
+    @test isempty(K.editors)
+  finally
+    Update.extensions_updater[] = was
+    foreach(o -> close(K.window_of(o)), copy(K.editors))
+  end
+end
+
 rm(root, recursive=true, force=true)

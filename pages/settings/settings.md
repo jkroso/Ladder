@@ -198,6 +198,15 @@ isempty(offer) ? say(update_news()) :
 
 With this on, Ladder looks for a newer version when it opens, and once a day after that. It gets the new version while you work. The new version takes the place of this one when you quit Ladder. To look for one, Ladder asks GitHub which version is the newest. It sends nothing about you or your files.
 
+```ui
+say(text) = Text(text, size=page_text_size() * 1px)
+offer = extension_offer()
+isempty(offer) ? say(extension_news()) :
+  Column(Alignment.Start, child_gap=12px, say(extension_news()), Button(label=offer, onclick=button -> update_extensions!()))
+```
+
+The box gets the new code of your extensions too: each kind of folder or block that Ladder got from GitHub, like `github.com/jkroso/Media.lad`. Ladder gets the new code while you work, and it loads the next time that Ladder opens. Ladder doesn't change an extension that's a link to a folder on this Mac, or one that has changes of your own.
+
 ---
 
 This page is a Markdown file, like any other in Ladder. To see the code of a setting, hold ⌥ and click it.

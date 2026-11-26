@@ -20,4 +20,4 @@ The final thing that makes Ladder unique, and this is where it gets its name, is
 
 The app needs a Mac with Apple silicon, and macOS 12 or later. To write down what's said in a recording, it needs macOS 26 or later. It opens on its welcome page, which shows what the editor does.
 
-The app updates itself. A box on the settings page turns that off.
+The app updates itself. It also gets the new code of each extension that it got from GitHub, like Mail.lad, and the new code loads the next time it opens. A box on the settings page turns both off.

@@ -4806,6 +4806,11 @@ sandbox(e) = get!(e.nodes, :sandbox) do
   Core.eval(m, :(const update_news = $(() -> update_news(e))))
   Core.eval(m, :(const update_offer = $(() -> (reads!(e, :updates); reads!(e, :update); Update.label(Update.own())))))
   Core.eval(m, :(const update! = $(() -> update_act!(e))))
+  # ... and the extensions' new code from GitHub, the same way: `extension_news()`, `extension_offer()`, like
+  # "Restart Ladder", and `update_extensions!()`.
+  Core.eval(m, :(const extension_news = $(() -> extensions_news(e))))
+  Core.eval(m, :(const extension_offer = $(() -> (reads!(e, :updates); reads!(e, :extensions); Update.label(Update.extensions())))))
+  Core.eval(m, :(const update_extensions! = $(() -> extensions_act!(e))))
   # ... and the news: `news_days()` is how many days Ladder keeps an article, 0 for ever, and `news_agents()` is
   # when Ladder's own agents get the news: "daily", "asked" or "off". See "a folder of news".
   Core.eval(m, :(const news_days = $(() -> (reads!(e, :news); News.keep_days()))))
@@ -45112,11 +45117,17 @@ end
 # version takes the app's place when you quit. update.jl does the work, and
 # says how. The settings page has a box that turns it off, a line that says how
 # far an update has got, and a button to look for one now.
+#
+# The app gets the new code of its extensions from GitHub the same way, and the
+# same box turns that off. The new code loads the next time that Ladder opens.
+# The settings page has a line that says which extensions have new code, and a
+# button that looks for it now or restarts Ladder to load it.
 
-"Turn on or off whether the app gets a newer version without being asked"
+"Turn on or off whether the app gets a newer version, and its extensions' new code, without being asked"
 updates!(e, on::Bool) = begin
   e.updates = on
   Update.own().auto = on
+  Update.extensions().auto = on
   save_settings!(e)
   rerun!(e, :updates)
   e
@@ -45141,6 +45152,51 @@ update_tick!(e) = begin
     rerun!(e, :update)
   end
   isfinite(wait) && redraw_in!(e, wait)   # while it checks or downloads, the window looks again soon
+  extensions_tick!(e)
+  nothing
+end
+
+"""
+What happens to the extensions' new code in each frame, as `update_tick!` does
+for the app. When it gets further, the block of the settings page that shows
+it runs again.
+"""
+extensions_tick!(e) = begin
+  x = Update.extensions()
+  x.auto = e.updates
+  wait = Update.tick!(x)
+  if get(e.nodes, :extensions_seen, -1) != x.changed
+    e.nodes[:extensions_seen] = x.changed
+    delete!(e.nodes, :extensions_held)
+    rerun!(e, :extensions)
+  end
+  isfinite(wait) && redraw_in!(e, wait)   # while it fetches, the window looks again soon
+  nothing
+end
+
+"A sentence or two on the extensions' new code, for the settings page"
+extensions_news(e) = begin
+  reads!(e, :updates)
+  reads!(e, :extensions)
+  get(e.nodes, :extensions_held, false) && return "Save your changes first. A page has changes that aren't in its file, and a restart would lose them."
+  Update.says(Update.extensions())
+end
+
+"""
+Do what the settings page's button for the extensions offers: look for new
+code, or restart Ladder to load it. A restart closes every window, each
+extension moves up to its new code, and Ladder opens again. It doesn't happen
+while a page has changes that aren't saved.
+"""
+extensions_act!(e) = begin
+  x = Update.extensions()
+  if Update.action(x) === :restart && unsaved()
+    e.nodes[:extensions_held] = true
+    return rerun!(e, :extensions)
+  end
+  Update.act!(x)
+  rerun!(e, :extensions)
+  x.again && foreach(o -> (w = window_of(o); w === nothing || close(w)), copy(editors))
   nothing
 end
 
@@ -61041,8 +61097,13 @@ open_editor(args) = begin
   keep_place!(quit_editor(e))
   # What code from the startup page does last, like the end of a look for email
   foreach(f -> Base.invokelatest(f), values(AT_QUIT))
+  # Each extension moves up to the new code that Ladder fetched, which loads the next time that Ladder opens
+  x = Update.extensions()
+  Update.quit!(x)
+  # After Restart Ladder, the program that puts a newer version of the app in its place opens it again too
+  x.again && (Update.own().again = true)
   # A newer version of the app that's ready takes the app's place once Ladder has quit
-  Update.quit!(Update.own())
+  Update.quit!(Update.own()) || Update.reopen!(x)
 end
 
 # --- where Ladder opens --------------------------------------------------------------------
