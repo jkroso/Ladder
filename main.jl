@@ -4409,6 +4409,21 @@ sandbox(e) = get!(e.nodes, :sandbox) do
   # ... and after how many characters a faint line goes down a file of code. 0 is no line.
   Core.eval(m, :(const code_guide = $(() -> (reads!(e, :guide); e.guide))))
   Core.eval(m, :(const code_guide! = $(n -> guide!(e, Int(n)))))
+  # ... and the terminal's: the caret's shape, "block", "bar" or "underline", and whether it blinks; whether what the
+  # mouse selects is copied; whether ⌥ is a Meta key; what a program's bell does, "flash", "sound" or "none"; and
+  # how many lines of the past a terminal keeps. See "a terminal's file".
+  Core.eval(m, :(const term_caret = $(() -> (reads!(e, :terminal); String(TERM_SETTINGS.caret)))))
+  Core.eval(m, :(const term_caret! = $(name -> term_setting!(e, :caret, term_choice(TERM_CARETS, name)))))
+  Core.eval(m, :(const term_blink = $(() -> (reads!(e, :terminal); TERM_SETTINGS.blink))))
+  Core.eval(m, :(const term_blink! = $(on -> term_setting!(e, :blink, Bool(on)))))
+  Core.eval(m, :(const term_copies = $(() -> (reads!(e, :terminal); TERM_SETTINGS.copies))))
+  Core.eval(m, :(const term_copies! = $(on -> term_setting!(e, :copies, Bool(on)))))
+  Core.eval(m, :(const term_meta = $(() -> (reads!(e, :terminal); TERM_SETTINGS.meta))))
+  Core.eval(m, :(const term_meta! = $(on -> term_setting!(e, :meta, Bool(on)))))
+  Core.eval(m, :(const term_bell = $(() -> (reads!(e, :terminal); String(TERM_SETTINGS.bell)))))
+  Core.eval(m, :(const term_bell! = $(name -> term_setting!(e, :bell, term_choice(TERM_BELLS, name)))))
+  Core.eval(m, :(const term_lines = $(() -> (reads!(e, :terminal); TERM_SETTINGS.most))))
+  Core.eval(m, :(const term_lines! = $(n -> term_setting!(e, :most, term_choice(TERM_PASTS, Int(n))))))
   # ... and the key bindings. `key_bundles()` gives the names of the bundles, and `key_bundle()` the one that's chosen.
   # `key_list()` shows each command with its keys, and a click on one changes them. `keys_changed()` is true when a
   # command has other keys than the bundle's, and `key_reset!()` gives every command the bundle's keys again.
@@ -23971,7 +23986,10 @@ keyboard_part(v::HTMLPage) = html_browser(v)
 # window shows other files, and what it wrote is there when the window comes
 # back. It ends when it's told to, with `exit`, and when the window closes.
 # The terminal has the font of code, at the size that code has, and the
-# colours of the window's theme: a program's red is the theme's.
+# colours of the window's theme: a program's red is the theme's. The
+# Terminal page of the settings has the rest: the caret's shape and whether
+# it blinks, whether what the mouse selects is copied, whether ⌥ is a Meta
+# key, what a program's bell does, and how many lines a terminal keeps.
 
 "True when the page shows a terminal's file at one of its levels: as the terminal, its text, its bytes in hexadecimal or its bits"
 term_page(b::Buffer) = b.view in FILE_VIEWS && lowercase(splitext(b.path)[2]) in TERMINALS && isfile(b.path)
@@ -24008,12 +24026,66 @@ term_palette() = begin
          term_colour(c.comment), strong..., dark ? ink : term_colour(c.line)]
 end
 
-"Give the terminal `v` the font of code and the colours of the theme, as the window of `e` has them now"
+"""
+The terminal's settings, which every window has the same. The Terminal page
+of the settings changes them, and the file of the settings keeps them.
+"""
+@def mutable struct TermSettings
+  caret::Symbol = :block   # the caret's shape while a program asks for none: one of TERM_CARETS
+  blink::Bool = false      # that caret blinks
+  copies::Bool = false     # what the mouse selects is copied as soon as the button goes up
+  meta::Bool = false       # ⌥ with a key sends ESC and the key, and not the Mac's character
+  bell::Symbol = :flash    # what a program's bell does: one of TERM_BELLS
+  most::Int = 10_000       # how many lines of the past a terminal keeps: one of TERM_PASTS
+end
+
+const TERM_SETTINGS = TermSettings()
+const TERM_CARETS = (:block, :bar, :underline)
+const TERM_BELLS = (:flash, :sound, :none)
+const TERM_PASTS = (1_000, 10_000, 50_000)
+
+"The choice of `options` that `x` names, for a live block of the settings: a word like \"bar\", or a number"
+term_choice(options, x) = begin
+  c = x isa AbstractString ? Symbol(lowercase(x)) : x
+  c in options || error("A terminal's setting can be $(join(string.(options), ", ", " or ")), not $(repr(x)).")
+  c
+end
+
+"Change the terminal's setting `name` in every window, and keep it"
+term_setting!(e, name::Symbol, value) = begin
+  setfield!(TERM_SETTINGS, name, value)
+  save_settings!(e)
+  any(o -> o === e, editors) || rerun!(e, :terminal)
+  foreach(o -> (rerun!(o, :terminal); redraw_in!(o, 0)), editors)
+  e
+end
+
+"The terminal's settings as the file of the settings has them: a line for each, like term.caret=bar"
+term_settings_text() = join("term.$name=$(getfield(TERM_SETTINGS, name))\n" for name in fieldnames(TermSettings))
+
+"Take the terminal's setting `name` from the file of the settings. A value that it can't be leaves it as it was."
+read_term_setting!(name, value) = begin
+  s = TERM_SETTINGS
+  if name == "caret" || name == "bell"
+    c = Symbol(value)
+    c in (name == "caret" ? TERM_CARETS : TERM_BELLS) && setfield!(s, Symbol(name), c)
+  elseif name in ("blink", "copies", "meta")
+    setfield!(s, Symbol(name), value == "true")
+  elseif name == "most"
+    n = tryparse(Int, value)
+    n in TERM_PASTS && (s.most = n)
+  end
+  nothing
+end
+
+"Give the terminal `v` the font of code and the colours of the theme, as the window of `e` has them now, and the terminal's settings"
 term_look!(v, e) = begin
   v.family, v.style, v.size = codefont(), codestyle(), Float64(num(code_size(e)))
   v.ink, v.paper, v.dim = term_colour(colours.ink), term_colour(colours.bg), term_colour(colours.dim)
   v.select = UInt32(round(Int, 255convert(RGBA{Float64}, colours.select).alpha)) << 24 | term_colour(colours.select)
   v.palette = term_palette()
+  s = TERM_SETTINGS
+  v.caret, v.blink, v.copies, v.meta, v.bell, v.most = s.caret, s.blink, s.copies, s.meta, s.bell, s.most
   v
 end
 
@@ -45055,7 +45127,7 @@ save_settings!(e) = begin
     mkpath(dirname(settings_file()))
     # After the bundle of key bindings comes a line for each command that has other keys than the bundle's, like key.save=ctrl+s
     changed = join(["key.$name=$(e.rebound[name])\n" for name in sort!(collect(keys(e.rebound)))])
-    write(settings_file(), "theme=$(e.theme)\nfont=$(e.font)\nweight=$(e.weight)\nzoom=$(e.zoom)\nwidth=$(e.widest.value)\nplain=$(e.plain)\nspelling=$(e.spelling)\nupdates=$(e.updates)\nautosave=$(e.autosave)\npeeks=$(e.peeks)\nagent=$(e.ai)\nglide=$(e.glide)\nwrap=$(e.wrap)\nnumbers=$(e.numbers)\nshade=$(e.shade)\nbeside=$(e.beside)\nindent=$(e.indent)\ncode=$(e.code_scale)\ncodefont=$(e.code_font)\ncodeweight=$(e.code_weight)\nguide=$(e.guide)\nsidebar=$(e.side.value)\nhidden=$(e.hidden)\nright=$(e.right)\nownmessage=$(e.own)\npinned=$(e.pinned)\nhidebar=$(e.hide_bar)\npagecard=$(page_card_setting())\nagentshidden=$(join(sort!(collect(AGENTS_HIDDEN[])), ','))\nkeys=$(e.bundle)\n$changed")
+    write(settings_file(), "theme=$(e.theme)\nfont=$(e.font)\nweight=$(e.weight)\nzoom=$(e.zoom)\nwidth=$(e.widest.value)\nplain=$(e.plain)\nspelling=$(e.spelling)\nupdates=$(e.updates)\nautosave=$(e.autosave)\npeeks=$(e.peeks)\nagent=$(e.ai)\nglide=$(e.glide)\nwrap=$(e.wrap)\nnumbers=$(e.numbers)\nshade=$(e.shade)\nbeside=$(e.beside)\nindent=$(e.indent)\ncode=$(e.code_scale)\ncodefont=$(e.code_font)\ncodeweight=$(e.code_weight)\nguide=$(e.guide)\nsidebar=$(e.side.value)\nhidden=$(e.hidden)\nright=$(e.right)\nownmessage=$(e.own)\npinned=$(e.pinned)\nhidebar=$(e.hide_bar)\npagecard=$(page_card_setting())\nagentshidden=$(join(sort!(collect(AGENTS_HIDDEN[])), ','))\n$(term_settings_text())keys=$(e.bundle)\n$changed")
   catch
     # A file that can't be written only means the settings last as long as the window
   end
@@ -45205,6 +45277,9 @@ load_settings!(e) = begin
       # How wide you made the page's card of agent mode. Nothing after the = means it has a page's shape.
       w = tryparse(Float64, value)
       PAGE_CARD_CHOSEN[] = w === nothing ? nothing : px(round(max(w, num(PAGE_CARD_NARROWEST))))
+    elseif startswith(name, "term.")
+      # A setting of the terminal, like term.caret=bar
+      read_term_setting!(chopprefix(name, "term."), value)
     elseif name == "keys"
       any(b -> first(b) == value, BUNDLES) && (e.bundle = String(value))
     elseif startswith(name, "key.")

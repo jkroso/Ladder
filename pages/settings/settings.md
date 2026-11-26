@@ -2,9 +2,10 @@
 
 Ladder keeps these choices, and uses them the next time it opens. Each one changes every window as you choose it. Press ⌘W to close this window.
 
-Four more pages have the rest of the settings. Hold ⌘ and click a link to go there. To come back, press ⌘⌥←.
+Five more pages have the rest of the settings. Hold ⌘ and click a link to go there. To come back, press ⌘⌥←.
 
 - [Code editor](code-editor.md) has how code shows.
+- [Terminal](terminal.md) has a terminal's caret, what selecting copies, the ⌥ key and the bell.
 - [Key bindings](key-bindings.md) has the keys of each command.
 - [Ignored files](ignored-files.md) lists the files and folders that Ladder leaves out.
 - [Startup](startup.md) is the page that Ladder opens the first time, and the code that it runs when it starts. After that, Ladder opens where you were when you quit.

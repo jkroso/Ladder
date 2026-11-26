@@ -1195,6 +1195,7 @@ The file keeps what the terminal shows: its text, with its colours. So when you 
 - **Programs that fill the terminal**, like vim, work as they do in a terminal app. A program that asks for the mouse gets the clicks and the wheel. Hold ⇧ to select text there.
 - **The shell runs on** while the window shows other files. It ends when you type `exit`, and when the window closes.
 - **Levels.** ⌘E shows the file's text, with the codes that colour it.
+- **Settings.** The [Terminal](settings/terminal.md) page of the settings has the shape of the caret and whether it blinks. It can also make selecting copy the text, make ⌥ the Meta key, change what the bell does, and set how many lines a terminal keeps.
 
 A `view` block shows the last lines of a terminal's file. It starts no shell:
 
@@ -1364,7 +1365,7 @@ Right-click the page to cut, copy or paste. The menu's Insert item adds a new bl
 
 A file can start with front matter: lines like `title: Notes` between two lines of `---`. Ladder shows it as a block of its own, as at the top of this page. To see how many words a page has, press ⌘⇧P and run Word Count. It leaves out the front matter and the comments, and it also says how many characters the page has and how long it takes to read.
 
-Press ⌘, to open [the settings](settings/settings.md) in a window of their own: the colours, the font and its weight, the size of the text and the width of the page. A button there makes Ladder the app that opens your Markdown files. Links at the top of that page go to the other pages of the settings. [Code editor](settings/code-editor.md) has the settings for code: its font, its weight, its size, its indent, its line numbers and whether a long line wraps. [Key bindings](settings/key-bindings.md) has the keys of each command. There you can choose the keys of VS Code, Sublime Text or Emacs, or click a command and press the keys you want for it.
+Press ⌘, to open [the settings](settings/settings.md) in a window of their own: the colours, the font and its weight, the size of the text and the width of the page. A button there makes Ladder the app that opens your Markdown files. Links at the top of that page go to the other pages of the settings. [Code editor](settings/code-editor.md) has the settings for code: its font, its weight, its size, its indent, its line numbers and whether a long line wraps. [Terminal](settings/terminal.md) has the settings for a terminal, like the shape of its caret. [Key bindings](settings/key-bindings.md) has the keys of each command. There you can choose the keys of VS Code, Sublime Text or Emacs, or click a command and press the keys you want for it.
 
 The Ladder app updates itself. It gets a newer version while you work, and the new version takes the place of this one when you quit. A box at the end of the settings turns that off.
 

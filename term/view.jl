@@ -23,10 +23,16 @@
 # line. A program that asks for the mouse, as vim does, gets the clicks and
 # the wheel, and ⇧ held with them keeps them for the view.
 #
-# The app sets `wide`, `high`, `size`, the font and the colours on each frame,
-# and `wake`, a function that makes the window draw: the program's output is
-# read on another thread, which calls it. `tick!` takes what the program wrote
-# when the view isn't shown. `close!` ends the program and writes the file.
+# The app sets `wide`, `high`, `size`, the font, the colours and the settings
+# on each frame, and `wake`, a function that makes the window draw: the
+# program's output is read on another thread, which calls it. `tick!` takes
+# what the program wrote when the view isn't shown. `close!` ends the program
+# and writes the file.
+#
+# The settings are the person's: the caret's shape and whether it blinks,
+# while the program asks for none of its own; whether a selection is copied as
+# the mouse makes it; whether ⌥ is a Meta key, which sends ESC before the key;
+# what the program's bell does; and how many lines of the past are kept.
 
 @use "github.com/jkroso/Prospects.jl" @def
 @use "github.com/jkroso/MiniFB.jl" onkey onmouse ontype onscroll KeyPress KeyRelease MouseMove Typed Keys flt
@@ -51,6 +57,11 @@ const MOST_FILE = 64_000_000   # bytes. A longer file isn't read: it's no termin
 const PIECE = 32_000      # bytes of a program's output that are read at a time
 const READ_FOR = 0.008    # seconds of a frame that go to reading what a program wrote. What's left waits for the next frame.
 const MOST_UNREAD = 1_000_000   # bytes that wait to be read before more is taken from the program, which then waits too
+const FLASH = 0.15        # seconds that the view flashes for when the program rings its bell
+const BLINK = 0.5         # seconds that a caret that blinks is lit, and then dark
+
+"What makes the Mac's alert sound, for a bell. A test puts its own here."
+const ALERT = Ref{Any}(() -> Sys.isapple() && ccall((:NSBeep, "/System/Library/Frameworks/AppKit.framework/AppKit"), Cvoid, ()))
 
 "The program that a view starts when it names none. While this is empty, that's the person's shell. A test puts a shell here that reads no settings."
 const USUAL = Ref(String[])
@@ -75,6 +86,13 @@ const LIGHT = UInt32[0x24292e, 0xc82829, 0x4d7a00, 0xa67400, 0x4271ae, 0x8959a8,
   dim::UInt32 = 0x00808080        # the line that says how to start a shell
   select::UInt32 = 0x4d4285f4     # over the text that's selected. Its first byte is how solid it is.
   palette::Vector{UInt32} = DARK
+  # The person's settings
+  caret::Symbol = :block          # the caret's shape while the program asks for none: :block, :bar or :underline
+  blink::Bool = false             # that caret blinks
+  copies::Bool = false            # what the mouse selects is copied as soon as the button goes up
+  meta::Bool = false              # ⌥ with a key sends ESC and the key, as a Meta key does, and not the Mac's character
+  bell::Symbol = :flash           # what the program's bell does: :flash the view, play the Mac's alert :sound, or :none
+  most::Int = 10_000              # how many lines of the past are kept
   wake::Any = () -> nothing
   shown::Bool = false             # only show the file: no program starts, and the keys do nothing
   term::Any = nothing             # the Terminal
@@ -97,6 +115,9 @@ const LIGHT = UInt32[0x24292e, 0xc82829, 0x4d7a00, 0xa67400, 0x4271ae, 0x8959a8,
   seen::Float64 = 0.0             # when the view was last shown
   woke::Float64 = 0.0             # when the window was last asked to draw
   had::Bool = false               # the view had the keyboard when it was last shown
+  rang::Int = 0                   # how many of the program's bells the view has answered
+  rung::Float64 = 0.0             # when the view last answered one
+  stirred::Float64 = 0.0          # when a key last went to the program. A caret that blinks is lit just after.
 end
 
 # --- the font -------------------------------------------------------------------------------
@@ -179,9 +200,10 @@ end
 terminal(v::TerminalView) = begin
   v.term === nothing || return v.term
   rows, cols = grid(v)
-  t = Terminal(rows, cols, ink=v.ink, paper=v.paper)
+  t = Terminal(rows, cols, ink=v.ink, paper=v.paper, most=v.most)
   bytes = try isfile(v.path) && filesize(v.path) <= MOST_FILE ? read(v.path) : UInt8[] catch; UInt8[] end
   isempty(bytes) ? (v.fresh = !v.shown) : restore!(t, bytes)
+  v.rang = t.bells   # a bell in the file rang long ago
   v.term = t
 end
 
@@ -245,6 +267,7 @@ tick!(v::TerminalView) = begin
     v.back > 0 && (v.back = min(v.back + length(t.past) + t.gone - before, length(t.past)))
     said = answers!(t)
     isempty(said) || Ptys.send!(s, said)
+    t.bells > v.rang && ring!(v)
     v.dirty || (v.due = time() + SAVE_AFTER)
     v.dirty = true
   end
@@ -257,6 +280,19 @@ tick!(v::TerminalView) = begin
   elseif v.dirty && time() >= v.due
     save!(v)
   end
+  v
+end
+
+"""
+Answer the program's bell, as the setting `bell` says: the view flashes, or
+the Mac plays its alert sound. Bells that come together are one.
+"""
+ring!(v::TerminalView) = begin
+  v.rang = v.term.bells
+  now = time()
+  (v.bell == :none || now - v.rung < 0.1) && return v
+  v.rung = now
+  v.bell == :sound ? ALERT[]() : redraw_in!(v, 0)
   v
 end
 
@@ -288,6 +324,7 @@ type!(v::TerminalView, bytes) = begin
   (running(v) && !isempty(bytes)) || return v
   Ptys.send!(v.shell, bytes)
   v.back = 0
+  v.stirred = time()
   unselect!(v)
   v
 end
@@ -302,6 +339,12 @@ describe(v::TerminalView) = begin
   t = terminal(v)
   v.seen = time()
   t.ink, t.paper = v.ink, v.paper
+  if t.most != v.most
+    # Fewer lines to keep forgets the oldest now
+    t.most = v.most
+    over = length(t.past) - t.most
+    over > 0 && (deleteat!(t.past, 1:over); t.gone += over)
+  end
   v.fresh && start!(v)
   tick!(v)
   rows, cols = grid(v)
@@ -315,13 +358,27 @@ describe(v::TerminalView) = begin
   v.shown && (v.back = min(length(t.past), t.rows - something(findlast(!Screens.isblank, t.lines), 0)))
   # A program that asked to hear about the keyboard is told when the view gets it and loses it
   has = focused(v)
-  has == v.had || (v.had = has; running(v) && Ptys.send!(v.shell, Screens.focus(t, has)))
+  has == v.had || (v.had = has; v.stirred = time(); running(v) && Ptys.send!(v.shell, Screens.focus(t, has)))
   edge_scroll!(v)
+  # A caret that blinks is drawn again when it goes dark or lights, and a flash for the bell ends
+  has && running(v) && t.shows && caret_look(v, t)[2] && redraw_in!(v, BLINK - mod(time() - v.stirred, BLINK) + 0.01)
+  (since = time() - v.rung) < FLASH && redraw_in!(v, FLASH - since)
   v.dirty && redraw_in!(v, max(0.05, v.due - time()))
   # What a program writes wakes the window. Should a wake be lost, the window still looks twice a second.
   running(v) && redraw_in!(v, 0.5)
   Box(width(v.wide), height(v.high), background(colour(v.paper)))
 end
+
+"""
+The shape of the caret, :block, :bar or :underline, and whether it blinks. A
+program can ask for its own, as vim does for its modes. While it asks for
+none, the caret is as the view's settings say.
+"""
+caret_look(v::TerminalView, t) =
+  t.shape == 0 ? (v.caret, v.blink) : (t.shape <= 2 ? :block : t.shape <= 4 ? :underline : :bar, isodd(t.shape))
+
+"True while a caret that blinks is lit: for a moment after a key, and then every other moment"
+lit(v::TerminalView, now=time()) = (since = now - v.stirred; since < BLINK || mod(since - BLINK, 2BLINK) >= BLINK)
 
 "The colour of a cell's character and the colour behind it, as red, green and blue"
 colours(v::TerminalView, c::Cell) = begin
@@ -619,21 +676,27 @@ draw(ctx, size, ui::ConcreteRect, v::TerminalView) = begin
       c.flags & Screens.TAIL != 0 && t.col > 1 && (c = t.lines[t.row].cells[t.col-1]; x -= cw)
       across = c.flags & Screens.WIDE != 0 ? 2cw : cw
       ink = solid(v.ink & 0x00ffffff)
-      if !focused(v)
-        # A view without the keyboard has the outline of the cursor
+      shape, blinks = caret_look(v, t)
+      has = focused(v)
+      if has && blinks && !lit(v)
+        # A caret that blinks is dark now
+      elseif !has && shape == :block
+        # A view without the keyboard has the outline of the block
         patch(ctx, paint, x, y, across, 1, ink)
         patch(ctx, paint, x, y + ch - 1, across, 1, ink)
         patch(ctx, paint, x, y, 1, ch, ink)
         patch(ctx, paint, x + across - 1, y, 1, ch, ink)
-      elseif t.shape in (3, 4)
+      elseif shape == :underline
         patch(ctx, paint, x, y + ch - 2, across, 2, ink)
-      elseif t.shape in (5, 6)
+      elseif shape == :bar
         patch(ctx, paint, x, y, 2, ch, ink)
       else
         patch(ctx, paint, x, y, across, ch, ink)
         c.ch == ' ' && c.mark == 0 || character!(ctx, paint, v, t, c, x, y + base, v.paper & 0x00ffffff)
       end
     end
+    # The bell's flash: the program's lines show through a veil of the text's colour
+    time() - v.rung < FLASH && v.bell == :flash && patch(ctx, paint, left, top, wide, high, 0x26000000 | (v.ink & 0x00ffffff))
     words = hint(v)
     if words !== nothing
       Skia.sk_paint_set_color(paint, solid(v.dim & 0x00ffffff))
@@ -786,6 +849,8 @@ onkey(v::TerminalView, ev::KeyRelease{Keys.mouse_left}) = begin
     at = cell_at(v, ev.window.mouse)
     at === nothing || tell!(v, ev.window, :release, 0, at)
   end
+  # With the setting on, what the mouse selected is copied as the button goes up
+  v.copies && v.drag in (:cells, :words, :lines) && copy!(v, ev.window)
   v.drag = :none
   handled
 end
@@ -837,6 +902,17 @@ const NAMES = Dict{Keys,Symbol}(Keys.enter => :enter, Keys.tab => :tab, Keys.bac
                                 Keys.home => :home, Keys._end => :end, Keys.pageup => :pageup, Keys.pagedown => :pagedown,
                                 Keys.insert => :insert, Keys.delete => :delete,
                                 (getproperty(Keys, Symbol(:f, n)) => Symbol(:f, n) for n in 1:12)...)
+
+# The character that each key types on a US keyboard, without ⇧ and with it. ⌥ as a Meta key sends it after ESC.
+const TYPES = Dict{Keys,Tuple{Char,Char}}((getproperty(Keys, Symbol(c)) => (c, uppercase(c)) for c in 'a':'z')...,
+                                          (getproperty(Keys, Symbol(d)) => (Char('0' + d), ")!@#\$%^&*("[d+1]) for d in 0:9)...,
+                                          Keys.tilde => ('`', '~'), Keys.minus => ('-', '_'), Keys.equal => ('=', '+'),
+                                          Keys.left_bracket => ('[', '{'), Keys.right_bracket => (']', '}'), Keys.backslash => ('\\', '|'),
+                                          Keys.semicolon => (';', ':'), Keys.apostrophe => ('\'', '"'), Keys.comma => (',', '<'),
+                                          Keys.period => ('.', '>'), Keys.slash => ('/', '?'), Keys.space => (' ', ' '))
+
+"True when ⌥ is held as a Meta key: the setting is on, and neither ⌘ nor Control is held too"
+meta_held(v::TerminalView, w) = v.meta && Keys.opt in w.keys && !(Keys.ctrl in w.keys) && !(Keys.cmd in w.keys)
 
 # The character of each key that sends something with Control held
 const CHARS = Dict{Keys,Char}((getproperty(Keys, Symbol(c)) => c for c in 'a':'z')...,
@@ -893,6 +969,8 @@ onkey(v::TerminalView, ev::KeyPress{K}) where K = begin
     c = get(CHARS, K, nothing)
     b = c === nothing ? nothing : Screens.control(c)
     b === nothing ? "" : (Keys.opt in w.keys ? "\e" : "") * b
+  elseif meta_held(v, w) && haskey(TYPES, K)
+    "\e" * TYPES[K][Keys.shft in w.keys ? 2 : 1]
   else
     ""   # a key that types comes as its character: see `ontype`
   end
@@ -901,11 +979,11 @@ onkey(v::TerminalView, ev::KeyPress{K}) where K = begin
 end
 
 # A key that types comes as its character, so each keyboard types its own letters, and ⌥ makes the characters that it
-# makes everywhere on a Mac. Control with a key was sent when the key went down.
+# makes everywhere on a Mac. Control with a key was sent when the key went down, and so was ⌥ as a Meta key.
 ontype(v::TerminalView, ev::Typed) = begin
   v.shown && return nothing
   c = ev.char
-  (iscntrl(c) || '' <= c <= '' || Keys.ctrl in ev.window.keys) && return handled
+  (iscntrl(c) || '' <= c <= '' || Keys.ctrl in ev.window.keys || meta_held(v, ev.window)) && return handled
   type!(v, string(c))
   handled
 end

@@ -5,7 +5,7 @@
 # shell is the Mac's /bin/sh, which reads none of your settings. Set
 # `LADDER_SHOTS` to a folder, and they save pictures of the window there.
 
-@use Test: @test, @testset
+@use Test: @test, @testset, @test_throws
 @use "../main" => K
 @use "github.com/jkroso/MiniFB.jl" Window KeyPress KeyRelease MouseMove Typed Keys onkey onmouse onscroll ontype
 @use "github.com/jkroso/UI.jl/Interface/draw" frame rect clipboard clipboard!
@@ -202,6 +202,110 @@ end
   ok = run("printf '\\033[?1000l\\033[?1049l'; echo first-\$((3+3))", "first-6")
   @test ok
   @test !t.second && t.tracks == :none
+end
+
+@testset "the settings: the caret, copying what's selected, ⌥ as Meta, the bell and the lines kept" begin
+  v = view()
+  t = v.term
+  s = K.TERM_SETTINGS
+  was = [getfield(s, f) for f in fieldnames(K.TermSettings)]
+  sounds = Ref(0)
+  Terms.ALERT[] = () -> (sounds[] += 1; nothing)
+  # The Terminal page of the settings calls these. Each changes every terminal.
+  page = K.sandbox(e)
+  page.term_caret!("Bar")
+  page.term_blink!(true)
+  page.term_copies!(true)
+  page.term_meta!(true)
+  frames(1)
+  @test (v.caret, v.blink, v.copies, v.meta) == (:bar, true, true, true)
+  @test page.term_caret() == "bar" && page.term_blink() && page.term_lines() == 10_000
+  @test_throws ErrorException page.term_caret!("triangle")
+  @test_throws ErrorException page.term_lines!(7)
+  # A program's own caret shows until it asks for the terminal's again
+  @test Terms.caret_look(v, t) == (:bar, true)
+  ok = run("printf '\\033[2 q'; echo shaped", "\nshaped")
+  @test ok
+  @test Terms.caret_look(v, t) == (:block, false)
+  ok = run("printf '\\033[0 q'; echo unshaped", "\nunshaped")
+  @test ok
+  @test Terms.caret_look(v, t) == (:bar, true)
+  shot("terminal-bar-caret.png")
+  # A caret that blinks is lit just after a key, dark half a second later, and lit again after that
+  @test Terms.lit(v, v.stirred + 0.2) && !Terms.lit(v, v.stirred + 0.75) && Terms.lit(v, v.stirred + 1.25)
+  # What the mouse selects is copied as the button goes up. A click that selects nothing copies nothing.
+  ok = run("echo copy-me", "\ncopy-me")
+  @test ok
+  clipboard!(w, "before")
+  row = findlast(l -> startswith(Screens.words(t, l), "copy-me"), t.lines)
+  click(cell(row, 2))
+  @test clipboard(w) == "before"
+  v.clicked = (time(), v.clicked[2:4]...)   # a slow frame mustn't part the two clicks
+  click(cell(row, 2))
+  @test clipboard(w) == "copy-me"
+  # ⌥ as a Meta key sends ESC and the key, with ⇧ too, and the Mac's character doesn't come
+  type("cat -v")
+  key(Keys.enter)
+  meta(k, char, held=Keys(0)) = begin
+    w.keys |= Keys.opt | held
+    onkey(w, KeyPress{k}(0, w))
+    ontype(w, Typed(char, w))
+    onkey(w, KeyRelease{k}(0, w))
+    w.keys = Keys(0)
+    frames(1)
+  end
+  meta(Keys.b, '∫')
+  meta(Keys.f, 'Ï', Keys.shft)
+  meta(Keys.period, '≥')
+  key(Keys.enter)
+  ok = until(() -> occursin("^[b^[F^[.", words()))
+  @test ok
+  @test !occursin("∫", words()) && !occursin("M-", words())
+  # With the setting off, ⌥ types the Mac's character
+  page.term_meta!(false)
+  frames(1)
+  meta(Keys.b, '∫')
+  key(Keys.enter)
+  ok = until(() -> occursin("M-bM-^HM-+", words()))
+  @test ok
+  key(Keys.c, Keys.ctrl)
+  # The bell plays the Mac's alert sound, or flashes the terminal, or does nothing
+  page.term_bell!("sound")
+  frames(1)
+  ok = run("printf '\\a'; echo rang", "\nrang")
+  @test ok
+  @test sounds[] == 1
+  page.term_bell!("flash")
+  frames(1)
+  sleep(0.15)   # bells that come within a tenth of a second are one
+  before = v.rung
+  ok = run("printf '\\a'; echo rang-again", "\nrang-again")
+  @test ok
+  @test sounds[] == 1
+  @test v.rung > before
+  page.term_bell!("none")
+  frames(1)
+  before = v.rung
+  ok = run("printf '\\a'; echo quiet", "\nquiet")
+  @test ok
+  @test sounds[] == 1 && v.rung == before && v.rang == t.bells
+  # Fewer lines to keep forgets the oldest at once
+  ok = run("seq 1 3000", "\n3000\n")
+  @test ok
+  @test length(t.past) > 1000
+  page.term_lines!(1000)
+  frames(1)
+  @test t.most == 1000 && length(t.past) == 1000
+  # The file of the settings keeps them, and a value that a setting can't be changes nothing
+  text = K.term_settings_text()
+  @test occursin("term.caret=bar\n", text) && occursin("term.copies=true\n", text) && occursin("term.most=1000\n", text)
+  K.read_term_setting!("caret", "underline")
+  K.read_term_setting!("bell", "siren")
+  K.read_term_setting!("most", "7")
+  @test (s.caret, s.bell, s.most) == (:underline, :none, 1000)
+  foreach((f, x) -> setfield!(s, f, x), fieldnames(K.TermSettings), was)
+  Terms.ALERT[] = () -> nothing
+  frames(1)
 end
 
 @testset "⌘E shows the file's text, and the shell runs on" begin
