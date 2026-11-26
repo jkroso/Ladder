@@ -411,6 +411,7 @@ end
 @use "./web" => Web
 @use "./web/browser" => Browsers
 @use "./web/files" => Webfiles
+@use "./web/source" => Sources
 @use "./remote" => Remote
 @use "./slides" => Slides
 @use "./desktop" => Desks
@@ -48863,7 +48864,7 @@ session_brief(alone::Bool=false) = alone ? """
 You are in Ladder, a Markdown app on the user's Mac. The user's window shows this conversation and nothing else, in place of a terminal. $BRIEF_SHOWS A link to a file, like [notes.md](notes.md), opens that file in the user's window when the user clicks it. Paths in links are from the folder that you started in.""" : """
 You are in Ladder, a Markdown app on the user's Mac. The user's window shows a page, with this conversation beside it. $BRIEF_SHOWS Answer a question here, in the conversation, and change the page only when the user asks for a change to it.
 
-Each message of the user starts with a block between <ladder> and </ladder>. Ladder wrote the block, not the user. It says which file the window shows, which section of it is in view, where the caret is, and what is selected. The section in view is the one at the top of the window. A web page that an HTML file makes has no lines or columns. Its block gives the exact text of a selection, and the paragraph that holds it between <paragraph> and </paragraph>. When nothing is selected, the caret is where the user last clicked, and the block gives the words before it and its paragraph. These are the words as the page shows them, not its HTML: find them in the file by their words. Lines and columns count from 1. A column is a place between characters: column 1 is before the first character of its line, so a selection ends before the character at its end column. The exact text of a selection is between <selection> and </selection>: it starts after the line break that follows <selection>, and ends before the line break in front of </selection>. Ladder saves the page to its file before each message, so the file has what the window shows, unless the block says otherwise. When the user asks for a change to the page, change its file: Ladder shows the change at once. Don't run `ladder show` or `ladder wait`: the page is open already, and the user talks to you here."""
+Each message of the user starts with a block between <ladder> and </ladder>. Ladder wrote the block, not the user. It says which file the window shows, which section of it is in view, where the caret is, and what is selected. The section in view is the one at the top of the window. A web page that an HTML file makes has no lines or columns. Its block gives the exact text of a selection, and the paragraph that holds it between <paragraph> and </paragraph>. When nothing is selected, the caret is where the user last clicked, and the block gives the words before it and its paragraph. These are the words as the page shows them. Where Ladder can tell, the block also gives their lines and columns in the HTML file, which can have tags and entities between the words. Lines and columns count from 1. A column is a place between characters: column 1 is before the first character of its line, so a selection ends before the character at its end column. The exact text of a selection is between <selection> and </selection>: it starts after the line break that follows <selection>, and ends before the line break in front of </selection>. Ladder saves the page to its file before each message, so the file has what the window shows, unless the block says otherwise. When the user asks for a change to the page, change its file: Ladder shows the change at once. Don't run `ladder show` or `ladder wait`: the page is open already, and the user talks to you here."""
 
 "What the agent of the session `s` is told of where it is: a session with a file of its own has no page beside it"
 session_brief(s::AgentSession) = session_brief(!isempty(s.file))
@@ -49943,17 +49944,56 @@ const MOST_PARAGRAPH = 2000   # characters. A longer paragraph doesn't go to the
 """
 What the agent is told of the page that the HTML file of the window of `e`
 makes: the lines for the `<ladder>` block about what's selected in it, or
-about where you last clicked in it, and a few words for you. That page has
-no lines or columns, so a selection goes with the paragraph that holds it,
-as the page shows its words. A click puts the caret, which the page doesn't
-draw: it goes as the words before it, with its paragraph. The agent finds
-them in the file by their words.
+about where you last clicked in it, and a few words for you. A selection
+goes with the paragraph that holds it, as the page shows its words. A click
+puts the caret, which the page doesn't draw: it goes as the words before
+it, with its paragraph. Each goes with its line and column in the file, when
+Ladder can tell where the page's words are in the HTML: see web/source.jl.
+They're kept until the selection, the page or the file changes, since the
+send button asks for them in each frame that the mouse is on it.
 """
 html_picked(e) = begin
-  b = html_browser(html_part(e))
+  v = html_part(e)
+  b = html_browser(v)
+  key = (b.picked, b.clicks[2], v.path, mtime(v.path))
+  kept = get(e.nodes, :html_picked, nothing)
+  kept !== nothing && kept[1] === b.view.page && kept[2] == key && return kept[3]
+  told = html_told(e, v, b)
+  e.nodes[:html_picked] = (b.view.page, key, told)
+  told
+end
+
+"The text of the HTML file at `path`, and the letters of it that its page can show, kept until the file changes"
+html_letters(e, path) = begin
+  at = mtime(path)
+  kept = get(e.nodes, :html_letters, nothing)
+  kept !== nothing && kept[1] == (path, at) && return kept[2]
+  html = isfile(path) ? read(path, String) : ""
+  got = (html=html, seen=Sources.seen(html))
+  e.nodes[:html_letters] = ((path, at), got)
+  got
+end
+
+"The letters of the page that the Browser `b` shows, kept until it lays the page out again"
+page_letters(e, b) = begin
+  p = b.view.page
+  kept = get(e.nodes, :page_letters, nothing)
+  kept !== nothing && kept[1] === p && return kept[2]
+  got = Sources.shown(Browsers.page_words(b))
+  e.nodes[:page_letters] = (p, got)
+  got
+end
+
+"What `html_picked` tells the agent of the page that the HTMLPage `v` shows with the Browser `b`"
+html_told(e, v, b) = begin
   S = Browsers.Select
   ws = Browsers.page_words(b)
   lo, hi = Browsers.selection(b)
+  # The line and the column of the file that the first letter at a place of the page is from, and that the last letter before it ends at
+  src, page = html_letters(e, v.path), page_letters(e, b)
+  spot(i) = i === nothing ? nothing : Sources.line_column(src.html, i)
+  starts(place) = spot(Sources.start(src.seen, page, place))
+  ends(place) = spot(Sources.finish(src.seen, page, place))
   # The paragraph that holds the start, which goes when it holds the end too
   from, to = S.paragraph(ws, lo)
   para = hi <= to ? S.copied(ws, from, to) : ""
@@ -49961,9 +50001,11 @@ html_picked(e) = begin
   inside = isempty(para) ? "." : " in this paragraph:\n<paragraph>\n$para\n</paragraph>"
   if lo < hi
     words = S.copied(ws, lo, hi)
+    a, z = starts(lo), ends(hi)
+    range = a === nothing || z === nothing ? "" : "In the file, the selection goes from line $(a[1]), column $(a[2]) to line $(z[1]), column $(z[2]). "
     told = length(words) > MOST_PICKED || occursin("</selection>", words) ?
-      "Text is selected. It's $(length(words)) characters long, from \"$(first(words, 60))\" to \"$(last(words, 60))\"." :
-      "The selection's exact text:\n<selection>\n$words\n</selection>"
+      "$(range)Text is selected. It's $(length(words)) characters long, from \"$(first(words, 60))\" to \"$(last(words, 60))\"." :
+      "$(isempty(range) ? "The selection's" : range * "Its") exact text, as the page shows it:\n<selection>\n$words\n</selection>"
     # A whole paragraph that's selected has nothing round it
     isempty(para) || (from, to) == (lo, hi) || (told *= "\nIt's" * inside)
     (told, " · selection")
@@ -49972,8 +50014,10 @@ html_picked(e) = begin
     # The last few words before the caret, which are enough to find it
     near = length(before) <= 40 ? before : (t = last(before, 40); i = findfirst(' ', t); i === nothing ? t : t[nextind(t, i):end])
     near = strip(near)
+    c = starts(lo)
+    file = c === nothing ? "" : ", at line $(c[1]), column $(c[2]) of the file"
     at = isempty(near) ? (isempty(para) ? "." : ", at the start of this paragraph:\n<paragraph>\n$para\n</paragraph>") : ", after \"$near\"" * inside
-    ("The caret is where the user last clicked$at\nNothing is selected.", "")
+    ("The caret is where the user last clicked$file$at\nNothing is selected.", "")
   else
     ("Nothing is selected.", "")
   end

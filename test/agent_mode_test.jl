@@ -272,16 +272,22 @@ try
     hit(spot(soft + 2)); hit(spot(soft + 2))
     frames(wh, 2)
     @test K.Browsers.selected_words(b) == "soft"
+    # It goes with where it is in the file, as the file's line and columns
+    L = findfirst(l -> occursin("<b>soft", l), readlines(html))
+    line = readlines(html)[L]
+    C = length(SubString(line, 1, prevind(line, first(findfirst("soft", line))))) + 1
     @test K.page_context(eh) == ("Brushes · selection", "<ladder>\nThe window shows the file $html.\nThe section in view is \"Brushes\".\n" *
-      "The selection's exact text:\n<selection>\nsoft\n</selection>\nIt's in this paragraph:\n<paragraph>\nBuy soft brushes for the walls.\n</paragraph>\n</ladder>")
+      "In the file, the selection goes from line $L, column $C to line $L, column $(C + 4). Its exact text, as the page shows it:\n" *
+      "<selection>\nsoft\n</selection>\nIt's in this paragraph:\n<paragraph>\nBuy soft brushes for the walls.\n</paragraph>\n</ladder>")
     # One click puts the caret there: the agent gets the words before it, and its paragraph
     sleep(0.5)
     hit(spot(soft))
     frames(wh, 2)
     @test K.Browsers.selected_words(b) == ""
-    @test endswith(K.page_context(eh)[2], "\nThe caret is where the user last clicked, after \"Buy\" in this paragraph:\n<paragraph>\nBuy soft brushes for the walls.\n</paragraph>\nNothing is selected.\n</ladder>")
+    @test endswith(K.page_context(eh)[2], "\nThe caret is where the user last clicked, at line $L, column $C of the file, after \"Buy\" in this paragraph:\n" *
+      "<paragraph>\nBuy soft brushes for the walls.\n</paragraph>\nNothing is selected.\n</ladder>")
     # What the agent is told at the start says how to read these
-    @test occursin("<paragraph>", K.session_brief()) && occursin("where the user last clicked", K.session_brief())
+    @test occursin("<paragraph>", K.session_brief()) && occursin("where the user last clicked", K.session_brief()) && occursin("lines and columns in the HTML file", K.session_brief())
     # The wheel moves the page on, and the outline follows it
     K.Browsers.scroll!(b, K.html_outline(eh)[2][rows[4].line] - 10)
     frames(wh, 3)
