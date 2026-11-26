@@ -123,6 +123,7 @@ On a page with a `schedule` block, an item that repeats has a bar for each time 
 | ⌘, | Opens the settings in a window of their own. Press it again to close that window. |
 | ⌘T | Opens a new tab and the file finder. The file that you choose shows in the new tab. |
 | ⌘⇧T | Makes a new terminal in the folder of the file that shows, and shows it |
+| ⌘⇧A | Starts a session with your agent in the folder of the file that shows, and shows it |
 | ⌘1 to ⌘9 | Show the first tab to the ninth tab in the sidebar |
 | ⌘W | Closes the file's tab and shows the tab under it. On the last tab, it shows the file's folder. On a folder, it shows the tab that showed last, or with no tabs it closes the folder. In a window with no file, it closes the window. |
 | ⌘\ | Shows and hides the list of files |
@@ -1114,8 +1115,6 @@ A line that holds only a sound file shows a player for it. The line is written a
 
 An agent like Claude Code can write a page and show it to you here: a plan with a diagram, a table of options, a list of boxes to tick. While the agent waits for you, its logo shows at the top right: Claude's for Claude Code, and Grok's for Grok. An agent that Ladder has no logo of shows as a bell. It's a button called "Nudge Claude". Change the page any way you like: tick a box, change a number, type a question on a new line. Then click the button, or press ⌘Return. Ladder saves the page and gives the agent the lines that you changed.
 
-To start an agent on the file that the window shows, press ⌘⇧P and run Collaborate. A terminal opens, with the agent that Settings chose in it. The agent reads the file and waits for it. When its logo shows at the top right, change the page and click the logo, as above. You can talk to the agent in the terminal too. The terminal is Kero when Kero is open. Without Kero, it's the Mac's app for `.command` files, which is Terminal unless you chose another.
-
 To talk with an agent beside the page, with no terminal, press ⌘⇧P and run Agent Mode. The window grows wider. The agent's pane is at the left, the page is in the middle on a card in the shape of a sheet of paper, and the page's outline is at the right. Type at the foot of the agent's pane and press Return. ⇧Return starts a new line.
 
 - What the agent says shows as a page, not as a terminal's text: headings, lists, tables, maths, diagrams and charts. Code in it shows as code and doesn't run.
@@ -1126,6 +1125,13 @@ To talk with an agent beside the page, with no terminal, press ⌘⇧P and run A
 - A click on a line of the outline goes to that heading. The arrow before a heading hides the headings under it.
 
 The button at the right end of the top bar hides the outline. Nothing hides the agent's pane: to work without the agent, leave agent mode. The page stays beside the outline, and the agent's pane has the rest of the window, so a wider window gives the agent more room. To give the agent more or less of the window, drag the gap between its pane and the page. Ladder keeps the width, and two clicks on the gap give the page its paper shape again. The two panes are dark on every theme, so that the page stands out between them. Run Agent Mode again to put the window back as it was. The session stays until you close the window, so you can go on with it later.
+
+To give an agent the whole page, as a terminal would, press ⌘⇧A. Or right-click a folder in the sidebar and choose New Agent Session. Ladder makes a file like `Claude.chat` in the folder, for the agent that [Settings](settings/settings.md) chose, and shows it. The file shows as the session: type at the foot and press Return. What the agent says shows as a page, as it does in agent mode, in the page's own colours. The agent works in the top folder of the folder's repository, or in the folder itself when it's in none.
+
+- The file keeps what you and the agent said, as Markdown. ⌘E shows that text.
+- The session has a tab in the sidebar, as each open file has. The agent works on while the window shows another file, and its tab has a ring that turns until the agent has done.
+- Open the file on another day, and your next words go on with the same session: the agent knows what was said. If the agent no longer has the session, a new one starts, and the session says so.
+- No page is beside the session, so only your words go to the agent. Claude asks before a step that your settings make it ask for, with Allow and Refuse, as in agent mode.
 
 To ask an agent about one part of the window, no agent has to wait. Run Ask Agent, and Ladder starts Claude Code with that part and your words. [Ask an agent about one thing](#ask-an-agent-about-one-thing) says how.
 
@@ -1360,6 +1366,8 @@ A zip file shows what it holds, without being unpacked: its folders and files, e
 A SolidCraft design, a file whose name ends in `.sc`, opens in an editor of its own: see [SolidCraft designs](#solidcraft-designs).
 
 A file whose name ends in `.vt` opens as a terminal: see [Terminals](#terminals).
+
+A file whose name ends in `.chat` opens as a session with an agent: see [Work with an agent](#work-with-an-agent).
 
 Right-click the page to cut, copy or paste. The menu's Insert item adds a new block where you clicked: a heading, a list, a to-do item, a table, a sheet, a spreadsheet, a diagram, a takeoff, a schedule, a chart, a board, a calendar, a sketch, a canvas, a live block and more.
 

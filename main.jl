@@ -4943,6 +4943,7 @@ const PREVIEW_LINES = 12
 const MODELS = (".stl", ".3mf", ".glb", ".gltf")   # the files of 3D models that the viewer reads
 const MODEL_HEIGHT = 260px
 const TERMINALS = (".vt",)   # the files that keep what a terminal shows: see "a terminal's file"
+const CHATS = (".chat",)     # the files that keep a session of an agent: see "a session's file"
 # The sound and the video files that macOS plays
 const SOUNDS = (".mp3", ".m4a", ".wav", ".aif", ".aiff", ".aac", ".flac", ".caf")
 const VIDEOS = (".mp4", ".mov", ".m4v")
@@ -5276,6 +5277,7 @@ file_icon(path) = begin
   ext in VIDEOS ? "file-earmark-play" :
   ext in MODELS || ext in DESIGNS ? "box" :
   ext in TERMINALS ? "terminal" :
+  ext in CHATS ? "chat-text" :
   ext == ".pdf" ? "file-earmark-pdf" :
   ext in ZIPS ? "file-earmark-zip" :
   ext in TABLES ? "file-earmark-spreadsheet" :
@@ -5447,6 +5449,8 @@ look(path; tree=true) = begin
     return Buffer(path=path, view=:file)   # the page that its HTML makes: see "an HTML file as its page"
   elseif tree && ext in TERMINALS
     return Buffer(path=path, view=:file)   # the terminal that it keeps: see "a terminal's file"
+  elseif tree && ext in CHATS
+    return Buffer(path=path, view=:file)   # the session that it keeps: see "a session's file"
   elseif !viewed(ext)
     shown = text_look(path)
     shown === nothing || return shown
@@ -5491,7 +5495,7 @@ table of the other. So has an HTML file: the page that its HTML makes.
 """
 file_views(b::Buffer) = begin
   (b.view in FILE_VIEWS && !isdir(b.path)) || return ()   # a folder that shows in the page has one way to show
-  (json_page(b) || html_page(b) || term_page(b)) && return FILE_VIEWS
+  (json_page(b) || html_page(b) || term_page(b) || chat_page(b)) && return FILE_VIEWS
   ext = lowercase(splitext(b.path)[2])
   ext in TABLES ? (text_file(b.path) ? FILE_VIEWS : ()) :
   viewed(ext) || !text_file(b.path) ? () : FILE_VIEWS[1:3]
@@ -5547,7 +5551,7 @@ look(path, view::Symbol) = begin
   view == :bits && return Buffer(path=path, view=:bits, lines=bitlines(path), about=bits_about(path))
   view == :hex && return Buffer(path=path, view=:hex, lines=hexlines(path), about=hex_about(path))
   # A terminal's file is read each time, since its shell writes it while it shows
-  (view == :text && (text_file(path) || lowercase(splitext(path)[2]) in TERMINALS)) || return look(path)
+  (view == :text && (text_file(path) || lowercase(splitext(path)[2]) in (TERMINALS..., CHATS...))) || return look(path)
   something(text_look(path), look(path))
 end
 
@@ -6024,6 +6028,8 @@ file_level!(e, view::Symbol) = begin
   at = place_in_file(e)
   # A terminal writes its file a moment after its shell writes. It writes it now, so that the file's text is what the terminal shows.
   term_page(b) && (v = get(e.nodes, (:term, b.path), nothing); v === nothing || Terms.save!(v))
+  # A session's file is written now too, so that its text is what the session shows
+  chat_page(b) && (p = get(e.nodes, (:chat, b.path), nothing); p === nothing || keep_talk!(p))
   shown = look(b.path, view)
   b.lines, b.about, b.view = shown.lines, shown.about, shown.view
   b.caret = b.anchor = (1, 0)
@@ -6804,7 +6810,7 @@ cursor(::FileView) = :arrow
 file_item(e, b::Buffer) = begin
   v = node!(() -> FileView(path=b.path), e, (:fileview, b.path))
   # What covers the page's whole space isn't one of the page's items, so it has no height to learn
-  b === e.buf && (page_covered(e) || html_shown(e) || term_shown(e) || file_covers(e)) && return Item(1, 1, 0px, 1px, Live(v, 1px))
+  b === e.buf && (page_covered(e) || html_shown(e) || term_shown(e) || chat_shown(e) || file_covers(e)) && return Item(1, 1, 0px, 1px, Live(v, 1px))
   # Lay it out once to learn how tall it is
   concrete = describe(Column(fixed(e.width), Alignment.Start, geometry(v)), (e.width, 9999px))
   high = concrete.height + 2LIVE_GAP
@@ -28268,6 +28274,8 @@ describe(p::Page) = begin
   html_shown(e) && return Box(width(grow=grow), height(grow=grow), Alignment.Start, html_part(e))
   # A terminal's file covers it with the terminal
   term_shown(e) && return Box(width(grow=grow), height(grow=grow), Alignment.Start, term_part(e))
+  # A session's file covers it with what you and the agent said
+  chat_shown(e) && return Box(width(grow=grow), height(grow=grow), Alignment.Start, chat_part(e))
   # A model's file covers it with the model, which is a component, so it gets a live block's colours and text size
   model = model_part(e)
   model === nothing || return with_theme(() -> Box(width(grow=grow), height(grow=grow), Alignment.Start, model), component_theme(e.zoom))
@@ -32908,7 +32916,7 @@ bar_row(t::TopBar) = begin
       (page_covered(e) || nofile(e) ? right_part(e) :
        readonly(b) && (page_object(e) isa BlogFolder || page_object(e) isa NewsFolder) ? (more..., mode..., outside...) :
        shown ? (own_ends..., (isempty(b.about) ? () : (said_part(b.about, side - LOCK_W - (isempty(outside) ? 0px : 40px) - (isempty(mode) ? 0px : MODE_W + grown)),))...,
-                      (term_shown(e) || !(readonly(b) || b.fixed) || !shows_lock(e, page_object(e)) ? () : (lock_part(e),))...,   # a terminal is yours to type in, and so is a CSV file
+                      (term_shown(e) || chat_shown(e) || !(readonly(b) || b.fixed) || !shows_lock(e, page_object(e)) ? () : (lock_part(e),))...,   # a terminal is yours to type in, and so are a session and a CSV file
                       mode...,
                       outside...) :
                      (more..., job_part(e)..., agent_part(e)..., checks..., diff_part(e)..., commit_part(e)..., mode...,
@@ -33107,7 +33115,7 @@ levels(d::Document) = begin
   views = file_views(b)
   isempty(views) && return full_block(e) === nothing ? PAGE_LEVELS : BLOCK_LEVELS
   length(views) == 3 ? FILE_LEVELS : (FILE_LEVELS..., json_page(b) ? "the tree of the file's values" : html_page(b) ? "the page that the HTML makes" :
-                                                    term_page(b) ? "the terminal that the file keeps" : "the file's table")
+                                                    term_page(b) ? "the terminal that the file keeps" : chat_page(b) ? "the session that the file keeps" : "the file's table")
 end
 
 level(d::Document) = begin
@@ -35511,7 +35519,7 @@ takes them. "-" is a line between two groups. A file has an item that opens it
 in the app that the Mac uses for it, unless that's Ladder.
 """
 file_menu(path) = begin
-  isdir(path) && return ["New Page", "New Folder", "New Terminal", "-", "Open in New Window", favourite_item(path), "-", "Rename", "Duplicate", "-",
+  isdir(path) && return ["New Page", "New Folder", "New Terminal", "New Agent Session", "-", "Open in New Window", favourite_item(path), "-", "Rename", "Duplicate", "-",
                          "Copy Path", "Show in Finder", "-", ignore_item(path), "Move to Trash"]
   app = opener(path)
   outside = isempty(app) || app_name(app) == "Ladder" ? String[] : ["Open in $(app_name(app))"]
@@ -35522,7 +35530,7 @@ end
 ignore_item(path) = Folders.isignored(path) ? "Stop Ignoring" : "Ignore"
 
 "The menu of the sidebar's own folder, for a right-click under the files that it lists"
-const FOLDER_MENU = ["New Page", "New Folder", "New Terminal", "-", "Copy Path", "Show in Finder"]
+const FOLDER_MENU = ["New Page", "New Folder", "New Terminal", "New Agent Session", "-", "Copy Path", "Show in Finder"]
 
 # A menu's text is 13/12 of its theme's size. This size makes it 13px, the size of a file's name in the sidebar.
 "The colours and the text size of a menu that floats over the window"
@@ -35547,6 +35555,7 @@ file_act!(e, path, name; at=:sidebar) =
   name == "New Page" ? new_page!(e, path) :
   name == "New Folder" ? new_folder!(e, path) :
   name == "New Terminal" ? new_terminal!(e, path) :
+  name == "New Agent Session" ? new_agent_session!(e, path) :
   name == "Open in New Window" ? (show_window!(page_window(path, e), window_of(e)); nothing) :
   startswith(name, "Open in ") ? open_outside(path) :
   name == "Rename" ? rename!(e, path; at) :
@@ -36334,7 +36343,8 @@ tab_marks(e, path) = begin
   (isempty(path) || isremote(path)) && return ()
   o = object(e, path)
   v = get(e.nodes, (:term, path), nothing)
-  working = v !== nothing && Terms.busy(v)
+  talk = get(e.nodes, (:chat, path), nothing)   # a session's tab has the ring while its agent works
+  working = (v !== nothing && Terms.busy(v)) || (talk isa AgentPane && talk.session !== nothing && talk.session.busy)
   working && redraw_in!(e, SPIN_FRAME)   # the ring turns
   ((o isa FSObject ? entry_marks(e, o) : ())...,
    (working ? (Box(fixed(18px), height(18px), Alignment.Center, justify=Alignment.Center, Spinner(size=11px)),) : ())...)
@@ -44823,6 +44833,7 @@ describe_window(e::Editor) = begin
   term_tick!(e)
   ask_tick!(e)
   session_tick!(e)
+  chat_tick!(e)
   live_checks_tick!(e)
   file_checks_tick!(e)
   rename_tick!(e)
@@ -44946,7 +44957,7 @@ the screen. A test's window isn't, so the windows that it opens aren't either.
 """
 show_window!(w, by) = (by !== nothing && isopen(by) && open(w); w)
 
-onclose(e::Editor, ::Window) = (Base.filter!(o -> o !== e, editors); close_designs!(e); close_terminals!(e); close_agent!(e); nothing)
+onclose(e::Editor, ::Window) = (Base.filter!(o -> o !== e, editors); close_designs!(e); close_terminals!(e); close_agent!(e); close_chats!(e); nothing)
 
 """
 A window that shows the Markdown file or the folder at `path`, with the
@@ -48087,135 +48098,36 @@ kind_command(k::AgentKind, options) = begin
   addenv(Cmd([found; options]), "PATH" => path)
 end
 
-# --- an agent's session in a terminal ---
+# --- the script of an agent's session in a terminal ---
 #
-# The command Collaborate starts an agent that works on the window's file
-# with you. It's the agent that Settings chose. It runs in a terminal, as it
-# does when you start it yourself, so you can talk to it there too. Ladder
-# gives it its first words: read the file, and wait for it with `ladder wait`
-# (see agent.jl). When it waits, its logo shows in the top bar. Then the
-# logo sends it what you changed, and Ask Agent asks it for a change.
-#
-# The session starts in Kero when Kero is open, as a new session in the
-# file's folder. Without Kero, Ladder opens a script, and the Mac runs it in
-# its app for `.command` files. That's Terminal, unless you chose another,
-# like iTerm.
-#
-# The session starts in the top folder of the file's repository, when git
-# keeps the file, so that the agent finds what it knows of the project. The
-# agent can change the file and run `ladder wait` without asking, when it has
-# a way to be told so. It asks for anything else as it always does.
-
-"What opens a terminal for a session: a function that takes the script and the folder, and gives the terminal's name. Nothing means `open_session!`. A test puts a function of its own here, so that no terminal opens."
-const SESSION_OPENER = Ref{Any}(nothing)
+# A reading companion of a folder of news is an agent that runs in a
+# terminal of Ladder's own: see "the agents that get the news". Ladder
+# writes a script that starts the agent there, with the folders of the
+# agent's command and of the `ladder` command on its PATH.
 
 "The folders that can hold the `ladder` command: the one beside this code, and the one that the installed app writes it to"
 ladder_bins() = filter(isdir, [joinpath(@__DIR__, "plugin", "bin"), joinpath(homedir(), "Library", "Application Support", "Ladder", "bin")])
 
 """
-The first words that an agent gets when Collaborate starts it on the file at
-`path`. They say all that the agent must do, for an agent that has no skill
-for Ladder's pages.
+The script that starts a session of the agent `k` in the folder `dir`, with
+`words` after its command: its options and its first words. The agent's own
+folder, the folders of the `ladder` command and Homebrew's go after the
+terminal's PATH, for a terminal that hasn't got them. The agent's name is
+there for `ladder wait`, so that the top bar shows its logo.
 """
-collaborate_words(path) = """
-Work on the file $path with me. It's open in Ladder, the app that shows it as a page. I change it there, and you change the file.
-
-1. Read the file.
-2. Run `ladder wait $(Base.shell_escape_posixly(path))` in the background. Then tell me in a sentence that you're ready. Don't run `ladder show`, because the file is open already.
-3. When that command ends, it prints the lines that I changed, or a change or a question that I asked for in Ladder. Do what it says by changing the file. Ladder shows your change in less than a second.
-4. Then run the same command in the background again. Do that each time, until I say that we're done.
-
-If you have a skill for Ladder's pages, it says more about what the command prints and about what a page can show."""
-
-"""
-What goes after the command of the agent `k` to start a session on the file
-at `path`: the first words, and the options that let the agent run
-`ladder wait`, and change the file, without asking. A rule for a file can't
-hold some characters, so a file with one of them in its path gets no rule,
-and the agent asks before its first change.
-"""
-session_words(k::AgentKind, path) = begin
-  words = collaborate_words(path)
-  # The words go before --allowedTools, which takes all that comes after it as its list. A rule with // names a file from the top of the disk.
-  k.name == "Claude" && return [words, "--allowedTools", "Bash(ladder wait *)", (occursin(r"^[\w \-./@+~]+$", path) ? ["Edit(/$path)"] : String[])...]
-  k.name == "Grok" && return ["--allow", "Bash(ladder wait*)", words]
-  k.name == "Gemini" && return ["-i", words]
-  [words]
-end
-
-"""
-The script that starts a session of the agent `k` on the file at `path`, in
-the folder `dir`. The agent's own folder, the folders of the `ladder` command
-and Homebrew's go after the terminal's PATH, for a terminal that hasn't got
-them. The agent's name is there for `ladder wait`, so that the top bar shows
-its logo.
-"""
-session_script(k::AgentKind, path, dir; words=session_words(k, path)) = begin
+session_script(k::AgentKind, dir, words) = begin
   found = agent_path(k)
   quoted = Base.shell_escape_posixly
   folders = join(unique([ladder_bins(); dirname(found); "/opt/homebrew/bin"; "/usr/local/bin"]), ':')
   """
   #!/bin/zsh
-  # Ladder wrote this file. It starts $(k.name) on a file that you and it change together: see Ladder's command Collaborate.
+  # Ladder wrote this file. It starts $(k.name) in a terminal of Ladder's.
   export PATH="\$PATH":$(quoted(folders))
   export LADDER_AGENT=$(quoted(k.name))
   cd $(quoted(dir)) || exit 1
   exec $(join(quoted.([found; words]), ' '))
   """
 end
-
-"Kero's command, when Kero is open, or nothing. `pgrep` doesn't find Kero's process on macOS 27, and `ps` does."
-kero_command() = begin
-  open = try occursin("/Kero.app/Contents/MacOS/Kero", read(pipeline(`ps -A -o comm`, stderr=devnull), String)) catch; false end
-  open || return nothing
-  found = Sys.which("kero")
-  found === nothing || return found
-  file = joinpath(homedir(), "Library", "Application Support", "kero", "bin", "kero")
-  isfile(file) ? file : nothing
-end
-
-"""
-Open a terminal that runs the script at `script`, in the folder `dir`, in
-front of the other windows. It gives the terminal's name: Kero when Kero is
-open, and else the Mac's app for a `.command` file.
-"""
-open_session!(script, dir) = begin
-  kero = kero_command()
-  if kero !== nothing && success(pipeline(`$kero new --dir $dir --focus -- $script`, stdout=devnull, stderr=devnull))
-    run(pipeline(`open -a Kero`, stderr=devnull), wait=false)
-    return "Kero"
-  end
-  run(pipeline(`open $script`, stderr=devnull))
-  "a terminal"
-end
-
-"""
-Start a session of the agent that Settings chose, in a terminal, to work on
-the window's file with you. The file is saved first, so that the agent reads
-what the window shows.
-"""
-collaborate!(e) = begin
-  b = e.buf
-  (writes(b) && !isremote(b.path)) || error("Collaborate needs a file on this Mac that Ladder can change.")
-  ws = agents(e)
-  isempty(ws) || error("$(uppercasefirst(first(ws).name)) works on this file with you already. Click its logo at the top right to send it what you changed.")
-  (dirty(b) || !isfile(b.path)) && save!(b)
-  k = agent_kind(e.ai)
-  path = truepath(b.path)
-  top = repo_of(e)
-  dir = isempty(top) ? dirname(path) : top
-  # A script of an earlier day is of no use: its session has started
-  folder = joinpath(tempdir(), "ladder-sessions")
-  mkpath(folder)
-  foreach(f -> time() - mtime(f) > 86400 && rm(f, force=true), readdir(folder, join=true))
-  script = joinpath(folder, "$(splitext(basename(path))[1])-$(round(Int, time() * 1000)).command")
-  write(script, session_script(k, path, dir))
-  chmod(script, 0o755)
-  terminal = something(SESSION_OPENER[], open_session!)(script, dir)
-  say_result!(e, "Started $(k.name) in $terminal. Its logo shows at the top right when it's ready.")
-end
-works_here(e, ::Val{:collaborate}) = writes(e.buf) && !isremote(e.buf.path)
-add_command!(collaborate!, title="Start an agent in a terminal that works on the file with you: it reads what you change here, and you see what it changes")
 
 """
 Start an agent with the command `command` and the words `prompt`, in the
@@ -48821,7 +48733,7 @@ end
 # a line of JSON for each thing that you say, and it prints a line of JSON
 # for each thing that it does: see `take_line!`. Its words come a few at a
 # time, so they show as the agent writes them. The session starts in the top
-# folder of the file's repository, as Collaborate's does.
+# folder of the file's repository.
 #
 # What the agent says runs no code. A reply is a page that somebody else
 # wrote (see `foreign`), so a block that would run code shows as its code.
@@ -48931,35 +48843,46 @@ program has stopped. `busy` is true while the agent works on what you said.
   turns::Bool = false          # the agent's program runs once for each thing that you say: see "an agent that works by turns"
   stopped::Bool = false        # you stopped the turn that's under way
   queue::Vector{String} = String[]   # what you said while a turn was under way, for the turns after it
+  file::String = ""            # the file that keeps the session, or "" for the session of agent mode: see "a session's file"
+  sent::String = ""            # the last thing that Ladder gave the program from you
 end
 
 "A command that a test puts in the place of the agent's: a program that reads and prints the same lines of JSON. Nothing means the agent that Settings chose."
 const SESSION_COMMAND = Ref{Any}(nothing)
 
+"What every session is told of how Ladder shows the agent's words"
+const BRIEF_SHOWS = "Ladder draws what you say as a page, not as a terminal's text: Markdown with headings, lists, tables, to-do boxes, maths, `mermaid` diagrams and `chart` blocks. So answer as a short page, and use a table, a diagram or a chart where it says a thing better than words. A chart is a `chart` code block: a line `kind: bars`, `kind: lines` or `kind: pie`, an empty line, then rows with ` | ` between the cells, and the names of the columns in the first row. Ladder draws these kinds of Mermaid diagram and no others: flowchart, sequenceDiagram, stateDiagram-v2, classDiagram, pie, mindmap, erDiagram, gantt and timeline. If you have a skill for Ladder's pages, it says more about what a page can show. Code in your answers shows as code and doesn't run."
+
 """
 What the agent is told of where it is, on top of what it's always told: that
-its words show as a page, and how to read the block at the start of each message.
+its words show as a page, and how to read the block at the start of each
+message. With `alone`, the session has the window to itself, and no page is
+beside it: see "a session's file".
 """
-session_brief() = """
-You are in Ladder, a Markdown app on the user's Mac. The user's window shows a page, with this conversation beside it. Ladder draws what you say as a page, not as a terminal's text: Markdown with headings, lists, tables, to-do boxes, maths, `mermaid` diagrams and `chart` blocks. So answer as a short page, and use a table, a diagram or a chart where it says a thing better than words. A chart is a `chart` code block: a line `kind: bars`, `kind: lines` or `kind: pie`, an empty line, then rows with ` | ` between the cells, and the names of the columns in the first row. Ladder draws these kinds of Mermaid diagram and no others: flowchart, sequenceDiagram, stateDiagram-v2, classDiagram, pie, mindmap, erDiagram, gantt and timeline. If you have a skill for Ladder's pages, it says more about what a page can show. Code in your answers shows as code and doesn't run. Answer a question here, in the conversation, and change the page only when the user asks for a change to it.
+session_brief(alone::Bool=false) = alone ? """
+You are in Ladder, a Markdown app on the user's Mac. The user's window shows this conversation and nothing else, in place of a terminal. $BRIEF_SHOWS A link to a file, like [notes.md](notes.md), opens that file in the user's window when the user clicks it. Paths in links are from the folder that you started in.""" : """
+You are in Ladder, a Markdown app on the user's Mac. The user's window shows a page, with this conversation beside it. $BRIEF_SHOWS Answer a question here, in the conversation, and change the page only when the user asks for a change to it.
 
 Each message of the user starts with a block between <ladder> and </ladder>. Ladder wrote the block, not the user. It says which file the window shows, where the caret is, and what is selected. Lines and columns count from 1. A column is a place between characters: column 1 is before the first character of its line, so a selection ends before the character at its end column. The exact text of a selection is between <selection> and </selection>: it starts after the line break that follows <selection>, and ends before the line break in front of </selection>. Ladder saves the page to its file before each message, so the file has what the window shows, unless the block says otherwise. When the user asks for a change to the page, change its file: Ladder shows the change at once. Don't run `ladder show` or `ladder wait`: the page is open already, and the user talks to you here."""
 
+"What the agent of the session `s` is told of where it is: a session with a file of its own has no page beside it"
+session_brief(s::AgentSession) = session_brief(!isempty(s.file))
+
 """
-The command that starts the program of a session on the file at `page`:
-Claude Code, which reads and prints lines of JSON. It asks Ladder before
-anything that your settings make it ask for, and it changes the file `page`
-without asking. With `id`, it goes on with the session of that name.
+The command that starts the program of the session `s`: Claude Code, which
+reads and prints lines of JSON. It asks Ladder before anything that your
+settings make it ask for, and it changes the session's page without asking.
+When the session has a name, it goes on with the session of that name.
 """
-session_command(e, page, id="") = begin
+session_command(s::AgentSession) = begin
   SESSION_COMMAND[] === nothing || return SESSION_COMMAND[]
-  k = agent_kind(e.ai)
-  k.name == "Claude" || error("Agent mode talks with Claude Code. Yours is $(k.name): the command Switch Agent chooses Claude.")
+  k = agent_kind(s.agent)
+  page, id = s.page, s.id
   # A rule with // names a file from the top of the disk. A rule can't hold some characters, so such a file has none, and the agent asks.
   rule = !isempty(page) && occursin(r"^[\w \-./@+~]+$", page) ? ["--allowedTools", "Edit(/$page)"] : String[]
   # --allowedTools takes all that comes after it as its list, so it's last
   kind_command(k, ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--include-partial-messages",
-                   "--permission-prompt-tool", "stdio", "--append-system-prompt", session_brief(),
+                   "--permission-prompt-tool", "stdio", "--append-system-prompt", session_brief(s),
                    (isempty(id) ? String[] : ["--resume", id])..., rule...])
 end
 
@@ -49001,6 +48924,24 @@ end
 ended!(s::AgentSession, wrong) = begin
   was = s.busy
   settle!(s)
+  # The agent no longer has a session that a file kept, like one of another Mac. A new one starts, with the words that you just said.
+  if !s.closing && !isempty(s.id) && !isempty(s.sent) && occursin("No conversation found", wrong)
+    s.id = ""
+    k = something(findlast(it -> it isa YouSaid, s.items), 0)
+    deleteat!(s.items, [i for i in k+1:length(s.items) if s.items[i] isa SessionNote])   # what the lost session said of its end
+    note!(s, "$(s.agent) doesn't have this session any more, so a new one starts here. It doesn't know what was said before.")
+    started = try
+      start!(s, session_command(s))
+      tell!(s, Dict("type" => "user", "message" => Dict("role" => "user", "content" => s.sent)))
+      true
+    catch err
+      note!(s, err isa ErrorException ? err.msg : "Ladder couldn't start $(s.agent): $(sprint(showerror, err))", true)
+      false
+    end
+    s.busy = started
+    s.version += 1
+    return s
+  end
   if !s.closing
     lines = filter(!isempty, strip.(split(wrong, '\n')))
     note!(s, isempty(lines) ? "$(s.agent) stopped. Your next words start it again." : "$(s.agent) stopped: $(last(lines))", was || !success(s.process))
@@ -49031,6 +48972,7 @@ end
 say!(s::AgentSession, words, about="", told="") = begin
   push!(s.items, YouSaid(words=String(words), about=String(about)))
   content = isempty(told) ? String(words) : told * "\n\n" * words
+  s.sent = content
   if !s.turns
     tell!(s, Dict("type" => "user", "message" => Dict("role" => "user", "content" => content)))
   elseif s.busy
@@ -49266,7 +49208,7 @@ turn_command(s::AgentSession, words::AbstractString) = begin
   TURN_COMMAND[] === nothing || return `$(TURN_COMMAND[]) $(s.agent) $(s.id) $words`
   k = agent_kind(s.agent)
   again = !isempty(s.id)
-  options = k.name == "Grok" ? ["--output-format", "streaming-json", "--rules", session_brief(), (again ? ["-r", s.id] : String[])..., "--permission-mode", "acceptEdits", "-p"] :
+  options = k.name == "Grok" ? ["--output-format", "streaming-json", "--rules", session_brief(s), (again ? ["-r", s.id] : String[])..., "--permission-mode", "acceptEdits", "-p"] :
             k.name == "Gemini" ? ["-o", "stream-json", (again ? ["--resume", s.id] : String[])..., "--approval-mode", "auto_edit", "-p"] :
             ["exec", "--json", "--sandbox", "workspace-write", "--skip-git-repo-check", (again ? ["resume", s.id] : String[])...]
   kind_command(k, [options; words])
@@ -49284,7 +49226,7 @@ turn!(s::AgentSession, words::AbstractString) = begin
   s.stopped = false
   process = try
     out, err = Pipe(), Pipe()
-    command = turn_command(s, first_words ? "<ladder-brief>\n$(session_brief())\n</ladder-brief>\n\n$words" : words)
+    command = turn_command(s, first_words ? "<ladder-brief>\n$(session_brief(s))\n</ladder-brief>\n\n$words" : words)
     process = run(pipeline(Cmd(command; dir=s.dir), stdin=devnull, stdout=out, stderr=err), wait=false)
     close(out.in)
     close(err.in)
@@ -49504,6 +49446,10 @@ steps that a click opened, by the place of its first step.
   was::Any = nothing
   open::Set{Int} = Set{Int}()
   error::String = ""           # why the session couldn't start, or ""
+  file::String = ""            # the file that keeps the session, when the pane is a session's file in the page: see "a session's file"
+  kept::Int = 0                # the version of the session that the file has
+  wrote::Float64 = 0.0         # when the file was last written
+  stamp::Float64 = 0.0         # when the file last changed, as Ladder read it or wrote it
 end
 
 "The outline of the page, at the right of the window in agent mode. `folded` holds each heading whose own headings are hidden."
@@ -49773,11 +49719,18 @@ reply_editor(p::AgentPane, e, dir) = begin
   sub
 end
 
+"True while the talk that's being described is a session's file in the page, and not the pane of agent mode: see \"a session's file\""
+const talk_on_page = Ref(false)
+
+"How much bigger than its sizes in the pane the talk's text is now: the window's zoom, and in a session's file the page's bigger text"
+talk_zoom(e) = e.zoom * (talk_on_page[] ? PAGE_TALK / REPLY_SIZE : 1.0)
+
 "Give the editor `sub` of a part of the agent's pane the colours and keys of the window of `e`, with the pane's own font and size"
-pane_style!(sub, e) = begin
+pane_style!(sub, e; own=false) = begin
   follow_host!(sub, e)
-  sub.font, sub.zoom, sub.look, sub.spelling = SANS, e.zoom * (REPLY_SIZE / TEXT_SIZE), :own, false
-  sub.theme = :night   # the pane is dark, so what's kept by the theme's name is kept apart from the page's
+  # What the agent says in a session's file has the page's own font: `own` is true for it there
+  sub.font, sub.zoom, sub.look, sub.spelling = own ? e.font : SANS, talk_zoom(e) * (REPLY_SIZE / TEXT_SIZE), :own, false
+  talk_on_page[] || (sub.theme = :night)   # the pane is dark, so what's kept by the theme's name is kept apart from the page's
   # Text that was laid out in other colours than the pane's is laid out again: each line keeps the colours that it was laid out in
   inks = (colours.ink, colours.dim, colours.accent)
   get(sub.nodes, :pane_inks, nothing) == inks || (sub.nodes[:pane_inks] = inks; empty!(sub.flows))
@@ -49831,6 +49784,7 @@ end
 
 "The session of the pane `p` of the window of `e`, with its program running. The first words start it, in the top folder of the file's repository."
 session!(p::AgentPane, e) = begin
+  on_page(p) && p.session === nothing && load_talk!(p, e)   # a session's file has its session from the file
   s = p.session
   if s === nothing
     b = e.buf
@@ -49840,7 +49794,7 @@ session!(p::AgentPane, e) = begin
     s = AgentSession(agent=pane_agent(p, e), dir=dir, page=writes(b) ? truepath(b.path) : "", turns=agent_kind(e.ai).name != "Claude")
   end
   # An agent that works by turns has no program between turns: `say!` starts one
-  s.turns || running(s) || start!(s, session_command(e, s.page, s.id))
+  s.turns || running(s) || start!(s, session_command(s))
   p.session = s
 end
 
@@ -50007,7 +49961,7 @@ send_words!(p::AgentPane) = begin
     return nothing
   end
   p.error = ""
-  about, told = page_context(e)
+  about, told = pane_context(p, e)
   say!(s, words, about, told)
   p.follow = true
   # A new field takes the keyboard, when the old one had it
@@ -50045,7 +49999,12 @@ agent works, that's twenty times a second.
 """
 session_tick!(e) = begin
   p = get(e.nodes, :agent_pane, nothing)
-  p isa AgentPane || return nothing
+  p isa AgentPane && pane_tick!(p, e)
+  nothing
+end
+
+"Give the task that reads what the agent of the pane `p` prints its turn, and draw the window of `e` again when its session has something new"
+pane_tick!(p::AgentPane, e) = begin
   s = p.session
   s === nothing && return nothing
   if s.busy
@@ -50072,9 +50031,9 @@ pane_button(p::AgentPane, action::Symbol, what=nothing) =
   get!(() -> own!(p, PaneButton(of=p, action=action, what=what)), p.parts, (:button, action, what === nothing ? 0 : what isa Int ? what : objectid(what)))
 
 "The face of the words of the agent's pane, in `colour`"
-pane_face(e, colour=colours.ink; size=REPLY_SIZE) = Face(SANS, "", size * e.zoom, colour, false)
+pane_face(e, colour=colours.ink; size=REPLY_SIZE) = Face(SANS, "", size * talk_zoom(e), colour, false)
 
-describe(p::AgentPane) = with_pane_colours() do
+describe(p::AgentPane) = on_page(p) ? talk_page(p) : with_pane_colours() do
   e = editor(p)
   p.field === nothing && pane_field!(p)
   follow!(p)
@@ -50139,12 +50098,13 @@ pane_talk(p::AgentPane, e, room) = begin
                                                          !(last(items) isa AgentWants && last(items).answer == :none))
   waits && push!(rows, Row(height(24px), Alignment.Center, child_gap=8px,
                            Box(fixed(16px), height(16px), Alignment.Center, justify=Alignment.Center, Spinner(size=12px)),
-                           Box(label("Thinking", 13px * e.zoom, color=colours.dim))))
+                           Box(label("Thinking", 13px * talk_zoom(e), color=colours.dim))))
   isempty(p.error) || push!(rows, words_block(e, p.error, PICK_FAILED, room))
+  isempty(rows) && on_page(p) && return talk_greeting(p, e, room)
   isempty(rows) && return Column(width(grow=grow), Alignment.Start, padding(40px, PANE_X, 20px, PANE_LEFT), child_gap=6px, name="Talk",
     words_block(e, "Ask about this page, or say what to change in it.", colours.dim, room),
     words_block(e, "What the agent says shows here as a page: tables, diagrams and charts, not a terminal's text.", colours.faint, room))
-  Column(width(grow=grow), Alignment.Start, padding(6px, PANE_X, 20px, PANE_LEFT), child_gap=10px, name="Talk", rows...)
+  Column(width(grow=grow), Alignment.Start, padding(on_page(p) ? 24px : 6px, PANE_X, 20px, PANE_LEFT), child_gap=10px, name="Talk", rows...)
 end
 
 "The words `words` in `colour`, wrapped to `room`, each line of them in turn"
@@ -50159,7 +50119,7 @@ talk_row(p::AgentPane, e, it::YouSaid, room) = begin
   inside = min(room * 0.86, 520px) - 26px
   about = isempty(it.about) ? () :
     (Row(height(18px), Alignment.Center, child_gap=5px, Icon("file-earmark-text", size=11px, color=colours.faint),
-         Box(label(shortened(pane_face(e, colours.faint; size=11.5px), it.about, inside), 11.5px * e.zoom, color=colours.faint))),)
+         Box(label(shortened(pane_face(e, colours.faint; size=11.5px), it.about, inside), 11.5px * talk_zoom(e), color=colours.faint))),)
   Column(width(grow=grow), Alignment.End, child_gap=3px, padding(6px, 0px, 2px, 0px), name="You said",
     about...,
     Box(padding(13px, 8px), radius(12px), background(on_glass(0.09)), words_block(e, it.words, colours.ink, inside; size=REPLY_SIZE)))
@@ -50169,7 +50129,7 @@ end
 talk_row(p::AgentPane, e, it::AgentReply, room) = begin
   sub = get!(() -> reply_editor(p, e, p.session.dir), p.parts, (:reply, objectid(it)))
   show_reply!(sub, it)
-  pane_style!(sub, e)
+  pane_style!(sub, e; own=talk_on_page[])
   pane_layout!(sub, room)
   tall = isempty(sub.layout) ? 0px : lowest(sub, sub.layout)
   Box(width(grow=grow), height(tall), Alignment.Start, name="Reply", node!(Document, sub, :document))
@@ -50179,10 +50139,10 @@ end
 talk_row(p::AgentPane, e, it::AgentWants, room) = begin
   inside = room - 26px
   ends = it.answer == :none ? Row(Alignment.Center, child_gap=8px, pane_button(p, :allow, it), pane_button(p, :refuse, it)) :
-    Box(label(it.answer == :allowed ? "You allowed it." : it.answer == :refused ? "You refused it." : "It wasn't answered.", 12px * e.zoom, color=colours.dim))
+    Box(label(it.answer == :allowed ? "You allowed it." : it.answer == :refused ? "You refused it." : "It wasn't answered.", 12px * talk_zoom(e), color=colours.dim))
   detail = isempty(it.detail) ? () :
     (Box(width(grow=grow), padding(8px, 6px), radius(6px), background(on_glass(0.06)), clip=true,
-       Column(Alignment.Start, [Row(height(17px), Alignment.Center, Text(String(l), size=12px * e.zoom, family=codefont(), subfamily=codestyle(), color=colours.ink, wrap=WrapMode.none))
+       Column(Alignment.Start, [Row(height(17px), Alignment.Center, Text(String(l), size=12px * talk_zoom(e), family=codefont(), subfamily=codestyle(), color=colours.ink, wrap=WrapMode.none))
                                 for l in first(split(it.detail, '\n'), 6)]...)),)
   Column(width(grow=grow), Alignment.Start, padding(13px, 11px), radius(10px), child_gap=9px, name="Agent asks",
          background(on_glass(0.05)), border(1px, :solid, on_glass(0.14)),
@@ -50212,16 +50172,16 @@ pane_foot(p::AgentPane, e, room) = begin
   s = p.session
   sub = p.field
   pane_style!(sub, e)
-  inside = agent_wide(e) - 2PANE_X - 4px - SEND_ROOM
+  inside = pane_wide(p, e) - 2PANE_X - 4px - SEND_ROOM
   pane_layout!(sub, inside)
-  line = REPLY_SIZE * e.zoom * 1.5
+  line = REPLY_SIZE * talk_zoom(e) * 1.5
   tall = min(isempty(sub.layout) ? line : lowest(sub, sub.layout), 9line)
   doc = Box(width(grow=grow), height(tall), Alignment.Start, clip=true, node!(Document, sub, :document))
   who = pane_agent(p, e)
   empty = sub.buf.lines == [""]
   text = empty ? Stack(width(grow=grow), height(tall), Alignment.Start,
-                       Row(width(grow=grow), height(tall), Alignment.Center, label("Ask $who, or say what to change", REPLY_SIZE * e.zoom, color=colours.faint)), doc) : doc
-  Box(width(grow=grow), padding(4px, PANE_X - 4px, PANE_X - 4px, PANE_X - 4px), name="Agent foot",
+                       Row(width(grow=grow), height(tall), Alignment.Center, label(on_page(p) ? "Ask $who, or say what to do" : "Ask $who, or say what to change", REPLY_SIZE * talk_zoom(e), color=colours.faint)), doc) : doc
+  Box(width(grow=grow), padding(4px, PANE_X - 4px, on_page(p) ? 18px : PANE_X - 4px, PANE_X - 4px), name="Agent foot",
     Row(width(grow=grow), Alignment.End, padding(6px, 6px, 6px, 14px), radius(14px), child_gap=SEND_ROOM - 28px,   # top, right, bottom, left
         background(on_glass(0.07)), border(1px, :solid, on_glass(0.1)),
       Box(width(grow=grow), padding(0px, 4px), text),   # one line of words is as tall as the button
@@ -50251,19 +50211,19 @@ describe(b::PaneButton) = begin
     k, n = b.what
     Row(height(22px), Alignment.Center, child_gap=8px, radius(5px), name="Steps",
       Box(fixed(16px), height(16px), Alignment.Center, justify=Alignment.Center, Icon(n == 0 ? "chevron-down" : "chevron-right", size=9px, color=colours.faint)),
-      Box(label(n == 0 ? "Hide the steps" : "$n steps", 13px * e.zoom, color=over ? colours.ink : colours.dim)))
+      Box(label(n == 0 ? "Hide the steps" : "$n steps", 13px * talk_zoom(e), color=over ? colours.ink : colours.dim)))
   else
     allow = b.action == :allow
     Box(height(26px), padding(12px, 0px), radius(6px), Alignment.Center, name=allow ? "Allow" : "Refuse",
         background(allow ? (over ? tint(colours.ink, 0.85) : colours.ink) : over ? on_glass(0.1) : clear), border(1px, :solid, allow ? clear : on_glass(0.2)),
-      label(allow ? "Allow" : "Refuse", 12px * e.zoom, color=allow ? colours.bg : colours.ink, weight="Semibold"))
+      label(allow ? "Allow" : "Refuse", 12px * talk_zoom(e), color=allow ? colours.bg : colours.ink, weight="Semibold"))
   end
 end
 cursor(::PaneButton) = :hand
 
 "The colour of the panes' ink at `strength` on the window's glass, as a colour with nothing see-through, which hides what's under it"
 solid_on_glass(e, strength) = begin
-  g, k = glass_colour(e), convert(RGBA{Float64}, colours.ink)
+  g, k = talk_on_page[] ? convert(RGBA{Float64}, colours.bg) : glass_colour(e), convert(RGBA{Float64}, colours.ink)
   RGBA(g.r + (k.r - g.r) * strength, g.g + (k.g - g.g) * strength, g.b + (k.b - g.b) * strength, 1.0)
 end
 
@@ -50276,7 +50236,7 @@ moves none of them. It shuts when the mouse leaves.
 """
 send_button(p::AgentPane, e, over::Bool) = begin
   ready = p.field.buf.lines != [""]
-  about = over ? first(page_context(e)) : ""
+  about = over ? first(pane_context(p, e)) : ""
   # Whether it's open, since when, and the words in it, which stay while it shuts
   kept = get(p.parts, :send_open, (false, 0.0, ""))
   kept[1] == !isempty(about) || (kept = (!isempty(about), time(), kept[3]))
@@ -50287,7 +50247,7 @@ send_button(p::AgentPane, e, over::Bool) = begin
   t = 1 - (1 - t)^3   # quick at the start, slow at the end
   open = kept[1] ? t : 1 - t
   face = pane_face(e, colours.bg; size=12px)
-  words = shortened(face, kept[3], max(40px, agent_wide(e) - 2PANE_X - 90px))
+  words = shortened(face, kept[3], max(40px, pane_wide(p, e) - 2PANE_X - 90px))
   wide = px(round(num((measure(face, words) + 36px) * open)))
   shows = wide >= 1px
   # Over your words, the button's colour has nothing see-through in it
@@ -50319,7 +50279,7 @@ end
 # A tooltip in the pane is put by the button's rectangle
 onmouse(b::PaneButton, ev::MouseMove) = begin
   # The send button shows what goes with your words while the mouse is on it, so its tooltip says that they go together
-  tip = b.action == :send ? (isempty(first(page_context(editor(b.of)))) ? "Send  ⏎" : "Send with context  ⏎") :
+  tip = b.action == :send ? (isempty(first(pane_context(b.of, editor(b.of)))) ? "Send  ⏎" : "Send with context  ⏎") :
         b.action == :stop ? "Stop the agent. What it changed so far stays." :
         b.action == :new ? "End this session, and start a new one" : b.action == :agent ? "Choose the agent" : ""
   r = isempty(tip) ? nothing : rect(b)
@@ -50485,10 +50445,10 @@ end
 works_here(e, ::Val{:agent_mode}) = agent_mode(e) || !nofile(e)
 add_command!(agent_mode!, title="Show an agent's session at the left of the page and the page's outline at its right, in a wider window. Again puts the window back.")
 
-"End the session of agent mode, and start a new one with your next words"
-new_agent_session!(e) = (new_session!(agent_pane(top_editor(e))); nothing)
-works_here(e, ::Val{:new_agent_session}) = agent_mode(e) && agent_pane(e).session !== nothing
-add_command!(new_agent_session!, title="End the session of agent mode, and start a new one with your next words")
+"End the session of agent mode. Your next words there start a new one."
+end_agent_session!(e) = (new_session!(agent_pane(top_editor(e))); nothing)
+works_here(e, ::Val{:end_agent_session}) = agent_mode(e) && agent_pane(e).session !== nothing
+add_command!(end_agent_session!, title="End the session of agent mode. Your next words there start a new one.")
 
 # --- a window that you see through ---
 #
@@ -50570,6 +50530,298 @@ blur_behind!(win, radius::Integer) = begin
   number = ccall((:objc_msgSend, libobjc), Clong, (Ptr{Cvoid}, Ptr{Cvoid}), win, sel("windowNumber"))
   ccall(blur, Cint, (Cint, Cint, Cint), ccall(server, Cint, ()), number, radius) == 0
 end
+
+# --- a session's file ----------------------------------------------------------------------
+#
+# A file whose name ends in .chat keeps a session of an agent: what you and
+# the agent said, the steps that the agent took, and the name that the agent
+# gives the session. Such a file opens as the session, which covers the
+# page's whole space. It's the talk of agent mode's pane with the page to
+# itself, in the page's own colours. It does what a terminal with an agent in
+# it does, but what the agent says shows as a page: headings, tables,
+# diagrams and charts. That's the file's highest level, over its bits, its
+# bytes in hexadecimal and its text, so ⌘E shows the text.
+#
+# New Agent Session, in a folder's menu and in the command palette, makes
+# such a file for the agent that Settings chose, and shows it. The agent
+# works in the top folder of the folder's repository, or in the folder
+# itself when it's in none. Its program starts with your first words. It
+# works on while the window shows other files, as a terminal's shell does.
+# It ends when the window closes, and when the agent has done and its file
+# has no tab.
+#
+# The file is Markdown, so any app reads it. A comment starts each part and
+# says what the part is: `<!-- ladder:you -->` before your words,
+# `<!-- ladder:agent -->` before the agent's, `<!-- ladder:step … -->`
+# before a step. The first line names the agent, its folder and the session.
+# With that name the agent goes on with the session on another day: your
+# next words start its program again, and it knows what was said. The file
+# is written when the agent has done, and every two seconds while it works.
+
+const CHAT_WIDE = 780px                  # how wide the talk of a session's file is at most, before the page's zoom
+const PAGE_TALK = 16px                   # how tall the text of a session's file is, before the page's zoom
+const TALK_MARK = "<!-- ladder:"         # what the line that starts a part of a session's file starts with
+
+"True when the page shows a session's file at one of its levels: as the session, its text, its bytes in hexadecimal or its bits"
+chat_page(b::Buffer) = b.view in FILE_VIEWS && lowercase(splitext(b.path)[2]) in CHATS && isfile(b.path)
+
+"True when the page shows a session's file as the session"
+chat_shown(e) = e.buf.view == :file && hosted(e) === nothing && chat_page(e.buf)
+
+"The sessions' files of the window of `e`: the pane of each one that it has shown and that's still there"
+chats(e) = get!(() -> Any[], e.nodes, :chats)
+
+"True when the pane `p` is a session's file in the page, and not the pane of agent mode"
+on_page(p::AgentPane) = !isempty(p.file)
+
+"How wide the pane `p` is: the pane of agent mode has what the page's card leaves, and a session's file has a column in the middle of the page"
+pane_wide(p::AgentPane, e) = on_page(p) ? px(round(num(clamp(page_room(e)[1] - 16px, 260px, CHAT_WIDE * e.zoom)))) : agent_wide(e)
+
+"What goes to the agent with your words from the pane `p`: what the page beside it shows (see `page_context`). A session's file has no page beside it."
+pane_context(p::AgentPane, e) = on_page(p) ? ("", "") : page_context(e)
+
+"The line that starts a part of a session's file: the kind of part, and with `about` what else the part has, as JSON"
+talk_mark(kind, about=nothing) = TALK_MARK * kind * (about === nothing ? "" : " " * replace(json_text(about), "--" => "-\\u002d")) * " -->"
+
+"The words `text` as lines of a session's file. A line that looks like the start of a part gets a \\ before it, which reading takes away."
+talk_body(text) = join((occursin(r"^\\*<!-- ladder:", l) ? "\\" * l : l for l in split(text, '\n')), "\n")
+
+"The mark and the words of the part of a session's file that keeps `it`, something that a session holds"
+talk_part(it::YouSaid) = (talk_mark("you", isempty(it.about) ? nothing : Dict("about" => it.about)), it.words)
+talk_part(it::AgentReply) = (talk_mark("agent"), rstrip(it.text))
+talk_part(it::AgentStep) = (talk_mark("step", Dict("tool" => it.tool, "state" => String(it.state))), it.words)
+talk_part(it::AgentWants) = (talk_mark("asked", Dict("tool" => it.tool, "answer" => String(it.answer), "detail" => it.detail)), it.words)
+talk_part(it::SessionNote) = (talk_mark("note", it.bad ? Dict("bad" => true) : nothing), it.words)
+
+"""
+The text of the file that keeps the session `s`: a line with the agent, its
+folder and the session's name, and then each thing that you and the agent
+said, in order. `before` is what the file had over that line, which stays.
+"""
+talk_text(s::AgentSession, before="") = begin
+  io = IOBuffer()
+  isempty(before) || print(io, before, "\n")
+  println(io, talk_mark("session", Dict("agent" => s.agent, "folder" => s.dir, "id" => s.id)))
+  for it in s.items
+    mark, words = talk_part(it)
+    print(io, "\n", mark, "\n", talk_body(words), "\n")
+  end
+  String(take!(io))
+end
+
+"""
+What `text`, the text of a session's file, holds: the agent's name, its
+folder, the session's name, and what you and the agent said, in order.
+`before` is the text over the first part, which is no part of the session.
+A step that was under way when the file was written is done now.
+"""
+read_talk(text::AbstractString) = begin
+  agent, folder, id, before, items = "", "", "", String[], Any[]
+  kind, about, body = "", nothing, String[]
+  said(key) = (v = json_field(about, key); v isa String ? v : "")
+  part!() = begin
+    words = String(strip(join(body, "\n"), '\n'))
+    empty!(body)
+    if kind == "session"
+      agent, folder, id = said("agent"), said("folder"), said("id")
+    elseif kind == "you"
+      push!(items, YouSaid(words=words, about=said("about")))
+    elseif kind == "agent"
+      push!(items, AgentReply(text=words, whole=true, n=1))
+    elseif kind == "step"
+      push!(items, AgentStep(id="kept-$(length(items))", tool=said("tool"), words=words, state=said("state") == "failed" ? :failed : :done))
+    elseif kind == "asked"
+      answer = said("answer")
+      push!(items, AgentWants(tool=said("tool"), words=words, detail=said("detail"), answer=answer == "allowed" ? :allowed : answer == "refused" ? :refused : :gone))
+    elseif kind == "note"
+      push!(items, SessionNote(words=words, bad=json_field(about, "bad") === true))
+    end
+  end
+  for line in split(text, '\n')
+    m = match(r"^<!-- ladder:(\w+)(?: (.*))? -->\s*$", line)
+    if m !== nothing
+      part!()
+      kind, about = String(m[1]), m[2] === nothing ? nothing : agent_json(m[2])
+    elseif isempty(kind)
+      push!(before, line)
+    else
+      push!(body, occursin(r"^\\+<!-- ladder:", line) ? line[2:end] : line)
+    end
+  end
+  part!()
+  (agent=agent, folder=folder, id=id, items=items, before=String(rstrip(join(before, "\n"))))
+end
+
+"""
+Read the file of the pane `p`, a session's file, into its session: what was
+said, and the name that the agent goes on with. A file with no agent in it
+gets the agent that Settings chose. The agent's folder is the one that the
+file names. Without one, it's the top folder of the file's repository, or
+the file's own folder.
+"""
+load_talk!(p::AgentPane, e) = begin
+  kept = read_talk(try read(p.file, String) catch; "" end)
+  s = p.session
+  if s === nothing
+    agent = !isempty(kept.agent) ? kept.agent : SESSION_COMMAND[] === nothing ? agent_kind(e.ai).name : e.ai
+    here = dirname(abspath(p.file))
+    top = git_top(here)
+    dir = !isempty(kept.folder) && isdir(kept.folder) ? kept.folder : !isempty(top) ? top : here
+    s = p.session = AgentSession(agent=agent, dir=dir, file=p.file, turns=agent_kind(agent).name != "Claude")
+  end
+  s.id, s.items = kept.id, kept.items
+  s.version += 1
+  p.kept, p.stamp = s.version, mtime(p.file)
+  p.parts[:before] = kept.before
+  empty!(p.open)
+  filter!(((k, _),) -> !(k isa Tuple && k[1] == :reply), p.parts)
+  p.follow = true
+  p
+end
+
+"Write the session of the pane `p` to its file, when the file doesn't have all of it yet"
+keep_talk!(p::AgentPane) = begin
+  s = p.session
+  (s === nothing || isempty(p.file) || s.version == p.kept) && return p
+  # A disk that says no is asked again with the next thing that the session has
+  try
+    write(p.file, talk_text(s, get(p.parts, :before, "")))
+    p.stamp = mtime(p.file)
+  catch
+  end
+  p.kept, p.wrote = s.version, time()
+  p
+end
+
+"""
+The session of the session's file that the page shows, in the page's space.
+The words that you type have the keyboard while nothing else has taken it:
+the field that finds text, the sidebar and the command palette take it and
+give it back. The top bar says which agent it is, and where it works.
+"""
+chat_part(e) = begin
+  b = e.buf
+  p = node!(e, (:chat, b.path)) do
+    made = AgentPane(file=b.path)
+    push!(chats(e), made)
+    made
+  end
+  s = p.session
+  # The file changed under the session, as when you changed its text a level down. The session shows what the file has now.
+  (s === nothing || (!s.busy && mtime(p.file) != p.stamp)) && load_talk!(p, e)
+  s = p.session
+  p.field === nothing && pane_field!(p)
+  w = window_of(e)
+  if w !== nothing
+    (w.focus === e || w.focus === nothing) && e.popup == :none && focus(p.field)
+    w.focus === p.field && e.popup != :none && focus(e)   # what floats over the page, like the command palette, has the keys
+  end
+  b.about = s.busy ? "$(s.agent) is working in $(basename(s.dir))" : "$(s.agent) in $(basename(s.dir))"
+  p
+end
+
+"A session's file in the page: what you and the agent said in a column in the middle, and under it the field that you type in"
+talk_page(p::AgentPane) = begin
+  was = talk_on_page[]
+  talk_on_page[] = true
+  try
+    e = editor(p)
+    p.field === nothing && pane_field!(p)
+    follow!(p)
+    wide = pane_wide(p, e)
+    room = wide - PANE_LEFT - PANE_X
+    Column(width(grow=grow), height(grow=grow), Alignment.Start, name="Agent",
+      reuse!(p.scroll, Row(width(grow=grow), Alignment.Start, justify=Alignment.Center, Box(fixed(wide), Alignment.Start, pane_talk(p, e, room)))),
+      Row(width(grow=grow), Alignment.Start, justify=Alignment.Center, Box(fixed(wide), Alignment.Start, pane_foot(p, e, room))))
+  finally
+    talk_on_page[] = was
+  end
+end
+
+"What a session's file shows before anything is said: the agent's logo and name, and the folder that it works in"
+talk_greeting(p::AgentPane, e, room) = begin
+  who = pane_agent(p, e)
+  logo = agent_logo(who)
+  dir = p.session === nothing ? dirname(p.file) : p.session.dir
+  z = talk_zoom(e)
+  line(words, size, colour; weight="") = Row(width(grow=grow), height(size * 1.5), Alignment.Center, justify=Alignment.Center, Box(label(words, size, color=colour, weight=weight)))
+  face = pane_face(e, colours.dim; size=13px)
+  Column(width(grow=grow), Alignment.Start, padding(max(40px, page_room(e)[2] * 0.2), PANE_X, 20px, PANE_LEFT), child_gap=4px, name="Talk",
+    Row(width(grow=grow), height(48px), Alignment.Center, justify=Alignment.Center,
+      Box(fixed(40px), height(40px), Alignment.Center, justify=Alignment.Center,
+          logo === nothing ? Icon("robot", size=40px, color=colours.dim) : Icon(logo[1], size=40px, color=logo[2]))),
+    Box(height(6px)),
+    line("A session with $who", 22px * z, colours.ink; weight="Semibold"),
+    line(shortened(face, "In $(tilde(dir))", room), face.size, colours.dim),
+    Box(height(10px)),
+    line("Ask anything, or say what to do in this folder.", face.size, colours.dim),
+    line("What $who says shows here as a page: tables, diagrams and charts.", face.size, colours.faint))
+end
+
+"""
+See to the sessions' files of the window of `e`. Each one's agent gets its
+turn, also while the window shows another file, and what it said goes into
+its file: at once when it has done, and every two seconds while it works.
+A session that isn't shown gives the keyboard back. Its program ends when
+the agent has done and the file has no tab: your next words start it again.
+One whose file has gone ends.
+"""
+chat_tick!(e) = begin
+  haskey(e.nodes, :chats) || return nothing
+  shown = chat_shown(e) ? get(e.nodes, (:chat, e.buf.path), nothing) : nothing
+  w = window_of(e)
+  for p in copy(chats(e))
+    s = p.session
+    if p !== shown
+      w !== nothing && p.field !== nothing && w.focus === p.field && focus(e)
+      if !isfile(p.file)
+        s === nothing || close!(s)
+        delete!(e.nodes, (:chat, p.file))
+        Base.filter!(o -> o !== p, chats(e))
+        continue
+      end
+      s !== nothing && !s.busy && running(s) && !(p.file in tabs(e)) && close!(s)
+    end
+    pane_tick!(p, e)
+    s !== nothing && s.version != p.kept && (!s.busy || time() - p.wrote > 2) && keep_talk!(p)
+  end
+  nothing
+end
+
+"End the agent of every session's file of the window of `e`, and write each file: the window has closed"
+close_chats!(e) = begin
+  haskey(e.nodes, :chats) || return nothing
+  for p in chats(e)
+    s = p.session
+    s === nothing && continue
+    was = s.busy
+    close!(s)
+    was && (s.version += 1)   # what was under way is whole now
+    keep_talk!(p)
+  end
+  empty!(chats(e))
+  nothing
+end
+
+"""
+Start a session with the agent that Settings chose, in a file of its own in
+the folder `dir`, and show it. The session fills the page: what the agent
+says shows as a page, not as a terminal's text. The agent works in the top
+folder of the folder's repository, or in the folder itself.
+"""
+new_agent_session!(e, dir) = begin
+  e = top_editor(e)
+  who = agent_kind(e.ai).name
+  path = free_path(e, dir, who, first(CHATS))
+  top = git_top(dir)
+  try write(path, talk_mark("session", Dict("agent" => who, "folder" => isempty(top) ? String(dir) : top, "id" => "")) * "\n") catch; return end   # the disk said no
+  open!(e, path)
+  list_files!(e)
+  nothing
+end
+new_agent_session!(e, d::AbstractDirectory) = new_agent_session!(e, path_of(d))
+# ⌘⇧A starts a session at once, in the folder of the file that shows
+add_command!(new_agent_session!; group="The file or the folder in focus", title="Start a session with your agent in the folder, shown as a page", keys="cmd+shift+a")
 
 # --- ask an agent ---
 #
@@ -59534,7 +59786,7 @@ news_companion!(e, folder) = begin
   try
     script = joinpath(tempdir(), "ladder-sessions", "news-$(round(Int, time() * 1000)).command")
     mkpath(dirname(script))
-    write(script, session_script(k, file, folder; words=companion_args(k, folder, truepath(file))))
+    write(script, session_script(k, folder, companion_args(k, folder, truepath(file))))
     chmod(script, 0o755)
     # The talk is kept in the folder of today's articles
     day = joinpath(folder, Dates.format(Dates.today(), "yyyy-mm-dd"))

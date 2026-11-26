@@ -491,8 +491,8 @@ try
     K.agent_mode!(e)
     frames(w, 3)
     @test named("Reply") !== nothing && pane.field.buf.lines == ["half a thought"]
-    # New Agent Session ends the program, and the next words start another
-    K.new_agent_session!(e)
+    # End Agent Session ends the program, and the next words start another
+    K.end_agent_session!(e)
     ok = until(() -> !K.running(s))
     @test ok && pane.session === nothing && named("Reply") === nothing
   end
