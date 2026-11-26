@@ -541,7 +541,7 @@ Ladder shows a page of Markdown that a web server sends, as a browser shows a pa
 
 Navigate goes to a file or a folder of your Mac too. Type its path, like `~/Desktop` or `/Users`, and the window shows it, as a link to it does. A path that doesn't start with `/` or `~` is from the folder of the page that shows.
 
-A server that has no Markdown sends HTML, and Ladder shows the page that the HTML makes, with its own engine, as it shows an HTML file. Its scripts run, and you scroll it, click it and type in it. Press ⌘E to see its HTML, and ⌘E again for the page.
+A server that has no Markdown sends HTML, and Ladder shows the page that the HTML makes, with its own engine, as it shows an HTML file. Its scripts run, and you scroll it, click it and type in it. Press ⌘E to see its HTML, and ⌘E again for the page. The top bar takes the page's colour, as a browser's bar does, so the two are one piece: the colour that the page names for its bar, or else the colour along the top of what shows. On a dark page the bar's buttons are light.
 
 Ladder keeps each page that it gets in your browser folder, `~/Browser`, at its place on its site. So `example.com/notes/plans.md` is the file `~/Browser/example.com/notes/plans.md`, and the page of the folder `example.com/notes/` is `notes/index.md` there. Each picture of the page goes there too, and each file that a `view` block of the page shows. Being in the browser folder is what makes a file act as a page of the web, so a file of it that you open from the sidebar or the Finder acts the same.
 

@@ -1107,6 +1107,69 @@ list(root::Box, wide, tall; pictures=src -> nothing, base="", at=nothing) = begi
   l
 end
 
+"The colour `c` over the colour `under`, which has no see-through part, as `share` of `c` and the rest of `under`"
+over(under::UInt32, c::UInt32, share=alpha(c)) = begin
+  share >= 1 && return c | 0xff000000
+  share <= 0 && return under
+  mix(k) = round(UInt32, ((under >> k) & 0xff) * (1 - share) + ((c >> k) & 0xff) * share) << k
+  0xff000000 | mix(16) | mix(8) | mix(0)
+end
+
+"""
+The one colour that the page shows along the line `y` px down it, or nothing.
+It's looked at in five points across the page, and it's the colour of three
+or more of them. A point under a picture, a gradient or a drawing has no one
+colour. `under` is what shows where the page draws nothing. What's turned
+or skewed is left out, and so is text, which is too thin to colour the line.
+"""
+edge_colour(l::List, y; under=0xffffffff) = begin
+  at = Float64(y) + 0.5
+  xs = [l.wide * k / 4 for k in 0:4]
+  xs[1], xs[end] = 0.5, l.wide - 0.5
+  base = over(under, l.background)
+  seen = Union{UInt32,Nothing}[base for _ in xs]
+  m = SAME
+  moves = NTuple{6,Float64}[]
+  shares = Float64[1.0]          # how much of each piece that's drawn as one shows
+  cuts = NTuple{4,Float64}[]     # the rectangles that what's drawn is cut to
+  for i in l.items
+    if i isa Move
+      push!(moves, m)
+      m = times(m, i.m)
+    elseif i isa Unmove
+      isempty(moves) || (m = pop!(moves))
+    elseif i isa Layer
+      push!(shares, shares[end] * i.opacity)
+    elseif i isa Unlayer
+      length(shares) > 1 && pop!(shares)
+    elseif i isa Clip
+      # A cut that's turned is taken as no cut
+      push!(cuts, something(placed_area(m, i.x, i.y, i.w, i.h), (-1e9, -1e9, 2e9, 2e9)))
+    elseif i isa Unclip
+      isempty(cuts) || pop!(cuts)
+    elseif i isa Fill || i isa Backing || i isa Picture || i isa Sketch || i isa Moving || i isa Drawing || i isa Widget
+      r = placed_area(m, i.x, i.y, i.w, i.h)
+      (r === nothing || !(r[2] <= at < r[2] + r[4])) && continue
+      share = i isa Fill ? alpha(i.color) * shares[end] : 0.0
+      for (k, x) in enumerate(xs)
+        (r[1] <= x < r[1] + r[3] && all(c -> c[1] <= x < c[1] + c[3] && c[2] <= at < c[2] + c[4], cuts)) || continue
+        seen[k] = !(i isa Fill) ? nothing : share >= 1 ? i.color | 0xff000000 : seen[k] === nothing ? nothing : over(seen[k], i.color, share)
+      end
+    end
+  end
+  for c in unique(seen)
+    c !== nothing && count(==(c), seen) >= 3 && return c
+  end
+  nothing
+end
+
+"The rectangle `(x, y, w, h)` where the move `m` puts it, or nothing when `m` turns or skews it"
+placed_area(m, x, y, w, h) = begin
+  (m[2] == 0 && m[3] == 0) || return nothing
+  (a, b), (c, d) = moved(m, x, y), moved(m, x + w, y + h)
+  (min(a, c), min(b, d), abs(c - a), abs(d - b))
+end
+
 # --- drawing ------------------------------------------------------------------------------
 
 rect(x, y, w, h) = Ref(Skia.sk_rect_t(Float32(x), Float32(y), Float32(x + w), Float32(y + h)))

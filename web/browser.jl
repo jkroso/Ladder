@@ -15,6 +15,7 @@
 #     loading(b)                           # true while a page is on its way
 #     page_now(b)                          # the address that was asked for the page that shows, or that's on its way
 #     scroll!(b, 400)                      # put the top of the window 400 px down the page
+#     tint(b)                              # the colour of the page for a bar over it, or nothing
 #
 # In place of an address, `html` is the HTML of a page to show, and `base` is
 # the address that the addresses in it are from. That page has a place among
@@ -400,6 +401,14 @@ scroll!(b::Browser, y) = begin
   redraw_in!(b, 0)
   scrolled(b)
 end
+
+"""
+The colour that a bar over the view takes, as a browser's bar takes the colour
+of its page: what the page's `theme-color` says, or the one colour along the
+top edge of what shows. Nothing before the page shows, and when its top edge
+has no one colour. See `Web.tint`.
+"""
+tint(b::Browser) = (p = b.view.page; p === nothing ? nothing : Web.tint(p, scrolled(b)))
 
 describe(b::Browser) = begin
   v = b.view

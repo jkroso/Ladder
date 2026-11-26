@@ -59,13 +59,13 @@
 @use Skia
 @use "github.com/jkroso/MiniFB.jl/skia" srgb
 @use Base64: base64decode
-@use "./dom" document Document
-@use "./css" resolve
+@use "./dom" document Document Element attr
+@use "./css" resolve media
 @use "./svg" => Svg
 @use "./video" => Film
 @use "./embed" => Embed
 @use "./box" boxes Box
-@use "./style" styles isauto ispercent Clock commit!
+@use "./style" styles isauto ispercent Clock commit! colour alpha
 @use "./layout" layout!
 @use "./paint" => Paint
 @use "./css" DARK
@@ -411,6 +411,34 @@ first of its pictures that move shows its next picture. Inf with none, and
 when they have all stopped.
 """
 changes(p::Page, at) = minimum(Float64[Film.after(r, at) for r in p.held if r isa Film.Reel]; init=Inf)
+
+"""
+The colour of the page `p` that a browser's bar takes, when the top of the
+window is `top` px down it: the colour that the page's `<meta
+name="theme-color">` says, or else the one colour along the top edge of what
+shows. Nothing when the page says none and its top edge has no one colour,
+like a picture there. `under` is what shows where the page draws nothing.
+"""
+tint(p::Page, top=0.0; under=0xffffffff) = begin
+  said = theme_colour(p; under)
+  said === nothing ? Paint.edge_colour(p.list, top / p.zoom; under) : said
+end
+
+"The colour that the page's `<meta name=\"theme-color\">` says, over `under`, or nothing. One with a `media` that the page isn't is left out."
+theme_colour(p::Page; under=0xffffffff) = begin
+  html = p.root.element
+  html === nothing && return nothing
+  for head in html.children
+    (head isa Element && head.tag == "head") || continue
+    for m in head.children
+      (m isa Element && m.tag == "meta" && lowercase(strip(attr(m, "name"))) == "theme-color") || continue
+      media(attr(m, "media"), p.wide / p.zoom) || continue
+      c = colour(attr(m, "content"))
+      c isa UInt32 && alpha(c) > 0 && return Paint.over(under, c)
+    end
+  end
+  nothing
+end
 
 "The link at the point `(x, y)` of the page, or nothing"
 link(p::Page, x, y) = begin

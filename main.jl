@@ -30986,22 +30986,115 @@ colours of the sidebar, the page and the panel at the right, as a bar that
 doesn't hide has under it, with a line along its bottom.
 """
 bar_back(e) = begin
-  hides_bar(e) || return ()
+  tint = bar_tint(e)
+  hides = hides_bar(e)
+  (hides || tint !== nothing) || return ()
   if agent_shows(e)
+    # Under a bar that doesn't hide is the top of the page's card, which has the web page's colour: see `describe(c::PageCard)`
+    hides || return ()
     # In agent mode only the page's card has a colour of its own, so the bar lies on that
     left, wide = page_card_span(e)
+    paper, rule = tint === nothing ? (colours.bg, colours.line) : (tint, tint_colours!(tint).line)
     return (Row(width(grow=grow), height(TOPBAR_H), Alignment.Start, offset_y=bar_top(e), padding(0px, 0px, 0px, left),
-              Box(fixed(wide), height(grow=grow), background(colours.bg), border(1px, :solid, colours.line)[:bottom])),)
+              Box(fixed(wide), height(grow=grow), background(paper), border(1px, :solid, rule)[:bottom])),)
   end
   full = filled(e)
   # A side menu that a kind of folder made has no colour of Ladder's over its top
   side = full || lowered(e) !== nothing || as_app(e) || own_side_menu(e) ? 0px : side_w(e)
   right = full || right_view(e) === nothing ? 0px : right_w(e) * right_opened(e)
   line = border(1px, :solid, colours.line)
+  # Over a web page the part beside the sidebar has the page's colour. A bar that doesn't hide has no line under it
+  # there, so it and the page are one piece. The sidebar and a panel at the right are under a bar that doesn't hide.
+  if !hides
+    return (Row(width(grow=grow), height(TOPBAR_H), Alignment.Start, offset_y=bar_top(e),
+              Box(fixed(side), height(grow=grow)), Box(width(grow=grow), height(grow=grow), background(tint)), Box(fixed(right), height(grow=grow))),)
+  end
+  middle = tint === nothing ? () : (background(tint), border(1px, :solid, tint_colours!(tint).line)[:bottom])
   (Row(width(grow=grow), height(TOPBAR_H), Alignment.Start, offset_y=bar_top(e), background(colours.bg), line[:bottom],
      (side > 0px ? (Box(fixed(side), height(grow=grow), background(colours.panel), line[:right]),) : ())...,
-     Box(width(grow=grow), height(grow=grow)),
+     Box(width(grow=grow), height(grow=grow), middle...),
      (right > 0px ? (Box(fixed(right), height(grow=grow), background(colours.panel), line[:left]),) : ())...),)
+end
+
+# --- the top bar over a web page ------------------------------------------------------------------
+#
+# Over a page of HTML the top bar takes the page's colour, as a browser's bar
+# does: the colour that the page's `<meta name="theme-color">` says, or else
+# the one colour along the top edge of what shows, so it changes as the page
+# scrolls past a header. So the bar and the page are one piece. The bar's
+# buttons and the file's name have the ink of a theme that shows on that
+# colour: the window's own when they show, dark on a light page and light on a
+# dark one when they don't. The part of the bar over the sidebar, and over a
+# panel at the right, keeps the window's colours. A page with no one colour
+# along its top, like one with a picture there, leaves the bar as it was.
+
+"""
+The colour of the web page that the window shows, which the top bar takes, or
+nothing: before the page shows, for a page with no one colour at its top, for
+an HTML file shown as its text, and for any other file. In agent mode the
+page lies on a card, and the top of the card and the middle of the bar over
+it take the colour.
+"""
+bar_tint(e) = begin
+  (html_shown(e) && !filled(e) && !page_covered(e)) || return nothing
+  v = get(e.nodes, (:html, e.buf.path), nothing)
+  (v isa HTMLPage && v.browser !== nothing) || return nothing
+  b = v.browser
+  p, s = b.view.page, Browsers.scrolled(b)
+  p === nothing && return nothing
+  # The bar asks more than once in each frame, so the colour is kept until the page is laid out again or scrolls
+  was = get(e.nodes, :bar_tint, nothing)
+  was !== nothing && was[1] === p && was[2] == s && return was[3]
+  c = Browsers.tint(b)
+  tint = c === nothing ? nothing : RGBA(((c >> 16) & 0xff) / 255, ((c >> 8) & 0xff) / 255, (c & 0xff) / 255, 1.0)
+  e.nodes[:bar_tint] = (p, s, tint)
+  tint
+end
+
+"How light the colour `c` looks, from 0 for black to 1 for white"
+how_light(c) = (k = convert(RGBA{Float64}, c); 0.2126k.r + 0.7152k.g + 0.0722k.b)
+
+"The colour `share` of the way from `a` to `b`"
+blended(a, b, share) = begin
+  x, y = convert(RGBA{Float64}, a), convert(RGBA{Float64}, b)
+  RGBA(x.r + (y.r - x.r) * share, x.g + (y.g - x.g) * share, x.b + (y.b - x.b) * share, 1.0)
+end
+
+"The colours of the top bar over a web page: see `tint_colours!`"
+const TINT_COLOURS = deepcopy(SEPIA)
+
+"""
+The colours of the top bar over a web page of the colour `c`. They're the
+window's own when its ink shows on `c`, else those of the light or the dark
+theme. `c` is behind them, and a button under the mouse or turned on is a
+little darker than `c` on a light page and lighter on a dark one.
+"""
+tint_colours!(c) = begin
+  own = colours_over[] === nothing ? colours : PAGE_KEPT
+  dark = how_light(c) < 0.5
+  base = (how_light(own.bg) < 0.5) == dark ? own : dark ? NIGHT : PAPER
+  base === TINT_COLOURS || foreach(n -> setfield!(TINT_COLOURS, n, getfield(base, n)), fieldnames(Palette))
+  TINT_COLOURS.bg = c
+  TINT_COLOURS.panel = blended(c, base.ink, 0.04)
+  TINT_COLOURS.hover = blended(c, base.ink, 0.08)
+  TINT_COLOURS.active = blended(c, base.ink, 0.13)
+  TINT_COLOURS.line = blended(c, base.ink, 0.15)
+  TINT_COLOURS
+end
+
+"""
+The colours of the top bar's three parts, its left end, its middle and its
+right end: each a Palette, or nothing for the page's own. In agent mode the
+two ends lie over the dark panes, and the middle over the page's card. Over a
+web page the bar has the page's colours, but where an end lies over the
+sidebar or a panel at the right.
+"""
+bar_inks(e) = begin
+  tint = bar_tint(e)
+  p = tint === nothing ? nothing : tint_colours!(tint)
+  agent_shows(e) && return (PANE_COLOURS, p, PANE_COLOURS)
+  p === nothing && return (nothing, nothing, nothing)
+  (side_w(e) > 0px ? nothing : p, p, right_view(e) !== nothing && right_opened(e) > 0 ? nothing : p)
 end
 
 "The most of the window's width that the sidebar can have, so the page keeps room beside it"
@@ -32834,9 +32927,10 @@ takeoff, a schedule or a sketch, the lines of one as text, or a picture.
 filled(e) = full_block(e) !== nothing || lowered(e) !== nothing || zooming(e) !== nothing
 
 # In agent mode the two ends of the bar lie over the dark panes, so they have the panes' colours. The middle is over the page's card.
-describe(t::TopBar) = agent_shows(editor(t)) ? with_pane_colours(() -> bar_row(t)) : bar_row(t)
+# Over a web page the bar has the page's colours. See `bar_inks`.
+describe(t::TopBar) = (inks = bar_inks(editor(t)); with_colours(() -> bar_row(t, inks), inks[3]))
 
-bar_row(t::TopBar) = begin
+bar_row(t::TopBar, inks=(nothing, nothing, nothing)) = begin
   e = editor(t)
   # While the page shows as slides or as an app, the bar is empty. It's still what you drag to move the window.
   (slideshow(e) === nothing && !as_app(e)) || return Row(width(grow=grow), height(TOPBAR_H), name="TopBar", offset_y=bar_top(e))
@@ -32905,15 +32999,20 @@ bar_row(t::TopBar) = begin
   # The top bar lies over the top of the sidebar. The file's name is in the
   # middle of the space beside the sidebar, so it moves as the sidebar slides.
   dark = agent_shows(e)
+  # Each part is described and drawn with its own colours. With none but the page's, the bar needs no marks.
+  marked = any(!isnothing, inks)
+  mark(p) = marked ? (ColourMark(palette=p),) : ()
   Row(width(grow=grow), height(TOPBAR_H), name="TopBar", offset_y=bar_top(e),
-    pane_mark(dark, true)...,
-    Row(fixed(left + room), height(grow=grow),
-      # The close, minimise and zoom buttons sit over the first 84px. In full screen they're hidden, and the buttons slide left.
-      Row(fixed(over), height(grow=grow), padding(0px, 8px, 0px, mac_buttons_room(e)), child_gap=2px,
-        buttons..., (dark ? pane_head(agent_pane(e), e) : (Box(width(grow=grow)),))..., arrows...)),   # in agent mode, the heading of the agent's pane
-    pane_mark(dark, false)...,
-    with_pane_colours(() -> Box(width(grow=grow), height(grow=grow), clip=true, crumb), false),
-    pane_mark(dark, true)...,
+    mark(inks[1])...,
+    with_colours(inks[1]) do
+      Row(fixed(left + room), height(grow=grow),
+        # The close, minimise and zoom buttons sit over the first 84px. In full screen they're hidden, and the buttons slide left.
+        Row(fixed(over), height(grow=grow), padding(0px, 8px, 0px, mac_buttons_room(e)), child_gap=2px,
+          buttons..., (dark ? pane_head(agent_pane(e), e) : (Box(width(grow=grow)),))..., arrows...))   # in agent mode, the heading of the agent's pane
+    end,
+    mark(inks[2])...,
+    with_colours(() -> Box(width(grow=grow), height(grow=grow), clip=true, crumb), inks[2]),
+    mark(inks[3])...,
     Row(fixed(side + beside), height(grow=grow), justify=Alignment.End, padding(0px, 10px, 0px, 0px),
       # A file that's only shown has no words to count. The bar has a lock, after what the file says of itself. A file with levels
       # has the snake or the ladder too. It's after the words, which are longer at one level than at another,
@@ -32936,7 +33035,7 @@ bar_row(t::TopBar) = begin
                       (b.fixed ? (lock_part(e),) : ())...,
                       # In agent mode, the button that hides the outline is at the end
                       (agent_shows(e) ? right_part(e) : ())...))...),
-    pane_mark(dark, false)...)
+    mark(nothing)...)
 end
 
 """
@@ -34248,7 +34347,10 @@ show_title_trail!(e, t, w, path) = begin
   nothing
 end
 
-describe(v::TitleTrail) = begin
+# The path lies over the middle of the bar, so it has the bar's colours there: a web page's, when the bar has them
+describe(v::TitleTrail) = with_colours(() -> trail_view(v), bar_inks(editor(v))[2])
+
+trail_view(v::TitleTrail) = begin
   # The path goes when the bar stops showing the file's name: as slides, as an app, or under a video that fills the screen
   e = editor(v)
   (slideshow(e) !== nothing || as_app(e) || screening(e) || nofile(e)) && (w = window_of(v); w === nothing || close_popup!(w, :title_trail))
@@ -39189,8 +39291,9 @@ open_outside!(e) = (open_outside(e.buf.path); e)
 The top bar's button that opens the file of a page that's only shown in the
 app that the Mac uses for it, since that app can change it. A folder, or a
 file that no app opens, has no button: it would only show it in the Finder.
+Nor has an HTML file: its app is a web browser, and Ladder is one for it.
 """
-outside_button(e) = isempty(opener(e.buf.path)) ? () : (button(e, :outside, "box-arrow-up-right"),)
+outside_button(e) = isempty(opener(e.buf.path)) || html_page(e.buf) ? () : (button(e, :outside, "box-arrow-up-right"),)
 
 "The name of the app at `path`, like Ladder for /Applications/Ladder.app"
 app_name(path) = splitext(basename(path))[1]
@@ -44805,7 +44908,7 @@ describe_window(e::Editor) = begin
   # A page of a blog looks as the blog's site does, whatever the theme. Text laid out in the other look is laid out again.
   look = page_look(e)
   look == e.look || (e.look = look; restyle!(e))
-  pane_dark[] = false   # the page's colours, whatever the last frame left
+  colours_over[], pane_dark[] = nothing, false   # the page's colours, whatever the last frame left
   use!(look == :site ? SITE : look == :news ? NEWS : getproperty(THEMES, e.theme))
   use_code_font!(e)
   side_tick!(e)   # the side menu of this frame, and how wide it is
@@ -49603,22 +49706,32 @@ on_glass(strength) = tint(colours.ink, strength)
 
 "The colours of the two panes of agent mode"
 const PANE_COLOURS = NIGHT
-"The page's colours, kept while the panes' colours are in use"
+"The page's colours, kept while other colours are in use"
 const PAGE_KEPT = deepcopy(SEPIA)
+"The colours in use in place of the page's, like the panes' or those of the top bar over a web page, or nothing while the page's are in use"
+const colours_over = Ref{Any}(nothing)
 "True while the panes' colours are in use"
 const pane_dark = Ref(false)
 
-"Use the colours of the panes of agent mode from now on, or with `on` false the page's again. It gives which were in use before."
-pane_colours!(on::Bool) = begin
-  was = pane_dark[]
-  on == was && return was
-  on ? (foreach(n -> setfield!(PAGE_KEPT, n, getfield(colours, n)), fieldnames(Palette)); use!(PANE_COLOURS)) : use!(PAGE_KEPT)
-  pane_dark[] = on
+"""
+Use the colours `p` in place of the page's from now on, or with nothing the
+page's again. It gives the ones that were in use before, for this to put back.
+"""
+over_colours!(p) = begin
+  was = colours_over[]
+  p === was && return was
+  was === nothing && foreach(n -> setfield!(PAGE_KEPT, n, getfield(colours, n)), fieldnames(Palette))
+  use!(p === nothing ? PAGE_KEPT : p)
+  colours_over[] = p
+  pane_dark[] = p === PANE_COLOURS
   was
 end
 
+"Run `f` with the colours `p` in place of the page's, or with nothing with the page's, and then put back the ones that were in use"
+with_colours(f, p) = (was = over_colours!(p); try f() finally over_colours!(was) end)
+
 "Run `f` with the colours of the panes of agent mode, or with `on` false with the page's, and then put back the ones that were in use"
-with_pane_colours(f, on::Bool=true) = (was = pane_colours!(on); try f() finally pane_colours!(was) end)
+with_pane_colours(f, on::Bool=true) = with_colours(f, on ? PANE_COLOURS : nothing)
 
 """
 A mark in what the window draws: from here on, the frame is drawn with the
@@ -49631,7 +49744,18 @@ wide as its column, so that it's drawn whenever what's beside it is.
   across::Bool = false
 end
 describe(c::PaneColours) = c.across ? Box(width(grow=grow), height(1px)) : Box(fixed(1px), height(grow=grow))
-draw(ctx, size, ui::ConcreteRect, c::PaneColours) = (pane_colours!(c.on); nothing)
+draw(ctx, size, ui::ConcreteRect, c::PaneColours) = (over_colours!(c.on ? PANE_COLOURS : nothing); nothing)
+
+"""
+A mark in a row of what the window draws: from here on, the frame is drawn
+with the colours `palette`, or with nothing with the page's. It's one pixel
+wide and as tall as its row, as `PaneColours` is.
+"""
+@def mutable struct ColourMark <: SemanticUI
+  palette::Any = nothing
+end
+describe(c::ColourMark) = Box(fixed(1px), height(grow=grow))
+draw(ctx, size, ui::ConcreteRect, c::ColourMark) = (over_colours!(c.palette); nothing)
 
 "The mark that turns the panes' colours on, or off, in a row of the window while it's in agent mode. Nothing when `dark` is false."
 pane_mark(dark::Bool, on::Bool) = dark ? (PaneColours(on=on),) : ()
@@ -49683,8 +49807,10 @@ end
 
 describe(c::PageCard) = begin
   e = editor(c)
+  # The top of the card is under the top bar. Over a web page it has the page's colour, as the bar's middle has.
+  tint = bar_tint(e)
   Column(fixed(page_card_wide(e)), height(grow=grow), Alignment.Start, radius(PAGE_CARD_ROUND), background(colours.bg), clip=true, name="Page card",
-    Box(width(grow=grow), height(above_page(e) - PAGE_CARD_GAP)),   # under the top bar
+    Box(width(grow=grow), height(above_page(e) - PAGE_CARD_GAP), (tint === nothing ? () : (background(tint),))...),
     node!(Page, e, :page))
 end
 
