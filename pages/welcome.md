@@ -1116,6 +1116,17 @@ An agent like Claude Code can write a page and show it to you here: a plan with 
 
 To start an agent on the file that the window shows, press ⌘⇧P and run Collaborate. A terminal opens, with the agent that Settings chose in it. The agent reads the file and waits for it. When its logo shows at the top right, change the page and click the logo, as above. You can talk to the agent in the terminal too. The terminal is Kero when Kero is open. Without Kero, it's the Mac's app for `.command` files, which is Terminal unless you chose another.
 
+To talk with an agent beside the page, with no terminal, press ⌘⇧P and run Agent Mode. The window grows wider. The agent's pane is at the left, the page is in the middle on a card in the shape of a sheet of paper, and the page's outline is at the right. Type at the foot of the agent's pane and press Return. ⇧Return starts a new line.
+
+- What the agent says shows as a page, not as a terminal's text: headings, lists, tables, maths, diagrams and charts. Code in it shows as code and doesn't run.
+- Each step that the agent takes is a line, like "Reading plan.md". More than three steps in a row fold into one line, which a click opens.
+- When Claude wants to do something that your settings make it ask for, the pane asks you. Click Allow or Refuse. Claude changes the window's file without asking. Codex, Gemini and Grok can't ask from here: they change files without asking, and their own settings say what else they may do.
+- The round button at the foot sends your words. Rest the mouse on it, and it opens to show what goes to the agent with them: the heading that the caret is under, and whether text is selected. While the agent works, the button stops the agent, and what the agent changed so far stays.
+- The agent's name is in the top bar, over its pane, with how the session goes. Click the name to choose another agent: Claude, Codex, Gemini or Grok. [Settings](settings/settings.md) says which of them the menu lists. The + beside the arrows ends the session. Your next words start a new one.
+- A click on a line of the outline goes to that heading. The arrow before a heading hides the headings under it.
+
+The button at the right end of the top bar hides the outline. Nothing hides the agent's pane: to work without the agent, leave agent mode. The page stays beside the outline, and the agent's pane has the rest of the window, so a wider window gives the agent more room. To give the agent more or less of the window, drag the gap between its pane and the page. Ladder keeps the width, and two clicks on the gap give the page its paper shape again. The two panes are dark on every theme, so that the page stands out between them. Run Agent Mode again to put the window back as it was. The session stays until you close the window, so you can go on with it later.
+
 To ask an agent about one part of the window, no agent has to wait. Run Ask For Change or Ask About, and Ladder starts Claude Code with that part and your words. [Ask an agent about one thing](#ask-an-agent-about-one-thing) says how.
 
 When an agent works on the page with you, Ask For Change and Ask Agent ask that agent, not a new one, because it knows what the page is for. It answers a question in its own window, not in a card. It gets your words, the part that you marked and the lines that you changed. If it's still working on what you sent before, it gets them when it waits for the page again. Until then, click the label to change your words or take them back.

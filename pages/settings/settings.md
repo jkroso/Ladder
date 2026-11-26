@@ -105,6 +105,13 @@ This is the agent that Ladder starts when you ask for a change to a part of the 
 
 When an agent shares the page with you, Ladder asks that agent instead, and the button shows its logo.
 
+```ui
+Row(Alignment.Center, child_gap=18px,
+    [Checkbox(label=name, checked=agent_listed(name), onchange=box -> agent_listed!(name, box.checked)) for name in every_agent()]...)
+```
+
+These boxes say which agents Ladder lists for you to choose from: in the menu above, in the menu of the agent's name in agent mode, and for the command Switch Agent. Take the tick from an agent that you don't use, like one that isn't on this Mac. The agent that's chosen now is always listed.
+
 ## News
 
 ```ui

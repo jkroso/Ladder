@@ -941,7 +941,7 @@ you let the page's site run code. A block that would run code, like a `ui`
 block or a sum in a line of text, shows as its code. See "a copy of a page
 from a web server" and "a web folder's own page".
 """
-foreign(path::AbstractString) = Eml.isemail(path) ||
+foreign(path::AbstractString) = is_reply(path) || Eml.isemail(path) ||
   ((isremote(path) || in_browser(path) || !isempty(copied_from(path))) && site_runs(page_site(path)) !== true)
 
 "The site that the page at `path` is from, like https://example.com: the site of a page from a web server or of a copy of one, or \"\""
@@ -1049,7 +1049,7 @@ kinds(b::Buffer) = begin
   elseif b.kinds_at != b.version
     b.kinds = classify(b.lines)
     # A page that somebody else wrote, like an email, shows the code of a block that would run code or read the Mac's files
-    foreign(b.path) && shown_only!(b.kinds) && code_waits!(b.path)
+    foreign(b.path) && shown_only!(b.kinds, is_reply(b.path) ? REPLY_BLOCKS : SHOWN_BLOCKS) && code_waits!(b.path)
     b.kinds_at = b.version
   end
   b.kinds
@@ -1826,8 +1826,22 @@ end
 "How wide and how tall the page's space in the window is: beside the sidebar, and under the top bar"
 page_room(e) = begin
   w, h = window_size(e)
+  # In agent mode, the page is on a card between the two panes
+  agent_shows(e) && return (page_span(e)[2], max(h - above_page(e) - PAGE_CARD_GAP, 1px))
   side = lowered(e) === nothing ? side_w(e) : 0px
   (max(w - side, 1px), max(h - above_page(e), 1px))
+end
+
+"""
+Where the page's space is across the window: its left edge, and how wide it
+is. It's beside the sidebar. In agent mode it's the page's card, between the
+agent's pane and the outline.
+"""
+page_span(e) = begin
+  agent_shows(e) && return page_card_span(e)
+  w, _ = window_size(e)
+  side = lowered(e) === nothing ? side_w(e) : 0px
+  (side, w - side)
 end
 
 """
@@ -4344,7 +4358,11 @@ sandbox(e) = get!(e.nodes, :sandbox) do
   # ... and the agent that Ladder starts for a change or a question, by its name, and the names that it can be
   Core.eval(m, :(const page_agent = $(() -> (reads!(e, :ai); e.ai))))
   Core.eval(m, :(const page_agent! = $(name -> preferred_agent!(e, String(name)))))
-  Core.eval(m, :(const agent_names = $(() -> [k.name for k in AGENT_KINDS])))
+  Core.eval(m, :(const agent_names = $(() -> (reads!(e, :agents); reads!(e, :ai); listed_agents(e)))))
+  # ... and every agent that Ladder can start, and whether each is in the lists that you choose an agent from
+  Core.eval(m, :(const every_agent = $(() -> [k.name for k in AGENT_KINDS])))
+  Core.eval(m, :(const agent_listed = $(name -> (reads!(e, :agents); reads!(e, :ai); String(name) in listed_agents(e)))))
+  Core.eval(m, :(const agent_listed! = $((name, on) -> agent_listed!(e, String(name), Bool(on)))))
   # ... and whether a line of a file of code that's too long for the window goes on under itself
   Core.eval(m, :(const code_wrap = $(() -> (reads!(e, :wrap); e.wrap))))
   Core.eval(m, :(const code_wrap! = $(on -> wrap!(e, Bool(on)))))
@@ -27614,7 +27632,8 @@ text_width(e) = begin
   alone = lowered(e) !== nothing
   # A side menu's compact form keeps its width beside the text while the sidebar is closed
   beside = alone ? 0px : e.panel || sliding(e) ? panel_w(e) : side_least(e)
-  room = w - beside - 2page_x(e) - gutter(e)
+  # In agent mode, the text is on the page's card, which keeps its width while a pane slides
+  room = (agent_shows(e) ? page_card_wide(e) : w - beside) - 2page_x(e) - gutter(e)
   # A file of code or of text takes all the room that the window has, and so do a CSV file's table and
   # the lines of a block that fill the window. A page is no wider than the settings say. A page of a blog is
   # as wide as its site's text, for as many words to a line. A page with comments leaves room for them at its right.
@@ -27630,10 +27649,9 @@ numbered lines starts at the left of that space, after its numbers, unless it's
 scrolled to the right.
 """
 text_left(e) = begin
-  w, _ = window_size(e)
-  side = lowered(e) === nothing ? side_w(e) : 0px
+  side, space = page_span(e)
   # The lines of a file's bytes start at the left too, and scroll to the right as numbered lines do
-  numbered(e.buf) || bytes_page(e.buf) ? side + PAGE_X + gutter(e) - sideways(e) : side + text_inset(e, w - side)
+  numbered(e.buf) || bytes_page(e.buf) ? side + PAGE_X + gutter(e) - sideways(e) : side + text_inset(e, space)
 end
 
 """
@@ -30617,7 +30635,7 @@ const THEME_ORDER = (:sepia, :paper, :night)
 const SLIDE_TIME = 0.25   # seconds for the sidebar to slide in or out
 
 "Show the sidebar if it's hidden, or hide it. It slides from where it is now."
-toggle_panel!(e) = (e.slid_from = opened(e); e.slid = time(); e.panel = !e.panel)
+toggle_panel!(e) = agent_shows(e) ? e.panel : (e.slid_from = opened(e); e.slid = time(); e.panel = !e.panel)   # in agent mode the agent's pane is there, and it stays
 
 sliding(e) = time() - e.slid < SLIDE_TIME
 
@@ -30656,6 +30674,8 @@ toggle_right!(e) = (e.nodes[:right_slid] = (right_opened(e), time()); e.right = 
 "How wide the panel at the right is when it's open. A narrow window makes it narrower, so the page keeps room beside it."
 right_w(e) = begin
   w, _ = window_size(e)
+  # The outline of agent mode is narrower than a panel, and a narrow window makes it narrower still
+  agent_shows(e) && return px(round(num(min(OUTLINE_W, w * 0.22))))
   left = lowered(e) === nothing ? side_w(e) : 0px
   px(round(num(clamp((w - left) * 0.4, 200px, RIGHT_W))))
 end
@@ -30663,6 +30683,7 @@ end
 "What the panel at the right shows for the page, or nothing when the page has no panel: see `page_side`"
 right_view(e) = begin
   (filled(e) || as_app(e) || nofile(e)) && return nothing
+  agent_shows(e) && return node!(OutlinePane, e, :outline_pane)   # in agent mode, the page's outline
   o = page_object(e)
   o === nothing ? nothing : page_side(e, o)
 end
@@ -30679,9 +30700,11 @@ right_panel(e) = begin
   own === nothing && return ()
   right_sliding(e) && redraw_in!(e, 0)
   wide = right_w(e)
+  # In agent mode the window's glass shows behind the outline, as it does behind the agent's pane
+  glassy = agent_shows(e)
   (Row(fixed(wide * shows), height(grow=grow), Alignment.Start, clip=true,
-     Column(fixed(wide), height(grow=grow), Alignment.Start, background(colours.panel), name="Side",
-            border(1px, :solid, colours.line)[:left],
+     Column(fixed(wide), height(grow=grow), Alignment.Start, background(glassy ? clear : colours.panel), name="Side",
+            border(glassy ? 0px : 1px, :solid, colours.line)[:left],
        Box(width(grow=grow), height(max(above_page(e), SIDE_GAP))),   # under the top bar
        own)),)
 end
@@ -30759,7 +30782,7 @@ hide_bar!(e, how::Symbol) = (how in first.(BAR_HIDINGS) && (e.hide_bar = how); s
 hides_bar(e) = e.hide_bar == :always || (e.hide_bar == :full_screen && e.full_screen)
 
 "How much room the top bar keeps at the top of the window, over the page. A bar that hides keeps none: it shows over the page."
-above_page(e) = hides_bar(e) ? 0px : TOPBAR_H
+above_page(e) = (hides_bar(e) ? 0px : TOPBAR_H) + (agent_shows(e) ? PAGE_CARD_GAP : 0px)   # in agent mode, the page's card starts a little under the window's top
 
 "When the top bar that hides last started to slide in or out, and how much of it showed then, from 0 to 1"
 bar_slid(e) = get(e.nodes, :bar_slid, (1.0, 0.0))
@@ -30856,6 +30879,12 @@ doesn't hide has under it, with a line along its bottom.
 """
 bar_back(e) = begin
   hides_bar(e) || return ()
+  if agent_shows(e)
+    # In agent mode only the page's card has a colour of its own, so the bar lies on that
+    left, wide = page_card_span(e)
+    return (Row(width(grow=grow), height(TOPBAR_H), Alignment.Start, offset_y=bar_top(e), padding(0px, 0px, 0px, left),
+              Box(fixed(wide), height(grow=grow), background(colours.bg), border(1px, :solid, colours.line)[:bottom])),)
+  end
   full = filled(e)
   # A side menu that a kind of folder made has no colour of Ladder's over its top
   side = full || lowered(e) !== nothing || as_app(e) || own_side_menu(e) ? 0px : side_w(e)
@@ -30871,7 +30900,7 @@ end
 widest_panel(e) = max(PANEL_MIN, min(PANEL_MAX, px(floor(num(window_size(e)[1]) / 2))))
 
 "How wide the sidebar is when it's open. A narrow window makes it narrower than you dragged it."
-panel_w(e) = min(e.side, widest_panel(e))
+panel_w(e) = agent_shows(e) ? agent_wide(e) : min(e.side, widest_panel(e))   # in agent mode, the agent's pane has the sidebar's place
 
 "Make the sidebar `w` pixels wide, or as near to that as it can be, and keep the width in the settings"
 side!(e, w) = begin
@@ -31875,9 +31904,11 @@ onkey(e::Editor, ev::KeyPress{K}) where K = begin
   command, select = command!(e, w, K)
   command == :wait && return
   # In a part of another page, a key for the window is the window's page's, and esc goes back to that page
-  hosted(e) === nothing || !part_key!(e, w, K, command, select) || return handled
+  (hosted(e) === nothing || agent_part_of(e) !== nothing) || !part_key!(e, w, K, command, select) || return handled
   # In the text of a request in place, Return gives the request to the agent and esc takes the field away
   ask_box_of(e) === nothing || !ask_key!(e, w, K, command) || return handled
+  # In the words that you type to the agent of agent mode, Return gives them to the agent. A key for the window is the window's page's.
+  agent_part_of(e) === nothing || !agent_key!(e, w, K, command) || return handled
   # In a field of a SolidCraft design, Return, Esc, Tab and the window's keys are the design's and the window's. In
   # the sheet of its parameters, Return and Tab are the sheet's.
   field = design_field_of(e)
@@ -32168,9 +32199,8 @@ tablebar(e) = begin
     # A spreadsheet has no buttons that move a column's text: a number goes on the right and text on the left
     [node!(() -> TableButton(action=a, label=l), e, (:table, a)) for (a, l) in TABLE_ACTIONS[1:(isspread(it.content) ? 4 : end)]]...)
   # The page's text is in the middle of the space beside the file panel
-  w, _ = window_size(e)
-  side = side_w(e)
-  left = side + max(PAGE_X, (w - side - e.width) / 2) + item_room(e, it)[1]
+  side, space = page_span(e)
+  left = side + max(PAGE_X, (space - e.width) / 2) + item_room(e, it)[1]
   (Row(width(grow=grow), height(grow=grow), Alignment.Start, padding(top, 0px, 0px, left), bar),)
 end
 
@@ -32695,7 +32725,10 @@ takeoff, a schedule or a sketch, the lines of one as text, or a picture.
 """
 filled(e) = full_block(e) !== nothing || lowered(e) !== nothing || zooming(e) !== nothing
 
-describe(t::TopBar) = begin
+# In agent mode the two ends of the bar lie over the dark panes, so they have the panes' colours. The middle is over the page's card.
+describe(t::TopBar) = agent_shows(editor(t)) ? with_pane_colours(() -> bar_row(t)) : bar_row(t)
+
+bar_row(t::TopBar) = begin
   e = editor(t)
   # While the page shows as slides or as an app, the bar is empty. It's still what you drag to move the window.
   (slideshow(e) === nothing && !as_app(e)) || return Row(width(grow=grow), height(TOPBAR_H), name="TopBar", offset_y=bar_top(e))
@@ -32763,12 +32796,16 @@ describe(t::TopBar) = begin
   own && (w = window_of(e); w !== nothing && any(p -> p.key == :title_trail, popups(w)) && close_popup!(w, :title_trail))
   # The top bar lies over the top of the sidebar. The file's name is in the
   # middle of the space beside the sidebar, so it moves as the sidebar slides.
+  dark = agent_shows(e)
   Row(width(grow=grow), height(TOPBAR_H), name="TopBar", offset_y=bar_top(e),
+    pane_mark(dark, true)...,
     Row(fixed(left + room), height(grow=grow),
       # The close, minimise and zoom buttons sit over the first 84px. In full screen they're hidden, and the buttons slide left.
       Row(fixed(over), height(grow=grow), padding(0px, 8px, 0px, mac_buttons_room(e)), child_gap=2px,
-        buttons..., Box(width(grow=grow)), arrows...)),
-    Box(width(grow=grow), height(grow=grow), clip=true, crumb),
+        buttons..., (dark ? pane_head(agent_pane(e), e) : (Box(width(grow=grow)),))..., arrows...)),   # in agent mode, the heading of the agent's pane
+    pane_mark(dark, false)...,
+    with_pane_colours(() -> Box(width(grow=grow), height(grow=grow), clip=true, crumb), false),
+    pane_mark(dark, true)...,
     Row(fixed(side + beside), height(grow=grow), justify=Alignment.End, padding(0px, 10px, 0px, 0px),
       # A file that's only shown has no words to count. The bar has a lock, after what the file says of itself. A file with levels
       # has the snake or the ladder too. It's after the words, which are longer at one level than at another,
@@ -32788,7 +32825,10 @@ describe(t::TopBar) = begin
                       outside...) :
                      (more..., job_part(e)..., agent_part(e)..., checks..., diff_part(e)..., commit_part(e)..., mode...,
                       # A page that's never changed has a lock at the end
-                      (b.fixed ? (lock_part(e),) : ())...))...))
+                      (b.fixed ? (lock_part(e),) : ())...,
+                      # In agent mode, the button that hides the outline is at the end
+                      (agent_shows(e) ? right_part(e) : ())...))...),
+    pane_mark(dark, false)...)
 end
 
 """
@@ -36377,7 +36417,8 @@ Find the side menu of the window of `e` for this frame, before anything is
 laid out: the page beside it needs its width. `side_part` shows it.
 """
 side_tick!(e) = begin
-  menu = side_menu(e, window_object(e))
+  # In agent mode, the agent's pane has the sidebar's place
+  menu = agent_shows(e) ? agent_pane(e) : side_menu(e, window_object(e))
   own = !(menu isa Sidebar)
   e.nodes[:side_menu] = menu
   e.nodes[:own_side_menu] = own
@@ -36443,7 +36484,7 @@ onmouse(p::PanelEdge, ev::MouseMove) = begin
 end
 
 "The strip over the sidebar's edge, while the sidebar is open and not sliding. It starts under the top bar."
-panel_edge(e) = e.panel && !sliding(e) && lowered(e) === nothing ?
+panel_edge(e) = e.panel && !sliding(e) && lowered(e) === nothing && !agent_shows(e) ?   # the agent's pane is as wide as the window leaves it
   (Row(width(grow=grow), height(grow=grow), Alignment.Start, padding(above_page(e), 0px, 0px, panel_w(e) - EDGE_W / 2),
        node!(PanelEdge, e, :edge)),) : ()
 
@@ -36918,9 +36959,7 @@ end
 
 "Where the finder's box is in the window: its left side, its top and its width. It's centred beside the sidebar."
 finder_place(e) = begin
-  W = num(window_size(e)[1])
-  left = lowered(e) === nothing ? num(side_w(e)) : 0.0
-  room = W - left
+  left, room = num.(page_span(e))
   wide = min(FINDER_WIDE, room - OMNI_LEFT - OMNI_RIGHT)
   (x=left + round((room - wide) / 2), y=FINDER_TOP, w=wide)
 end
@@ -38525,11 +38564,7 @@ palette_bar_lines(e, p::CommandPalette, chips, room) = begin
 end
 
 "How wide the bar is inside, for the tag, the chips and the Run button"
-palette_room(e) = begin
-  wide = num(window_size(e)[1])
-  left = lowered(e) === nothing ? num(side_w(e)) : 0.0
-  wide - left - OMNI_LEFT - OMNI_RIGHT - 2 - 2OMNI_BAR_X
-end
+palette_room(e) = num(page_span(e)[2]) - OMNI_LEFT - OMNI_RIGHT - 2 - 2OMNI_BAR_X
 
 "True when chip `k` is on a line that shows. The Run button, one more than the last chip, always counts as in sight."
 palette_fits(e, p::CommandPalette, k::Int) = begin
@@ -38546,8 +38581,10 @@ with what it hangs over. `down` is how far the whole of it is below its place
 while the bar slides. The strip is `band` here.
 """
 palette_plan(e, p::CommandPalette) = begin
-  W, H = num(window_size(e)[1]), num(window_size(e)[2])
-  left = lowered(e) === nothing ? num(side_w(e)) : 0.0
+  H = num(window_size(e)[2])
+  # The bar is as wide as the page's space: beside the sidebar, or in agent mode under the page's card
+  left = num(page_span(e)[1])
+  W = left + num(page_span(e)[2])
   chips = p.command === nothing ? Wanted[] : palette_chips(p)
   room = palette_room(e)
   lines, more = p.command === nothing ? (Any[], false) : palette_bar_lines(e, p, chips, room)
@@ -40713,8 +40750,7 @@ comment_balance(e, space) = (extra = comment_room(e); clamp(space - 2PAGE_X - e.
 "The page's text, with its comments in a column at its right"
 with_comments(e, page) = begin
   comment_room(e) == 0px && return page
-  w, _ = window_size(e)
-  before = comment_balance(e, w - side_w(e))
+  before = comment_balance(e, page_span(e)[2])
   Row(Alignment.Start, Box(fixed(before)), page, Box(fixed(COMMENT_GAP * e.zoom)), node!(Comments, e, :comments))
 end
 
@@ -44659,6 +44695,7 @@ describe_window(e::Editor) = begin
   # A page of a blog looks as the blog's site does, whatever the theme. Text laid out in the other look is laid out again.
   look = page_look(e)
   look == e.look || (e.look = look; restyle!(e))
+  pane_dark[] = false   # the page's colours, whatever the last frame left
   use!(look == :site ? SITE : look == :news ? NEWS : getproperty(THEMES, e.theme))
   use_code_font!(e)
   side_tick!(e)   # the side menu of this frame, and how wide it is
@@ -44696,6 +44733,7 @@ describe_window(e::Editor) = begin
   run_tick!(e)
   term_tick!(e)
   ask_tick!(e)
+  session_tick!(e)
   about_tick!(e)
   live_checks_tick!(e)
   file_checks_tick!(e)
@@ -44719,8 +44757,8 @@ describe_window(e::Editor) = begin
   # typing shows without waiting for a frame that was already under way. Between
   # times it only wakes to blink the caret.
   if win !== nothing
-    # While the sidebar slides, the top bar's buttons slide, the command palette slides, or the caret moves to a new place, each frame is drawn as soon as it can be
-    win.animating = sliding(e) || clearing(e) || gliding(e) || palette_moving(e) || bar_sliding(e)
+    # While the sidebar or the panel at the right slides, the top bar's buttons slide, the command palette slides, or the caret moves to a new place, each frame is drawn as soon as it can be
+    win.animating = sliding(e) || right_sliding(e) || clearing(e) || gliding(e) || palette_moving(e) || bar_sliding(e)
     # A part of a live block that has the keyboard, like a text field, blinks its own caret
     win.wake = pop!(e.nodes, :ran, false) ? 0.05 : win.focus === e ? 0.51 - mod(time() - e.blink, 0.5) :
                win.focus === nothing ? 0.0 : 0.25
@@ -44770,7 +44808,7 @@ The sidebar, the page and the panel at the right, side by side. The sidebar
 runs from the top of the window to the bottom, and the top bar lies over the
 top of the sidebar and the page.
 """
-window_body(e) = Row(width(grow=grow), height(grow=grow), Alignment.Start, background(colours.bg),
+window_body(e) = agent_shows(e) ? agent_body(e) : Row(width(grow=grow), height(grow=grow), Alignment.Start, background(colours.bg),
   # The lines of a block that fill the window take the sidebar's room too
   (side_w(e) > 0px && lowered(e) === nothing && !as_app(e) ? (side_part(e),) : ())...,
   Column(width(grow=grow), height(grow=grow), Alignment.Start,
@@ -44820,7 +44858,7 @@ the screen. A test's window isn't, so the windows that it opens aren't either.
 """
 show_window!(w, by) = (by !== nothing && isopen(by) && open(w); w)
 
-onclose(e::Editor, ::Window) = (Base.filter!(o -> o !== e, editors); close_designs!(e); close_terminals!(e); nothing)
+onclose(e::Editor, ::Window) = (Base.filter!(o -> o !== e, editors); close_designs!(e); close_terminals!(e); close_agent!(e); nothing)
 
 """
 A window that shows the Markdown file or the folder at `path`, with the
@@ -44999,7 +45037,7 @@ save_settings!(e) = begin
     mkpath(dirname(settings_file()))
     # After the bundle of key bindings comes a line for each command that has other keys than the bundle's, like key.save=ctrl+s
     changed = join(["key.$name=$(e.rebound[name])\n" for name in sort!(collect(keys(e.rebound)))])
-    write(settings_file(), "theme=$(e.theme)\nfont=$(e.font)\nweight=$(e.weight)\nzoom=$(e.zoom)\nwidth=$(e.widest.value)\nplain=$(e.plain)\nspelling=$(e.spelling)\nupdates=$(e.updates)\nautosave=$(e.autosave)\npeeks=$(e.peeks)\nagent=$(e.ai)\nglide=$(e.glide)\nwrap=$(e.wrap)\nnumbers=$(e.numbers)\nshade=$(e.shade)\nbeside=$(e.beside)\nindent=$(e.indent)\ncode=$(e.code_scale)\ncodefont=$(e.code_font)\ncodeweight=$(e.code_weight)\nguide=$(e.guide)\nsidebar=$(e.side.value)\nhidden=$(e.hidden)\nright=$(e.right)\nownmessage=$(e.own)\npinned=$(e.pinned)\nhidebar=$(e.hide_bar)\nkeys=$(e.bundle)\n$changed")
+    write(settings_file(), "theme=$(e.theme)\nfont=$(e.font)\nweight=$(e.weight)\nzoom=$(e.zoom)\nwidth=$(e.widest.value)\nplain=$(e.plain)\nspelling=$(e.spelling)\nupdates=$(e.updates)\nautosave=$(e.autosave)\npeeks=$(e.peeks)\nagent=$(e.ai)\nglide=$(e.glide)\nwrap=$(e.wrap)\nnumbers=$(e.numbers)\nshade=$(e.shade)\nbeside=$(e.beside)\nindent=$(e.indent)\ncode=$(e.code_scale)\ncodefont=$(e.code_font)\ncodeweight=$(e.code_weight)\nguide=$(e.guide)\nsidebar=$(e.side.value)\nhidden=$(e.hidden)\nright=$(e.right)\nownmessage=$(e.own)\npinned=$(e.pinned)\nhidebar=$(e.hide_bar)\npagecard=$(page_card_setting())\nagentshidden=$(join(sort!(collect(AGENTS_HIDDEN[])), ','))\nkeys=$(e.bundle)\n$changed")
   catch
     # A file that can't be written only means the settings last as long as the window
   end
@@ -45142,6 +45180,13 @@ load_settings!(e) = begin
       # It was true or false before the bar could hide in full screen only
       how = value == "true" ? :always : value == "false" ? :never : Symbol(value)
       how in first.(BAR_HIDINGS) && (e.hide_bar = how)
+    elseif name == "agentshidden"
+      # The agents that you took out of the lists, with commas between their names
+      AGENTS_HIDDEN[] = Set(String(n) for n in split(value, ',') if any(k -> k.name == n, AGENT_KINDS))
+    elseif name == "pagecard"
+      # How wide you made the page's card of agent mode. Nothing after the = means it has a page's shape.
+      w = tryparse(Float64, value)
+      PAGE_CARD_CHOSEN[] = w === nothing ? nothing : px(round(max(w, num(PAGE_CARD_NARROWEST))))
     elseif name == "keys"
       any(b -> first(b) == value, BUNDLES) && (e.bundle = String(value))
     elseif startswith(name, "key.")
@@ -45336,7 +45381,7 @@ key_bindings!(e, bundle::Bundle) = bundle!(e, bundle.name)
 struct AgentChoice
   name::String
 end
-choices_for(::Type{AgentChoice}, e) = [AgentChoice(k.name) for k in AGENT_KINDS]
+choices_for(::Type{AgentChoice}, e) = AgentChoice.(listed_agents(e))
 chip_kind(::Type{AgentChoice}) = :choice
 worded(a::AgentChoice) = a.name
 sidenote(a::AgentChoice) = try agent_path(agent_kind(a.name)); "" catch; "not installed" end
@@ -46013,10 +46058,10 @@ page's lines. A block of Julia code keeps its colours. A block in a language
 that Ladder does nothing with, like `python`, stays as it is. True when a
 block that would do more now only shows its code. See `foreign`.
 """
-shown_only!(ks::Vector{Line}) = begin
+shown_only!(ks::Vector{Line}, shown=SHOWN_BLOCKS) = begin
   hid = false
   for (i, l) in enumerate(ks)
-    (l.kind in (Kind.fence, Kind.code) && !isempty(l.lang) && !(l.lang in SHOWN_BLOCKS) && known_lang(l.lang)) || continue
+    (l.kind in (Kind.fence, Kind.code) && !isempty(l.lang) && !(l.lang in shown) && known_lang(l.lang)) || continue
     lang = l.lang in (LIVE, CHECK, RESULT, "julia") ? "julia" : ""
     hid |= lang != l.lang
     ks[i] = Line(l.kind, l.level, l.prefix, lang)
@@ -47905,6 +47950,25 @@ const AGENT_KINDS = [
 "The agent called `name` that Ladder can start, or Claude Code when there's none of that name"
 agent_kind(name::AbstractString) = AGENT_KINDS[something(findfirst(k -> k.name == name, AGENT_KINDS), 1)]
 
+"The names of the agents that you took out of Ladder's lists in Settings. Every window has them, and the settings file keeps them."
+const AGENTS_HIDDEN = Ref(Set{String}())
+
+"""
+The names of the agents that Ladder lists for you to choose from: in the
+menu of agent mode, in Settings and for the command Switch Agent. Settings
+has a box for each agent. The agent that's chosen now is always listed.
+"""
+listed_agents(e) = [k.name for k in AGENT_KINDS if !(k.name in AGENTS_HIDDEN[]) || k.name == agent_kind(e.ai).name]
+
+"List the agent called `name` for you to choose from, or with `on` false take it out of the lists. The settings keep it."
+agent_listed!(e, name::AbstractString, on::Bool) = begin
+  any(k -> k.name == name, AGENT_KINDS) || error("Ladder can't start an agent called $name.")
+  (on ? delete! : push!)(AGENTS_HIDDEN[], String(name))
+  save_settings!(e)
+  foreach(o -> (rerun!(o, :agents); redraw_in!(o, 0)), editors)
+  e
+end
+
 """
 Where the command of the agent `k` is. An app that the Finder opened doesn't
 have the terminal's PATH, so the agent's usual folders are tried too.
@@ -48669,6 +48733,1775 @@ ask_for_change!(e, node::Union{ToChange,Things}, request::String) = begin
   # It waits while an agent works on a request before it: see "a queue of requests"
   queue_ask!(e, words, places, isempty(name) ? said -> ask_change!(e, places, said, prompt=change_prompt(places, said) * talk) :
                                                said -> ask_sharer!(e, name, places, said, talk=talk))
+end
+
+# --- agent mode ----------------------------------------------------------------------------
+#
+# The command Agent Mode puts an agent's session at the left of the page and
+# the page's outline at its right. The window grows wider to make room for
+# the two, and the page shows between them on a card with round corners, in
+# the shape of a sheet of paper. The command again puts the window back.
+#
+# The session is a talk with Claude Code. What you type at the foot of the
+# agent's pane goes to the agent, and what the agent says shows over it as a
+# page of Ladder's, not as a terminal's letters: headings, lists, tables,
+# maths, diagrams and charts. Each step that the agent takes, like reading a
+# file, is a line. When the agent wants to do something that your settings
+# make it ask for, the pane asks you, with a button that allows it and one
+# that refuses.
+#
+# The agent is one program that runs for the whole session. Ladder writes it
+# a line of JSON for each thing that you say, and it prints a line of JSON
+# for each thing that it does: see `take_line!`. Its words come a few at a
+# time, so they show as the agent writes them. The session starts in the top
+# folder of the file's repository, as Collaborate's does.
+#
+# What the agent says runs no code. A reply is a page that somebody else
+# wrote (see `foreign`), so a block that would run code shows as its code.
+# Diagrams, maths and charts draw, since they only show what's written.
+#
+# The agent's pane has the sidebar's place. It always shows: the agent is
+# what agent mode is for, so the top bar has no button that hides it, and the
+# sidebar's key does nothing. Leaving agent mode is what takes it away. The
+# outline is the panel at the right (see "the panel at the right"), with its
+# button at the right end of the top bar. A click on a line of the outline
+# goes to that heading.
+#
+# The outline needs only so much room, and the page has the width of a sheet
+# of paper. So the page's card is beside the outline, and the agent's pane
+# has all the rest of the window: a wider window gives the agent more room.
+
+# A wait of 0 would leave the window waiting for a key or the mouse: its loop reads a wake of 0 as no wake at all
+const SOON = 0.001                       # seconds: the wait for a frame that should come at once
+const AGENT_W = 400px                    # how wide the agent's pane is in the window that agent mode makes. A wider window gives it more.
+const AGENT_MIN = 300px                  # the agent's pane is never narrower than this while the window has room for it
+const OUTLINE_W = 260px                  # how wide the outline is, in a window that has room for it
+const PAGE_CARD_GAP = 8px                # between the page's card and the window's edges, and between it and each pane
+const PAGE_CARD_ROUND = 14px             # how round the corners of the page's card are
+const PAGE_CARD_LEAST = 420px            # the card is never narrower than this while the window has room for it
+const PAGE_CARD_NARROWEST = 240px        # nor than this, when you drag its edge or the window is narrow
+"How wide you made the page's card with the strip at its left edge, or `nothing` while it has a page's shape. Every window has it, and the settings file keeps it."
+const PAGE_CARD_CHOSEN = Ref{Union{Nothing,px}}(nothing)
+const PANE_X = 16px                      # the room at each side of what a pane shows
+const PANE_LEFT = 24px                   # the room at the left of what you and the agent said, in line with the words that you type
+const SEND_GROWS = 0.16                  # seconds that the send button takes to open over what goes with your words
+const SEND_ROOM = 36px                   # the room at the right of the words that you type: the send button, and the gap before it
+const REPLY_SIZE = 14px                  # how tall the text of the agent's pane is, before the page's zoom
+const REPLY_NAME = ".ladder-reply.md"    # the name of the page that holds a reply of the agent. No file has it.
+
+"The blocks that show in what an agent says in a session: the ones that only draw what's written. Any other shows as its code."
+const REPLY_BLOCKS = (SHOWN_BLOCKS..., "chart")
+
+"The path of a page that holds what an agent said in a session that runs in the folder `dir`. Its pictures and links are from that folder."
+reply_page(dir) = joinpath(dir, REPLY_NAME)
+
+"True when `path` is the path of a page that holds what an agent said in a session"
+is_reply(path::AbstractString) = endswith(path, REPLY_NAME) && basename(path) == REPLY_NAME
+
+# --- what a session holds ---
+
+"Words that you gave the agent. `about` is what the window showed then, like the heading that the caret was under."
+@def mutable struct YouSaid
+  words::String = ""
+  about::String = ""
+end
+
+"What the agent said, as Markdown. `whole` is false while its words still come, and `n` goes up with each change to them."
+@def mutable struct AgentReply
+  text::String = ""
+  whole::Bool = false
+  n::Int = 0
+end
+
+"A step that the agent took with a tool, like reading a file. `words` say what it does, and `state` is :going, :done or :failed."
+@def mutable struct AgentStep
+  id::String = ""
+  tool::String = ""
+  words::String = ""
+  state::Symbol = :going
+end
+
+"""
+Something that the agent asks to do, which your settings make it ask for.
+`detail` is the command of a shell command. `answer` is :none until you
+allow it or refuse it.
+"""
+@def mutable struct AgentWants
+  id::String = ""
+  tool::String = ""
+  words::String = ""
+  detail::String = ""
+  input::Any = nothing
+  answer::Symbol = :none
+end
+
+"A line that the session says of itself, like that the agent stopped. `bad` is true for something that went wrong."
+@def mutable struct SessionNote
+  words::String = ""
+  bad::Bool = false
+end
+
+"""
+A session of an agent in a window: the program, the folder that it runs in,
+and all that you and it said, in order. `page` is the file that the window
+showed when it started, which the agent can change without asking. `id` is
+the name that the agent gives the session, to go on with it after its
+program has stopped. `busy` is true while the agent works on what you said.
+`version` goes up with each thing that changes, so the window knows to draw.
+"""
+@def mutable struct AgentSession
+  agent::String = "Claude"
+  dir::String = ""
+  page::String = ""
+  process::Any = nothing
+  to::Any = nothing            # the agent reads this: each line is a message
+  items::Vector{Any} = Any[]
+  busy::Bool = false
+  id::String = ""
+  version::Int = 0
+  closing::Bool = false        # Ladder ended the program itself
+  asked::Int = 0               # how many messages of its own Ladder has sent the program
+  turns::Bool = false          # the agent's program runs once for each thing that you say: see "an agent that works by turns"
+  stopped::Bool = false        # you stopped the turn that's under way
+  queue::Vector{String} = String[]   # what you said while a turn was under way, for the turns after it
+end
+
+"A command that a test puts in the place of the agent's: a program that reads and prints the same lines of JSON. Nothing means the agent that Settings chose."
+const SESSION_COMMAND = Ref{Any}(nothing)
+
+"""
+What the agent is told of where it is, on top of what it's always told: that
+its words show as a page, and how to read the block at the start of each message.
+"""
+session_brief() = """
+You are in Ladder, a Markdown app on the user's Mac. The user's window shows a page, with this conversation beside it. Ladder draws what you say as a page, not as a terminal's text: Markdown with headings, lists, tables, to-do boxes, maths, `mermaid` diagrams and `chart` blocks. So answer as a short page, and use a table, a diagram or a chart where it says a thing better than words. A chart is a `chart` code block: a line `kind: bars`, `kind: lines` or `kind: pie`, an empty line, then rows with ` | ` between the cells, and the names of the columns in the first row. Ladder draws these kinds of Mermaid diagram and no others: flowchart, sequenceDiagram, stateDiagram-v2, classDiagram, pie, mindmap, erDiagram, gantt and timeline. If you have a skill for Ladder's pages, it says more about what a page can show. Code in your answers shows as code and doesn't run. Answer a question here, in the conversation, and change the page only when the user asks for a change to it.
+
+Each message of the user starts with a block between <ladder> and </ladder>. Ladder wrote the block, not the user. It says which file the window shows, where the caret is, and what is selected. Lines and columns count from 1. A column is a place between characters: column 1 is before the first character of its line, so a selection ends before the character at its end column. The exact text of a selection is between <selection> and </selection>: it starts after the line break that follows <selection>, and ends before the line break in front of </selection>. Ladder saves the page to its file before each message, so the file has what the window shows, unless the block says otherwise. When the user asks for a change to the page, change its file: Ladder shows the change at once. Don't run `ladder show` or `ladder wait`: the page is open already, and the user talks to you here."""
+
+"""
+The command that starts the program of a session on the file at `page`:
+Claude Code, which reads and prints lines of JSON. It asks Ladder before
+anything that your settings make it ask for, and it changes the file `page`
+without asking. With `id`, it goes on with the session of that name.
+"""
+session_command(e, page, id="") = begin
+  SESSION_COMMAND[] === nothing || return SESSION_COMMAND[]
+  k = agent_kind(e.ai)
+  k.name == "Claude" || error("Agent mode talks with Claude Code. Yours is $(k.name): the command Switch Agent chooses Claude.")
+  # A rule with // names a file from the top of the disk. A rule can't hold some characters, so such a file has none, and the agent asks.
+  rule = !isempty(page) && occursin(r"^[\w \-./@+~]+$", page) ? ["--allowedTools", "Edit(/$page)"] : String[]
+  # --allowedTools takes all that comes after it as its list, so it's last
+  kind_command(k, ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--include-partial-messages",
+                   "--permission-prompt-tool", "stdio", "--append-system-prompt", session_brief(),
+                   (isempty(id) ? String[] : ["--resume", id])..., rule...])
+end
+
+"True while the program of the session `s` runs"
+running(s::AgentSession) = s.process !== nothing && process_running(s.process)
+
+"Put the line `words` in what the session `s` shows, as something that the session says of itself"
+note!(s::AgentSession, words, bad=false) = (push!(s.items, SessionNote(words=String(words), bad=bad)); s.version += 1; s)
+
+"""
+Start the program of the session `s` with `command`. A task reads each line
+that it prints, as the window gives it its turn: see `session_tick!`.
+"""
+start!(s::AgentSession, command::Cmd) = begin
+  to, out, err = Pipe(), Pipe(), Pipe()
+  process = run(pipeline(Cmd(command; dir=s.dir), stdin=to, stdout=out, stderr=err), wait=false)
+  close(out.in)   # only the program writes to them now, so reading ends when the program does
+  close(err.in)
+  close(to.out)
+  s.process, s.to, s.closing = process, to, false
+  wrong = @async read(err, String)
+  @async begin
+    for line in eachline(out)
+      try
+        take_line!(s, line)
+      catch err
+        note!(s, "Ladder couldn't read a line that $(s.agent) printed: $(sprint(showerror, err))", true)
+      end
+    end
+    said = try fetch(wrong) catch; "" end
+    wait(process)
+    # A program that Ladder started since has the session now
+    s.process === process && ended!(s, said)
+  end
+  s
+end
+
+"The program of the session `s` has ended, and `wrong` is what it wrote of what went wrong"
+ended!(s::AgentSession, wrong) = begin
+  was = s.busy
+  settle!(s)
+  if !s.closing
+    lines = filter(!isempty, strip.(split(wrong, '\n')))
+    note!(s, isempty(lines) ? "$(s.agent) stopped. Your next words start it again." : "$(s.agent) stopped: $(last(lines))", was || !success(s.process))
+  end
+  s.version += 1
+  s
+end
+
+"The agent has done with what you said: nothing of the session `s` is still under way"
+settle!(s::AgentSession) = begin
+  s.busy = false
+  for it in s.items
+    it isa AgentReply && !it.whole && (it.whole = true; it.n += 1)
+    it isa AgentStep && it.state == :going && (it.state = :done)
+    it isa AgentWants && it.answer == :none && (it.answer = :gone)
+  end
+  s
+end
+
+"Write the message `o` to the program of the session `s`, as a line of JSON. A task writes it, so a program that's slow to read holds nothing up."
+tell!(s::AgentSession, o) = begin
+  to, line = s.to, json_text(o) * "\n"
+  to === nothing || @async try write(to, line) catch end
+  nothing
+end
+
+"Give the agent of the session `s` the words `words`. `about` is what the window shows, and `told` says it to the agent."
+say!(s::AgentSession, words, about="", told="") = begin
+  push!(s.items, YouSaid(words=String(words), about=String(about)))
+  content = isempty(told) ? String(words) : told * "\n\n" * words
+  if !s.turns
+    tell!(s, Dict("type" => "user", "message" => Dict("role" => "user", "content" => content)))
+  elseif s.busy
+    push!(s.queue, content)   # the agent's program takes one thing at a time
+  else
+    turn!(s, content)
+  end
+  s.busy = true
+  s.version += 1
+  s
+end
+
+"Stop what the agent of the session `s` is doing. The session goes on, and what the agent changed so far stays."
+stop!(s::AgentSession) = begin
+  s.busy || return s
+  if s.turns
+    # The turn's program ends, and with it what you said after. The session's name stays, so your next words go on from here.
+    s.stopped = true
+    empty!(s.queue)
+    running(s) && try kill(s.process) catch end
+  else
+    tell!(s, Dict("type" => "control_request", "request_id" => "ladder-$(s.asked += 1)", "request" => Dict("subtype" => "interrupt")))
+  end
+  s
+end
+
+"Allow what the agent asks to do with `it`, or with `allow` false refuse it"
+answer!(s::AgentSession, it::AgentWants, allow::Bool) = begin
+  it.answer == :none || return s
+  it.answer = allow ? :allowed : :refused
+  said = allow ? Dict("behavior" => "allow", "updatedInput" => it.input) : Dict("behavior" => "deny", "message" => "The user refused this in Ladder.")
+  tell!(s, Dict("type" => "control_response", "response" => Dict("subtype" => "success", "request_id" => it.id, "response" => said)))
+  s.version += 1
+  s
+end
+
+"End the program of the session `s`"
+close!(s::AgentSession) = begin
+  s.closing = true
+  settle!(s)
+  s.to === nothing || try close(s.to) catch end
+  running(s) && try kill(s.process) catch end
+  s
+end
+
+"`value` as JSON: what `json_value` reads, a Dict, a list, a string, a number, true, false or nothing"
+json_text(value) = sprint(json_text, value)
+json_text(io::IO, s::AbstractString) = begin
+  print(io, '"')
+  for c in s
+    c == '"' ? print(io, "\\\"") : c == '\\' ? print(io, "\\\\") : c == '\n' ? print(io, "\\n") : c == '\r' ? print(io, "\\r") :
+    c == '\t' ? print(io, "\\t") : c < ' ' ? print(io, "\\u", string(UInt16(c), base=16, pad=4)) : print(io, c)
+  end
+  print(io, '"')
+end
+json_text(io::IO, ::Nothing) = print(io, "null")
+json_text(io::IO, b::Bool) = print(io, b)
+json_text(io::IO, n::Integer) = print(io, n)
+json_text(io::IO, n::Real) = print(io, isfinite(n) ? Float64(n) : "null")
+json_text(io::IO, n::JSONNumber) = print(io, n.text)
+json_text(io::IO, list::AbstractVector) = (print(io, '['); foreach(((i, x),) -> (i > 1 && print(io, ','); json_text(io, x)), enumerate(list)); print(io, ']'))
+json_text(io::IO, o::JSONObject) = json_pairs(io, zip(o.keys, o.values))
+json_text(io::IO, d::AbstractDict) = json_pairs(io, d)
+json_pairs(io::IO, pairs) = begin
+  print(io, '{')
+  for (i, (k, v)) in enumerate(pairs)
+    i > 1 && print(io, ',')
+    json_text(io, string(k)); print(io, ':'); json_text(io, v)
+  end
+  print(io, '}')
+end
+
+"The step of the session `s` that the agent names `id`, or nothing"
+step_of(s::AgentSession, id) = (k = findlast(it -> it isa AgentStep && it.id == id, s.items); k === nothing ? nothing : s.items[k])
+
+"The last thing that the session `s` shows when it's a reply whose words still come, or nothing"
+open_reply(s::AgentSession) = !isempty(s.items) && last(s.items) isa AgentReply && !last(s.items).whole ? last(s.items) : nothing
+
+"""
+Take a line that the program of the session `s` printed. Each line is JSON
+with a `type`:
+
+- `stream_event` is a piece of what the agent is writing now: the start of a
+  block of words or of a tool's use, or more words of a block.
+- `assistant` is a block that's whole: its words, or a tool with what it's given.
+- `user` holds what a tool came to, which ends its step.
+- `control_request` asks you whether the agent may use a tool.
+- `result` ends the agent's work on what you said.
+"""
+take_line!(s::AgentSession, line::AbstractString) = begin
+  o = agent_json(line)
+  o === nothing && return s
+  kind = json_field(o, "type")
+  # What an agent that this one started says to it is theirs. This session shows only the step that started it.
+  json_field(o, "parent_tool_use_id") === nothing || return s
+  if kind == "system"
+    id = json_field(o, "session_id")
+    json_field(o, "subtype") == "init" && id isa String && (s.id = id)
+  elseif kind == "stream_event"
+    stream_event!(s, json_field(o, "event"))
+  elseif kind == "assistant"
+    parts = json_field(json_field(o, "message"), "content")
+    for p in (parts isa AbstractVector ? parts : ())
+      what = json_field(p, "type")
+      if what == "text" && json_field(p, "text") isa String
+        # Its words came piece by piece already, when the program sends pieces. This is all of them.
+        reply = open_reply(s)
+        reply === nothing && (reply = AgentReply(); push!(s.items, reply))
+        reply.text, reply.whole = json_field(p, "text"), true
+        reply.n += 1
+      elseif what == "tool_use"
+        id, name = json_field(p, "id"), json_field(p, "name")
+        (id isa String && name isa String) || continue
+        step = step_of(s, id)
+        step === nothing && (step = AgentStep(id=id, tool=name); push!(s.items, step))
+        step.words = tool_words(name, json_field(p, "input"))
+      end
+    end
+  elseif kind == "user"
+    parts = json_field(json_field(o, "message"), "content")
+    for p in (parts isa AbstractVector ? parts : ())
+      json_field(p, "type") == "tool_result" || continue
+      step = step_of(s, json_field(p, "tool_use_id"))
+      step === nothing || (step.state = json_field(p, "is_error") === true ? :failed : :done)
+    end
+  elseif kind == "control_request"
+    r = json_field(o, "request")
+    id, name = json_field(o, "request_id"), json_field(r, "tool_name")
+    if json_field(r, "subtype") == "can_use_tool" && id isa String && name isa String
+      input = json_field(r, "input")
+      command = json_field(input, "command")
+      push!(s.items, AgentWants(id=id, tool=name, input=input, words=lowercasefirst(tool_words(name, input)),
+                                detail=name == "Bash" && command isa String ? command : ""))
+    end
+  elseif kind == "result"
+    settle!(s)
+    said = json_field(o, "result")
+    # A turn that you stopped ends with an error of its own, which is no news
+    json_field(o, "is_error") === true && json_field(o, "subtype") != "error_during_execution" &&
+      note!(s, said isa String && !isempty(said) ? said : "$(s.agent) couldn't do that.", true)
+    json_field(o, "subtype") == "error_during_execution" && note!(s, "You stopped $(s.agent).")
+  end
+  s.version += 1
+  s
+end
+
+"Take a piece of what the agent of the session `s` is writing now: the start of a block, or more of a block's words"
+stream_event!(s::AgentSession, ev) = begin
+  kind = json_field(ev, "type")
+  if kind == "content_block_start"
+    block = json_field(ev, "content_block")
+    what = json_field(block, "type")
+    if what == "text"
+      open_reply(s) === nothing && push!(s.items, AgentReply())
+    elseif what == "tool_use"
+      id, name = json_field(block, "id"), json_field(block, "name")
+      id isa String && name isa String && step_of(s, id) === nothing && push!(s.items, AgentStep(id=id, tool=name, words=tool_words(name, nothing)))
+    end
+  elseif kind == "content_block_delta"
+    delta = json_field(ev, "delta")
+    more = json_field(delta, "text")
+    if json_field(delta, "type") == "text_delta" && more isa String
+      reply = open_reply(s)
+      reply === nothing && (reply = AgentReply(); push!(s.items, reply))
+      reply.text *= more
+      reply.n += 1
+    end
+  end
+  s
+end
+
+"The name of the file at `path`, for a step's words"
+step_file(path) = path isa String ? basename(path) : "a file"
+
+"""
+What a step with the tool `name` does, in a few words, from what the tool is
+given: "Reading main.jl", "Changing main.jl", "Looking for wide(". `input`
+is nothing while the agent still writes it.
+"""
+tool_words(name::AbstractString, input) = begin
+  get(key) = (v = json_field(input, key); v isa String ? replace(strip(v), r"\s+" => " ") : "")
+  # Other agents than Claude call a file's place by other names
+  file = something(json_field(input, "file_path"), json_field(input, "target_file"), json_field(input, "absolute_path"), json_field(input, "path"), Some(nothing))
+  name == "Read" ? "Reading $(step_file(file))" :
+  name in ("Edit", "Write", "MultiEdit", "NotebookEdit") ? "Changing $(step_file(something(file, json_field(input, "notebook_path"), Some(nothing))))" :
+  name == "Grep" ? "Looking for $(isempty(get("pattern")) ? get("query") : get("pattern"))" :
+  name == "List" ? "Listing $(file isa String ? basename(rstrip(file, '/')) : "a folder")" :
+  name == "Glob" ? "Looking for files like $(get("pattern"))" :
+  name == "Bash" ? (isempty(get("description")) ? (isempty(get("command")) ? "Running a command" : "Running $(get("command"))") : get("description")) :
+  name == "WebSearch" ? "Searching the web for $(get("query"))" :
+  name == "WebFetch" ? "Reading $(get("url"))" :
+  name in ("Task", "Agent") ? (isempty(get("description")) ? "Starting an agent" : "An agent: $(get("description"))") :
+  name == "TodoWrite" ? "Planning the work" :
+  name == "Skill" ? "Using the skill $(get("skill"))" :
+  startswith(name, "mcp__") ? "Using $(replace(replace(name, r"^mcp__" => ""), "__" => ": ", "_" => " "))" : "Using $name"
+end
+
+"The icon of a step with the tool `name`"
+tool_icon(name::AbstractString) =
+  name == "Read" ? "file-earmark-text" : name in ("Edit", "Write", "MultiEdit", "NotebookEdit") ? "pencil" :
+  name in ("Grep", "Glob") ? "search" : name == "List" ? "folder" : name == "Bash" ? "terminal" : name in ("WebSearch", "WebFetch") ? "globe" :
+  name in ("Task", "Agent") ? "robot" : name == "TodoWrite" ? "list-task" : "gear"
+
+# --- an agent that works by turns ---
+#
+# Claude Code's program stays for a whole session. The programs of Codex,
+# Gemini and Grok do one thing and end. So a session with one of them starts
+# its program again for each thing that you say, with the name that the
+# agent gave the session, and the agent goes on from where it was. Each
+# prints lines of JSON while it works, in a form of its own, and Ladder shows
+# them as it shows Claude's: words, steps, and the end of the turn. These
+# agents can't ask you before a step. They run with the same options as for
+# a change that you ask for in the page: they change files, and what else
+# they may do is in each agent's own settings.
+
+"A command that a test puts in the place of an agent that works by turns. It's given the agent's name, the session's name or \"\", and your words."
+const TURN_COMMAND = Ref{Any}(nothing)
+
+"The names that other agents give their tools, as Claude Code's names, which `tool_words` and `tool_icon` know"
+const TOOL_NAMES = Dict(
+  "read_file" => "Read", "read_many_files" => "Read", "write_file" => "Write", "replace" => "Edit", "search_replace" => "Edit", "edit" => "Edit",
+  "run_terminal_command" => "Bash", "run_shell_command" => "Bash", "grep" => "Grep", "grep_search" => "Grep", "search_file_content" => "Grep",
+  "glob" => "Glob", "list_dir" => "List", "list_directory" => "List", "web_search" => "WebSearch", "google_web_search" => "WebSearch",
+  "web_fetch" => "WebFetch", "todo_write" => "TodoWrite", "write_todos" => "TodoWrite", "spawn_subagent" => "Task")
+
+"""
+The command for one turn of the session `s`, with `words` for the agent.
+After the first turn it names the session, so the agent goes on with it.
+Grok takes what Ladder says of itself as rules. The others get that at the
+start of the first words: see `turn!`.
+"""
+turn_command(s::AgentSession, words::AbstractString) = begin
+  TURN_COMMAND[] === nothing || return `$(TURN_COMMAND[]) $(s.agent) $(s.id) $words`
+  k = agent_kind(s.agent)
+  again = !isempty(s.id)
+  options = k.name == "Grok" ? ["--output-format", "streaming-json", "--rules", session_brief(), (again ? ["-r", s.id] : String[])..., "--permission-mode", "acceptEdits", "-p"] :
+            k.name == "Gemini" ? ["-o", "stream-json", (again ? ["--resume", s.id] : String[])..., "--approval-mode", "auto_edit", "-p"] :
+            ["exec", "--json", "--sandbox", "workspace-write", "--skip-git-repo-check", (again ? ["resume", s.id] : String[])...]
+  kind_command(k, [options; words])
+end
+
+"""
+Start the program of the session `s` for one turn, with `words` for the
+agent. A task reads each line that it prints. When the program ends, the
+turn has ended, and the next thing that you said meanwhile starts a turn.
+"""
+turn!(s::AgentSession, words::AbstractString) = begin
+  # Grok has what Ladder says of itself as rules. Another agent reads it before your words, until its session has a name to go on with.
+  first_words = isempty(s.id) && s.agent != "Grok"
+  s.asked += 1
+  s.stopped = false
+  process = try
+    out, err = Pipe(), Pipe()
+    command = turn_command(s, first_words ? "<ladder-brief>\n$(session_brief())\n</ladder-brief>\n\n$words" : words)
+    process = run(pipeline(Cmd(command; dir=s.dir), stdin=devnull, stdout=out, stderr=err), wait=false)
+    close(out.in)
+    close(err.in)
+    wrong = @async read(err, String)
+    @async begin
+      for line in eachline(out)
+        try
+          turn_line!(s, line)
+        catch err
+          note!(s, "Ladder couldn't read a line that $(s.agent) printed: $(sprint(showerror, err))", true)
+        end
+      end
+      said = try fetch(wrong) catch; "" end
+      wait(process)
+      # A turn that Ladder started since has the session now
+      s.process === process && turn_ended!(s, said)
+    end
+    process
+  catch err
+    empty!(s.queue)
+    s.busy = false
+    note!(s, err isa ErrorException ? err.msg : "Ladder couldn't start $(s.agent): $(sprint(showerror, err))", true)
+    return s
+  end
+  s.process, s.to, s.closing = process, nothing, false
+  s
+end
+
+"The line of `wrong`, which a program wrote of what went wrong, that says the most: the first that names an error, or the last"
+fault_line(wrong) = begin
+  lines = filter(!isempty, strip.(split(wrong, '\n')))
+  isempty(lines) && return ""
+  k = findfirst(l -> occursin(r"^\S*error"i, l), lines)
+  String(lines[something(k, length(lines))])
+end
+
+"The program of a turn of the session `s` has ended, and `wrong` is what it wrote of what went wrong"
+turn_ended!(s::AgentSession, wrong) = begin
+  settle!(s)
+  if s.closing
+    empty!(s.queue)
+  elseif s.stopped
+    note!(s, "You stopped $(s.agent).")
+  elseif !success(s.process)
+    said = fault_line(wrong)
+    empty!(s.queue)
+    note!(s, isempty(said) ? "$(s.agent) stopped before it had done." : "$(s.agent) stopped: $said", true)
+  end
+  s.stopped = false
+  isempty(s.queue) || (turn!(s, popfirst!(s.queue)); s.busy = running(s))
+  s.version += 1
+  s
+end
+
+"More of the words that the agent of the session `s` is saying now"
+more_words!(s::AgentSession, text::AbstractString) = begin
+  reply = open_reply(s)
+  reply === nothing && (reply = AgentReply(); push!(s.items, reply))
+  reply.text *= text
+  reply.n += 1
+  s
+end
+
+"The words that the agent of the session `s` was saying are whole: a step comes after them"
+end_words!(s::AgentSession) = (reply = open_reply(s); reply === nothing || (reply.whole = true; reply.n += 1); s)
+
+"A step of the agent of the session `s` with the tool `name`, as the agent calls it, on `input`. `id` is the step's name."
+tool_step!(s::AgentSession, id, name, input) = begin
+  (id isa String && name isa String) || return nothing
+  end_words!(s)
+  tool = get(TOOL_NAMES, name, name)
+  id = turn_step(s, id)
+  step = step_of(s, id)
+  step === nothing && (step = AgentStep(id=id, tool=tool); push!(s.items, step))
+  step.words = tool_words(tool, input)
+  step
+end
+
+"The step `id` of the session `s` has ended, well or not"
+step_ended!(s::AgentSession, id, well::Bool) = (step = id isa String ? step_of(s, turn_step(s, id)) : nothing; step === nothing || (step.state = well ? :done : :failed); s)
+
+"The name of the step that the agent calls `id` in this turn of the session `s`. Codex starts its names again in each turn, so the turn's number goes before."
+turn_step(s::AgentSession, id::AbstractString) = "$(s.asked)/$id"
+
+"""
+Take a line that the program of a turn of the session `s` printed: JSON with
+a `type`, in the form of the session's agent. A notice before the JSON on a
+line, as Gemini prints, is left out.
+"""
+turn_line!(s::AgentSession, line::AbstractString) = begin
+  at = findfirst('{', line)
+  at === nothing && return s
+  o = agent_json(SubString(line, at))
+  o === nothing && return s
+  kind = json_field(o, "type")
+  kind isa String || return s
+  s.agent == "Grok" ? grok_line!(s, o, kind) : s.agent == "Gemini" ? gemini_line!(s, o, kind) : codex_line!(s, o, kind)
+  s.version += 1
+  s
+end
+
+"What the line `o` says went wrong, or `other`"
+fault_words(o, other) = begin
+  for key in ("message", "error", "data")
+    v = json_field(o, key)
+    v isa String && !isempty(v) && return v
+    m = json_field(v, "message")
+    m isa String && !isempty(m) && return m
+  end
+  other
+end
+
+# Grok prints `text` for each piece of its words, `tool_call` for a step and `tool_call_update` for how the step goes, and `end` with the session's name
+grok_line!(s::AgentSession, o, kind) = begin
+  if kind == "text"
+    data = json_field(o, "data")
+    data isa String && more_words!(s, data)
+  elseif kind == "tool_call"
+    tool_step!(s, json_field(o, "toolCallId"), json_field(o, "toolName"), json_field(o, "rawInput"))
+  elseif kind == "tool_call_update"
+    status = json_field(o, "status")
+    status in ("completed", "failed") && step_ended!(s, json_field(o, "toolCallId"), status == "completed")
+  elseif kind == "end"
+    id = json_field(o, "sessionId")
+    id isa String && (s.id = id)
+    why = json_field(o, "stopReason")
+    settle!(s)
+    why isa String && !(why in ("end_turn", "cancelled")) && !s.stopped && note!(s, "$(s.agent) stopped: $(replace(why, '_' => ' ')).", true)
+  elseif kind == "error"
+    note!(s, fault_words(o, "$(s.agent) couldn't do that."), true)
+  end
+  s
+end
+
+# Gemini prints `init` with the session's name, `message` for each piece of its words, `tool_use` and `tool_result` for a step, and `result`
+gemini_line!(s::AgentSession, o, kind) = begin
+  if kind == "init"
+    id = json_field(o, "session_id")
+    id isa String && (s.id = id)
+  elseif kind == "message"
+    words = json_field(o, "content")
+    json_field(o, "role") == "assistant" && words isa String && more_words!(s, words)
+  elseif kind == "tool_use"
+    tool_step!(s, json_field(o, "tool_id"), json_field(o, "tool_name"), json_field(o, "parameters"))
+  elseif kind == "tool_result"
+    step_ended!(s, json_field(o, "tool_id"), json_field(o, "status") == "success")
+  elseif kind == "result"
+    settle!(s)
+    json_field(o, "status") == "success" || s.stopped || note!(s, fault_words(o, "$(s.agent) couldn't do that."), true)
+  elseif kind == "error"
+    note!(s, fault_words(o, "$(s.agent) couldn't do that."), true)
+  end
+  s
+end
+
+# Codex prints `thread.started` with the session's name, an `item` when each thing starts and ends (its words, a command,
+# a change to files, a search), and `turn.completed` or `turn.failed`
+codex_line!(s::AgentSession, o, kind) = begin
+  if kind == "thread.started"
+    id = json_field(o, "thread_id")
+    id isa String && (s.id = id)
+  elseif kind in ("item.started", "item.updated", "item.completed")
+    item = json_field(o, "item")
+    id, what = json_field(item, "id"), json_field(item, "type")
+    ended = kind == "item.completed"
+    if what == "agent_message"
+      words = json_field(item, "text")
+      ended && words isa String && (end_words!(s); push!(s.items, AgentReply(text=words, whole=true, n=1)))
+    elseif what == "command_execution"
+      tool_step!(s, id, "Bash", item)
+      ended && step_ended!(s, id, json_field(item, "status") != "failed")
+    elseif what == "file_change"
+      changes = json_field(item, "changes")
+      path = changes isa AbstractVector && !isempty(changes) ? json_field(first(changes), "path") : nothing
+      tool_step!(s, id, "Edit", JSONObject(["file_path"], Any[path]))
+      ended && step_ended!(s, id, json_field(item, "status") != "failed")
+    elseif what == "web_search"
+      tool_step!(s, id, "WebSearch", item)
+      ended && step_ended!(s, id, true)
+    elseif what == "mcp_tool_call"
+      server, tool = json_field(item, "server"), json_field(item, "tool")
+      tool_step!(s, id, "mcp__$(server)__$(tool)", item)
+      ended && step_ended!(s, id, json_field(item, "status") != "failed")
+    elseif what == "todo_list"
+      tool_step!(s, id, "TodoWrite", item)
+      ended && step_ended!(s, id, true)
+    elseif what == "error"
+      note!(s, fault_words(item, "$(s.agent) couldn't do that."), true)
+    end
+  elseif kind == "turn.completed"
+    settle!(s)
+  elseif kind == "turn.failed"
+    settle!(s)
+    s.stopped || note!(s, fault_words(o, "$(s.agent) couldn't do that."), true)
+  elseif kind == "error"
+    note!(s, fault_words(o, "$(s.agent) couldn't do that."), true)
+  end
+  s
+end
+
+# --- the window in agent mode ---
+
+"""
+The agent's pane of a window: the session, the words that you type, and what
+it keeps between frames. `follow` is true while the newest words stay in sight. `was` is how
+the window was before agent mode, to put it back. `open` holds each run of
+steps that a click opened, by the place of its first step.
+"""
+@def mutable struct AgentPane <: SemanticUI
+  session::Any = nothing
+  field::Any = nothing
+  parts::Dict{Any,Any} = Dict{Any,Any}()
+  scroll::Scroll = Scroll(width(grow=grow), height(grow=grow))
+  follow::Bool = true
+  put::px = 0px                # how far the pane was scrolled when it was last drawn
+  seen::Int = -1               # the version of the session that the window last drew
+  was::Any = nothing
+  open::Set{Int} = Set{Int}()
+  error::String = ""           # why the session couldn't start, or ""
+end
+
+"The outline of the page, at the right of the window in agent mode. `folded` holds each heading whose own headings are hidden."
+@def mutable struct OutlinePane <: SemanticUI
+  folded::Set{Tuple{Int,String}} = Set{Tuple{Int,String}}()
+  rows::Dict{Int,Any} = Dict{Int,Any}()
+  scroll::Scroll = Scroll(width(grow=grow), height(grow=grow))
+end
+
+"A line of the outline: a heading or a component of the page. `opens` is true when it has lines under it, which a click on its arrow hides."
+@def mutable struct OutlineRow <: SemanticUI
+  of::Any = nothing
+  line::Int = 0
+  caret::Int = 0
+  level::Int = 1
+  title::String = ""
+  icon::String = ""
+  depth::Int = 0
+  opens::Bool = false
+  folded::Bool = false
+  now::Bool = false
+end
+
+"The card that the page is on in agent mode: its round corners cut off what the page shows"
+@def mutable struct PageCard <: SemanticUI end
+
+"The strip between the agent's pane and the page's card. A drag of it makes the card wider or narrower."
+@def mutable struct CardEdge <: SemanticUI
+  grab::px = 0px           # how far right of the card's left edge the mouse was when the drag started
+  pressed::Float64 = 0.0   # when the mouse was last pressed on it, to know two clicks
+end
+
+"A button of the agent's pane: `action` is what it does, and `what` is what it does it to, like something that the agent asks for"
+@def mutable struct PaneButton <: SemanticUI
+  of::Any = nothing
+  action::Symbol = :none
+  what::Any = nothing
+end
+
+"The agent's pane of the window of `e`. It's kept while the window is open, with its session, so leaving agent mode loses nothing."
+agent_pane(e) = node!(AgentPane, e, :agent_pane)
+
+"True while the window of `e` is in agent mode"
+agent_mode(e) = get(e.nodes, :agent_mode, false) === true
+
+"True while the window of `e` shows the agent's pane, the page's card and the outline. Something that fills the window, slides and a page shown as an app have it all."
+agent_shows(e) = agent_mode(e) && lowered(e) === nothing && !as_app(e) && slideshow(e) === nothing
+
+"How wide the outline is once it's open, or 0px while it's hidden"
+outline_room(e) = e.right && right_view(e) !== nothing ? right_w(e) : 0px
+
+"""
+How wide the agent's pane is: all of the window that the page's card and the
+outline leave, so a wider window gives the agent more room.
+"""
+agent_wide(e) = px(round(num(max(AGENT_MIN, window_size(e)[1] - outline_room(e) - page_card_wide(e) - 2PAGE_CARD_GAP))))
+
+"""
+How wide the page's card is. It has the shape of a sheet of A4 paper that
+stands up, as tall as the window. A window that's too narrow for that beside
+the agent's pane makes it narrower, and it's never narrower than
+`PAGE_CARD_LEAST` while there's room for that. A drag of the strip at its
+left edge gives it another width (see `CardEdge`). It keeps its width while
+a pane slides, so the page's text doesn't wrap again on each frame.
+"""
+page_card_wide(e) = begin
+  w, h = window_size(e)
+  room = w - AGENT_MIN - outline_room(e) - 2PAGE_CARD_GAP
+  px(round(num(max(min(room, something(PAGE_CARD_CHOSEN[], page_shape_wide(h))), PAGE_CARD_NARROWEST))))
+end
+
+"What the settings file says about the page's card: the width you gave it, or nothing while it has a page's shape"
+page_card_setting() = (c = PAGE_CARD_CHOSEN[]; c === nothing ? "" : string(c.value))
+
+"How wide the page's card is in a window `h` tall while it has a page's shape"
+page_shape_wide(h) = max((h - 2PAGE_CARD_GAP) / √2, PAGE_CARD_LEAST)
+
+"""
+Make the page's card `wide` across, or as near to that as the window of `e`
+allows, and keep the width in the settings. The agent's pane gets the rest
+of the window. `nothing` gives the card a page's shape again.
+"""
+page_card!(e, wide) = begin
+  if wide !== nothing
+    room = window_size(e)[1] - AGENT_MIN - outline_room(e) - 2PAGE_CARD_GAP
+    wide = px(round(num(clamp(wide, PAGE_CARD_NARROWEST, max(PAGE_CARD_NARROWEST, room)))))
+  end
+  wide == PAGE_CARD_CHOSEN[] && return e
+  PAGE_CARD_CHOSEN[] = wide
+  save_settings!(e)
+  foreach(o -> redraw_in!(o, SOON), editors)   # each window in agent mode has the new width
+  e
+end
+
+"""
+Where the page's card is across the window: its left edge, and how wide it
+is. It's beside the outline, with the agent's pane at its left. While the
+outline slides out, the card goes with it to the window's edge.
+"""
+page_card_span(e) = begin
+  w, _ = window_size(e)
+  wide = page_card_wide(e)
+  right = right_view(e) === nothing ? 0px : right_w(e) * right_opened(e)
+  (w - right - wide - PAGE_CARD_GAP, wide)
+end
+
+# The agent's pane has no narrower form and never goes: all of it stays, as the compact form of a side menu does.
+# So the top bar has no button that hides it.
+compact_width(p::AgentPane) = agent_wide(editor(p))
+
+"""
+The colour of the window behind the two panes of agent mode: dark, whatever
+colours the page has, so that the page's card stands out. While the window
+is see-through (see `see_through!`), what's behind the window shows through it.
+"""
+glass_colour(e) = RGBA(0.09, 0.09, 0.1, see_through(e) && !e.full_screen ? GLASS_ALPHA : 1.0)   # a window that fills a screen of its own has nothing behind it, so there the glass is solid
+
+"""
+What the window draws behind the two panes of agent mode. A window that's
+see-through draws nothing there: the glass is the colour of the window
+itself, which macOS draws in the window's own shape, so the glass has the
+window's round corners. See `glass_window!`.
+"""
+glass(e) = see_through(e) ? clear : glass_colour(e)
+
+"What lies a little lighter on the glass: behind your words, the field that you type in, and a line of the outline under the mouse"
+on_glass(strength) = tint(colours.ink, strength)
+
+# --- the colours of the two panes ---
+#
+# The agent's pane and the outline are dark, whatever colours the page has,
+# so that the page stands out between them. Ladder draws with one set of
+# colours at a time (see `use!`), and some things read it as they're
+# described and others as they're drawn. So the panes' colours are in use
+# while a pane is described, and again while it's drawn: a mark at the start
+# of each pane turns them on as the frame is drawn, and a mark at its end
+# puts the page's colours back. The two ends of the top bar, which lie over
+# the panes, have them too.
+
+"The colours of the two panes of agent mode"
+const PANE_COLOURS = NIGHT
+"The page's colours, kept while the panes' colours are in use"
+const PAGE_KEPT = deepcopy(SEPIA)
+"True while the panes' colours are in use"
+const pane_dark = Ref(false)
+
+"Use the colours of the panes of agent mode from now on, or with `on` false the page's again. It gives which were in use before."
+pane_colours!(on::Bool) = begin
+  was = pane_dark[]
+  on == was && return was
+  on ? (foreach(n -> setfield!(PAGE_KEPT, n, getfield(colours, n)), fieldnames(Palette)); use!(PANE_COLOURS)) : use!(PAGE_KEPT)
+  pane_dark[] = on
+  was
+end
+
+"Run `f` with the colours of the panes of agent mode, or with `on` false with the page's, and then put back the ones that were in use"
+with_pane_colours(f, on::Bool=true) = (was = pane_colours!(on); try f() finally pane_colours!(was) end)
+
+"""
+A mark in what the window draws: from here on, the frame is drawn with the
+colours of the panes of agent mode, or with `on` false with the page's. It's
+one pixel wide and as tall as its row, or with `across` one pixel tall and as
+wide as its column, so that it's drawn whenever what's beside it is.
+"""
+@def mutable struct PaneColours <: SemanticUI
+  on::Bool = true
+  across::Bool = false
+end
+describe(c::PaneColours) = c.across ? Box(width(grow=grow), height(1px)) : Box(fixed(1px), height(grow=grow))
+draw(ctx, size, ui::ConcreteRect, c::PaneColours) = (pane_colours!(c.on); nothing)
+
+"The mark that turns the panes' colours on, or off, in a row of the window while it's in agent mode. Nothing when `dark` is false."
+pane_mark(dark::Bool, on::Bool) = dark ? (PaneColours(on=on),) : ()
+
+"""
+The window in agent mode: the agent's pane, the page on its card, and the
+outline, on the window's glass. The top bar lies over the top of all three.
+"""
+agent_body(e) = begin
+  glass_window!(e)
+  left, _ = page_card_span(e)
+  side = side_w(e)
+  Row(width(grow=grow), height(grow=grow), Alignment.Start, background(glass(e)), name="Agent mode",
+    (side > 0px ? (side_part(e),) : ())...,
+    Row(width(grow=grow), height(grow=grow), Alignment.Start, padding(PAGE_CARD_GAP, 0px, PAGE_CARD_GAP, max(0px, left - side - EDGE_W)),   # top, right, bottom, left
+      node!(CardEdge, e, :card_edge),
+      node!(PageCard, e, :page_card)),
+    right_panel(e)...)
+end
+
+# The gap between the agent's pane and the page's card is a strip that you
+# drag, as the sidebar's edge is. A drag to the left gives the page more of the
+# window, and one to the right gives the agent more. Two clicks give the card a
+# page's shape again. A short line shows in the gap while the mouse is on it.
+
+describe(c::CardEdge) = begin
+  Box(width(EDGE_W), height(grow=grow), Alignment.Center, name="Card edge",
+    (ishovered(c) ? (Box(width(3px), height(44px), radius(2px), background(RGBA(1, 1, 1, 0.32))),) : ())...)
+end
+
+cursor(::CardEdge) = :resize_x
+
+onkey(c::CardEdge, ev::KeyPress{Keys.mouse_left}) = begin
+  e = editor(c)
+  twice = time() - c.pressed < 0.4
+  c.pressed = twice ? 0.0 : time()
+  twice && return (page_card!(e, nothing); handled)
+  c.grab = ev.window.mouse[1] - page_card_span(e)[1]
+  handled
+end
+
+onmouse(c::CardEdge, ev::MouseMove) = begin
+  held(c, Keys.mouse_left) || return
+  e = editor(c)
+  left, wide = page_card_span(e)
+  page_card!(e, left + wide - (ev.position[1] - c.grab))   # the card's right edge stays where it is
+  handled
+end
+
+describe(c::PageCard) = begin
+  e = editor(c)
+  Column(fixed(page_card_wide(e)), height(grow=grow), Alignment.Start, radius(PAGE_CARD_ROUND), background(colours.bg), clip=true, name="Page card",
+    Box(width(grow=grow), height(above_page(e) - PAGE_CARD_GAP)),   # under the top bar
+    node!(Page, e, :page))
+end
+
+# A box cuts its children off at its straight edges. So what the page shows in the card's corners, like a picture
+# that's as wide as the card, is painted over with the glass, and then a thin line goes round the card.
+draw(ctx, size, ui::ConcreteRect, c::PageCard) = begin
+  e = editor(c)
+  x, y, w, h, r = num(ui.left), num(ui.top), num(ui.width), num(ui.height), Float32(num(PAGE_CARD_ROUND))
+  edges = Ref(Skia.sk_rect_t(Float32(x), Float32(y), Float32(x + w), Float32(y + h)))
+  corners = Skia.sk_path_new()
+  Skia.sk_path_add_rounded_rect(corners, edges, 0f0, 0f0, Skia.SK_PATH_DIRECTION_CW)
+  Skia.sk_path_add_rounded_rect(corners, edges, r, r, Skia.SK_PATH_DIRECTION_CW)
+  Skia.sk_path_set_filltype(corners, Skia.SK_PATH_FILLTYPE_EVENODD)
+  paint = ink(glass(e))
+  # The glass takes the place of what's there, so glass that's see-through stays see-through
+  Skia.sk_paint_set_blend_mode(paint, Skia.SK_BLEND_MODE_SRC)
+  Skia.sk_canvas_draw_path(ctx, corners, paint)
+  Skia.sk_paint_delete(paint)
+  Skia.sk_path_delete(corners)
+  round_box(ctx, x + 0.5, y + 0.5, w - 1, h - 1, r; line=on_glass(dark_page() ? 0.16 : 0.12))
+end
+
+# --- the agent's pane ---
+
+"The editor of the words that you type to the agent, which the pane `p` of the window of `e` shows: lines that no file holds"
+pane_field!(p::AgentPane) = begin
+  sub = Editor()
+  sub.buf = Buffer()
+  sub.nodes[:input] = own!(sub, TextInput())
+  sub.nodes[:agent_part] = (p, :field)
+  setfield!(sub, :parent, p)
+  p.field = sub
+end
+
+"The editor of a reply of the agent, which the pane `p` of the window of `e` shows as a page that's never changed. A link in it opens in the window."
+reply_editor(p::AgentPane, e, dir) = begin
+  sub = Editor()
+  sub.buf = Buffer(path=reply_page(dir), fixed=true, reading=true)
+  sub.nodes[:input] = own!(sub, TextInput())
+  sub.nodes[:host] = e
+  sub.nodes[:span] = (1, 1)
+  sub.nodes[:agent_part] = (p, :reply)
+  setfield!(sub, :parent, p)
+  sub
+end
+
+"Give the editor `sub` of a part of the agent's pane the colours and keys of the window of `e`, with the pane's own font and size"
+pane_style!(sub, e) = begin
+  follow_host!(sub, e)
+  sub.font, sub.zoom, sub.look, sub.spelling = SANS, e.zoom * (REPLY_SIZE / TEXT_SIZE), :own, false
+  sub.theme = :night   # the pane is dark, so what's kept by the theme's name is kept apart from the page's
+  # Text that was laid out in other colours than the pane's is laid out again: each line keeps the colours that it was laid out in
+  inks = (colours.ink, colours.dim, colours.accent)
+  get(sub.nodes, :pane_inks, nothing) == inks || (sub.nodes[:pane_inks] = inks; empty!(sub.flows))
+  sub
+end
+
+"True when some line that `sub` laid out has the page's colour of text, and not the pane's: it was laid out while the page's colours were in use"
+page_inked(sub) = PAGE_KEPT.ink != colours.ink &&
+  any(it -> it.content isa Flow && any(vl -> any(seg -> seg.face.color == PAGE_KEPT.ink, vl.segs), it.content.lines), sub.layout)
+
+"""
+Lay out the text of the editor `sub` of a part of the agent's pane, as wide
+as `room`. Each line keeps the colours that it was laid out in, so lines
+that have the page's colours are laid out again in the pane's.
+"""
+pane_layout!(sub, room) = begin
+  layout!(sub, room)
+  page_inked(sub) && (empty!(sub.flows); layout!(sub, room))
+  sub
+end
+
+"Put the words of the reply `it` in its editor `sub`, when they changed since it last showed them"
+show_reply!(sub, it::AgentReply) = begin
+  get(sub.nodes, :shown, -1) == it.n && return sub
+  b = sub.buf
+  b.lines = String.(split(rstrip(it.text), '\n'))
+  b.version += 1
+  b.caret = b.anchor = (1, 0)
+  sub.nodes[:span] = (1, length(b.lines))
+  sub.nodes[:shown] = it.n
+  sub
+end
+
+"The part of the agent's pane of an editor `e` that the pane shows, with what kind of part it is: `:field` or `:reply`. Nothing for any other editor."
+agent_part_of(e) = get(e.nodes, :agent_part, nothing)
+
+"""
+What a key does in a part of the agent's pane, before the part's editor does
+what it does with a key. True when the key is done with. In the words that
+you type, Return gives them to the agent, and ⇧Return starts a new line. A
+command for the window runs in the window's page. Esc does nothing.
+"""
+agent_key!(e, w, K, command) = begin
+  p, kind = agent_part_of(e)
+  kind == :field && K == Keys.enter && unmodified(w) && (send_words!(p); return true)
+  K == Keys.escape && return true
+  (command !== nothing && (COMMANDS[command].kind == :window || command in (:find, :find_next, :find_last))) || return false
+  run!(editor(p), w, command, false)
+  true
+end
+
+"The session of the pane `p` of the window of `e`, with its program running. The first words start it, in the top folder of the file's repository."
+session!(p::AgentPane, e) = begin
+  s = p.session
+  if s === nothing
+    b = e.buf
+    onmac = !isempty(b.path) && !isremote(b.path)
+    top = repo_of(e)
+    dir = !isempty(top) ? top : onmac ? (isdir(b.path) ? b.path : dirname(b.path)) : isempty(e.folder) ? homedir() : e.folder
+    s = AgentSession(agent=pane_agent(p, e), dir=dir, page=writes(b) ? truepath(b.path) : "", turns=agent_kind(e.ai).name != "Claude")
+  end
+  # An agent that works by turns has no program between turns: `say!` starts one
+  s.turns || running(s) || start!(s, session_command(e, s.page, s.id))
+  p.session = s
+end
+
+"The name of the agent of the pane `p`: the one of its session, or the one that Settings chose, which the next session is with"
+pane_agent(p::AgentPane, e) = p.session !== nothing ? p.session.agent : SESSION_COMMAND[] === nothing ? agent_kind(e.ai).name : e.ai
+
+"""
+Make the agent called `name` the one of the pane `p`, as the command Switch
+Agent does. A session with another agent ends: your next words start one
+with the new agent.
+"""
+pane_agent!(p::AgentPane, name::AbstractString) = begin
+  e = editor(p)
+  agent_kind(e.ai).name == name || preferred_agent!(e, String(name))
+  s = p.session
+  s === nothing || s.agent == name || new_session!(p)
+  redraw_in!(e, SOON)
+  nothing
+end
+
+const AGENT_MENU = :agent_menu
+const AGENT_MENU_W = 200px
+
+"The menu of the agents, under the agent's name in the top bar. `over` is the row that the mouse or an arrow key is on, or 0."
+@def mutable struct AgentMenu <: SemanticUI
+  of::Any = nothing
+  over::Int = 0
+end
+
+"A row of the menu of the agents: the agent called `name`, with its logo"
+@def mutable struct AgentMenuRow <: SemanticUI
+  menu::Any = nothing
+  name::String = ""
+  index::Int = 0
+end
+
+"""
+Show the agents that Ladder lists, in a menu under `under`, the agent's
+name in the top bar. Each has its logo before its name, and the pane's
+agent has a tick. A click on one makes it the pane's agent. Settings says
+which agents the menu lists: see `listed_agents`.
+"""
+choose_agent!(p::AgentPane, under, w) = begin
+  any(q -> q.key == AGENT_MENU, popups(w)) && return (close_popup!(w, AGENT_MENU); nothing)
+  e = editor(p)
+  menu = node!(() -> AgentMenu(of=p), e, :agent_menu)
+  menu.over = 0
+  popup!(w, menu, anchor=under, placement=:below, gap=4px, width=AGENT_MENU_W, key=AGENT_MENU, theme=component_theme(e.zoom))
+  nothing
+end
+
+describe(m::AgentMenu) = with_pane_colours() do
+  p = m.of
+  e = editor(p)
+  names = listed_agents(e)
+  Column(width(grow=grow), Alignment.Start, padding(4px), child_gap=1px, radius(8px), name="Agent menu",
+         background(colours.float), border(1px, :solid, colours.line), shadow(0px, 6px, 20px, RGBA(0, 0, 0, 0.35)),
+    (node!(() -> AgentMenuRow(menu=m, name=name), e, (:agent_row, name)) for name in names)...)
+end
+
+describe(r::AgentMenuRow) = begin
+  p = r.menu.of
+  e = editor(p)
+  names = listed_agents(e)
+  r.index = something(findfirst(==(r.name), names), 0)
+  logo = agent_logo(r.name)
+  here = try agent_path(agent_kind(r.name)); true catch; false end
+  Row(width(grow=grow), height(30px), Alignment.Center, padding(8px, 0px), child_gap=9px, radius(5px), name="Agent row",
+      background(ishovered(r) || r.menu.over == r.index ? on_glass(0.1) : clear),
+    Box(fixed(16px), height(16px), Alignment.Center, justify=Alignment.Center,
+        logo === nothing ? Icon("robot", size=15px, color=colours.dim) : Icon(logo[1], size=15px, color=logo[2])),
+    Box(label(r.name, 13px, color=here ? colours.ink : colours.dim)),
+    # An agent whose command isn't on this Mac says so. A click still chooses it, and the pane says how to install it.
+    (here ? () : (Box(label("not installed", 11px, color=colours.faint)),))...,
+    Box(width(grow=grow)),
+    (pane_agent(p, e) == r.name ? (Icon("check", size=12px, color=colours.dim),) : ())...)
+end
+
+cursor(::AgentMenuRow) = :hand
+onmouse(r::AgentMenuRow, ::MouseMove) = (r.menu.over = r.index; nothing)
+onkey(r::AgentMenuRow, ev::KeyPress{Keys.mouse_left}) = (close_popup!(ev.window, AGENT_MENU); pane_agent!(r.menu.of, r.name); handled)
+# The arrows move over the rows, and Return chooses the row that they're on
+onkey(m::AgentMenu, ::KeyPress{Keys.down}) = (n = length(listed_agents(editor(m.of))); m.over = n == 0 ? 0 : mod1(m.over + 1, n); redraw_in!(editor(m.of), SOON); handled)
+onkey(m::AgentMenu, ::KeyPress{Keys.up}) = (n = length(listed_agents(editor(m.of))); m.over = n == 0 ? 0 : mod1(m.over - 1, n); redraw_in!(editor(m.of), SOON); handled)
+onkey(m::AgentMenu, ev::KeyPress{Keys.enter}) = begin
+  names = listed_agents(editor(m.of))
+  m.over in eachindex(names) || return handled
+  close_popup!(ev.window, AGENT_MENU)
+  pane_agent!(m.of, names[m.over])
+  handled
+end
+
+"The text of the page `b` from the place `lo` to the place `hi`, each a line and how many characters are before it in the line"
+text_between(b::Buffer, lo, hi) =
+  lo[1] == hi[1] ? String(first(chop(b.lines[lo[1]], head=lo[2], tail=0), hi[2] - lo[2])) :
+    join([String(chop(b.lines[lo[1]], head=lo[2], tail=0)); b.lines[lo[1]+1:hi[1]-1]; String(first(b.lines[hi[1]], hi[2]))], "\n")
+
+const MOST_PICKED = 6000   # characters. A longer selection goes to the agent as its range only.
+
+"""
+What the window of `e` shows, for the agent: a few words for you, like the
+heading that the caret is under, and the block that says it to the agent,
+between `<ladder>` tags. The block has the caret's line and column, and
+says whether text is selected. A selection has where it starts and ends,
+and its exact text between `<selection>` tags, with nothing put before its
+lines. So no text of the page can look like the block's end, but text that
+holds the closing tag itself, which goes as its range only.
+"""
+page_context(e) = begin
+  b = e.buf
+  isempty(b.path) && return ("", "")
+  path = isremote(b.path) ? b.path : truepath(b.path)
+  # Ladder saves the page before each message. A page that it couldn't save still has changes that the file lacks.
+  shows = "The window shows the file $path." * (dirty(b) ? " The window has changes that aren't in the file yet." : "")
+  b.view in (:markdown, :code) || return (name(b), "<ladder>\n$shows\n</ladder>")
+  n = b.caret[1]
+  heads = filter(x -> x.level <= 6 && x.line <= n, page_outline(e))
+  under = isempty(heads) ? "" : last(heads).title
+  lo, hi = selection(b)
+  # A column is counted from 1, as editors count it: the caret is before the character of that column
+  picked = if lo == hi
+    "Nothing is selected."
+  else
+    words = text_between(b, lo, hi)
+    range = "The selection goes from line $(lo[1]), column $(lo[2] + 1) to line $(hi[1]), column $(hi[2] + 1)."
+    length(words) > MOST_PICKED ? "$range It's $(length(words)) characters long, so read it in the file." :
+      occursin("</selection>", words) ? "$range Read its text in the file." :
+      "$range Its exact text:\n<selection>\n$words\n</selection>"
+  end
+  caret = "The caret is on line $n, column $(b.caret[2] + 1)" * (isempty(under) ? "" : ", under the heading \"$under\"") * "."
+  told = "<ladder>\n$shows\n$caret\n$picked\n</ladder>"
+  # The few words for you say that a selection goes too
+  some = lo == hi ? "" : lo[1] == hi[1] ? " · selection" : " · $(hi[1] - lo[1] + 1) lines selected"
+  ((isempty(under) ? name(b) : under) * some, told)
+end
+
+"The headings and the components of the page that the window of `e` shows, or the places of a file of code. They're kept until the text changes."
+page_outline(e) = begin
+  b = e.buf
+  kept = get(e.nodes, :pane_outline, nothing)
+  kept !== nothing && kept[1] === b && kept[2] == b.version && return kept[3]::Vector{Entry}
+  found = b.view == :markdown ? outline(b) :
+          b.view == :code ? [Entry(h.line, h.what == "section" ? 1 : 2, h.words, h.what == "section" ? "text-left" : "braces", h.line) for h in code_places(e)] : Entry[]
+  e.nodes[:pane_outline] = (b, b.version, found)
+  found
+end
+
+"""
+Give the agent the words that you typed in the pane `p`. The page is saved
+first, so that the agent reads what the window shows. The session starts
+with the first words.
+"""
+send_words!(p::AgentPane) = begin
+  e = editor(p)
+  words = String(strip(join(p.field.buf.lines, "\n")))
+  isempty(words) && return nothing
+  b = e.buf
+  s = try
+    writes(b) && (dirty(b) || !isfile(b.path)) && save!(b)
+    session!(p, e)
+  catch err
+    p.error = err isa ErrorException ? err.msg : sprint(showerror, err)
+    redraw_in!(e, SOON)
+    return nothing
+  end
+  p.error = ""
+  about, told = page_context(e)
+  say!(s, words, about, told)
+  p.follow = true
+  # A new field takes the keyboard, when the old one had it
+  w = window_of(e)
+  typing = w !== nothing && w.focus === p.field
+  pane_field!(p)
+  typing && focus(p.field)
+  redraw_in!(e, SOON)
+  nothing
+end
+
+"End the session of the pane `p`, and start with nothing. The next words start a new session."
+new_session!(p::AgentPane) = begin
+  p.session === nothing || close!(p.session)
+  p.session = nothing
+  p.error = ""
+  empty!(p.open)
+  filter!(((k, _),) -> !(k isa Tuple && k[1] == :reply), p.parts)
+  p.scroll.offset, p.follow = 0px, true
+  redraw_in!(editor(p), SOON)
+  nothing
+end
+
+"End the session of the window of `e`: the window has closed"
+close_agent!(e) = begin
+  p = get(e.nodes, :agent_pane, nothing)
+  p isa AgentPane && p.session !== nothing && close!(p.session)
+  nothing
+end
+
+"""
+Give the task that reads what the agent prints its turn, and draw the window
+again when the session of the window of `e` has something new. While the
+agent works, that's twenty times a second.
+"""
+session_tick!(e) = begin
+  p = get(e.nodes, :agent_pane, nothing)
+  p isa AgentPane || return nothing
+  s = p.session
+  s === nothing && return nothing
+  if s.busy
+    yield()
+    redraw_in!(e, 0.05)
+  end
+  s.version == p.seen || (p.seen = s.version; redraw_in!(e, SOON))
+  nothing
+end
+
+"Keep the newest words of the pane `p` in sight, until you scroll up from them. Back at the end, it follows them again."
+follow!(p::AgentPane) = begin
+  sc = p.scroll
+  bottom = max(0px, sc.content_height - sc.viewport)
+  sc.offset < p.put - 2px && (p.follow = false)
+  sc.offset >= bottom - 4px && (p.follow = true)
+  p.follow && (sc.offset = bottom)
+  p.put = sc.offset
+  p
+end
+
+"The button of the pane `p` that does `action` to `what`. It's kept between frames."
+pane_button(p::AgentPane, action::Symbol, what=nothing) =
+  get!(() -> own!(p, PaneButton(of=p, action=action, what=what)), p.parts, (:button, action, what === nothing ? 0 : what isa Int ? what : objectid(what)))
+
+"The face of the words of the agent's pane, in `colour`"
+pane_face(e, colour=colours.ink; size=REPLY_SIZE) = Face(SANS, "", size * e.zoom, colour, false)
+
+describe(p::AgentPane) = with_pane_colours() do
+  e = editor(p)
+  p.field === nothing && pane_field!(p)
+  follow!(p)
+  room = agent_wide(e) - PANE_LEFT - PANE_X
+  Column(width(grow=grow), height(grow=grow), Alignment.Start, name="Agent",
+    PaneColours(on=true, across=true),
+    Box(width(grow=grow), height(max(above_page(e), SIDE_GAP) - 1px)),   # under the top bar, which has the pane's heading: see `pane_head`
+    reuse!(p.scroll, pane_talk(p, e, room)),
+    pane_foot(p, e, room),
+    PaneColours(on=false, across=true))
+end
+
+cursor(::AgentPane) = :arrow
+# A click on the pane, where nothing else takes it, gives the keyboard to the words that you type
+onkey(p::AgentPane, ::KeyPress{Keys.mouse_left}) = (p.field === nothing || focus(p.field); handled)
+
+"""
+The heading of the agent's pane: the agent's logo and name, which a click
+opens into a menu of the agents, how its session goes, and the button
+that starts a new session. It's in the top bar, over
+the pane, between the window's own buttons and the two arrows, so the talk
+has all of the pane's height. A name that's too long for a narrow pane is
+cut off at the button.
+"""
+pane_head(p::AgentPane, e) = begin
+  s = p.session
+  goes = s === nothing ? "No session yet" : s.busy ? "Working" : !(s.turns || running(s)) ? "Stopped" : "In $(basename(s.dir))"
+  (Row(width(grow=grow), height(grow=grow), Alignment.Center, padding(0px, 6px, 0px, 0px), child_gap=4px, clip=true, name="Agent head",
+     pane_button(p, :agent),
+     Box(label(goes, 12px, color=colours.dim))),
+   (s === nothing ? () : (Box(fixed(30px), height(grow=grow), Alignment.Center, justify=Alignment.Center, pane_button(p, :new)),))...)
+end
+
+"What you and the agent said, from the first words to the newest, as wide as `room`"
+pane_talk(p::AgentPane, e, room) = begin
+  s = p.session
+  items = s === nothing ? Any[] : s.items
+  rows = Any[]
+  k = 1
+  while k <= length(items)
+    it = items[k]
+    if it isa AgentStep
+      # More than three steps in a row show as one line, which a click opens, once the agent has gone on from them
+      j = k
+      while j < length(items) && items[j+1] isa AgentStep; j += 1 end
+      if j - k >= 3 && !(k in p.open) && !(s.busy && j == length(items))
+        push!(rows, pane_button(p, :steps, k))
+        pane_button(p, :steps, k).what = (k, j - k + 1)
+      else
+        j - k >= 3 && (push!(rows, pane_button(p, :steps, k)); pane_button(p, :steps, k).what = (k, 0))
+        append!(rows, (step_row(e, items[i], room) for i in k:j))
+      end
+      k = j + 1
+      continue
+    end
+    push!(rows, talk_row(p, e, it, room))
+    k += 1
+  end
+  # While the agent thinks, with nothing of its own under way to show it
+  waits = s !== nothing && s.busy && (isempty(items) || !(last(items) isa AgentStep && last(items).state == :going) &&
+                                                         !(last(items) isa AgentReply && !last(items).whole) &&
+                                                         !(last(items) isa AgentWants && last(items).answer == :none))
+  waits && push!(rows, Row(height(24px), Alignment.Center, child_gap=8px,
+                           Box(fixed(16px), height(16px), Alignment.Center, justify=Alignment.Center, Spinner(size=12px)),
+                           Box(label("Thinking", 13px * e.zoom, color=colours.dim))))
+  isempty(p.error) || push!(rows, words_block(e, p.error, PICK_FAILED, room))
+  isempty(rows) && return Column(width(grow=grow), Alignment.Start, padding(40px, PANE_X, 20px, PANE_LEFT), child_gap=6px, name="Talk",
+    words_block(e, "Ask about this page, or say what to change in it.", colours.dim, room),
+    words_block(e, "What the agent says shows here as a page: tables, diagrams and charts, not a terminal's text.", colours.faint, room))
+  Column(width(grow=grow), Alignment.Start, padding(6px, PANE_X, 20px, PANE_LEFT), child_gap=10px, name="Talk", rows...)
+end
+
+"The words `words` in `colour`, wrapped to `room`, each line of them in turn"
+words_block(e, words, colour, room; size=13px) = begin
+  face = pane_face(e, colour; size)
+  Column(Alignment.Start, [Row(height(face.size * 1.45), Alignment.Center, label(l, face.size, color=colour))
+                           for para in split(words, '\n') for l in wrapped(face, para, num(room))]...)
+end
+
+"Your words to the agent, at the right of the pane on a shape of their own, under what the window showed then"
+talk_row(p::AgentPane, e, it::YouSaid, room) = begin
+  inside = min(room * 0.86, 520px) - 26px
+  about = isempty(it.about) ? () :
+    (Row(height(18px), Alignment.Center, child_gap=5px, Icon("file-earmark-text", size=11px, color=colours.faint),
+         Box(label(shortened(pane_face(e, colours.faint; size=11.5px), it.about, inside), 11.5px * e.zoom, color=colours.faint))),)
+  Column(width(grow=grow), Alignment.End, child_gap=3px, padding(6px, 0px, 2px, 0px), name="You said",
+    about...,
+    Box(padding(13px, 8px), radius(12px), background(on_glass(0.09)), words_block(e, it.words, colours.ink, inside; size=REPLY_SIZE)))
+end
+
+"What the agent said, as a page of Ladder's as wide as `room`"
+talk_row(p::AgentPane, e, it::AgentReply, room) = begin
+  sub = get!(() -> reply_editor(p, e, p.session.dir), p.parts, (:reply, objectid(it)))
+  show_reply!(sub, it)
+  pane_style!(sub, e)
+  pane_layout!(sub, room)
+  tall = isempty(sub.layout) ? 0px : lowest(sub, sub.layout)
+  Box(width(grow=grow), height(tall), Alignment.Start, name="Reply", node!(Document, sub, :document))
+end
+
+"Something that the agent asks to do, with the buttons that allow it and refuse it, and then what you answered"
+talk_row(p::AgentPane, e, it::AgentWants, room) = begin
+  inside = room - 26px
+  ends = it.answer == :none ? Row(Alignment.Center, child_gap=8px, pane_button(p, :allow, it), pane_button(p, :refuse, it)) :
+    Box(label(it.answer == :allowed ? "You allowed it." : it.answer == :refused ? "You refused it." : "It wasn't answered.", 12px * e.zoom, color=colours.dim))
+  detail = isempty(it.detail) ? () :
+    (Box(width(grow=grow), padding(8px, 6px), radius(6px), background(on_glass(0.06)), clip=true,
+       Column(Alignment.Start, [Row(height(17px), Alignment.Center, Text(String(l), size=12px * e.zoom, family=codefont(), subfamily=codestyle(), color=colours.ink, wrap=WrapMode.none))
+                                for l in first(split(it.detail, '\n'), 6)]...)),)
+  Column(width(grow=grow), Alignment.Start, padding(13px, 11px), radius(10px), child_gap=9px, name="Agent asks",
+         background(on_glass(0.05)), border(1px, :solid, on_glass(0.14)),
+    words_block(e, "$(p.session.agent) asks to do this: $(it.words)", colours.ink, inside),
+    detail..., ends)
+end
+
+"A line that the session says of itself"
+talk_row(p::AgentPane, e, it::SessionNote, room) = words_block(e, it.words, it.bad ? PICK_FAILED : colours.dim, room; size=12.5px)
+
+"A step of the agent as a line: a ring that turns while it's under way, and then the icon of its tool"
+step_row(e, it::AgentStep, room) = begin
+  mark = it.state == :going ? Spinner(size=12px) :
+         it.state == :failed ? Icon("exclamation-triangle", size=13px, color=PICK_FAILED) : Icon(tool_icon(it.tool), size=13px, color=colours.faint)
+  face = pane_face(e, colours.dim; size=13px)
+  Row(width(grow=grow), height(22px), Alignment.Center, child_gap=8px, name="Step",
+    Box(fixed(16px), height(16px), Alignment.Center, justify=Alignment.Center, mark),
+    Box(label(shortened(face, it.words, room - 26px), face.size, color=colours.dim)))
+end
+
+"""
+The foot of the agent's pane: the field that you type in, with the button
+that sends or stops at its right. With one line of words it's one line
+tall. The words wrap before the button, which stays at the last line.
+"""
+pane_foot(p::AgentPane, e, room) = begin
+  s = p.session
+  sub = p.field
+  pane_style!(sub, e)
+  inside = agent_wide(e) - 2PANE_X - 4px - SEND_ROOM
+  pane_layout!(sub, inside)
+  line = REPLY_SIZE * e.zoom * 1.5
+  tall = min(isempty(sub.layout) ? line : lowest(sub, sub.layout), 9line)
+  doc = Box(width(grow=grow), height(tall), Alignment.Start, clip=true, node!(Document, sub, :document))
+  who = pane_agent(p, e)
+  empty = sub.buf.lines == [""]
+  text = empty ? Stack(width(grow=grow), height(tall), Alignment.Start,
+                       Row(width(grow=grow), height(tall), Alignment.Center, label("Ask $who, or say what to change", REPLY_SIZE * e.zoom, color=colours.faint)), doc) : doc
+  Box(width(grow=grow), padding(4px, PANE_X - 4px, PANE_X - 4px, PANE_X - 4px), name="Agent foot",
+    Row(width(grow=grow), Alignment.End, padding(6px, 6px, 6px, 14px), radius(14px), child_gap=SEND_ROOM - 28px,   # top, right, bottom, left
+        background(on_glass(0.07)), border(1px, :solid, on_glass(0.1)),
+      Box(width(grow=grow), padding(0px, 4px), text),   # one line of words is as tall as the button
+      pane_button(p, s !== nothing && s.busy && empty ? :stop : :send)))
+end
+
+describe(b::PaneButton) = begin
+  p, e = b.of, editor(b.of)
+  over = ishovered(b)
+  if b.action == :send
+    send_button(p, e, over)
+  elseif b.action == :stop
+    Box(fixed(28px), height(28px), radius(14px), Alignment.Center, justify=Alignment.Center, name="Stop", background(over ? tint(colours.ink, 0.85) : colours.ink),
+      Icon("stop-fill", size=11px, color=colours.bg))
+  elseif b.action == :agent
+    who = pane_agent(p, e)
+    logo = agent_logo(who)
+    Row(height(28px), Alignment.Center, padding(7px, 0px), child_gap=7px, radius(6px), name="Agent name", background(over ? on_glass(0.1) : clear),
+      (logo === nothing ? Icon("robot", size=16px, color=colours.dim) : Icon(logo[1], size=16px, color=logo[2])),
+      Box(label(who, 13px, weight="Semibold")),
+      Icon("chevron-down", size=9px, color=colours.faint))
+  elseif b.action == :new
+    Box(fixed(28px), height(28px), radius(6px), Alignment.Center, justify=Alignment.Center, name="New session", background(over ? on_glass(0.1) : clear),
+      Icon("plus-lg", size=14px, color=colours.dim))
+  elseif b.action == :steps
+    # A run of steps as one line. `what` is where the run starts and how many it holds, or 0 while they show.
+    k, n = b.what
+    Row(height(22px), Alignment.Center, child_gap=8px, radius(5px), name="Steps",
+      Box(fixed(16px), height(16px), Alignment.Center, justify=Alignment.Center, Icon(n == 0 ? "chevron-down" : "chevron-right", size=9px, color=colours.faint)),
+      Box(label(n == 0 ? "Hide the steps" : "$n steps", 13px * e.zoom, color=over ? colours.ink : colours.dim)))
+  else
+    allow = b.action == :allow
+    Box(height(26px), padding(12px, 0px), radius(6px), Alignment.Center, name=allow ? "Allow" : "Refuse",
+        background(allow ? (over ? tint(colours.ink, 0.85) : colours.ink) : over ? on_glass(0.1) : clear), border(1px, :solid, allow ? clear : on_glass(0.2)),
+      label(allow ? "Allow" : "Refuse", 12px * e.zoom, color=allow ? colours.bg : colours.ink, weight="Semibold"))
+  end
+end
+cursor(::PaneButton) = :hand
+
+"The colour of the panes' ink at `strength` on the window's glass, as a colour with nothing see-through, which hides what's under it"
+solid_on_glass(e, strength) = begin
+  g, k = glass_colour(e), convert(RGBA{Float64}, colours.ink)
+  RGBA(g.r + (k.r - g.r) * strength, g.g + (k.g - g.g) * strength, g.b + (k.b - g.b) * strength, 1.0)
+end
+
+"""
+The button that sends your words: a round button at the right of the words.
+While the mouse is on it, it opens to the left to show what goes to the
+agent with your words: the heading that the caret is under, or the file's
+name, and whether text is selected. The open part lies over your words and
+moves none of them. It shuts when the mouse leaves.
+"""
+send_button(p::AgentPane, e, over::Bool) = begin
+  ready = p.field.buf.lines != [""]
+  about = over ? first(page_context(e)) : ""
+  # Whether it's open, since when, and the words in it, which stay while it shuts
+  kept = get(p.parts, :send_open, (false, 0.0, ""))
+  kept[1] == !isempty(about) || (kept = (!isempty(about), time(), kept[3]))
+  isempty(about) || (kept = (kept[1], kept[2], about))
+  p.parts[:send_open] = kept
+  t = clamp((time() - kept[2]) / SEND_GROWS, 0.0, 1.0)
+  t < 1 && redraw_in!(e, SOON)
+  t = 1 - (1 - t)^3   # quick at the start, slow at the end
+  open = kept[1] ? t : 1 - t
+  face = pane_face(e, colours.bg; size=12px)
+  words = shortened(face, kept[3], max(40px, agent_wide(e) - 2PANE_X - 90px))
+  wide = px(round(num((measure(face, words) + 36px) * open)))
+  shows = wide >= 1px
+  # Over your words, the button's colour has nothing see-through in it
+  back = ready ? (over ? solid_on_glass(e, 0.85) : colours.ink) : shows ? solid_on_glass(e, 0.24) : on_glass(0.12)
+  ink = ready ? colours.bg : shows ? colours.ink : colours.bg
+  # The button keeps its place and its size in the row. Its open part reaches out to the left of that.
+  Box(fixed(28px), height(28px), Alignment.Start, name="Send",
+    Row(fixed(wide + 28px), height(28px), radius(14px), Alignment.Center, background(back), offset_x=-wide, name="Send pill",
+      (shows ? (Box(fixed(wide), height(28px), clip=true,
+                  Row(height(28px), Alignment.Center, padding(0px, 0px, 0px, 12px), child_gap=6px, name="About",   # top, right, bottom, left
+                    Icon("file-earmark-text", size=12px, color=ink),
+                    Box(label(words, face.size, color=ink)))),) : ())...,
+      Box(fixed(28px), height(28px), Alignment.Center, justify=Alignment.Center, Icon("arrow-up", size=14px, color=ink))))
+end
+
+onkey(b::PaneButton, ev::KeyPress{Keys.mouse_left}) = begin
+  p, s = b.of, b.of.session
+  b.action == :agent && return (hide_tooltip!(ev.window); choose_agent!(p, b, ev.window); handled)
+  b.action == :send && send_words!(p)
+  b.action == :stop && s !== nothing && stop!(s)
+  b.action == :new && new_session!(p)
+  b.action in (:allow, :refuse) && s !== nothing && answer!(s, b.what, b.action == :allow)
+  b.action == :steps && (k = b.what[1]; k in p.open ? delete!(p.open, k) : push!(p.open, k))
+  hide_tooltip!(ev.window)
+  redraw_in!(editor(p), SOON)
+  handled
+end
+
+# A tooltip in the pane is put by the button's rectangle
+onmouse(b::PaneButton, ev::MouseMove) = begin
+  # The send button shows what goes with your words while the mouse is on it, so its tooltip says that they go together
+  tip = b.action == :send ? (isempty(first(page_context(editor(b.of)))) ? "Send  ⏎" : "Send with context  ⏎") :
+        b.action == :stop ? "Stop the agent. What it changed so far stays." :
+        b.action == :new ? "End this session, and start a new one" : b.action == :agent ? "Choose the agent" : ""
+  r = isempty(tip) ? nothing : rect(b)
+  r === nothing || show_tooltip!(ev.window, tip_label(tip), r.left, r.top, r.width, r.height; placement=:bottom, gap=6px)
+  nothing
+end
+
+# --- the outline ---
+
+"The line of the heading that the top of the window of `e` is in: the last of `entries` that starts above the first lines that show, or 0"
+section_now(e, entries) = begin
+  (isempty(entries) || isempty(e.layout)) && return 0
+  edge = e.scroll.offset + 70px   # a heading counts once it's near the top of the window
+  line = 1
+  for it in e.layout
+    it.top + PAGE_TOP > edge && break
+    line = it.last
+  end
+  k = findlast(x -> x.level <= 6 && x.line <= line, entries)
+  k === nothing ? 0 : entries[k].line
+end
+
+describe(o::OutlinePane) = with_pane_colours() do
+  e = editor(o)
+  b = e.buf
+  entries = page_outline(e)
+  heads = filter(x -> x.level <= 6, entries)
+  top = isempty(heads) ? 1 : minimum(x -> x.level, heads)
+  # A page that starts with its one biggest heading has that for its title, and its sections are the headings a level down
+  titled = !isempty(heads) && first(heads).level == top && count(x -> x.level == top, heads) == 1 && first(heads).line == first(entries).line
+  base = titled && length(heads) > 1 ? minimum(x -> x.level, heads[2:end]) : top
+  named = titled ? first(heads).title : isempty(b.path) ? "Untitled" : title(b.path)
+  sections = count(x -> x.level == base, titled ? heads[2:end] : heads)
+  now = section_now(e, entries)
+  wide = right_w(e)
+  rows = Any[]
+  under, depth = 0, 0   # the level of a folded heading, whose lines are left out, and how far in the last heading is
+  for (k, x) in enumerate(entries)
+    titled && k == 1 && continue   # the title is at the top of the pane
+    under > 0 && x.level > under && continue
+    under = 0
+    x.level <= 6 && (depth = x.level - base)
+    opens = k < length(entries) && entries[k+1].level > x.level
+    folded = opens && (x.level, x.title) in o.folded
+    folded && (under = x.level)
+    r = get!(() -> own!(o, OutlineRow(of=o)), o.rows, length(rows) + 1)
+    r.line, r.caret, r.level, r.title, r.icon = x.line, x.caret, x.level, x.title, x.icon
+    r.depth, r.opens, r.folded, r.now = max(0, x.level <= 6 ? depth : depth + 1), opens, folded, now == x.line
+    push!(rows, r)
+  end
+  face = Face(SANS, "Semibold", 14px, colours.ink, false)
+  Column(width(grow=grow), height(grow=grow), Alignment.Start, name="Outline",
+    PaneColours(on=true, across=true),
+    Column(width(grow=grow), height(44px), Alignment.Start, padding(PANE_X, 0px), child_gap=2px, justify=Alignment.Center,   # across, down
+      Row(height(18px), Alignment.Center, label(shortened(face, named, wide - 2PANE_X), 14px, weight="Semibold")),
+      Row(height(16px), Alignment.Center, label(isempty(rows) ? "No headings yet" : sections == 1 ? "1 section" : "$sections sections", 12px, color=colours.dim))),
+    reuse!(o.scroll, Column(width(grow=grow), Alignment.Start, padding(4px, 8px, 16px, 8px), child_gap=1px, rows...)),
+    PaneColours(on=false, across=true))
+end
+
+const OUTLINE_STEP = 14px   # how far in each level of the outline is
+
+describe(r::OutlineRow) = begin
+  e = editor(r)
+  heading = r.level <= 6
+  colour = r.now || ishovered(r) ? colours.ink : colours.dim
+  face = Face(SANS, r.depth == 0 && heading ? "Medium" : "", 13px, colour, false)
+  room = right_w(e) - 16px - 16px - OUTLINE_STEP * r.depth - 14px - 7px - 14px - 7px
+  Row(width(grow=grow), height(30px), Alignment.Center, radius(7px), padding(0px, 8px, 0px, 8px + OUTLINE_STEP * r.depth), child_gap=7px, name="Outline row",
+      background(r.now ? on_glass(0.09) : ishovered(r) ? on_glass(0.05) : clear),
+    Box(fixed(14px), height(14px), Alignment.Center, justify=Alignment.Center,
+        (r.opens ? (Icon(r.folded ? "chevron-right" : "chevron-down", size=9px, color=colours.dim),) : ())...),
+    Icon(heading ? "text-left" : r.icon, size=13px, color=r.now ? colours.ink : colours.faint),
+    Box(label(shortened(face, r.title, max(room, 20px)), 13px, color=colour, weight=face.style)))
+end
+cursor(::OutlineRow) = :hand
+
+# A click on the arrow of a heading hides the lines under it, or shows them. A click anywhere else on a line goes to it in the page.
+onkey(r::OutlineRow, ev::KeyPress{Keys.mouse_left}) = begin
+  e, o = editor(r), r.of
+  at = rect(r)
+  if r.opens && at !== nothing && ev.window.mouse[1] < at.left + 8px + OUTLINE_STEP * r.depth + 18px
+    key = (r.level, r.title)
+    key in o.folded ? delete!(o.folded, key) : push!(o.folded, key)
+  else
+    note_place!(e)   # ⌘⌥← comes back here
+    show_line!(e, r.caret)
+    # The heading goes near the top of the window. The next frame does it, once it has laid out the page.
+    e.nodes[:hold] = (r.line, 24px - PAGE_TOP)
+  end
+  redraw_in!(e, SOON)
+  handled
+end
+
+# --- into agent mode, and out of it ---
+
+"""
+Make the window `w` of `e` wider for agent mode: as wide as the agent's
+pane, the page's card and the outline need, or as wide as its screen. The
+page stays where it is on the screen, as far as the screen allows. A window
+that fills a screen of its own stays as it is.
+"""
+widen_for_agent!(e, w, p::AgentPane, side_was) = begin
+  (w === nothing || e.full_screen) && return nothing
+  wide, tall = w.size
+  x, y = w.position
+  screen = w.screen
+  outline = e.right ? OUTLINE_W : 0px
+  card = something(PAGE_CARD_CHOSEN[], page_shape_wide(tall))
+  want = AGENT_W + card + outline + 2PAGE_CARD_GAP
+  new = px(round(num(min(max(want, wide), max(screen.size[1], wide)))))
+  # The middle of the page's space before, and of the card's room after
+  middle = x + side_was + (wide - side_was) / 2
+  left = middle - (new - outline - PAGE_CARD_GAP - card / 2)   # the card is beside the outline
+  left = px(round(num(clamp(left, screen.position[1], max(screen.position[1], screen.position[1] + screen.size[1] - new)))))
+  p.was = (p.was..., grew=new - wide, moved=left - x)
+  w.position = typeof(w.position)(left, y)
+  w.size = typeof(w.size)(new, tall)
+  nothing
+end
+
+"Make the window `w` of `e` as wide as it was before agent mode, where it was, less what you changed since"
+narrow_from_agent!(e, w, p::AgentPane) = begin
+  (w === nothing || e.full_screen || p.was === nothing || !haskey(p.was, :grew)) && return nothing
+  wide, tall = w.size
+  x, y = w.position
+  w.size = typeof(w.size)(max(wide - p.was.grew, 400px), tall)
+  w.position = typeof(w.position)(x - p.was.moved, y)
+  nothing
+end
+
+"""
+Show an agent's session at the left of the page and the page's outline at
+its right, in a wider window, with the page between them on a card. Run it
+again to put the window back as it was. The session stays, for the next time.
+"""
+agent_mode!(e) = begin
+  e = top_editor(e)
+  p = agent_pane(e)
+  w = window_of(e)
+  if agent_mode(e)
+    e.nodes[:agent_mode] = false
+    see_through!(e, w, false)
+    narrow_from_agent!(e, w, p)
+    p.was === nothing || (e.panel = p.was.panel)
+    e.slid = 0.0   # the sidebar is where it was at once
+    focus(e)
+  else
+    side_was = side_w(e)
+    p.was = (panel=e.panel,)
+    e.nodes[:agent_mode] = true
+    e.panel = true
+    e.slid = 0.0
+    widen_for_agent!(e, w, p, side_was)
+    see_through!(e, w, GLASS_ALPHA < 1)
+    p.field === nothing && pane_field!(p)
+    focus(p.field)
+  end
+  empty!(e.flows)   # the page's text is as wide as its new place allows
+  redraw_in!(e, SOON)
+  nothing
+end
+works_here(e, ::Val{:agent_mode}) = agent_mode(e) || !nofile(e)
+add_command!(agent_mode!, title="Show an agent's session at the left of the page and the page's outline at its right, in a wider window. Again puts the window back.")
+
+"End the session of agent mode, and start a new one with your next words"
+new_agent_session!(e) = (new_session!(agent_pane(top_editor(e))); nothing)
+works_here(e, ::Val{:new_agent_session}) = agent_mode(e) && agent_pane(e).session !== nothing
+add_command!(new_agent_session!, title="End the session of agent mode, and start a new one with your next words")
+
+# --- a window that you see through ---
+#
+# With `GLASS_ALPHA` under 1, the window of agent mode is see-through behind
+# the two panes, like a pane of frosted glass: what's behind the window
+# shows, blurred, and only the page's card is solid. At 1, as it is now, the
+# window is solid. A window that isn't on the screen, in a test, is always solid.
+
+const GLASS_ALPHA = 1.0    # how much of the glass's own colour shows. At 1 the window is solid. Under 1 it's see-through behind the panes.
+const GLASS_BLUR = 30      # how far what's behind the window is blurred, in px
+
+"True while the window of `e` is see-through behind its panes"
+see_through(e) = get(e.nodes, :see_through, false) === true
+
+const SURFACE_OPACITY = 236   # the number that AppKit has for how solid what OpenGL draws is: NSOpenGLContextParameterSurfaceOpacity
+
+"""
+Make the window `w` of `e` see-through where it draws a colour that isn't
+solid, with what's behind it blurred, or with `on` false make it solid
+again. The window draws with OpenGL, so both the window and what OpenGL
+draws are told. A window that isn't on the screen stays solid.
+"""
+see_through!(e, w, on::Bool) = begin
+  e.nodes[:see_through] = false
+  (Sys.isapple() && w !== nothing && !isempty(w.glfw)) || return nothing
+  try
+    win = nswindow(w)
+    context = ccall((:glfwGetNSGLContext, GLFW.libglfw), Ptr{Cvoid}, (GLFW.Window,), w.glfw[1])
+    context == C_NULL && return nothing
+    with_pool() do
+      solid = Ref{Cint}(on ? 0 : 1)
+      ccall((:objc_msgSend, libobjc), Cvoid, (Ptr{Cvoid}, Ptr{Cvoid}, Ptr{Cint}, Cint), context, sel("setValues:forParameter:"), solid, SURFACE_OPACITY)
+      send(win, "setOpaque:", !on)
+      on || msg(win, "setBackgroundColor:", msg(cls("NSColor"), "windowBackgroundColor"))
+      blur_behind!(win, on ? GLASS_BLUR : 0)
+      msg(win, "invalidateShadow")
+    end
+    e.nodes[:see_through] = on
+    delete!(e.nodes, :glass_set)
+    on && glass_window!(e)
+  catch err
+    @warn "Ladder couldn't make the window see-through" exception=(err, catch_backtrace())
+  end
+  nothing
+end
+
+"""
+Give the window of `e` the glass's colour for its own colour, while it's
+see-through. The colour changes with the theme, and it's solid while the
+window fills a screen of its own, so each frame of agent mode asks.
+"""
+glass_window!(e) = begin
+  see_through(e) || return nothing
+  c = glass_colour(e)
+  get(e.nodes, :glass_set, nothing) == c && return nothing
+  w = window_of(e)
+  (w === nothing || isempty(w.glfw)) && return nothing
+  with_pool() do
+    colour = ccall((:objc_msgSend, libobjc), Ptr{Cvoid}, (Ptr{Cvoid}, Ptr{Cvoid}, Cdouble, Cdouble, Cdouble, Cdouble),
+                   cls("NSColor"), sel("colorWithSRGBRed:green:blue:alpha:"), c.r, c.g, c.b, c.alpha)
+    msg(nswindow(w), "setBackgroundColor:", colour)
+  end
+  e.nodes[:glass_set] = c
+  nothing
+end
+
+"""
+Blur what's behind the NSWindow `win` by `radius` px, where the window is
+see-through. macOS has no public way to do it for a window that OpenGL draws,
+so this asks its window server, as terminals with a blurred background do.
+It's true when the window server took it.
+"""
+blur_behind!(win, radius::Integer) = begin
+  lib = Base.Libc.Libdl.dlopen_e("/System/Library/PrivateFrameworks/SkyLight.framework/SkyLight")
+  lib == C_NULL && return false
+  server = Base.Libc.Libdl.dlsym_e(lib, :SLSMainConnectionID)
+  blur = Base.Libc.Libdl.dlsym_e(lib, :SLSSetWindowBackgroundBlurRadius)
+  (server == C_NULL || blur == C_NULL) && return false
+  number = ccall((:objc_msgSend, libobjc), Clong, (Ptr{Cvoid}, Ptr{Cvoid}), win, sel("windowNumber"))
+  ccall(blur, Cint, (Cint, Cint, Cint), ccall(server, Cint, ()), number, radius) == 0
 end
 
 # --- ask an agent ---
@@ -52746,7 +54579,7 @@ side_name(e, ::GitDirectory) = "git's panel"
 page_first(e, ::GitDirectory) = false
 
 push!(BLOCK_ICONS, "layout-sidebar-reverse")
-BUTTONS[:right_panel] = (run=toggle_right!, tip=e -> (e.right ? "Hide " : "Show ") * side_name(e, page_object(e)),
+BUTTONS[:right_panel] = (run=toggle_right!, tip=e -> (e.right ? "Hide " : "Show ") * (agent_shows(e) ? "the outline" : side_name(e, page_object(e))),
                          off=e -> false, strong=false, on=e -> e.right)
 add_command!(toggle_right!, name=:right_panel, title="Show or hide the panel at the right of the page, like git's panel beside a repository's files")
 works_here(e, ::Val{:right_panel}) = right_view(e) !== nothing
@@ -56619,7 +58452,8 @@ publish_tick!(e) = begin
     PUBLISHED[job.folder] = said
     empty!(BLOG_POSTS)
   end
-  redraw_in!(e, 0)
+  # A step that writes a page has the next frame at once. While every job waits for a script or for git, the window looks ten times a second.
+  redraw_in!(e, !isempty(PUBLISHING) && all(job -> job.step in (:script, :send), values(PUBLISHING)) ? 0.1 : 0)
   nothing
 end
 
