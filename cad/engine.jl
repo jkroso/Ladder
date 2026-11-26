@@ -17,7 +17,7 @@
 #
 # `available()` says whether this Mac has SolidCraft.app.
 
-@use "./json" => JSON
+@use "../json" => JSON
 
 const NAME = "solidcraft-cli"
 

@@ -16,8 +16,8 @@
 # other command, `spec(command)` makes a form from what SolidCraft says of its
 # parameters, so every command can be run from the editor.
 
-@use "./json" => JSON
-@use "./json" Object
+@use "../json" => JSON
+@use "../json" Object
 
 "One thing that a form asks for"
 struct Field

@@ -406,6 +406,7 @@ end
 @use "./centient" => Centient
 @use "./update" => Update
 @use "./mime" => Mime
+@use "./json" JSONObject JSONNumber json_value write_json
 @use "./eml" => Eml
 @use "./webpage" => Webpages
 @use "./web" => Web
@@ -5963,131 +5964,6 @@ const JSON_ARROW = 16px        # the room for the arrow of an object or a list
 const JSON_PAD = 6px           # between the ends of a row's highlight and its text
 const MOST_STRING = 2000       # characters. A longer string stops there on its row.
 
-"An object of a JSON file: its keys and their values, in the order that the file has them"
-struct JSONObject
-  keys::Vector{String}
-  values::Vector{Any}
-end
-
-"A number of a JSON file, as the file writes it. So 3 shows as 3, 1.50 as 1.50, and a long number loses no digits."
-struct JSONNumber
-  text::String
-end
-
-"""
-What the JSON in `data` holds: a JSONObject, a list, a string, a JSONNumber,
-true, false or nothing. It's an error if `data` isn't JSON.
-"""
-json_value(data::AbstractVector{UInt8}) = begin
-  # Some programs start a file with a mark that says it's UTF-8. It isn't part of the JSON.
-  i = length(data) >= 3 && data[1] == 0xef && data[2] == 0xbb && data[3] == 0xbf ? 4 : 1
-  value, i = json_read(data, json_blank(data, i))
-  json_blank(data, i) > length(data) || error("There's more after the JSON")
-  value
-end
-
-"The place of the first byte at or after `i` that isn't a space or a line break"
-json_blank(d, i) = begin
-  while i <= length(d) && (d[i] == 0x20 || d[i] == 0x0a || d[i] == 0x0d || d[i] == 0x09)
-    i += 1
-  end
-  i
-end
-
-"Byte `i` of `d`. It's an error if the JSON stops before it."
-json_byte(d, i) = i <= length(d) ? d[i] : error("The JSON stops early")
-
-const JSON_NUMBER = r"^-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?$"
-
-"The value that starts at byte `i` of `d`, and the place of the byte after it"
-json_read(d, i) = begin
-  c = json_byte(d, i)
-  if c == UInt8('{')
-    keys, values = String[], Any[]
-    i = json_blank(d, i + 1)
-    json_byte(d, i) == UInt8('}') && return JSONObject(keys, values), i + 1
-    while true
-      key, i = json_string(d, i)
-      i = json_blank(d, i)
-      json_byte(d, i) == UInt8(':') || error("A key of the JSON has no value")
-      value, i = json_read(d, json_blank(d, i + 1))
-      push!(keys, key)
-      push!(values, value)
-      i = json_blank(d, i)
-      c = json_byte(d, i)
-      c == UInt8('}') && return JSONObject(keys, values), i + 1
-      c == UInt8(',') || error("The JSON has an object that doesn't end")
-      i = json_blank(d, i + 1)
-    end
-  elseif c == UInt8('[')
-    list = Any[]
-    i = json_blank(d, i + 1)
-    json_byte(d, i) == UInt8(']') && return list, i + 1
-    while true
-      value, i = json_read(d, i)
-      push!(list, value)
-      i = json_blank(d, i)
-      c = json_byte(d, i)
-      c == UInt8(']') && return list, i + 1
-      c == UInt8(',') || error("The JSON has a list that doesn't end")
-      i = json_blank(d, i + 1)
-    end
-  elseif c == UInt8('"')
-    json_string(d, i)
-  else
-    j = i
-    while j <= length(d) && !(d[j] in (UInt8(','), UInt8('}'), UInt8(']'), 0x20, 0x0a, 0x0d, 0x09))
-      j += 1
-    end
-    word = String(d[i:j-1])
-    word == "true" ? (true, j) : word == "false" ? (false, j) : word == "null" ? (nothing, j) :
-      occursin(JSON_NUMBER, word) ? (JSONNumber(word), j) : error("The JSON has $(repr(first(word, 20))) where a value should be")
-  end
-end
-
-"The string that starts at byte `i` of `d`, and the place of the byte after it"
-json_string(d, i) = begin
-  json_byte(d, i) == UInt8('"') || error("The JSON has no string where one should be")
-  i += 1
-  j = i
-  # Most strings have no \ in them, and are copied as they are
-  while (c = json_byte(d, j)) != UInt8('"') && c != UInt8('\\')
-    j += 1
-  end
-  d[j] == UInt8('"') && return String(d[i:j-1]), j + 1
-  out = IOBuffer()
-  write(out, view(d, i:j-1))
-  while (c = json_byte(d, j)) != UInt8('"')
-    if c == UInt8('\\')
-      x = json_byte(d, j + 1)
-      j += 2
-      if x == UInt8('u')
-        n, j = json_hex(d, j)
-        # A character past U+FFFF is written as two halves
-        if 0xd800 <= n < 0xdc00 && j + 1 <= length(d) && d[j] == UInt8('\\') && d[j+1] == UInt8('u')
-          low, k = json_hex(d, j + 2)
-          0xdc00 <= low < 0xe000 && ((n, j) = (0x10000 + ((n - 0xd800) << 10) + (low - 0xdc00), k))
-        end
-        # Half of one on its own is no character
-        print(out, 0xd800 <= n < 0xe000 ? '�' : Char(n))
-      else
-        write(out, x == UInt8('n') ? UInt8('\n') : x == UInt8('t') ? UInt8('\t') : x == UInt8('r') ? UInt8('\r') :
-                   x == UInt8('b') ? UInt8('\b') : x == UInt8('f') ? UInt8('\f') : x)
-      end
-    else
-      write(out, c)
-      j += 1
-    end
-  end
-  String(take!(out)), j + 1
-end
-
-"The number that the four hexadecimal digits at byte `i` of `d` write, and the place of the byte after them"
-json_hex(d, i) = begin
-  i + 3 <= length(d) || error("The JSON stops early")
-  parse(UInt32, String(d[i:i+3]), base=16), i + 4
-end
-
 "What each JSON file that was read holds, with when the file had last changed then. Only the last few are kept."
 const JSON_READ = Dict{String,Tuple{Float64,Any}}()
 
@@ -6120,35 +5996,9 @@ json_holder(v) = v isa JSONObject || v isa Vector{Any}
 json_count(o::JSONObject) = (n = length(o.keys); "$(commas(n)) key$(n == 1 ? "" : "s")")
 json_count(l::Vector{Any}) = (n = length(l); "$(commas(n)) item$(n == 1 ? "" : "s")")
 
-"Write `v` as JSON. An object and a list have each key or item on a line of its own, `depth` steps of two spaces in."
-json_write(io::IO, s::AbstractString) = begin
-  print(io, '"')
-  for c in s
-    c == '"' ? print(io, "\\\"") : c == '\\' ? print(io, "\\\\") : c == '\n' ? print(io, "\\n") :
-    c == '\r' ? print(io, "\\r") : c == '\t' ? print(io, "\\t") :
-    isvalid(c) && c < ' ' ? print(io, "\\u", string(UInt32(c), base=16, pad=4)) : print(io, c)
-  end
-  print(io, '"')
-end
-json_write(io::IO, n::JSONNumber) = print(io, n.text)
-json_write(io::IO, b::Bool) = print(io, b)
-json_write(io::IO, ::Nothing) = print(io, "null")
-json_write(io::IO, v::Union{JSONObject,Vector{Any}}, depth=0) = begin
-  object = v isa JSONObject
-  json_length(v) == 0 && return print(io, object ? "{}" : "[]")
-  print(io, object ? '{' : '[')
-  for (k, (key, x)) in enumerate(json_items(v))
-    print(io, k > 1 ? ",\n" : "\n", "  "^(depth + 1))
-    object && (json_write(io, key); print(io, ": "))
-    json_write(io, x, depth + 1)
-  end
-  print(io, '\n', "  "^depth, object ? '}' : ']')
-end
-json_write(io::IO, x, depth) = json_write(io, x)
-
 "What ⌘C copies of `v`: a string as its text, and any other value as JSON"
 json_copy(v::AbstractString) = String(v)
-json_copy(v) = sprint(json_write, v)
+json_copy(v) = sprint(write_json, v, 0)
 
 "A row of a JSON file's tree: how many steps in it is, the key of its value or its place in its list, and its value"
 struct JSONRow
@@ -6238,13 +6088,13 @@ json_words(e, s, colour) = Box(height(grow=grow), Alignment.Center,
 
 "`s` as a string of JSON, in its quotes, no longer than `room` characters. A longer one stops with an …"
 json_quoted(s, room) = begin
-  q = sprint(json_write, length(s) > MOST_STRING ? first(s, MOST_STRING) : s)
+  q = sprint(write_json, length(s) > MOST_STRING ? first(s, MOST_STRING) : s, 0)
   length(q) <= room && length(s) <= MOST_STRING ? q : first(q, max(2, room - 2)) * "…\""
 end
 
 "What `x` shows as in a closed object or list: an object or a list in short, and a string no longer than 40 characters"
 json_brief(x) = json_holder(x) ? (x isa JSONObject ? (json_length(x) == 0 ? "{}" : "{…}") : (json_length(x) == 0 ? "[]" : "[…]")) :
-                x isa AbstractString ? json_quoted(x, 40) : sprint(json_write, x)
+                x isa AbstractString ? json_quoted(x, 40) : sprint(write_json, x, 0)
 
 """
 What a closed object or list holds, on one line of no more than `room`
@@ -6273,7 +6123,7 @@ json_shown(t::JSONTree, i, room) = begin
   v = t.rows[i].value
   v isa AbstractString ? (json_quoted(v, room), colours.string) :
   v isa JSONNumber ? (v.text, colours.number) :
-  v isa Bool || v === nothing ? (sprint(json_write, v), colours.keyword) :
+  v isa Bool || v === nothing ? (sprint(write_json, v, 0), colours.keyword) :
   json_length(v) == 0 ? (json_brief(v), colours.dim) :
   json_opened(t, i) ? (v isa JSONObject ? "{" * json_count(v) * "}" : "[" * json_count(v) * "]", colours.dim) :
                       (json_peek(v, room), colours.dim)
@@ -13743,7 +13593,7 @@ json_cell(::Nothing) = ""
 json_cell(x) = x isa Vector{Any} && !any(json_holder, x) ? join((json_cell(y) for y in x), ", ") : json_line(x)
 
 "`x` as JSON on one line"
-json_line(x) = replace(sprint(json_write, x), r",\n\s*" => ", ", r"\n\s*" => "")
+json_line(x) = replace(sprint(write_json, x, 0), r",\n\s*" => ", ", r"\n\s*" => "")
 
 """
 The rows of the table of the page that a filter reads: the one under the
@@ -14352,7 +14202,7 @@ save_rows(v::FilterView, path) = begin
   d, s = filter_shown!(v)
   s === nothing && return 0
   if lowercase(splitext(path)[2]) in JSONS && !isempty(d.things)
-    write(path, sprint(json_write, Any[d.things[r-1] for r in s.rows]) * "\n")
+    write(path, sprint(write_json, Any[d.things[r-1] for r in s.rows], 0) * "\n")
   else
     mark = lowercase(splitext(path)[2]) == ".tsv" ? '\t' : ','
     quoted(cell) = occursin(mark, cell) || occursin('"', cell) || occursin('\n', cell) ? "\"" * replace(cell, "\"" => "\"\"") * "\"" : cell
@@ -15256,10 +15106,10 @@ things that the rows came from when `d` has them.
 """
 save_text(d::FilterRows, format) = begin
   format == "json" || return Saves.delimited(d.rows, format == "tsv" ? '\t' : ',')
-  isempty(d.things) || return sprint(json_write, d.things) * "\n"
+  isempty(d.things) || return sprint(write_json, d.things, 0) * "\n"
   names = [isempty(name) ? "column $c" : name for (c, name) in enumerate(d.rows[1])]
   things = Any[JSONObject(copy(names), Any[json_cell_of(cell, get(d.numbers, c, false)) for (c, cell) in enumerate(row)]) for row in d.rows[2:end]]
-  sprint(json_write, things) * "\n"
+  sprint(write_json, things, 0) * "\n"
 end
 
 "What the button of `v` will do, before it's clicked. `to` is where the rows would go."
@@ -49066,7 +48916,7 @@ end
 
 "Write the message `o` to the program of the session `s`, as a line of JSON. A task writes it, so a program that's slow to read holds nothing up."
 tell!(s::AgentSession, o) = begin
-  to, line = s.to, json_text(o) * "\n"
+  to, line = s.to, sprint(write_json, o) * "\n"
   to === nothing || @async try write(to, line) catch end
   nothing
 end
@@ -49119,33 +48969,6 @@ close!(s::AgentSession) = begin
   s.to === nothing || try close(s.to) catch end
   running(s) && try kill(s.process) catch end
   s
-end
-
-"`value` as JSON: what `json_value` reads, a Dict, a list, a string, a number, true, false or nothing"
-json_text(value) = sprint(json_text, value)
-json_text(io::IO, s::AbstractString) = begin
-  print(io, '"')
-  for c in s
-    c == '"' ? print(io, "\\\"") : c == '\\' ? print(io, "\\\\") : c == '\n' ? print(io, "\\n") : c == '\r' ? print(io, "\\r") :
-    c == '\t' ? print(io, "\\t") : c < ' ' ? print(io, "\\u", string(UInt16(c), base=16, pad=4)) : print(io, c)
-  end
-  print(io, '"')
-end
-json_text(io::IO, ::Nothing) = print(io, "null")
-json_text(io::IO, b::Bool) = print(io, b)
-json_text(io::IO, n::Integer) = print(io, n)
-json_text(io::IO, n::Real) = print(io, isfinite(n) ? Float64(n) : "null")
-json_text(io::IO, n::JSONNumber) = print(io, n.text)
-json_text(io::IO, list::AbstractVector) = (print(io, '['); foreach(((i, x),) -> (i > 1 && print(io, ','); json_text(io, x)), enumerate(list)); print(io, ']'))
-json_text(io::IO, o::JSONObject) = json_pairs(io, zip(o.keys, o.values))
-json_text(io::IO, d::AbstractDict) = json_pairs(io, d)
-json_pairs(io::IO, pairs) = begin
-  print(io, '{')
-  for (i, (k, v)) in enumerate(pairs)
-    i > 1 && print(io, ',')
-    json_text(io, string(k)); print(io, ':'); json_text(io, v)
-  end
-  print(io, '}')
 end
 
 "The step of the session `s` that the agent names `id`, or nothing"
@@ -50851,7 +50674,7 @@ pane_wide(p::AgentPane, e) = on_page(p) ? px(round(num(clamp(page_room(e)[1] - 1
 pane_context(p::AgentPane, e) = on_page(p) ? ("", "") : page_context(e)
 
 "The line that starts a part of a session's file: the kind of part, and with `about` what else the part has, as JSON"
-talk_mark(kind, about=nothing) = TALK_MARK * kind * (about === nothing ? "" : " " * replace(json_text(about), "--" => "-\\u002d")) * " -->"
+talk_mark(kind, about=nothing) = TALK_MARK * kind * (about === nothing ? "" : " " * replace(sprint(write_json, about), "--" => "-\\u002d")) * " -->"
 
 "The words `text` as lines of a session's file. A line that looks like the start of a part gets a \\ before it, which reading takes away."
 talk_body(text) = join((occursin(r"^\\*<!-- ladder:", l) ? "\\" * l : l for l in split(text, '\n')), "\n")

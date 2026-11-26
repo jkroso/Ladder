@@ -25,7 +25,7 @@
 #     at(eye, (800, 600), (30.0, 0.0, 13.0))   # where that point of the design shows, in px
 #     hit(shapes, ray(eye, (800, 600), (400, 300)))   # what shows at a place of the view
 
-@use "./json" => JSON
+@use "../json" => JSON
 
 const Vec3 = NTuple{3,Float64}
 

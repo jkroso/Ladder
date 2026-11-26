@@ -10,7 +10,7 @@
 @use "../cad/scene" => Scenes
 @use "../cad/sketch" => Sketching
 @use "../cad/engine" => Engines
-@use "../cad/json" => JSON
+@use "../json" => JSON
 
 const XY = Sketching.Frame((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0))
 line(a, b) = Dict{String,Any}("type" => "line", "start_at" => Any[a...], "end_at" => Any[b...])

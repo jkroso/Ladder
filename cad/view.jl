@@ -85,7 +85,7 @@
 @use "github.com/jkroso/UI.jl/Interface/Semantic/TextInput" => TextInputs
 @use Colors: Colorant, RGBA, RGB, @colorant_str, red, green, blue
 @use Skia
-@use "./json" => JSON
+@use "../json" => JSON
 @use "./design" => Designs
 @use "./scene" => Scenes
 @use "./gl" => GLs

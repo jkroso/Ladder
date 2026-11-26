@@ -7,7 +7,7 @@
 
 @use Test: @test, @testset, @test_throws
 @use "../main" => K
-@use "../cad/json" => JSON
+@use "../json" => JSON
 @use "../cad/scene" => Scenes
 @use "../cad/sketch" => Sketching
 @use "../cad/commands" => Commands

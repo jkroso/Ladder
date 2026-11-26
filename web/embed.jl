@@ -12,6 +12,8 @@
 # `video` gives nothing for any other address. This file asks the web for
 # nothing: main.jl asks the page's `load` for the JSON and for the picture.
 
+@use "../json" => JSON
+
 "`s` as it's written in an address: each character that means something there is written as % and its number"
 escape(s::AbstractString) = join(c in 'a':'z' || c in 'A':'Z' || c in '0':'9' || c in "-._~" ? string(c) : join("%" * uppercase(string(x, base=16, pad=2)) for x in codeunits(string(c))) for c in s)
 
@@ -35,48 +37,16 @@ video(src::AbstractString) = begin
   (watch=watch, about="https://www.youtube.com/oembed?format=json&url=" * escape(watch), picture=isempty(id) ? "" : "https://i.ytimg.com/vi/$id/hqdefault.jpg")
 end
 
-"The text that JSON writes as `s` between its quotes: `\\u00e9` is é, and a new line is a space"
-plain(s::AbstractString) = begin
-  out = IOBuffer()
-  chars = collect(s)
-  hex(i) = i + 3 <= length(chars) ? tryparse(UInt32, String(chars[i:i+3]), base=16) : nothing
-  i = 1
-  while i <= length(chars)
-    c = chars[i]
-    if c == '\\' && i < length(chars)
-      n = chars[i += 1]
-      if n == 'u'
-        code = hex(i + 1)
-        code === nothing || (i += 4)
-        # A character past U+FFFF is written as two halves
-        if code !== nothing && 0xd800 <= code < 0xdc00 && i + 2 <= length(chars) && chars[i+1] == '\\' && chars[i+2] == 'u'
-          low = hex(i + 3)
-          low !== nothing && 0xdc00 <= low < 0xe000 && (code = 0x10000 + ((code - 0xd800) << 10) + (low - 0xdc00); i += 6)
-        end
-        code !== nothing && isvalid(Char, code) && print(out, Char(code))
-      else
-        print(out, n in ('n', 't', 'r') ? ' ' : n in ('b', 'f') ? "" : n)
-      end
-    else
-      print(out, c)
-    end
-    i += 1
-  end
-  String(take!(out))
-end
-
-"The text of the field `name` of the JSON `json`, or \"\" when the JSON has no such field with text in it"
-field(json::AbstractString, name::AbstractString) = begin
-  m = match(Regex("\"" * name * "\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\""), json)
-  m === nothing ? "" : plain(m[1])
-end
-
 "The name of a video and the address of its picture, as the JSON `bytes` that YouTube gives at `video(src).about` says: \"\" for what it doesn't say"
 facts(bytes) = begin
-  json = String(copy(Vector{UInt8}(bytes)))
-  isvalid(json) || return ("", "")
-  picture = field(json, "thumbnail_url")
-  (field(json, "title"), startswith(picture, "https://") ? picture : "")
+  data = Vector{UInt8}(bytes)
+  isvalid(String(copy(data))) || return ("", "")
+  said = try JSON.parse(data) catch; nothing end
+  said isa AbstractDict || return ("", "")
+  text(key) = (x = get(said, key, ""); x isa AbstractString ? x : "")
+  picture = text("thumbnail_url")
+  # The name goes on one line
+  (replace(text("title"), r"[\n\r\t]" => " ", r"[\b\f]" => ""), startswith(picture, "https://") ? picture : "")
 end
 
 """

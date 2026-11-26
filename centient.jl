@@ -20,126 +20,10 @@
 
 # --- JSON ----------------------------------------------------------------------
 #
-# The server speaks JSON. This is all of it that the two need, so that Ladder
-# needs no package for it.
+# The server speaks JSON, which json.jl reads and writes.
 
-"`value` as JSON: a Dict, a list, a string, a number, true, false or nothing"
-json(value) = sprint(json, value)
-json(io::IO, s::AbstractString) = begin
-  print(io, '"')
-  for c in s
-    c == '"' ? print(io, "\\\"") : c == '\\' ? print(io, "\\\\") : c == '\n' ? print(io, "\\n") :
-    c == '\r' ? print(io, "\\r") : c == '\t' ? print(io, "\\t") :
-    c < ' ' ? print(io, "\\u", string(UInt16(c), base=16, pad=4)) : print(io, c)
-  end
-  print(io, '"')
-end
-json(io::IO, ::Nothing) = print(io, "null")
-json(io::IO, b::Bool) = print(io, b)
-json(io::IO, n::Integer) = print(io, n)
-json(io::IO, n::Real) = isfinite(n) ? print(io, Float64(n)) : print(io, "null")
-json(io::IO, list::Union{AbstractVector,Tuple}) = begin
-  print(io, '[')
-  for (i, x) in enumerate(list)
-    i > 1 && print(io, ',')
-    json(io, x)
-  end
-  print(io, ']')
-end
-json(io::IO, d::AbstractDict) = begin
-  print(io, '{')
-  for (i, (k, v)) in enumerate(d)
-    i > 1 && print(io, ',')
-    json(io, string(k)); print(io, ':'); json(io, v)
-  end
-  print(io, '}')
-end
-
-"What the JSON in `text` says, or an error if it isn't JSON. A number comes as a Float64."
-parse_json(text::AbstractString) = begin
-  chars = collect(text)
-  value, i = read_value(chars, blank(chars, 1))
-  blank(chars, i) > length(chars) || error("There's more after the JSON")
-  value
-end
-
-blank(chars, i) = begin
-  while i <= length(chars) && chars[i] in (' ', '\t', '\n', '\r')
-    i += 1
-  end
-  i
-end
-
-read_value(chars, i) = begin
-  i <= length(chars) || error("The JSON stops early")
-  c = chars[i]
-  if c == '{'
-    d = Dict{String,Any}()
-    i = blank(chars, i + 1)
-    chars[i] == '}' && return d, i + 1
-    while true
-      key, i = read_string(chars, blank(chars, i))
-      i = blank(chars, i)
-      chars[i] == ':' || error("A key of the JSON has no value")
-      d[key], i = read_value(chars, blank(chars, i + 1))
-      i = blank(chars, i)
-      chars[i] == '}' && return d, i + 1
-      chars[i] == ',' || error("The JSON has an object that doesn't end")
-      i += 1
-    end
-  elseif c == '['
-    list = Any[]
-    i = blank(chars, i + 1)
-    chars[i] == ']' && return list, i + 1
-    while true
-      x, i = read_value(chars, blank(chars, i))
-      push!(list, x)
-      i = blank(chars, i)
-      chars[i] == ']' && return list, i + 1
-      chars[i] == ',' || error("The JSON has a list that doesn't end")
-      i += 1
-    end
-  elseif c == '"'
-    read_string(chars, i)
-  else
-    j = i
-    while j <= length(chars) && !(chars[j] in (',', '}', ']', ' ', '\t', '\n', '\r'))
-      j += 1
-    end
-    word = String(chars[i:j-1])
-    word == "null" ? (nothing, j) : word == "true" ? (true, j) : word == "false" ? (false, j) : (parse(Float64, word), j)
-  end
-end
-
-read_string(chars, i) = begin
-  (i <= length(chars) && chars[i] == '"') || error("The JSON has no string where one should be")
-  out = IOBuffer()
-  i += 1
-  while chars[i] != '"'
-    c = chars[i]
-    if c == '\\'
-      c = chars[i+1]
-      i += 2
-      if c == 'u'
-        n = parse(UInt32, String(chars[i:i+3]), base=16)
-        i += 4
-        # A character past U+FFFF is written as two halves
-        if 0xd800 <= n < 0xdc00 && i + 5 <= length(chars) && chars[i] == '\\' && chars[i+1] == 'u'
-          low = parse(UInt32, String(chars[i+2:i+5]), base=16)
-          n = 0x10000 + ((n - 0xd800) << 10) + (low - 0xdc00)
-          i += 6
-        end
-        print(out, Char(n))
-      else
-        print(out, c == 'n' ? '\n' : c == 't' ? '\t' : c == 'r' ? '\r' : c == 'b' ? '\b' : c == 'f' ? '\f' : c)
-      end
-    else
-      print(out, c)
-      i += 1
-    end
-  end
-  String(take!(out)), i + 1
-end
+@use "./json" => JSON
+@use "./json" json
 
 # --- where Centient is -----------------------------------------------------------
 
@@ -315,7 +199,7 @@ end
 
 "Take one line of the program's answers"
 answer!(s::Server, line::AbstractString) = begin
-  msg = try parse_json(line) catch; return end
+  msg = try JSON.parse(line) catch; return end
   msg isa Dict || return
   id = get(msg, "id", nothing)
   id isa Real || return
@@ -374,4 +258,4 @@ check!(s::Server=server) = begin
   !isempty(s.waiting)
 end
 
-export available, ask, check!, finished, failed, stop!, running, Request, server, json, parse_json
+export available, ask, check!, finished, failed, stop!, running, Request, server, json

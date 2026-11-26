@@ -8,14 +8,14 @@
 @testset "JSON" begin
   @test C.json(Dict("a" => [1, 2.5, "x", nothing, true])) == """{"a":[1,2.5,"x",null,true]}"""
   @test C.json("tab\t \"quoted\" \\ line\nend \x01") == "\"tab\\t \\\"quoted\\\" \\\\ line\\nend \\u0001\""
-  @test C.parse_json(""" {"a": [1, 2.5e1, "x", null, true, false], "b": {"c": {}} , "d": []} """) ==
+  @test C.JSON.parse(""" {"a": [1, 2.5e1, "x", null, true, false], "b": {"c": {}} , "d": []} """) ==
         Dict("a" => Any[1.0, 25.0, "x", nothing, true, false], "b" => Dict("c" => Dict{String,Any}()), "d" => Any[])
-  @test C.parse_json("\"m\\u00b2 \\ud83d\\ude00 \\n \\/ é\"") == "m² 😀 \n / é"
+  @test C.JSON.parse("\"m\\u00b2 \\ud83d\\ude00 \\n \\/ é\"") == "m² 😀 \n / é"
   for value in (Dict{String,Any}("name" => "20mm \"conduit\"\n", "price" => 4.2, "tags" => Any["a", nothing]), Any[], "m²", 12.0, nothing)
-    @test C.parse_json(C.json(value)) == value
+    @test C.JSON.parse(C.json(value)) == value
   end
-  @test_throws Exception C.parse_json("{\"a\": 1")
-  @test_throws Exception C.parse_json("[1] 2")
+  @test_throws Exception C.JSON.parse("{\"a\": 1")
+  @test_throws Exception C.JSON.parse("[1] 2")
 end
 
 # centient_fake.jl answers as Centient's server does

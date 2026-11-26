@@ -26,7 +26,7 @@
 # it. Until it's undone, everything else that's asked for waits.
 
 @use "./engine" => Engines
-@use "./json" => JSON
+@use "../json" => JSON
 @use "./scene" Shape read_glb Vec3
 @use "./scene" => Scenes
 @use "../zip" => Zips

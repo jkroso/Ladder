@@ -37,7 +37,7 @@
 # and the radiator reaches along +y. A model has y up and metres.
 @use "./satellite" sizes satellite glb sky VIEW_SKY Shape CELL noise tinted dot cross unit FIRST LIMITS page_numbers
 @use "../cad/engine" => Engines
-@use "../cad/json" => JSON
+@use "../json" => JSON
 
 const Vec = NTuple{3,Float64}
 const UV = NTuple{2,Float64}
