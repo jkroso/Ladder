@@ -1263,6 +1263,7 @@ struct Live
   node::Any      # a SemanticUI or a GeometricUI
   tall::px
 end
+tall(l::Live) = l.tall
 
 "A table laid out"
 struct Grid
@@ -2909,8 +2910,7 @@ solid(b::Buffer, i::Int) = begin
     s, t = codeblock(b, i)
     lang = ks[s].lang
     closed = t > s && ks[s].kind == Kind.fence && ks[t].kind == Kind.fence && ks[t].level == 1
-    whole = closed && (lang in (MATTER, TOML_MATTER, TAKEOFF, SCHEDULE, LIVE) || haskey(BLOCKS, lang) ||
-                       (lang == DIAGRAM && isdiagram(join(b.lines[s+1:t-1], "\n"))) ||
+    whole = closed && (lang in (MATTER, TOML_MATTER) || block_is_whole(b, lang, s, t) ||
                        (lang == MATH && has_maths(join(b.lines[s+1:t-1], "\n"))) || block_source(b, s) !== nothing)
     return whole ? (s, t) : k.kind == Kind.fence ? (i, i) : nothing
   end
@@ -3442,6 +3442,316 @@ gridcell(g::Grid, p::Pos) = begin
   (r, nearest(g.cells[r], p[2]))
 end
 
+# --- blocks ------------------------------------------------------------------------------
+#
+# Every built-in fenced code block that Ladder shows as something of its own is
+# a type (its view type, or a tag type for stateless/grid blocks), mapped from
+# its fence language in `BLOCKS`. Behaviour is defined by methods on that type
+# (and on view instances), matching Ladder's folder dispatch (`AbstractDirectory`):
+# `block_name`, `block_icon`, `block_insert`, `block_is_whole`, `block_is_code`,
+# `block_safe`, `block_reply`, `block_outline`, `block_layout`, `block_html`,
+# `block_tables!`, `block_table_kind`, `block_names`, `block_places`, `reread!`,
+# `block_tick!`, `before_save!`, `full!`.
+#
+# A view-backed block has these fields: `n`, its place among the page's blocks
+# in its language, `first` and `last`, the lines of its block, `lines`, the lines
+# that it was last read from, and `parts`, its buttons and the rest that's kept
+# between frames. `reread!(view, lines)` reads it again.
+
+"Adapter for extensions that register a block as `BLOCKS[lang] = BlockKind(name, icon, view, html)`"
+struct BlockKind
+  name::String   # what the sidebar calls it
+  icon::String   # and the icon beside that name
+  view::Any      # the type or constructor of its view
+  html::Any      # `html(e, view)` is the block as HTML, or nothing to show its lines
+end
+
+"The languages whose blocks show as a component or built-in view, mapped to their block type"
+const BLOCKS = Dict{String,Any}()
+
+# --- block dispatch protocol (defaults; each block type overrides only where it differs) ---
+
+block_name(T::Type) = string(nameof(T))
+block_name(k::BlockKind) = k.name
+
+block_icon(T::Type) = "puzzle"
+block_icon(k::BlockKind) = k.icon
+
+block_make(T::Type, n::Int) = T(n=n)
+block_make(k::BlockKind, n::Int) = k.view(n=n)
+
+"The Insert menu entry `(menu_name, lines, caret)` for a block type, or nothing"
+block_insert(T) = nothing
+block_insert(lang::AbstractString) = block_insert(BLOCKS[lang])
+
+"True when the closed block of type `T` with body `code` is stepped over as a whole unit by the caret"
+block_is_whole(T, code::AbstractString) = true
+block_is_whole(b::Buffer, lang::AbstractString, s::Int, t::Int) =
+  haskey(BLOCKS, lang) && block_is_whole(BLOCKS[lang], join(b.lines[s+1:t-1], "\n"))
+
+"True when the block's lines are Julia code that participates in name completion"
+block_is_code(T) = false
+
+"True when the block is shown on foreign pages without trust"
+block_safe(T) = false
+
+"True when the block is shown in agent replies (`block_safe` blocks are always shown too)"
+block_reply(T) = block_safe(T)
+
+"True when clicking the block's sidebar outline entry puts the caret inside (`i + 1`) instead of after (`close + 1`)"
+block_outline_inside(T) = false
+
+"The sidebar outline entry for a block of type `T` opening at line `i` and closing at `close`, or nothing"
+block_outline(T, lines::Vector{String}, i::Int, close::Int) =
+  Entry(i, 7, block_name(T), block_icon(T), min((block_outline_inside(T) ? i : close) + 1, length(lines)))
+
+"What a form/source calls a table contributed by a block of type `T`"
+block_table_kind(T) = "block"
+
+"Contribute any table(s) from a closed block of type `T` (lines `i`..`t`) to `out`"
+block_tables!(T, e, i::Int, t::Int, under::AbstractString, out) = nothing
+
+"Named values contributed by a block of type `T` for sheets and inline sums"
+block_names(T, lines) = Tuple{String,String}[]
+
+"Map places contributed by a block of type `T`"
+block_places(T, lines) = @NamedTuple{name::String, place::String, line::Int}[]
+
+"The first and the last line of the `n`th code block of `b` in the language `lang`, or nothing"
+block_lines(b::Buffer, lang::String, n::Int) = begin
+  ks = kinds(b)
+  seen = 0
+  for i in eachindex(ks)
+    (ks[i].kind == Kind.fence && ks[i].level == 0 && ks[i].lang == lang) || continue
+    (seen += 1) == n || continue
+    t = codeblock(b, i)[2]
+    return t > i && ks[t].kind == Kind.fence && ks[t].level == 1 ? (i, t) : nothing
+  end
+  nothing
+end
+
+"The view of the `n`th block of the page that shows in the language `lang`"
+block_view(e, lang, n) = begin
+  v = get!(() -> block_make(BLOCKS[lang], n), e.nodes, (:block, lang, e.buf.path, n))
+  own!(node!(Document, e, :document), v)
+  v
+end
+
+"Prepare a block view `v` after `reread!` and before measuring its height in `block_item`"
+prepare_block!(e, v) = v
+
+"Measure the height of a block view `v` for page layout"
+measure_block!(e, v) = begin
+  concrete = describe(Column(fixed(e.width), Alignment.Start, geometry(v)), (e.width, 9999px))
+  can_fill(v) && (v.tall = concrete.height)
+  concrete.height
+end
+
+"What the block in the language `lang` from line `i` to line `t` shows. `n` is its place among the page's blocks in that language."
+block_item(e, lang, i, t, n) = begin
+  v = block_view(e, lang, n)
+  v.first, v.last = i, t
+  reread!(v, e.buf.lines[i+1:t-1])
+  prepare_block!(e, v)
+  # A block that fills the window is drawn over the page, and its room in the page stays empty
+  filling(v) && return Live(Box(width(grow=grow), height(v.tall)), v.tall + 2LIVE_GAP)
+  Live(v, measure_block!(e, v) + 2LIVE_GAP)
+end
+
+"Lay out the block of type `T` in `lang` opening on line `i` (the `n`th in `lang` on the page). Returns `(last_line, content)` or nothing."
+block_layout(T, e, lang::AbstractString, i::Int, n::Int) = begin
+  b = e.buf
+  ks = kinds(b)
+  t = codeblock(b, i)[2]
+  (!incode(b, i) && t > i && ks[t].kind == Kind.fence && ks[t].level == 1) || return nothing
+  (t, block_item(e, lang, i, t, n))
+end
+
+"The place of the block that opens on line `s` among the blocks of `b` in the language `lang`"
+block_place(b::Buffer, lang, s) = count(i -> (k = kinds(b)[i]; k.kind == Kind.fence && k.level == 0 && k.lang == lang), 1:s)
+
+"A view-backed block as HTML, or nothing to show its lines"
+block_html(e, v) = nothing
+
+"The closed block of type `T` in `lang` from line `s` to line `t` as HTML, or nothing to show its lines"
+block_html(T, e, lang::AbstractString, s::Int, t::Int) = begin
+  v = block_view(e, lang, block_place(e.buf, lang, s))
+  v.first, v.last = s, t
+  reread!(v, e.buf.lines[s+1:t-1])
+  block_html(e, v)
+end
+block_html(k::BlockKind, e, lang::AbstractString, s::Int, t::Int) = begin
+  k.html === nothing && return nothing
+  v = block_view(e, lang, block_place(e.buf, lang, s))
+  v.first, v.last = s, t
+  reread!(v, e.buf.lines[s+1:t-1])
+  k.html(e, v)
+end
+
+"The block in the language `lang` that opens on line `s`, as HTML, or nothing to show its lines"
+block_html(e, lang::AbstractString, s::Int, t::Int) = begin
+  haskey(BLOCKS, lang) || return nothing
+  ks = kinds(e.buf)
+  t > s && ks[t].kind == Kind.fence && ks[t].level == 1 || return nothing
+  block_html(BLOCKS[lang], e, lang, s, t)
+end
+
+"""
+Write `new` as the lines of the block of `v`, a view in the language `lang`.
+The caret stays where it was in the text, and ⌘Z takes the change back. With
+`typing`, changes that come one soon after another are taken back together.
+"""
+write_block!(v, lang, new::Vector{String}; typing=false, reread::Bool=true) = begin
+  e = editor(v)
+  b = e.buf
+  readonly(b) && return v
+  span = block_lines(b, lang, v.n)
+  span === nothing && return v
+  i, t = span
+  v.first, v.last = i, t
+  old = b.lines[i+1:t-1]
+  new == old && return (reread ? reread!(v, new) : (v.lines = new; v))
+  caret, anchor = b.caret, b.anchor
+  edit!(b, line_end(b, i), line_end(b, t - 1), isempty(new) ? "" : "\n" * join(new, "\n"); typing)
+  by = length(new) - length(old)
+  moved(p) = p[1] >= t ? (p[1] + by, p[2]) : p[1] > i ? (i, 0) : p
+  b.caret, b.anchor = moved(caret), moved(anchor)
+  v.last += by
+  reread ? reread!(v, new) : (v.lines = new; v)
+end
+
+"What happens to a block's view in each frame, before the page is laid out. Most kinds of block need nothing."
+block_tick!(v) = v
+
+"What a block's view does right before its page is saved. Most kinds of block need nothing."
+before_save!(v) = v
+
+"Do what each block of the page that shows needs in this frame"
+blocks_tick!(e) = for (key, node) in collect(e.nodes)
+  (key isa Tuple && length(key) == 4 && key[1] == :block && key[3] == e.buf.path) || continue
+  block_tick!(node)
+  filling(node) || continue
+  # A block whose lines have gone goes back to the page. Under one that fills the window, the page stays where it was.
+  block_lines(e.buf, key[2], node.n) === nothing ? (node.full = false) : (e.scroll.offset = node.pinned)
+end
+
+"A part of the block view `v` that's kept between frames"
+block_part!(make, v, key) = begin
+  node = get!(make, v.parts, key)
+  node.parent === nothing && setfield!(node, :parent, v)
+  node
+end
+part!(make, v, key) = block_part!(make, v, key)
+
+"A button of a block. A click does `act!(view, action, window)`."
+@def mutable struct BlockButton <: SemanticUI
+  of::Any = nothing
+  action::Any = :none
+  icon::String = ""
+  words::String = ""
+  tip::String = ""
+  on::Bool = false                            # it's lit, like the kind of chart that shows now
+  off::Bool = false                           # it does nothing now, and shows that
+  bold::Bool = false                          # it's filled with colour, like the one button that a question waits for
+  rect::NTuple{4,px} = (0px, 0px, 0px, 0px)   # where it was last drawn, to put its tooltip under it
+  quiet::Bool = false                         # clicked, so no tooltip until the mouse leaves it
+end
+const PlanButton = BlockButton
+
+"The button of the block view `v` that's kept under `key`, with what it does and shows now"
+block_button!(v, key, action; icon="", words="", tip="", on=false, off=false, bold=false) = begin
+  b = block_part!(() -> BlockButton(of=v), v, (:button, key))
+  b.action, b.icon, b.words, b.tip, b.on, b.off, b.bold = action, icon, words, tip, on, off, bold
+  b
+end
+
+describe(b::BlockButton) = begin
+  ishovered(b) || (b.quiet = false)
+  filled = b.bold && !b.off
+  colour = b.off ? colours.faint : filled ? colours.bg : b.on ? colours.accent : colours.dim
+  back = filled ? (ishovered(b) ? RGBA(colours.accent, 0.85) : colours.accent) :
+         b.on ? colours.active : ishovered(b) && !b.off ? colours.hover : clear
+  Box(height(26px), padding(filled ? 10px : 7px, 0px), radius(6px), Alignment.Center, name="Button", background(back),
+    Row(Alignment.Center, child_gap=5px,
+      (isempty(b.icon) ? () : (Icon(b.icon, size=14px, color=colour),))...,
+      (isempty(b.words) ? () : (label(b.words, 12px, color=b.off ? colours.faint : filled ? colours.bg : colours.ink, weight=filled ? "Semibold" : ""),))...))
+end
+
+cursor(b::BlockButton) = b.off ? :arrow : :hand
+draw(ctx, size, ui::ConcreteRect, b::BlockButton) = (b.rect = (ui.left, ui.top, ui.width, ui.height); nothing)
+
+onmouse(b::BlockButton, ev::MouseMove) = begin
+  (b.quiet || isempty(b.tip)) && return
+  show_tooltip!(ev.window, tip_label(b.tip), b.rect..., placement=:bottom, gap=6px)
+end
+
+onkey(b::BlockButton, ev::KeyPress{Keys.mouse_left}) = begin
+  b.quiet = true
+  hide_tooltip!(ev.window)
+  b.off ? handled : act!(b.of, b.action, ev.window)
+end
+
+"What a block's box looks like in the page: round corners and a thin line, as a schedule has"
+block_look() = (width(grow=grow), Alignment.Start, radius(8px), border(1px, :solid, colours.line), background(takeoff_back()))
+
+"The row of buttons at the top of a block"
+block_bar(parts...) = Row(width(grow=grow), height(38px), padding(6px, 0px), child_gap=2px, Alignment.Center, background(colours.block), parts...)
+
+"A line of quiet words in a block that has nothing to show yet"
+block_note(words) = Row(width(grow=grow), padding(16px, 20px), Alignment.Center, clip=true,
+                        Box(width(grow=grow), Text(words, size=13px, family=SANS, color=colours.dim, wrap=WrapMode.words)))
+
+"A colour as CSS writes it, like #2a78d6"
+css_colour(c) = (c = RGBA(c); "#" * join(string(round(Int, 255x), base=16, pad=2) for x in (c.r, c.g, c.b)))
+
+"""
+True for a kind of view that can fill the window, over the page: a takeoff, a
+schedule, a sketch or a canvas. Such a view has the fields `full`, `tall`, which
+is how tall it was in the page, and `pinned`, which is how far the page was scrolled.
+"""
+can_fill(v) = hasfield(typeof(v), :full) && hasfield(typeof(v), :pinned)
+"True for a view that fills the window now"
+filling(v) = can_fill(v) && v.full
+
+"Put the block of the current page that fills the window back in the page"
+unfill!(e) = for (key, node) in e.nodes
+  filling(node) && key isa Tuple && length(key) == 4 && key[1] == :block && key[3] == e.buf.path && (node.full = false)
+end
+
+"The block of the page that fills the window, or nothing"
+full_block(e) = begin
+  for (key, node) in e.nodes
+    filling(node) && key isa Tuple && length(key) == 4 && key[1] == :block && key[3] == e.buf.path && return node
+  end
+  nothing
+end
+
+"The takeoff of the page that fills the window, or nothing"
+full_takeoff(e) = (v = full_block(e); v isa TakeoffView ? v : nothing)
+
+"The block that fills the window, over the page and the sidebar and under the top bar"
+takeoff_over(e) = begin
+  v = full_block(e)
+  v === nothing ? () : (Box(width(grow=grow), height(grow=grow), padding(above_page(e), 0px, 0px, 0px), background(colours.bg), geometry(v)),)
+end
+
+"Per-view preparation before toggling fullscreen"
+before_fill!(v, on::Bool) = v
+"Where keyboard focus goes after toggling fullscreen"
+fill_focus(v, on::Bool) = on ? keyboard_part(v) : editor(v)
+
+"Make a fillable block fill the window, or put it back in the page"
+full!(v, on::Bool) = begin
+  e = editor(v)
+  on && unfill!(e)   # one block of the page at a time fills the window
+  before_fill!(v, on)
+  v.full = on
+  v.pinned = e.scroll.offset
+  target = fill_focus(v, on)
+  target === nothing || focus(target)
+  handled
+end
+
 # --- spreadsheets ----------------------------------------------------------------------
 #
 # A code block in the language `spreadsheet` is drawn as a spreadsheet. Each
@@ -3616,6 +3926,26 @@ droprow!(e) = begin
   above = max(i - 1, s + 1)
   b.caret = b.anchor = (above, spreadcells(b.lines[above])[end].hi)
   touch!(e)
+end
+
+struct SpreadBlock end
+BLOCKS[SPREADSHEET] = SpreadBlock
+block_name(::Type{SpreadBlock}) = "Spreadsheet"
+block_icon(::Type{SpreadBlock}) = "grid-3x3"
+block_insert(::Type{SpreadBlock}) = ("Spreadsheet", ["```$SPREADSHEET", "|  |  |  |", "|  |  |  |", "|  |  |  |", "```"], (2, 2))
+block_is_whole(::Type{SpreadBlock}, ::AbstractString) = false
+block_outline_inside(::Type{SpreadBlock}) = true
+block_table_kind(::Type{SpreadBlock}) = "spreadsheet"
+block_html(::Type{SpreadBlock}, e, lang::AbstractString, s::Int, t::Int) = nothing
+block_layout(::Type{SpreadBlock}, e, lang::AbstractString, i::Int, n::Int) =
+  (run = drawn(e.buf, i, SPREADSHEET); run === nothing ? nothing : (run[2], spreadgrid(e, run...)))
+block_tables!(::Type{SpreadBlock}, e, i::Int, t::Int, under::AbstractString, out) = begin
+  b = e.buf
+  texts = [spreadtexts(b.lines[r]) for r in i+1:t-1]
+  values = get!(() -> answers(texts), e.flows, (:answers, texts))
+  rows = [String[isformula(text) ? (values[r][c].failed ? "" : values[r][c].text) : String(strip(text)) for (c, text) in enumerate(row)]
+          for (r, row) in enumerate(texts)]
+  push!(out, (first=i, last=t, under=under, rows=rows, headed=false, ranged=false))
 end
 
 # --- sheets ----------------------------------------------------------------------------
@@ -4297,6 +4627,32 @@ suggestbox(e) = begin
   top >= above_page(e) || return ()
   (Row(width(grow=grow), height(grow=grow), Alignment.Start, padding(top, 0px, 0px, left), list),)
 end
+
+BLOCKS[SHEET] = SheetBlock
+block_name(::Type{SheetBlock}) = "Sheet"
+block_icon(::Type{SheetBlock}) = "calculator"
+block_insert(::Type{SheetBlock}) = ("Sheet", ["```$SHEET", " = ", "```"], (2, 0))
+block_is_whole(::Type{SheetBlock}, ::AbstractString) = false
+block_outline_inside(::Type{SheetBlock}) = true
+block_table_kind(::Type{SheetBlock}) = "sheet"
+block_html(::Type{SheetBlock}, e, lang::AbstractString, s::Int, t::Int) = sheet_html(e, s, t)
+block_layout(::Type{SheetBlock}, e, lang::AbstractString, i::Int, n::Int) =
+  (run = drawn(e.buf, i, SHEET); run === nothing ? nothing : (run[2], sheetgrid(e, run...)))
+block_tables!(::Type{SheetBlock}, e, i::Int, t::Int, under::AbstractString, out) = begin
+  b = e.buf
+  texts = [parts(b.lines[r]) for r in i+1:t-1]
+  given = sheet_given(e, i)
+  # A sheet with a row over a range is a table with a row for each value of that row
+  over = get!(() -> cases(texts; given, cache=e.flows), e.flows, (:cases, texts, given))
+  if over !== nothing
+    push!(out, (first=i, last=t, under=under, rows=over.table, headed=true, ranged=true))
+    return
+  end
+  results = get!(() -> tally(texts; given, cache=e.flows), e.flows, (:sheetrun, texts, given, nothing))
+  rows = [String[strip(name), results[r].failed ? "" : results[r].text] for (r, (name, _)) in enumerate(texts)]
+  push!(out, (first=i, last=t, under=under, rows=rows, headed=false, ranged=false))
+end
+block_names(::Type{SheetBlock}, lines) = Tuple{String,String}[row for row in parts.(lines) if !isempty(ident(row[1]))]
 
 # --- the page's layout ---------------------------------------------------------------
 
@@ -8148,6 +8504,19 @@ live(e, code::String) = begin
   Live(node, concrete.height + 2LIVE_GAP)
 end
 
+BLOCKS[LIVE] = LiveBlock
+block_name(::Type{LiveBlock}) = "Live Block"
+block_icon(::Type{LiveBlock}) = "bounding-box"
+block_insert(::Type{LiveBlock}) = ("Live Block", ["```$LIVE", "", "```"], (2, 0))
+block_is_code(::Type{LiveBlock}) = true
+block_html(::Type{LiveBlock}, e, lang::AbstractString, s::Int, t::Int) = nothing
+block_outline(::Type{LiveBlock}, lines::Vector{String}, i::Int, close::Int) =
+  ((name, icon) = component(view(lines, i+1:close-1)); Entry(i, 7, name, icon, min(close + 1, length(lines))))
+block_layout(::Type{LiveBlock}, e, lang::AbstractString, i::Int, n::Int) = begin
+  b = e.buf; ks = kinds(b); t = codeblock(b, i)[2]
+  !incode(b, i) && t > i && ks[t].kind == Kind.fence && ks[t].level == 1 ? (t, live(e, join(b.lines[i+1:t-1], "\n"))) : nothing
+end
+
 # --- diagrams -----------------------------------------------------------------------
 #
 # A code block in the language `mermaid` shows the diagram that its code
@@ -8177,6 +8546,21 @@ diagram(e, code::String) = begin
   # Lay it out once to learn how tall it is
   concrete = describe(Column(fixed(e.width), Alignment.Start, geometry(node)), (e.width, 9999px))
   Live(node, concrete.height + 2LIVE_GAP)
+end
+
+struct DiagramBlock end
+BLOCKS[DIAGRAM] = DiagramBlock
+block_name(::Type{DiagramBlock}) = "Diagram"
+block_icon(::Type{DiagramBlock}) = "diagram-3"
+block_insert(::Type{DiagramBlock}) = ("Diagram", ["```$DIAGRAM", "flowchart LR", "  A[Start] --> B[End]", "```"], (3, 2))
+block_is_whole(::Type{DiagramBlock}, code::AbstractString) = isdiagram(code)
+block_safe(::Type{DiagramBlock}) = true
+block_html(::Type{DiagramBlock}, e, lang::AbstractString, s::Int, t::Int) = diagram_html(e, s, t)
+block_outline(::Type{DiagramBlock}, lines::Vector{String}, i::Int, close::Int) =
+  isdiagram(join(view(lines, i+1:close-1), "\n")) ? Entry(i, 7, "Diagram", "diagram-3", min(close + 1, length(lines))) : nothing
+block_layout(::Type{DiagramBlock}, e, lang::AbstractString, i::Int, n::Int) = begin
+  b = e.buf; ks = kinds(b); t = codeblock(b, i)[2]
+  !incode(b, i) && t > i && ks[t].kind == Kind.fence && ks[t].level == 1 && (c = diagram(e, join(b.lines[i+1:t-1], "\n"))) !== nothing ? (t, c) : nothing
 end
 
 # --- formulas ---------------------------------------------------------------------------
@@ -8423,17 +8807,6 @@ end
 @def mutable struct PlanArea <: SemanticUI
   of::Any = nothing
 end
-"A button of a takeoff: a tool, a page arrow, the button that makes the quote"
-@def mutable struct PlanButton <: SemanticUI
-  of::Any = nothing
-  action::Any = :none
-  icon::String = ""
-  words::String = ""
-  tip::String = ""
-  off::Bool = false                           # it does nothing now, and shows that
-  rect::NTuple{4,px} = (0px, 0px, 0px, 0px)   # where it was last drawn, to put its tooltip under it
-  quiet::Bool = false                         # clicked, so no tooltip until the mouse leaves it
-end
 "A measure in a takeoff's list"
 @def mutable struct MeasureRow <: SemanticUI
   of::Any = nothing
@@ -8516,13 +8889,6 @@ that points at the field, the way the lists in Centient's own forms do.
   pick::Int = 0            # the row that was picked when it was last drawn. A row that the keys pick is brought in sight.
   popup::Any = nothing     # what UI.jl floats it in
   settled::Bool = false    # its side of the text field is chosen, and it keeps that side while it's open
-end
-
-"A part of `v` that's kept between frames"
-part!(make, v::TakeoffView, key) = begin
-  node = get!(make, v.parts, key)
-  node.parent === nothing && setfield!(node, :parent, v)
-  node
 end
 
 "The text field of a takeoff. One field does for the name of a measure, a search, the scale and the rest."
@@ -8609,19 +8975,6 @@ end
 "The first and the last line of the `n`th takeoff block of `b`, or nothing"
 takeoff_lines(b::Buffer, n::Int) = block_lines(b, TAKEOFF, n)
 
-"The first and the last line of the `n`th code block of `b` in the language `lang`, or nothing"
-block_lines(b::Buffer, lang::String, n::Int) = begin
-  ks = kinds(b)
-  seen = 0
-  for i in eachindex(ks)
-    (ks[i].kind == Kind.fence && ks[i].level == 0 && ks[i].lang == lang) || continue
-    (seen += 1) == n || continue
-    t = codeblock(b, i)[2]
-    return t > i && ks[t].kind == Kind.fence && ks[t].level == 1 ? (i, t) : nothing
-  end
-  nothing
-end
-
 "Read the takeoff again from the lines of its block, if they've changed"
 reread!(v::TakeoffView, lines) = begin
   lines == v.lines && return v
@@ -8645,35 +8998,17 @@ commit!(v::TakeoffView) = begin
   i, t = span
   v.first, v.last = i, t
   b.lines[i+1:t-1] == v.lines || return reread!(v, b.lines[i+1:t-1])
-  new = Plans.written(v.data)
-  new == v.lines && return v
-  caret, anchor = b.caret, b.anchor
-  edit!(b, line_end(b, i), line_end(b, t - 1), isempty(new) ? "" : "\n" * join(new, "\n"))
-  by = length(new) - length(v.lines)
-  moved(p) = p[1] >= t ? (p[1] + by, p[2]) : p[1] > i ? (i, 0) : p
-  b.caret, b.anchor = moved(caret), moved(anchor)
-  v.last += by
-  v.lines = new
-  v
+  write_block!(v, TAKEOFF, Plans.written(v.data), reread=false)
 end
 
-"What the `takeoff` block from line `i` to line `t` shows. `n` is its place among the page's takeoffs."
-takeoff_item(e, i, t, n) = begin
-  v = get!(() -> TakeoffView(n=n), e.nodes, (:takeoff, e.buf.path, n))
-  own!(node!(Document, e, :document), v)
-  v.first, v.last = i, t
-  reread!(v, e.buf.lines[i+1:t-1])
-  # A takeoff that fills the window is drawn over the page, and its room in the page stays empty
-  v.full && return Live(Box(width(grow=grow), height(v.tall)), v.tall + 2LIVE_GAP)
-  # Lay it out once to learn how tall it is. While nothing that it shows changes, its geometry
-  # is kept (see `shown_state`), and so is its height. Laid out again here at another height
-  # than the page gives it, the page's layout of it couldn't be used again either.
+# While nothing that a takeoff shows changes, its geometry is kept (see `shown_state`), and so is its height.
+measure_block!(e, v::TakeoffView) = begin
   g = geometry(v)
   if version(v) == 0 || version(v) != v.measured
     v.tall = describe(Column(fixed(e.width), Alignment.Start, g), (e.width, 9999px)).height
     v.measured = version(v)
   end
-  Live(v, v.tall + 2LIVE_GAP)
+  v.tall
 end
 
 # --- Centient ----------------------------------------------------------------------------
@@ -8757,7 +9092,7 @@ What happens to a takeoff in each frame, before the page is laid out: a drag
 that ended is written down, the text field that lost the keyboard closes, and
 Centient's answers are taken.
 """
-tick!(v::TakeoffView) = begin
+block_tick!(v::TakeoffView) = begin
   w = window_of(v)
   v.grab !== nothing && !held(v, Keys.mouse_left) && drop!(v)
   # A click somewhere else took the keyboard from the text field
@@ -8817,15 +9152,6 @@ tick!(v::TakeoffView) = begin
   # While Centient works, the window looks again soon
   (waiting || v.search !== nothing || v.lookup !== nothing || v.quoting !== nothing) && redraw_in!(v, 0.1)
   v
-end
-
-"Do what each takeoff of the page that shows needs in this frame"
-takeoff_tick!(e) = for (key, node) in collect(e.nodes)
-  (node isa TakeoffView && key[2] == e.buf.path) || continue
-  tick!(node)
-  node.full || continue
-  # A takeoff whose block has gone goes back to the page. Under one that fills the window, the page stays where it was.
-  takeoff_lines(e.buf, node.n) === nothing ? (node.full = false) : (e.scroll.offset = node.pinned)
 end
 
 # --- the text field ----------------------------------------------------------------------
@@ -9713,84 +10039,11 @@ end
 
 "The button of `v` that's kept under `key`, with what it does and shows now"
 button!(v::TakeoffView, key, action; icon="", words="", tip="", off=false) = begin
-  b = part!(() -> PlanButton(of=v), v, (:button, key))
-  b.action, b.icon, b.words, b.tip, b.off = action, icon, words, tip, off
-  b
+  on = (action isa Tuple && action[1] == :tool && v.tool == action[2]) || (action == :snap && v.snap)
+  block_button!(v, key, action; icon, words, tip, on, off)
 end
 
-describe(b::PlanButton) = begin
-  v = b.of
-  ishovered(b) || (b.quiet = false)
-  # The tool in use is lit, and so is the magnet while corners snap
-  on = (b.action isa Tuple && b.action[1] == :tool && v.tool == b.action[2]) || (b.action == :snap && v.snap)
-  colour = b.off ? colours.faint : on ? colours.accent : colours.dim
-  Box(height(26px), padding(7px, 0px), radius(6px), Alignment.Center, name="Button",
-      background(on ? colours.active : ishovered(b) && !b.off ? colours.hover : clear),
-    Row(Alignment.Center, child_gap=5px,
-      (isempty(b.icon) ? () : (Icon(b.icon, size=14px, color=colour),))...,
-      (isempty(b.words) ? () : (label(b.words, 12px, color=b.off ? colours.faint : colours.ink),))...))
-end
-
-cursor(b::PlanButton) = b.off ? :arrow : :hand
-
-draw(ctx, size, ui::ConcreteRect, b::PlanButton) = (b.rect = (ui.left, ui.top, ui.width, ui.height); nothing)
-
-onmouse(b::PlanButton, ev::MouseMove) = begin
-  (b.quiet || isempty(b.tip)) && return
-  show_tooltip!(ev.window, tip_label(b.tip), b.rect..., placement=:bottom, gap=6px)
-end
-
-onkey(b::PlanButton, ev::KeyPress{Keys.mouse_left}) = begin
-  b.quiet = true
-  hide_tooltip!(ev.window)
-  b.off ? handled : act!(b.of, b.action, ev.window)
-end
-
-"Make the takeoff fill the window, or put it back in the page"
-full!(v::TakeoffView, on::Bool) = begin
-  e = editor(v)
-  on && unfill!(e)   # one block at a time fills the window
-  v.full = on
-  v.pinned = e.scroll.offset
-  focus(part!(() -> PlanArea(of=v), v, :area))
-  handled
-end
-
-"The takeoff of the page that fills the window, or nothing"
-full_takeoff(e) = begin
-  for (key, node) in e.nodes
-    node isa TakeoffView && node.full && key[2] == e.buf.path && return node
-  end
-  nothing
-end
-
-"""
-True for a kind of view that can fill the window, over the page: a takeoff, a
-schedule and a sketch. Such a view has the fields `full`, `tall`, which is how
-tall it was in the page, and `pinned`, which is how far the page was scrolled.
-"""
-can_fill(v) = hasfield(typeof(v), :full) && hasfield(typeof(v), :pinned)
-"True for a view that fills the window now"
-filling(v) = can_fill(v) && v.full
-
-"Put the block that fills the window back in the page"
-unfill!(e) = foreach(node -> filling(node) && (node.full = false), values(e.nodes))
-
-"The takeoff, the schedule or the sketch of the page that fills the window, or nothing"
-full_block(e) = begin
-  for (key, node) in e.nodes
-    filling(node) || continue
-    # A view is kept under its page: the second part of the key of a takeoff and a schedule, and the third of another block
-    (key[1] == :block ? key[3] : key[2]) == e.buf.path && return node
-  end
-  nothing
-end
-
-"The takeoff, the schedule or the sketch that fills the window, over the page and the sidebar and under the top bar"
-takeoff_over(e) = begin
-  v = full_block(e)
-  v === nothing ? () : (Box(width(grow=grow), height(grow=grow), padding(above_page(e), 0px, 0px, 0px), background(colours.bg), geometry(v)),)
-end
+fill_focus(v::TakeoffView, ::Bool) = keyboard_part(v)
 
 "Do what a button of a takeoff does"
 act!(v::TakeoffView, action, w) = begin
@@ -10755,8 +11008,8 @@ end
 # UI.jl asks for the takeoff's inputs before those of its parts on each frame
 inputs(v::TakeoffView) = (v.reads = hash(shown_state(v)); (v.reads,))
 inputs(a::PlanArea) = (a.of.reads,)
-# A schedule's buttons are PlanButtons too. They're described on each frame, as the schedule is.
-inputs(b::PlanButton) = b.of isa TakeoffView ? (b.action, b.icon, b.words, b.tip, b.off, b.quiet, b.of.reads) : nothing
+# A takeoff's buttons keep their geometry while nothing the takeoff reads changes
+inputs(b::BlockButton) = b.of isa TakeoffView ? (b.action, b.icon, b.words, b.tip, b.on, b.off, b.quiet, b.of.reads) : nothing
 inputs(r::MeasureRow) = (r.i, r.of.reads)
 inputs(c::AmountCell) = (c.i, c.of.reads)
 inputs(u::UnitWord) = (u.of.i, u.of.of.reads)
@@ -10766,6 +11019,37 @@ inputs(w::HeadWords) = (w.of.key, w.of.side, ishovered(w.of), w.of.of.reads)   #
 # A click beside a button is the block's, and takes the keyboard from the text field
 onkey(v::TakeoffView, ::KeyPress{Keys.mouse_left}) = (focus(part!(() -> PlanArea(of=v), v, :area)); handled)
 onmouse(v::TakeoffView, ::MouseMove) = held(v, Keys.mouse_left) ? handled : nothing
+
+block_names(::Type{TakeoffView}, lines) = begin
+  out = Tuple{String,String}[]
+  t = Plans.takeoff(lines)
+  for m in t.measures
+    a = isempty(strip(m.name)) ? nothing : Plans.amount(t, m)
+    a === nothing && continue
+    x = string(round(a, digits=4))
+    push!(out, (m.name, m.kind == :count ? x : m.kind == :length ? x * "m" : x * "m^2"))
+  end
+  out
+end
+
+"The `takeoff` code block as HTML: a table of what's measured and what each measure comes to"
+block_html(e, v::TakeoffView) = begin
+  data = v.data
+  isempty(data.measures) && return nothing
+  rows = map(data.measures) do m
+    amount = Plans.amount(data, m)
+    "<tr><td>$(escape(m.name))</td><td>$(amount === nothing ? "" : escape(Plans.shown(m, amount)))</td></tr>"
+  end
+  about = join(filter(!isempty, [isempty(data.plan) ? "" : "Measured from " * escape(basename(data.plan)),
+                                 isempty(data.customer) ? "" : "for " * escape(data.customer),
+                                 isempty(data.made) ? "" : "quote " * escape(data.made)]), ", ")
+  (isempty(about) ? "" : "<p>$about</p>\n") * "<table>\n" * join(rows, "\n") * "\n</table>"
+end
+
+BLOCKS[TAKEOFF] = TakeoffView
+block_name(::Type{TakeoffView}) = "Takeoff"
+block_icon(::Type{TakeoffView}) = "rulers"
+block_insert(::Type{TakeoffView}) = ("Takeoff", ["```$TAKEOFF", "```", "", ""], (4, 0))
 
 # --- a schedule of the page's tasks -------------------------------------------------------
 #
@@ -10795,7 +11079,7 @@ const DATES_H = 46.0       # how tall the months and the days over the rows are
 const DAY_MOST = 60.0      # the most px to a day
 const DAY_LEAST = 2.5      # and the least
 const DAY_USUAL = 34.0     # the most px to a day when a schedule shows all its tasks
-const BAR_EDGE = 7.0       # px at the right end of a bar, where a drag makes the task longer or shorter
+const TASK_BAR_EDGE = 7.0  # px at the right end of a bar, where a drag makes the task longer or shorter
 const KNOB = 4.5           # the radius of the circle after a bar, which a link is dragged from
 const KNOB_GAP = 11.0      # from the end of a bar to the middle of that circle
 const NAMES_W = 250px      # how wide the names of the tasks are at the most
@@ -10858,19 +11142,8 @@ end
   rect::NTuple{4,px} = (0px, 0px, 0px, 0px)
 end
 
-"A part of `v` that's kept between frames"
-part!(make, v::ScheduleView, key) = begin
-  node = get!(make, v.parts, key)
-  node.parent === nothing && setfield!(node, :parent, v)
-  node
-end
-
 "The button of `v` that's kept under `key`, with what it does and shows now"
-button!(v::ScheduleView, key, action; icon="", words="", tip="", off=false) = begin
-  b = part!(() -> PlanButton(of=v), v, (:button, key))
-  b.action, b.icon, b.words, b.tip, b.off = action, icon, words, tip, off
-  b
-end
+button!(v::ScheduleView, key, action; icon="", words="", tip="", off=false) = block_button!(v, key, action; icon, words, tip, off)
 
 "The text field of a schedule, for the day that the work starts"
 schedule_input(v::ScheduleView) = part!(v, :input) do
@@ -10889,11 +11162,7 @@ chart(v::ScheduleView) = part!(() -> ChartArea(of=v), v, :area)
 page_todos(e) = (b = e.buf; get!(() -> Schedules.todos(b.lines, kinds(b)), e.flows, (:todos, b.path, b.version)))
 
 "The view of the `n`th schedule of the page that shows"
-schedule_view(e, n) = begin
-  v = get!(() -> ScheduleView(n=n), e.nodes, (:schedule, e.buf.path, n))
-  own!(node!(Document, e, :document), v)
-  v
-end
+schedule_view(e, n) = block_view(e, SCHEDULE, n)
 
 "Read the schedule again from the lines of its block, if they've changed"
 reread!(v::ScheduleView, lines) = begin
@@ -10946,39 +11215,21 @@ commit!(v::ScheduleView) = begin
   v.planned = nothing
   v.renamed = false
   new == v.lines && return v
-  caret, anchor = b.caret, b.anchor
-  edit!(b, line_end(b, i), line_end(b, t - 1), isempty(new) ? "" : "\n" * join(new, "\n"))
-  by = length(new) - length(v.lines)
-  moved(p) = p[1] >= t ? (p[1] + by, p[2]) : p[1] > i ? (i, 0) : p
-  b.caret, b.anchor = moved(caret), moved(anchor)
-  v.last += by
-  v.lines = new
-  v
+  write_block!(v, SCHEDULE, new, reread=false)
 end
 
-"What the `schedule` block from line `i` to line `t` shows. `n` is its place among the page's schedules."
-schedule_item(e, i, t, n) = begin
-  v = schedule_view(e, n)
-  v.first, v.last = i, t
-  reread!(v, e.buf.lines[i+1:t-1])
+prepare_block!(e, v::ScheduleView) = (tasks!(v); v)
+before_fill!(v::ScheduleView, ::Bool) = (v.zoom = 0.0)
+fill_focus(v::ScheduleView, ::Bool) = keyboard_part(v)
+
+before_save!(v::ScheduleView) = begin
+  b = editor(v).buf
+  span = block_lines(b, SCHEDULE, v.n)
+  span === nothing && return v
+  reread!(v, b.lines[span[1]+1:span[2]-1])
   tasks!(v)
-  # A schedule that fills the window is drawn over the page, and its room in the page stays empty
-  v.full && return Live(Box(width(grow=grow), height(v.tall)), v.tall + 2LIVE_GAP)
-  # Lay it out once to learn how tall it is
-  concrete = describe(Column(fixed(e.width), Alignment.Start, geometry(v)), (e.width, 9999px))
-  v.tall = concrete.height
-  Live(v, v.tall + 2LIVE_GAP)
-end
-
-"Make the schedule fill the window, or put it back in the page. Either way it shows every task again."
-full!(v::ScheduleView, on::Bool) = begin
-  e = editor(v)
-  on && unfill!(e)   # one block at a time fills the window
-  v.full = on
-  v.pinned = e.scroll.offset
-  v.zoom = 0.0
-  focus(chart(v))
-  handled
+  v.renamed && commit!(v)
+  v
 end
 
 "How tall the names and the bars are in a schedule that fills the window, when its tasks need less: the window, under the top bar and the schedule's buttons"
@@ -10988,20 +11239,16 @@ full_room(v::ScheduleView) = num(window_size(editor(v))[2] - above_page(editor(v
 chart_h(v::ScheduleView) = (rows = DATES_H + TASK_H * length(v.tasks); px(v.full ? max(rows, full_room(v)) : rows))
 
 """
-Write the page to its file. A task that was renamed in the page since its
-schedule was last written gets its new name in the schedule first, so that the
-file's schedule names the tasks as the file's to-do items do. A page from a web
-server is a file in the browser folder, so it's written there and never to the server.
+Write the page to its file. A block that has changes to commit before saving
+does so first (for instance, a schedule records renamed tasks). A page from a
+web server is a file in the browser folder, so it's written there and never to
+the server.
 """
 save_page!(e) = begin
   write_blocks!(e)   # what a block that a file defines holds now goes into its lines
   for (key, node) in collect(e.nodes)
-    (node isa ScheduleView && key[2] == e.buf.path) || continue
-    span = block_lines(e.buf, SCHEDULE, node.n)
-    span === nothing && continue
-    reread!(node, e.buf.lines[span[1]+1:span[2]-1])
-    tasks!(node)
-    node.renamed && commit!(node)
+    (key isa Tuple && length(key) == 4 && key[1] == :block && key[3] == e.buf.path) || continue
+    before_save!(node)
   end
   save!(e.buf)
   # A page that a part of this one shows, and that was changed there, is saved with it
@@ -11127,7 +11374,7 @@ under(v::ScheduleView, x::Real, y::Real) = begin
     hypot(x - kx, y - ky) <= (corner ? KNOB + 1.5 : KNOB + 3) && return (:knob, i, k)
   end
   if by - 2 <= y < by + bh + 2
-    bx <= x < bx + bw + 3 && return x >= bx + bw - min(BAR_EDGE, bw / 2) ? (:edge, i) : (:bar, i)
+    bx <= x < bx + bw + 3 && return x >= bx + bw - min(TASK_BAR_EDGE, bw / 2) ? (:edge, i) : (:bar, i)
     for (a, z) in task_runs(v, i)
       rx, _, rw, _ = bar_box(v, i, a, z)
       rx <= x < rx + rw && return (:run, i, a, z)
@@ -11728,7 +11975,7 @@ onkey(v::ScheduleView, ev::KeyPress{Keys.enter}) = unmodified(ev) ? (v.asking ? 
 onkey(v::ScheduleView, ev::KeyPress{Keys.escape}) = unmodified(ev) ? (v.asking ? stop_asking!(v) : nothing) : nothing
 
 "What happens to a schedule in each frame, before the page is laid out: a drag that ended is written down, and the text field that lost the keyboard closes"
-tick!(v::ScheduleView) = begin
+block_tick!(v::ScheduleView) = begin
   w = window_of(v)
   v.grab !== nothing && !held(v, Keys.mouse_left) && drop!(v)
   # A click somewhere else took the keyboard from the text field. A day that reads is kept.
@@ -11736,15 +11983,6 @@ tick!(v::ScheduleView) = begin
     Schedules.date(schedule_input(v).text) === nothing ? stop_asking!(v) : answer!(v)
   end
   v
-end
-
-"Do what each schedule of the page that shows needs in this frame"
-schedule_tick!(e) = for (key, node) in collect(e.nodes)
-  (node isa ScheduleView && key[2] == e.buf.path) || continue
-  tick!(node)
-  node.full || continue
-  # A schedule whose block has gone goes back to the page. Under one that fills the window, the page stays where it was.
-  block_lines(e.buf, SCHEDULE, node.n) === nothing ? (node.full = false) : (e.scroll.offset = node.pinned)
 end
 
 describe(v::ScheduleView) = begin
@@ -11776,6 +12014,23 @@ cursor(::ScheduleView) = :arrow
 # A click beside a button is the block's, and takes the keyboard from the text field
 onkey(v::ScheduleView, ::KeyPress{Keys.mouse_left}) = (focus(chart(v)); handled)
 onmouse(v::ScheduleView, ::MouseMove) = held(v, Keys.mouse_left) ? handled : nothing
+
+"The `schedule` code block as HTML: a table of the page's tasks and the days of each"
+block_html(e, v::ScheduleView) = begin
+  tasks = Schedules.plan!(Schedules.schedule(v.lines), page_todos(e))
+  isempty(tasks) && return nothing
+  rows = map(tasks) do task
+    cells = [task.todo.name, Schedules.short(task.start), Schedules.short(task.finish), Schedules.days_text(task.days),
+             join((tasks[j].todo.name for j in task.after), ", ")]
+    "<tr>" * join("<td>$(escape(c))</td>" for c in cells) * "</tr>"
+  end
+  "<table>\n<tr><th>Task</th><th>Starts</th><th>Ends</th><th>Takes</th><th>After</th></tr>\n" * join(rows, "\n") * "\n</table>"
+end
+
+BLOCKS[SCHEDULE] = ScheduleView
+block_name(::Type{ScheduleView}) = "Schedule"
+block_icon(::Type{ScheduleView}) = "bar-chart-steps"
+block_insert(::Type{ScheduleView}) = ("Schedule", ["```$SCHEDULE", "```", "", ""], (4, 0))
 
 # --- a to-do item of a page that has a schedule ------------------------------------------------
 #
@@ -12012,13 +12267,6 @@ square_button(icon, lit) =
   Box(width(FILL_SIDE), height(FILL_SIDE), radius(6px), Alignment.Center, justify=Alignment.Center, name="Button",
       background(lit ? colours.hover : colours.float), border(1px, :solid, colours.line),
     Icon(icon, size=12px, color=colours.dim))
-
-"A part of `v` that's kept between frames"
-part!(make, v::ZoomView, key) = begin
-  node = get!(make, v.parts, key)
-  node.parent === nothing && setfield!(node, :parent, v)
-  node
-end
 
 "The ZoomView of `e` while it fills the window, or nothing"
 zooming(e) = (v = get(e.nodes, :zoom, nothing); v === nothing || v.what === nothing ? nothing : v)
@@ -12404,9 +12652,8 @@ zoom_over(e) = zooming(e) === nothing ? () :
 
 "The button of `v` that's kept under `key`, with what it does and shows now"
 button!(v::ZoomView, key, action; icon="", tip="", off=false) = begin
-  b = part!(() -> PlanButton(of=v), v, (:button, key))
-  b.action, b.icon, b.tip, b.off = action, icon, tip, off
-  b
+  on = action isa Tuple && action[1] == :tool && v.tool == action[2]
+  block_button!(v, key, action; icon, tip, on, off)
 end
 
 "Do what a button of a ZoomView does"
@@ -12837,167 +13084,6 @@ zoom_key!(v::ZoomView, K, w, command) = begin
   handled
 end
 
-# --- blocks that show as a component ---------------------------------------------------------
-#
-# A code block in one of the languages of `BLOCKS` shows as a component of its
-# own, as a takeoff and a schedule do: a chart, a question, a set of changes,
-# a board, a calendar, a list of what was found, a sketch or a list of emails. Each one
-# keeps all that it knows in the lines of its block, so the file holds the
-# whole of it, and ⌘Z takes back what you do to it. Move the caret into the
-# block, or click the block with ⌥ held, to see those lines.
-#
-# The view of a block is a node with these fields: `n`, its place among the
-# page's blocks in its language, `first` and `last`, the lines of its block,
-# `lines`, the lines that it was last read from, and `parts`, its buttons and
-# the rest that's kept between frames. `reread!(view, lines)` reads it again.
-
-"What a block in one language shows as"
-struct BlockKind
-  name::String   # what the sidebar calls it
-  icon::String   # and the icon beside that name
-  view::Any      # the type of its view
-  html::Any      # `html(e, view)` is the block as HTML, or nothing to show its lines
-end
-
-"The languages whose blocks show as a component, with what each shows as"
-const BLOCKS = Dict{String,BlockKind}()
-
-"The view of the `n`th block of the page that shows in the language `lang`"
-block_view(e, lang, n) = begin
-  v = get!(() -> BLOCKS[lang].view(n=n), e.nodes, (:block, lang, e.buf.path, n))
-  own!(node!(Document, e, :document), v)
-  v
-end
-
-"What the block in the language `lang` from line `i` to line `t` shows. `n` is its place among the page's blocks in that language."
-block_item(e, lang, i, t, n) = begin
-  v = block_view(e, lang, n)
-  v.first, v.last = i, t
-  reread!(v, e.buf.lines[i+1:t-1])
-  # A block that fills the window is drawn over the page, and its room in the page stays empty
-  filling(v) && return Live(Box(width(grow=grow), height(v.tall)), v.tall + 2LIVE_GAP)
-  # Lay it out once to learn how tall it is
-  concrete = describe(Column(fixed(e.width), Alignment.Start, geometry(v)), (e.width, 9999px))
-  can_fill(v) && (v.tall = concrete.height)
-  Live(v, concrete.height + 2LIVE_GAP)
-end
-
-"The place of the block that opens on line `s` among the blocks of `b` in the language `lang`"
-block_place(b::Buffer, lang, s) = count(i -> (k = kinds(b)[i]; k.kind == Kind.fence && k.level == 0 && k.lang == lang), 1:s)
-
-"The block in the language `lang` that opens on line `s`, as HTML, or nothing to show its lines"
-block_html(e, lang, s, t) = begin
-  ks = kinds(e.buf)
-  t > s && ks[t].kind == Kind.fence && ks[t].level == 1 || return nothing
-  v = block_view(e, lang, block_place(e.buf, lang, s))
-  v.first, v.last = s, t
-  reread!(v, e.buf.lines[s+1:t-1])
-  BLOCKS[lang].html(e, v)
-end
-
-"""
-Write `new` as the lines of the block of `v`, a view in the language `lang`.
-The caret stays where it was in the text, and ⌘Z takes the change back. With
-`typing`, changes that come one soon after another are taken back together.
-"""
-write_block!(v, lang, new::Vector{String}; typing=false) = begin
-  e = editor(v)
-  b = e.buf
-  readonly(b) && return v
-  span = block_lines(b, lang, v.n)
-  span === nothing && return v
-  i, t = span
-  v.first, v.last = i, t
-  old = b.lines[i+1:t-1]
-  new == old && return reread!(v, new)
-  caret, anchor = b.caret, b.anchor
-  edit!(b, line_end(b, i), line_end(b, t - 1), isempty(new) ? "" : "\n" * join(new, "\n"); typing)
-  by = length(new) - length(old)
-  moved(p) = p[1] >= t ? (p[1] + by, p[2]) : p[1] > i ? (i, 0) : p
-  b.caret, b.anchor = moved(caret), moved(anchor)
-  v.last += by
-  reread!(v, new)
-end
-
-"What happens to a block's view in each frame, before the page is laid out. Most kinds of block need nothing."
-block_tick!(v) = v
-
-"Do what each block of the page that shows needs in this frame"
-blocks_tick!(e) = for (key, node) in collect(e.nodes)
-  (key isa Tuple && length(key) == 4 && key[1] == :block && key[3] == e.buf.path) || continue
-  block_tick!(node)
-  filling(node) || continue
-  # A block whose lines have gone goes back to the page. Under one that fills the window, the page stays where it was.
-  block_lines(e.buf, key[2], node.n) === nothing ? (node.full = false) : (e.scroll.offset = node.pinned)
-end
-
-"A part of the block view `v` that's kept between frames"
-block_part!(make, v, key) = begin
-  node = get!(make, v.parts, key)
-  node.parent === nothing && setfield!(node, :parent, v)
-  node
-end
-
-"A button of a block. A click does `act!(view, action, window)`."
-@def mutable struct BlockButton <: SemanticUI
-  of::Any = nothing
-  action::Any = :none
-  icon::String = ""
-  words::String = ""
-  tip::String = ""
-  on::Bool = false                            # it's lit, like the kind of chart that shows now
-  off::Bool = false                           # it does nothing now, and shows that
-  bold::Bool = false                          # it's filled with colour, like the one button that a question waits for
-  rect::NTuple{4,px} = (0px, 0px, 0px, 0px)   # where it was last drawn, to put its tooltip under it
-  quiet::Bool = false                         # clicked, so no tooltip until the mouse leaves it
-end
-
-"The button of the block view `v` that's kept under `key`, with what it does and shows now"
-block_button!(v, key, action; icon="", words="", tip="", on=false, off=false, bold=false) = begin
-  b = block_part!(() -> BlockButton(of=v), v, (:button, key))
-  b.action, b.icon, b.words, b.tip, b.on, b.off, b.bold = action, icon, words, tip, on, off, bold
-  b
-end
-
-describe(b::BlockButton) = begin
-  ishovered(b) || (b.quiet = false)
-  filled = b.bold && !b.off
-  colour = b.off ? colours.faint : filled ? colours.bg : b.on ? colours.accent : colours.dim
-  back = filled ? (ishovered(b) ? RGBA(colours.accent, 0.85) : colours.accent) :
-         b.on ? colours.active : ishovered(b) && !b.off ? colours.hover : clear
-  Box(height(26px), padding(filled ? 10px : 7px, 0px), radius(6px), Alignment.Center, name="Button", background(back),
-    Row(Alignment.Center, child_gap=5px,
-      (isempty(b.icon) ? () : (Icon(b.icon, size=14px, color=colour),))...,
-      (isempty(b.words) ? () : (label(b.words, 12px, color=b.off ? colours.faint : filled ? colours.bg : colours.ink, weight=filled ? "Semibold" : ""),))...))
-end
-
-cursor(b::BlockButton) = b.off ? :arrow : :hand
-draw(ctx, size, ui::ConcreteRect, b::BlockButton) = (b.rect = (ui.left, ui.top, ui.width, ui.height); nothing)
-
-onmouse(b::BlockButton, ev::MouseMove) = begin
-  (b.quiet || isempty(b.tip)) && return
-  show_tooltip!(ev.window, tip_label(b.tip), b.rect..., placement=:bottom, gap=6px)
-end
-
-onkey(b::BlockButton, ev::KeyPress{Keys.mouse_left}) = begin
-  b.quiet = true
-  hide_tooltip!(ev.window)
-  b.off ? handled : act!(b.of, b.action, ev.window)
-end
-
-"What a block's box looks like in the page: round corners and a thin line, as a schedule has"
-block_look() = (width(grow=grow), Alignment.Start, radius(8px), border(1px, :solid, colours.line), background(takeoff_back()))
-
-"The row of buttons at the top of a block"
-block_bar(parts...) = Row(width(grow=grow), height(38px), padding(6px, 0px), child_gap=2px, Alignment.Center, background(colours.block), parts...)
-
-"A line of quiet words in a block that has nothing to show yet"
-block_note(words) = Row(width(grow=grow), padding(16px, 20px), Alignment.Center, clip=true,
-                        Box(width(grow=grow), Text(words, size=13px, family=SANS, color=colours.dim, wrap=WrapMode.words)))
-
-"A colour as CSS writes it, like #2a78d6"
-css_colour(c) = (c = RGBA(c); "#" * join(string(round(Int, 255x), base=16, pad=2) for x in (c.r, c.g, c.b)))
-
 # --- a chart of a table's numbers ------------------------------------------------------------
 #
 # A code block in the language `chart` draws the numbers of a table of the
@@ -13087,48 +13173,12 @@ page_tables(e) = begin
         push!(out, (first=i, last=run[2], under=under, rows=rows, headed=true, ranged=false))
         stop = run[2]
       end
-    elseif k.kind == Kind.fence && k.level == 0 && k.lang in (SPREADSHEET, SHEET)
-      t = codeblock(b, i)[2]
-      if t > i && ks[t].kind == Kind.fence && ks[t].level == 1
-        if k.lang == SPREADSHEET
-          texts = [spreadtexts(b.lines[r]) for r in i+1:t-1]
-          values = get!(() -> answers(texts), e.flows, (:answers, texts))
-          rows = [String[isformula(text) ? (values[r][c].failed ? "" : values[r][c].text) : String(strip(text)) for (c, text) in enumerate(row)]
-                  for (r, row) in enumerate(texts)]
-        else
-          texts = [parts(b.lines[r]) for r in i+1:t-1]
-          given = sheet_given(e, i)
-          # A sheet with a row over a range is a table with a row for each value of that row
-          over = get!(() -> cases(texts; given, cache=e.flows), e.flows, (:cases, texts, given))
-          if over !== nothing
-            push!(out, (first=i, last=t, under=under, rows=over.table, headed=true, ranged=true))
-            i = t + 1
-            continue
-          end
-          results = get!(() -> tally(texts; given, cache=e.flows), e.flows, (:sheetrun, texts, given, nothing))
-          rows = [String[strip(name), results[r].failed ? "" : results[r].text] for (r, (name, _)) in enumerate(texts)]
-        end
-        push!(out, (first=i, last=t, under=under, rows=rows, headed=false, ranged=false))
-        stop = t
-      end
-    elseif k.kind == Kind.fence && k.level == 0 && k.lang == TIMELOG
-      # A log of hours is a table of its tasks, with the hours of each
-      t = codeblock(b, i)[2]
-      if t > i && ks[t].kind == Kind.fence && ks[t].level == 1
-        rows = Timelogs.table(log_to_day(e, Timelogs.timelog(b.lines[i+1:t-1])), Timelogs.now())
-        length(rows) > 1 && push!(out, (first=i, last=t, under=under, rows=rows, headed=true, ranged=false))
-        stop = t
-      end
-    elseif k.kind == Kind.fence && k.level == 0 && k.lang in (FILTER, LOAD)
-      # A filter is a table of the rows that it shows. It reads a table above it. A load block is a filter too.
-      t = codeblock(b, i)[2]
-      if t > i && ks[t].kind == Kind.fence && ks[t].level == 1
-        rows = filter_page_table(e, b.lines[i+1:t-1], out, i; load=k.lang == LOAD)
-        rows === nothing || push!(out, (first=i, last=t, under=under, rows=rows, headed=true, ranged=false))
-        stop = t
-      end
     elseif k.kind == Kind.fence && k.level == 0
-      stop = max(i, codeblock(b, i)[2])   # a table in a block of code isn't one
+      t = codeblock(b, i)[2]
+      if haskey(BLOCKS, k.lang) && t > i && ks[t].kind == Kind.fence && ks[t].level == 1
+        block_tables!(BLOCKS[k.lang], e, i, t, under, out)
+      end
+      stop = max(i, t)   # a table in a block of code isn't one
     elseif k.kind == Kind.paragraph && (rows = table_rows(e, i)) !== nothing
       push!(out, (first=i, last=i, under=under, rows=rows, headed=true, ranged=false))   # a line that shows a CSV file as a table
     end
@@ -13501,7 +13551,12 @@ chart_html(e, v::ChartView) = begin
   "<div class=\"diagram\">\n$title$picture\n</div>"
 end
 
-BLOCKS[CHART] = BlockKind("Chart", "bar-chart", ChartView, chart_html)
+BLOCKS[CHART] = ChartView
+block_name(::Type{ChartView}) = "Chart"
+block_icon(::Type{ChartView}) = "bar-chart"
+block_insert(::Type{ChartView}) = ("Chart", ["```$CHART", "```", "", ""], (4, 0))
+block_reply(::Type{ChartView}) = true
+block_html(e, v::ChartView) = chart_html(e, v)
 
 # --- a filter of a table's rows ----------------------------------------------------------------
 #
@@ -14352,7 +14407,16 @@ filter_html(e, v::FilterView) = begin
     join((row("td", cells) for cells in table[2:end]), "\n") * "\n</tbody>\n</table>"
 end
 
-BLOCKS[FILTER] = BlockKind("Filter", "funnel", FilterView, filter_html)
+BLOCKS[FILTER] = FilterView
+block_name(::Type{FilterView}) = "Filter"
+block_icon(::Type{FilterView}) = "funnel"
+block_insert(::Type{FilterView}) = ("Filter", ["```$FILTER", "from: ", "```", "", ""], (2, 6))
+block_table_kind(::Type{FilterView}) = "filter"
+block_html(e, v::FilterView) = filter_html(e, v)
+block_tables!(::Type{FilterView}, e, i::Int, t::Int, under::AbstractString, out; load=false) = begin
+  rows = filter_page_table(e, e.buf.lines[i+1:t-1], out, i; load)
+  rows === nothing || push!(out, (first=i, last=t, under=under, rows=rows, headed=true, ranged=false))
+end
 
 # --- checks of the page's code ------------------------------------------------------------------
 #
@@ -14765,7 +14829,12 @@ check_html(e, v::CheckView) = begin
     join(("<li>$(r.went == :pass ? "✓" : "✗") <code>$(escape(r.code))</code>$(isempty(r.said) ? "" : ": " * escape(r.said))</li>" for r in v.results), "\n") * "\n</ul>"
 end
 
-BLOCKS[CHECK] = BlockKind("Check", "check2-square", CheckView, check_html)
+BLOCKS[CHECK] = CheckView
+block_name(::Type{CheckView}) = "Check"
+block_icon(::Type{CheckView}) = "check2-square"
+block_insert(::Type{CheckView}) = ("Check", ["```$CHECK", "", "```"], (2, 0))
+block_is_code(::Type{CheckView}) = true
+block_html(e, v::CheckView) = check_html(e, v)
 
 # --- checks in a file of Julia code ---
 #
@@ -15537,7 +15606,11 @@ save_html(e, v::SaveView) = begin
   "<p><em>Saves $(escape(what)) $(isempty(to) ? "as a file" : "to " * escape(to)).</em></p>"
 end
 
-BLOCKS[SAVE] = BlockKind("Save", "save", SaveView, save_html)
+BLOCKS[SAVE] = SaveView
+block_name(::Type{SaveView}) = "Save"
+block_icon(::Type{SaveView}) = "save"
+block_insert(::Type{SaveView}) = ("Save", ["```$SAVE", "to: ", "```", "", ""], (2, 4))
+block_html(e, v::SaveView) = save_html(e, v)
 
 # --- a form that adds a row to a table ---------------------------------------------------------
 #
@@ -16106,7 +16179,11 @@ form_html(e, v::FormView) = begin
   "<p><em>$(title)A form that adds rows to $(t isa String ? "a table" : escape(form_target(t))).</em></p>"
 end
 
-BLOCKS[FORM] = BlockKind("Form", "input-cursor-text", FormView, form_html)
+BLOCKS[FORM] = FormView
+block_name(::Type{FormView}) = "Form"
+block_icon(::Type{FormView}) = "input-cursor-text"
+block_insert(::Type{FormView}) = ("Form", ["```$FORM", "```", "", ""], (4, 0))
+block_html(e, v::FormView) = form_html(e, v)
 
 # --- rows loaded from a server or a file --------------------------------------------------------
 #
@@ -16408,7 +16485,15 @@ pick_tick!(v::FilterView) = begin
   v
 end
 
-BLOCKS[LOAD] = BlockKind("Load", "cloud-arrow-down", (; n) -> FilterView(n=n, lang=LOAD), filter_html)
+struct LoadBlock end
+BLOCKS[LOAD] = LoadBlock
+block_name(::Type{LoadBlock}) = "Load"
+block_icon(::Type{LoadBlock}) = "cloud-arrow-down"
+block_make(::Type{LoadBlock}, n::Int) = FilterView(n=n, lang=LOAD)
+block_insert(::Type{LoadBlock}) = ("Load", ["```$LOAD", "```", "", ""], (4, 0))
+block_table_kind(::Type{LoadBlock}) = "load block"
+block_tables!(::Type{LoadBlock}, e, i::Int, t::Int, under::AbstractString, out) =
+  block_tables!(FilterView, e, i, t, under, out; load=true)
 
 # --- where a block's rows come from --------------------------------------------------------
 #
@@ -16476,8 +16561,7 @@ table_kind(e, t) = begin
   k = kinds(e.buf)[t.first]
   k.kind == Kind.table && return "table"
   k.kind == Kind.fence || return "CSV file"
-  k.lang == SHEET ? "sheet" : k.lang == SPREADSHEET ? "spreadsheet" : k.lang == FILTER ? "filter" :
-  k.lang == LOAD ? "load block" : k.lang == TIMELOG ? "time log" : "block"
+  haskey(BLOCKS, k.lang) ? block_table_kind(BLOCKS[k.lang]) : "block"
 end
 
 # The language of each kind of block that reads rows, for writing its lines
@@ -17238,7 +17322,11 @@ map_html(e, v::MapView) = begin
   "<div class=\"diagram\">\n$shows<p><a href=\"$(escape(Maps.link(s.place)))\">$address</a></p>\n</div>"
 end
 
-BLOCKS[MAP] = BlockKind("Map", "geo-alt", MapView, map_html)
+BLOCKS[MAP] = MapView
+block_name(::Type{MapView}) = "Map"
+block_icon(::Type{MapView}) = "geo-alt"
+block_insert(::Type{MapView}) = ("Map", ["```$MAP", "", "```"], (2, 0))
+block_html(e, v::MapView) = map_html(e, v)
 
 # --- a question with answers to choose ---------------------------------------------------------
 #
@@ -17360,7 +17448,10 @@ ask_html(e, v::AskView) = begin
   (isempty(strip(q.note)) ? "" : "<blockquote>$(escape(q.note))</blockquote>")
 end
 
-BLOCKS[ASK] = BlockKind("Question", "question-circle", AskView, ask_html)
+BLOCKS[ASK] = AskView
+block_name(::Type{AskView}) = "Question"
+block_icon(::Type{AskView}) = "question-circle"
+block_html(e, v::AskView) = ask_html(e, v)
 
 # --- changes to accept or reject ----------------------------------------------------------------
 #
@@ -17932,7 +18023,10 @@ changes_html(e, v::ChangesView) = begin
   join(parts, "\n")
 end
 
-BLOCKS[CHANGES] = BlockKind("Changes", "file-diff", ChangesView, changes_html)
+BLOCKS[CHANGES] = ChangesView
+block_name(::Type{ChangesView}) = "Changes"
+block_icon(::Type{ChangesView}) = "file-diff"
+block_html(e, v::ChangesView) = changes_html(e, v)
 
 # --- a calendar of the page's days -------------------------------------------------------------
 #
@@ -18475,7 +18569,11 @@ calendar_html(e, v::CalendarView) = begin
   "<table style=\"width: 100%; table-layout: fixed\">\n<caption>$(Calendars.title(month))</caption>\n<tr>$heads</tr>\n$rows\n</table>"
 end
 
-BLOCKS[CALENDAR] = BlockKind("Calendar", "calendar3", CalendarView, calendar_html)
+BLOCKS[CALENDAR] = CalendarView
+block_name(::Type{CalendarView}) = "Calendar"
+block_icon(::Type{CalendarView}) = "calendar3"
+block_insert(::Type{CalendarView}) = ("Calendar", ["```$CALENDAR", "```", "", ""], (4, 0))
+block_html(e, v::CalendarView) = calendar_html(e, v)
 
 # --- a board of the page's tasks ---------------------------------------------------------------
 #
@@ -18807,7 +18905,11 @@ board_html(e, v::BoardView) = begin
   "<table>\n<tr>$heads</tr>\n<tr>$cells</tr>\n</table>"
 end
 
-BLOCKS[BOARD] = BlockKind("Board", "kanban", BoardView, board_html)
+BLOCKS[BOARD] = BoardView
+block_name(::Type{BoardView}) = "Board"
+block_icon(::Type{BoardView}) = "kanban"
+block_insert(::Type{BoardView}) = ("Board", ["```$BOARD", "```", "", ""], (4, 0))
+block_html(e, v::BoardView) = board_html(e, v)
 
 # --- blocks of the page side by side -------------------------------------------------------------
 #
@@ -19241,7 +19343,12 @@ end
 columns_html(e, v::ColumnsView) = v.shares === nothing ? nothing : ""
 
 # The language `column` means the same as `columns`
-foreach(lang -> BLOCKS[lang] = BlockKind("Columns", "columns-gap", ColumnsView, columns_html), Columns.LANGS)
+foreach(lang -> BLOCKS[lang] = ColumnsView, Columns.LANGS)
+block_name(::Type{ColumnsView}) = "Columns"
+block_icon(::Type{ColumnsView}) = "columns-gap"
+block_insert(::Type{ColumnsView}) = ("Columns", ["```$COLUMN_BLOCK", "2", "```", "", ""], (5, 0))
+block_outline_inside(::Type{ColumnsView}) = true
+block_html(e, v::ColumnsView) = columns_html(e, v)
 
 # --- a list of what was found in the pages of a folder -----------------------------------------
 #
@@ -19671,8 +19778,7 @@ cursor(::SearchView) = :arrow
 block_icon(kind::Symbol) = begin
   kind == :code && return "code-slash"
   lang = first(Searches.WHATS[kind].langs)
-  lang == TAKEOFF ? "rulers" : lang == SCHEDULE ? "bar-chart-steps" : lang == SHEET ? "calculator" : lang == SPREADSHEET ? "grid-3x3" :
-  lang == DIAGRAM ? "diagram-3" : haskey(BLOCKS, lang) ? BLOCKS[lang].icon : "puzzle"
+  haskey(BLOCKS, lang) ? block_icon(BLOCKS[lang]) : "puzzle"
 end
 
 """
@@ -19819,7 +19925,11 @@ find_html(e, v::SearchView) = begin
   join(out, "\n") * "\n</ul>"
 end
 
-BLOCKS[FIND] = BlockKind("Find", "search", SearchView, find_html)
+BLOCKS[FIND] = SearchView
+block_name(::Type{SearchView}) = "Find"
+block_icon(::Type{SearchView}) = "search"
+block_insert(::Type{SearchView}) = ("Find", ["```$FIND", "```", "", ""], (4, 0))
+block_html(e, v::SearchView) = find_html(e, v)
 
 # --- a gallery of a folder's files ------------------------------------------------------------
 #
@@ -20320,7 +20430,11 @@ gallery_html(e, v::GalleryView) = begin
   "<div class=\"gallery\" style=\"display: grid; grid-template-columns: repeat(auto-fill, minmax($(Galleries.SIDES[v.data.size])px, 1fr)); gap: $(Galleries.GAP)px\">\n$squares\n</div>"
 end
 
-BLOCKS[GALLERY] = BlockKind("Gallery", "images", GalleryView, gallery_html)
+BLOCKS[GALLERY] = GalleryView
+block_name(::Type{GalleryView}) = "Gallery"
+block_icon(::Type{GalleryView}) = "images"
+block_insert(::Type{GalleryView}) = ("Gallery", ["```$GALLERY", "```", "", ""], (4, 0))
+block_html(e, v::GalleryView) = gallery_html(e, v)
 
 # --- a sketch ---------------------------------------------------------------------------------
 #
@@ -20603,20 +20717,10 @@ describe(v::SketchView) = begin
   end
 end
 
-"""
-Make the sketch fill the window, or put it back in the page. In the page it
-shows only its drawing, so words that were being typed are added, no shape is
-selected, and the keyboard goes back to the text.
-"""
-full!(v::SketchView, on::Bool) = begin
-  e = editor(v)
-  on && unfill!(e)   # one block at a time fills the window
+"In the page a sketch shows only its drawing, so words that were being typed are added and no shape stays selected."
+before_fill!(v::SketchView, on::Bool) = begin
   on || (settle_number!(v); answer!(v); v.picked = 0; v.draft = v.grab = nothing)
-  v.full = on
-  v.pinned = e.scroll.offset
   v.box = (0.0, 0.0, 0.0, 0.0)   # it's another size now, so how big it's drawn is worked out afresh
-  on ? focus(sketch_area(v)) : focus(e)
-  handled
 end
 
 # A pinch on a sketch in the page doesn't make it fill the window. Only the button beside its top right corner does.
@@ -21011,7 +21115,11 @@ sketch_html(e, v::SketchView) = begin
   "<div class=\"diagram\">\n$picture\n</div>"
 end
 
-BLOCKS[SKETCH] = BlockKind("Sketch", "pencil", SketchView, sketch_html)
+BLOCKS[SKETCH] = SketchView
+block_name(::Type{SketchView}) = "Sketch"
+block_icon(::Type{SketchView}) = "pencil"
+block_insert(::Type{SketchView}) = ("Sketch", ["```$SKETCH", "```", "", ""], (4, 0))
+block_html(e, v::SketchView) = sketch_html(e, v)
 
 # --- a canvas ---------------------------------------------------------------------------------
 #
@@ -21448,25 +21556,11 @@ end
 # In the page it's as tall as the board needs. In the window it takes all the room under its buttons.
 describe(a::CanvasArea) = (v = a.of; Box(width(grow=grow), v.full ? height(grow=grow) : height(px(page_tall(v)))))
 
-"""
-Make the canvas fill the window, or put it back in the page. In the page it
-shows the whole board, so words that were being typed are kept, nothing is
-selected, and the keyboard goes back to the text.
-"""
-full!(v::CanvasView, on::Bool) = begin
-  e = editor(v)
-  # One block at a time fills the window. A canvas of the page that a card of a page came from still fills it
-  # when Back goes there.
-  on && for (key, node) in e.nodes
-    filling(node) && key isa Tuple && (key[1] == :block ? key[3] : key[2]) == e.buf.path && (node.full = false)
-  end
+"In the page a canvas shows the whole board, so words that were being typed are kept and nothing stays selected."
+before_fill!(v::CanvasView, on::Bool) = begin
   on || (finish_typing!(v); v.picked = v.grab = v.draft = v.reach = nothing)
-  v.full = on
-  v.pinned = e.scroll.offset
   v.zoom = 0.0   # it's another size now, so it shows the whole board
   v.box = (0.0, 0.0, 0.0, 0.0)
-  on ? focus(canvas_area(v)) : focus(e)
-  handled
 end
 
 # A pinch on a canvas in the page makes its board bigger or smaller there: see `onpinch(::CanvasArea, ...)`. It doesn't make
@@ -22336,7 +22430,11 @@ canvas_html(e, v::CanvasView) = begin
   "<div class=\"diagram\">\n$picture\n</div>"
 end
 
-BLOCKS[CANVAS] = BlockKind("Canvas", "sticky", CanvasView, canvas_html)
+BLOCKS[CANVAS] = CanvasView
+block_name(::Type{CanvasView}) = "Canvas"
+block_icon(::Type{CanvasView}) = "sticky"
+block_insert(::Type{CanvasView}) = ("Canvas", ["```$CANVAS", "```", "", ""], (4, 0))
+block_html(e, v::CanvasView) = canvas_html(e, v)
 
 # --- a log of the hours on each task -----------------------------------------------------------
 #
@@ -22733,7 +22831,18 @@ timelog_html(e, v::TimelogView) = begin
   "\n</tbody>\n<tfoot>\n" * join(sums, "\n") * "\n</tfoot>\n</table>"
 end
 
-BLOCKS[TIMELOG] = BlockKind("Time log", "stopwatch", TimelogView, timelog_html)
+BLOCKS[TIMELOG] = TimelogView
+block_name(::Type{TimelogView}) = "Time log"
+block_icon(::Type{TimelogView}) = "stopwatch"
+block_insert(::Type{TimelogView}) = ("Time Log", ["```$TIMELOG", "```", "", ""], (4, 0))
+block_table_kind(::Type{TimelogView}) = "time log"
+block_html(e, v::TimelogView) = timelog_html(e, v)
+block_tables!(::Type{TimelogView}, e, i::Int, t::Int, under::AbstractString, out) = begin
+  rows = Timelogs.table(log_to_day(e, Timelogs.timelog(e.buf.lines[i+1:t-1])), Timelogs.now())
+  length(rows) > 1 && push!(out, (first=i, last=t, under=under, rows=rows, headed=true, ranged=false))
+end
+block_names(::Type{TimelogView}, lines) = Tuple{String,String}[(task, string(round(minutes / 60, digits=4)) * "hr")
+                                                               for (task, minutes) in Timelogs.tasks(Timelogs.timelog(lines), Timelogs.now()) if !isempty(strip(task))]
 
 # --- contacts ----------------------------------------------------------------------------------
 #
@@ -23255,7 +23364,22 @@ end
 "The contacts of the block as HTML: a card for each one, with the class names of the h-card microformat"
 contact_html(e, v::ContactView) = Contacts.markup(v.data)
 
-BLOCKS[CONTACT] = BlockKind("Contact", "person-vcard", ContactView, contact_html)
+BLOCKS[CONTACT] = ContactView
+block_name(::Type{ContactView}) = "Contact"
+block_icon(::Type{ContactView}) = "person-vcard"
+block_insert(::Type{ContactView}) = ("Contact", ["```$CONTACT", "", "```"], (2, 0))
+block_html(e, v::ContactView) = contact_html(e, v)
+block_places(::Type{ContactView}, lines) = begin
+  out = @NamedTuple{name::String, place::String, line::Int}[]
+  at = 0
+  for c in Contacts.contacts(lines)
+    at += c.before
+    k = Contacts.place(c, :address)
+    k === nothing || push!(out, (name=Contacts.title(c), place=c.lines[k].value, line=at + k))
+    at += length(c.lines)
+  end
+  out
+end
 
 # --- contacts from a vCard ---------------------------------------------------------------------
 #
@@ -23560,7 +23684,11 @@ signature_html(e, v::SignatureView) = begin
   (isempty(under) ? "" : "\n<p style=\"margin-top: -0.5em; font-size: 0.88em; color: #6b6259\">$(escape(under))</p>")
 end
 
-BLOCKS[SIGNATURE] = BlockKind("Signature", "pen", SignatureView, signature_html)
+BLOCKS[SIGNATURE] = SignatureView
+block_name(::Type{SignatureView}) = "Signature"
+block_icon(::Type{SignatureView}) = "pen"
+block_insert(::Type{SignatureView}) = ("Signature", ["```$SIGNATURE", "```", "", ""], (4, 0))
+block_html(e, v::SignatureView) = signature_html(e, v)
 # --- a link card -------------------------------------------------------------------------------
 #
 # A line that holds only the address of a web page, written as a picture's
@@ -24604,9 +24732,17 @@ view_html(e, v::ViewBlock) = begin
   "<p><a href=\"$shown\">$shown</a></p>"
 end
 
-BLOCKS[VIEW_BLOCK] = BlockKind("View", "eye", ViewBlock, view_html)
+BLOCKS[VIEW_BLOCK] = ViewBlock
+block_name(::Type{ViewBlock}) = "View"
+block_icon(::Type{ViewBlock}) = "eye"
+block_insert(::Type{ViewBlock}) = ("View", ["```$VIEW_BLOCK", "", "```"], (2, 0))
+block_html(e, v::ViewBlock) = view_html(e, v)
 # A block in the language `web` is a view by the name that it had before. It writes its line back in its own language.
-BLOCKS[WEBVIEW] = BlockKind("View", "eye", (; n) -> ViewBlock(n=n, lang=WEBVIEW), view_html)
+struct WebBlock end
+BLOCKS[WEBVIEW] = WebBlock
+block_name(::Type{WebBlock}) = "View"
+block_icon(::Type{WebBlock}) = "eye"
+block_make(::Type{WebBlock}, n::Int) = ViewBlock(n=n, lang=WEBVIEW)
 
 # --- what code comes to --------------------------------------------------------------------------
 #
@@ -24978,7 +25114,12 @@ result_html(e, v::ResultBlock) = begin
   isempty(v.named) ? nothing : "<p><a href=\"$(escaped(v.named))\">$(escaped(v.named))</a></p>"
 end
 
-BLOCKS[RESULT] = BlockKind("Result", "code-square", ResultBlock, result_html)
+BLOCKS[RESULT] = ResultBlock
+block_name(::Type{ResultBlock}) = "Result"
+block_icon(::Type{ResultBlock}) = "code-square"
+block_insert(::Type{ResultBlock}) = ("Result", ["```$RESULT", "", "```"], (2, 0))
+block_is_code(::Type{ResultBlock}) = true
+block_html(e, v::ResultBlock) = result_html(e, v)
 
 # --- one thing in many parts of the page -------------------------------------------------------
 #
@@ -25426,7 +25567,11 @@ onmouse(v::DayView, ::MouseMove) = v.grab ? handled : nothing
 "The block as HTML: the day that the page shows"
 day_html(e, v::DayView) = (d = something(v.day, calendar_today()); "<p><strong>$(Dates.dayname(d)) $(Schedules.long(d))</strong></p>")
 
-BLOCKS[DAY_BLOCK] = BlockKind("Day", "calendar-day", DayView, day_html)
+BLOCKS[DAY_BLOCK] = DayView
+block_name(::Type{DayView}) = "Day"
+block_icon(::Type{DayView}) = "calendar-day"
+block_insert(::Type{DayView}) = ("Day", ["```$DAY_BLOCK", "```", "", ""], (4, 0))
+block_html(e, v::DayView) = day_html(e, v)
 
 # --- the page's text on its day ------------------------------------------------------------------
 #
@@ -26107,18 +26252,8 @@ each with the name of whose place it is, the place as the block has it, and
 the line of the block that it's on. `lines` are the lines of the block. A
 block of contacts gives the address of each contact that has one.
 """
-block_places(lang, lines) = begin
-  out = @NamedTuple{name::String, place::String, line::Int}[]
-  lang == CONTACT || return out
-  at = 0
-  for c in Contacts.contacts(lines)
-    at += c.before
-    k = Contacts.place(c, :address)
-    k === nothing || push!(out, (name=Contacts.title(c), place=c.lines[k].value, line=at + k))
-    at += length(c.lines)
-  end
-  out
-end
+block_places(lang::AbstractString, lines) =
+  haskey(BLOCKS, lang) ? block_places(BLOCKS[lang], lines) : @NamedTuple{name::String, place::String, line::Int}[]
 
 """
 Every place that the page gives its maps, with the line of the page that
@@ -26139,10 +26274,10 @@ page_places(e) = begin
     end
     ks = kinds(b)
     for (i, k) in enumerate(ks)
-      (k.kind == Kind.fence && k.level == 0 && k.lang == CONTACT) || continue
+      (k.kind == Kind.fence && k.level == 0 && haskey(BLOCKS, k.lang)) || continue
       t = codeblock(b, i)[2]
       (t > i && ks[t].kind == Kind.fence && ks[t].level == 1) || continue
-      append!(out, ((name=p.name, place=p.place, line=i + p.line) for p in block_places(k.lang, b.lines[i+1:t-1])))
+      append!(out, ((name=p.name, place=p.place, line=i + p.line) for p in block_places(BLOCKS[k.lang], b.lines[i+1:t-1])))
     end
     out
   end
@@ -26468,25 +26603,8 @@ with an expression for its value, as a row of a sheet has. `lines` are the
 lines of the block. A sheet gives its rows, a takeoff gives each measure with
 its amount, and a time log gives each task with its hours.
 """
-block_names(lang, lines) = begin
-  out = Tuple{String,String}[]
-  if lang == SHEET
-    append!(out, (row for row in parts.(lines) if !isempty(ident(row[1]))))
-  elseif lang == TAKEOFF
-    t = Plans.takeoff(lines)
-    for m in t.measures
-      a = isempty(strip(m.name)) ? nothing : Plans.amount(t, m)
-      a === nothing && continue
-      x = string(round(a, digits=4))
-      push!(out, (m.name, m.kind == :count ? x : m.kind == :length ? x * "m" : x * "m^2"))
-    end
-  elseif lang == TIMELOG
-    for (task, minutes) in Timelogs.tasks(Timelogs.timelog(lines), Timelogs.now())
-      isempty(strip(task)) || push!(out, (task, string(round(minutes / 60, digits=4)) * "hr"))
-    end
-  end
-  out
-end
+block_names(lang::AbstractString, lines) =
+  haskey(BLOCKS, lang) ? block_names(BLOCKS[lang], lines) : Tuple{String,String}[]
 
 """
 The names that the sums in a line of text give, each with the code of its
@@ -26559,8 +26677,10 @@ given_and_sums(e, upto::Int, sums::Bool) = begin
       if k.kind == Kind.fence && k.level == 0
         t = codeblock(b, i)[2]
         if t > i && ks[t].kind == Kind.fence && ks[t].level == 1
-          t < upto && k.lang in (SHEET, TAKEOFF, TIMELOG) &&
-            append!(out, get!(() -> block_names(k.lang, b.lines[i+1:t-1]), e.flows, (:block_names, k.lang, b.lines[i+1:t-1])))
+          if t < upto && haskey(BLOCKS, k.lang)
+            got = get!(() -> block_names(BLOCKS[k.lang], b.lines[i+1:t-1]), e.flows, (:block_names, k.lang, b.lines[i+1:t-1]))
+            isempty(got) || append!(out, got)
+          end
           i = t
         end
       elseif sums && !(k.kind in (Kind.fence, Kind.code))
@@ -26713,7 +26833,7 @@ end
 const SOURCE = r"^\s*(?:`{3,}|~{3,})\s*[^\s`]+[ \t]+((?:\.{1,2}/|~?/|github\.com/)\S+)\s*$"
 
 "True when Ladder itself says what a code block in the language `lang` shows"
-known_lang(lang) = lang in (LIVE, SHEET, SPREADSHEET, DIAGRAM, MATH, TAKEOFF, SCHEDULE, MATTER, TOML_MATTER, HEX, BITS, COMMENT, "julia") || haskey(BLOCKS, lang)
+known_lang(lang) = lang in (MATTER, TOML_MATTER, MATH, HEX, BITS, COMMENT, "julia") || haskey(BLOCKS, lang)
 
 "What was found in each file that could define a kind of block: when the file was saved, and whether its text defines the function"
 const DEFINES = Dict{Tuple{String,String},Tuple{Float64,Bool}}()
@@ -27836,9 +27956,7 @@ layout!(e, width=text_width(e)) = begin
   # The email as it was sent, with the lines that it stands for, or nothing when the page shows its lines
   sent = span === nothing ? sent_email(e) : nothing
   sent === nothing || (lines = sent_lines(e); sent = lines === nothing ? nothing : (sent, lines))
-  plans = 0   # how many takeoff blocks there have been so far
-  schedules = 0   # and how many schedules
-  parts = 0   # and how many lines that show a part of another page
+  parts = 0   # how many lines that show a part of another page
   seen = Dict{String,Int}()   # and how many blocks in each of the languages of `BLOCKS`
   # The lines of plain text as the frame before laid them out: see `PlainLine`. A page in columns, an email as it
   # was sent, and a page of emails have lines that are laid out another way.
@@ -27898,39 +28016,15 @@ layout!(e, width=text_width(e)) = begin
       i = sent[2][2] + 1
       continue
     end
-    # A `takeoff` code block shows its plan and its measures, unless the caret is in it
-    if ks[i].kind == Kind.fence && ks[i].level == 0 && ks[i].lang == TAKEOFF
-      plans += 1   # each takeoff keeps its view by its place among the page's takeoffs
-      t = codeblock(b, i)[2]
-      if !incode(b, i) && t > i && ks[t].kind == Kind.fence && ks[t].level == 1
-        content = takeoff_item(e, i, t, plans)
-        push!(items, Item(i, t, top, content.tall, content))
-        top += content.tall
-        i = t + 1
-        continue
-      end
-    end
-    # A `schedule` code block shows the page's tasks on a line of days, unless the caret is in it
-    if ks[i].kind == Kind.fence && ks[i].level == 0 && ks[i].lang == SCHEDULE
-      schedules += 1
-      t = codeblock(b, i)[2]
-      if !incode(b, i) && t > i && ks[t].kind == Kind.fence && ks[t].level == 1
-        content = schedule_item(e, i, t, schedules)
-        push!(items, Item(i, t, top, content.tall, content))
-        top += content.tall
-        i = t + 1
-        continue
-      end
-    end
-    # A block in one of the languages of `BLOCKS` shows as its component, unless the caret is in it
+    # A block in one of the languages of `BLOCKS` shows as its component, grid or view
     if ks[i].kind == Kind.fence && ks[i].level == 0 && haskey(BLOCKS, ks[i].lang)
       lang = ks[i].lang
       seen[lang] = get(seen, lang, 0) + 1   # each one keeps its view by its place among the page's blocks in its language
-      t = codeblock(b, i)[2]
-      if !incode(b, i) && t > i && ks[t].kind == Kind.fence && ks[t].level == 1
-        content = block_item(e, lang, i, t, seen[lang])
-        push!(items, Item(i, t, top, content.tall, content))
-        top += content.tall
+      laid = block_layout(BLOCKS[lang], e, lang, i, seen[lang])
+      if laid !== nothing
+        t, content = laid
+        push!(items, Item(i, t, top, tall(content), content))
+        top += tall(content)
         i = t + 1
         continue
       end
@@ -27943,28 +28037,6 @@ layout!(e, width=text_width(e)) = begin
       t = codeblock(b, i)[2]
       if source !== nothing && !incode(b, i) && t > i && ks[t].kind == Kind.fence && ks[t].level == 1
         content = file_block_item(e, lang, source, i, t, seen[lang])
-        push!(items, Item(i, t, top, content.tall, content))
-        top += content.tall
-        i = t + 1
-        continue
-      end
-    end
-    # A `ui` code block shows what its code makes, unless the caret is in it
-    if ks[i].kind == Kind.fence && ks[i].level == 0 && ks[i].lang == LIVE && !incode(b, i)
-      t = codeblock(b, i)[2]
-      if t > i && ks[t].kind == Kind.fence && ks[t].level == 1
-        content = live(e, join(b.lines[i+1:t-1], "\n"))
-        push!(items, Item(i, t, top, content.tall, content))
-        top += content.tall
-        i = t + 1
-        continue
-      end
-    end
-    # A `mermaid` code block shows its diagram, unless the caret is in it. Code that can't be drawn as a diagram shows as code.
-    if ks[i].kind == Kind.fence && ks[i].level == 0 && ks[i].lang == DIAGRAM && !incode(b, i)
-      t = codeblock(b, i)[2]
-      content = t > i && ks[t].kind == Kind.fence && ks[t].level == 1 ? diagram(e, join(b.lines[i+1:t-1], "\n")) : nothing
-      if content !== nothing
         push!(items, Item(i, t, top, content.tall, content))
         top += content.tall
         i = t + 1
@@ -27989,17 +28061,6 @@ layout!(e, width=text_width(e)) = begin
         push!(items, Item(i, i, top, content.tall, content))
         top += content.tall
         i += 1
-        continue
-      end
-    end
-    # A `sheet` code block is drawn as a sheet, and a `spreadsheet` one as a spreadsheet, unless the caret is on its first or last line
-    if ks[i].kind == Kind.fence && ks[i].level == 0 && ks[i].lang in (SHEET, SPREADSHEET)
-      run = drawn(b, i, ks[i].lang)
-      if run !== nothing
-        content = ks[i].lang == SHEET ? sheetgrid(e, run...) : spreadgrid(e, run...)
-        push!(items, Item(i, run[2], top, tall(content), content))
-        top += tall(content)
-        i = run[2] + 1
         continue
       end
     end
@@ -33431,8 +33492,9 @@ end
 low(node) = level(node) < length(levels(node))
 
 "The language of the block that `v` is the view of, or nothing"
-block_lang(v) = v isa TakeoffView ? TAKEOFF : v isa ScheduleView ? SCHEDULE : v isa FilterView ? v.lang :
-                findfirst(kind -> kind.view isa Type && v isa kind.view, BLOCKS)
+block_lang(v) = findfirst(T -> (T isa Type && v isa T) || (T isa BlockKind && T.view isa Type && v isa T.view), BLOCKS)
+block_lang(v::FilterView) = v.lang
+block_lang(v::ViewBlock) = v.lang
 
 "The first and the last line of the block that `v` is the view of, or nothing"
 block_span(b::Buffer, v) = (lang = block_lang(v); lang === nothing ? nothing : block_lines(b, lang, v.n))
@@ -35371,8 +35433,9 @@ const COMPONENTS = Dict(
   "Mermaid" => ("Diagram", "diagram-3"))
 const LAYOUTS = ("Box", "Row", "Column", "Stack", "Scroll", "Text", "Image")
 "Every icon that the sidebar can show. The built app reads them all when it's made."
-const SIDEBAR_ICONS = unique(["eye", "eye-slash", "file-earmark-text", "chevron-right", "chevron-down", "calculator", "grid-3x3", "puzzle", "bounding-box", "rulers", "bar-chart-steps",
-                              ("type-h$n" for n in 1:6)..., (icon for (_, icon) in values(COMPONENTS))..., (kind.icon for kind in values(BLOCKS))...])
+const SIDEBAR_ICONS = unique(["eye", "eye-slash", "file-earmark-text", "chevron-right", "chevron-down", "puzzle",
+                              ("type-h$n" for n in 1:6)..., (icon for (_, icon) in values(COMPONENTS))...,
+                              (block_icon(T) for T in values(BLOCKS) if !isempty(block_icon(T)))...])
 
 """
 The name and the icon of what a block of `ui` code shows. It's read from the
@@ -35397,30 +35460,11 @@ outline(lines::Vector{String}, kinds::Vector{Line}, folder::AbstractString="") =
   for (i, l) in enumerate(kinds)
     if l.kind == Kind.heading
       push!(out, Entry(i, l.level, rest(lines[i], l.prefix), "type-h$(l.level)", i))
-    elseif l.kind == Kind.fence && l.level == 0 && (l.lang in (LIVE, SHEET, SPREADSHEET, DIAGRAM, TAKEOFF, SCHEDULE) || haskey(BLOCKS, l.lang))
+    elseif l.kind == Kind.fence && l.level == 0 && haskey(BLOCKS, l.lang)
       # The line that closes the block, or the last line when nothing closes it
       close = something(findnext(k -> k.kind == Kind.fence, kinds, i + 1), length(lines))
-      if l.lang == SHEET
-        push!(out, Entry(i, 7, "Sheet", "calculator", min(i + 1, length(lines))))
-      elseif l.lang == SPREADSHEET
-        push!(out, Entry(i, 7, "Spreadsheet", "grid-3x3", min(i + 1, length(lines))))
-      elseif l.lang == TAKEOFF
-        # The caret goes under the block. In the block, it would show the block's lines.
-        push!(out, Entry(i, 7, "Takeoff", "rulers", min(close + 1, length(lines))))
-      elseif l.lang == SCHEDULE
-        push!(out, Entry(i, 7, "Schedule", "bar-chart-steps", min(close + 1, length(lines))))
-      elseif haskey(BLOCKS, l.lang)
-        # A `columns` block shows nothing, so the caret goes into it: its lines show, and its number can be changed
-        push!(out, Entry(i, 7, BLOCKS[l.lang].name, BLOCKS[l.lang].icon, min((l.lang in Columns.LANGS ? i : close) + 1, length(lines))))
-      elseif l.lang == DIAGRAM
-        # Code that can't be drawn as a diagram is a code block like any other.
-        # The caret goes under the block. In the block, it would show the block's code.
-        isdiagram(join(view(lines, i+1:close-1), "\n")) && push!(out, Entry(i, 7, "Diagram", "diagram-3", min(close + 1, length(lines))))
-      else
-        name, icon = component(view(lines, i+1:close-1))
-        # The caret goes under the block. In the block, it would show the block's code.
-        push!(out, Entry(i, 7, name, icon, min(close + 1, length(lines))))
-      end
+      entry = block_outline(BLOCKS[l.lang], lines, i, close)
+      entry === nothing || push!(out, entry)
     elseif l.kind == Kind.fence && l.level == 0 && block_source(lines[i], l.lang, folder) !== nothing
       # A block that a file defines has the name of its language. The caret goes under the block.
       close = something(findnext(k -> k.kind == Kind.fence, kinds, i + 1), length(lines))
@@ -36831,44 +36875,16 @@ const INSERTS = [
   ("Callout",       ["> [!NOTE]", "> "],            (2, 2)),
   "-",
   ("Table",         ["|  |  |  |", "|---|---|---|", "|  |  |  |", "|  |  |  |"], (1, 2)),
-  ("Sheet",         ["```$SHEET", " = ", "```"],    (2, 0)),
-  ("Spreadsheet",   ["```$SPREADSHEET", "|  |  |  |", "|  |  |  |", "|  |  |  |", "```"], (2, 2)),
+  block_insert(SHEET),
+  block_insert(SPREADSHEET),
   ("Code",          ["```julia", "", "```"],        (2, 0)),
-  ("Live Block",    ["```$LIVE", "", "```"],        (2, 0)),
-  ("Diagram",       ["```$DIAGRAM", "flowchart LR", "  A[Start] --> B[End]", "```"], (3, 2)),
+  block_insert(LIVE),
+  block_insert(DIAGRAM),
   ("Formula",       ["\$\$", "", "\$\$"],           (2, 0)),
-  # The caret goes to an empty line under the block. In the block, it would show the block's lines.
-  ("Takeoff",       ["```$TAKEOFF", "```", "", ""], (4, 0)),
-  ("Schedule",      ["```$SCHEDULE", "```", "", ""], (4, 0)),
   # An agent writes a question and a set of changes, so the menu has neither
-  ("Chart",         ["```$CHART", "```", "", ""],   (4, 0)),
-  ("Board",         ["```$BOARD", "```", "", ""],   (4, 0)),
-  ("Calendar",      ["```$CALENDAR", "```", "", ""], (4, 0)),
-  ("Day",           ["```$DAY_BLOCK", "```", "", ""], (4, 0)),
-  # The two blocks that are typed under it show side by side
-  ("Columns",       ["```$COLUMN_BLOCK", "2", "```", "", ""], (5, 0)),
-  ("Find",          ["```$FIND", "```", "", ""],    (4, 0)),
-  # The caret goes onto the block's empty line, for the first check
-  ("Check",         ["```$CHECK", "", "```"],      (2, 0)),
-  # The caret goes after from:, for the name of the file to filter
-  ("Filter",        ["```$FILTER", "from: ", "```", "", ""], (2, 6)),
-  # The caret goes after to:, for the name of the file or the address of the server
-  ("Save",          ["```$SAVE", "to: ", "```", "", ""], (2, 4)),
-  # The block shows a list of files to choose from, so the caret goes under it
-  ("Load",          ["```$LOAD", "```", "", ""], (4, 0)),
-  # The block shows a field for each column of the table above it, so the caret goes under it
-  ("Form",          ["```$FORM", "```", "", ""], (4, 0)),
-  ("Sketch",        ["```$SKETCH", "```", "", ""],  (4, 0)),
-  ("Canvas",        ["```$CANVAS", "```", "", ""],  (4, 0)),
-  # The caret goes onto the block's empty line, for the name of the file or the address of the page
-  ("View",          ["```$VIEW_BLOCK", "", "```"], (2, 0)),
-  # The caret goes onto the block's empty line, for its code or the name of its file
-  ("Result",        ["```$RESULT", "", "```"],     (2, 0)),
-  ("Signature",     ["```$SIGNATURE", "```", "", ""], (4, 0)),
-  ("Contact",       ["```$CONTACT", "", "```"],     (2, 0)),
-  ("Gallery",       ["```$GALLERY", "```", "", ""], (4, 0)),
-  ("Map",           ["```$MAP", "", "```"],         (2, 0)),
-  ("Time Log",      ["```$TIMELOG", "```", "", ""], (4, 0)),
+  (block_insert(lang) for lang in (TAKEOFF, SCHEDULE, CHART, BOARD, CALENDAR, DAY_BLOCK, COLUMN_BLOCK, FIND,
+                                   CHECK, FILTER, SAVE, LOAD, FORM, SKETCH, CANVAS, VIEW_BLOCK, RESULT,
+                                   SIGNATURE, CONTACT, GALLERY, MAP, TIMELOG))...,
   # A card is the address of a page, written as a picture's is. The caret goes after the https://.
   ("Link Card",     ["![](https://)"],              (1, 12)),
   # This one records from the microphone into a new file, and the line shows the recorder. The caret goes
@@ -41182,20 +41198,6 @@ sheet_html(e, s, t) = begin
   "<table>\n" * join(rows, "\n") * "\n</table>"
 end
 
-"The `takeoff` code block from line `s` to line `t` as HTML: a table of what's measured and what each measure comes to"
-takeoff_html(e, s, t) = begin
-  data = Plans.takeoff(e.buf.lines[s+1:t-1])
-  isempty(data.measures) && return nothing
-  rows = map(data.measures) do m
-    amount = Plans.amount(data, m)
-    "<tr><td>$(escape(m.name))</td><td>$(amount === nothing ? "" : escape(Plans.shown(m, amount)))</td></tr>"
-  end
-  about = join(filter(!isempty, [isempty(data.plan) ? "" : "Measured from " * escape(basename(data.plan)),
-                                 isempty(data.customer) ? "" : "for " * escape(data.customer),
-                                 isempty(data.made) ? "" : "quote " * escape(data.made)]), ", ")
-  (isempty(about) ? "" : "<p>$about</p>\n") * "<table>\n" * join(rows, "\n") * "\n</table>"
-end
-
 # Skia's SVG canvas draws text as shapes with this flag, so it needs no font where it's shown
 const SVG_TEXT_AS_SHAPES = UInt32(1)
 
@@ -41247,28 +41249,13 @@ diagram_html(e, s, t) = begin
   svg === nothing ? nothing : "<div class=\"diagram\">\n$svg</div>"
 end
 
-"The `schedule` code block from line `s` to line `t` as HTML: a table of the page's tasks and the days of each"
-schedule_html(e, s, t) = begin
-  tasks = Schedules.plan!(Schedules.schedule(e.buf.lines[s+1:t-1]), page_todos(e))
-  isempty(tasks) && return nothing
-  rows = map(tasks) do task
-    cells = [task.todo.name, Schedules.short(task.start), Schedules.short(task.finish), Schedules.days_text(task.days),
-             join((tasks[j].todo.name for j in task.after), ", ")]
-    "<tr>" * join("<td>$(escape(c))</td>" for c in cells) * "</tr>"
-  end
-  "<table>\n<tr><th>Task</th><th>Starts</th><th>Ends</th><th>Takes</th><th>After</th></tr>\n" * join(rows, "\n") * "\n</table>"
-end
-
 "The document as a page of HTML"
 page_html(e) = begin
   write_blocks!(e)   # a block that a file defines is in the page as what it holds now
   b = e.buf
   styled = Ref(false)   # whether the rules that give a card its look are in the page yet
   html(b.lines, title=title(b.path),
-       block=(lang, s, t) -> lang == SHEET ? sheet_html(e, s, t) : lang == TAKEOFF ? takeoff_html(e, s, t) :
-                             lang == SCHEDULE ? schedule_html(e, s, t) :
-                             haskey(BLOCKS, lang) ? block_html(e, lang, s, t) :
-                             lang == DIAGRAM ? diagram_html(e, s, t) : nothing,
+       block=(lang, s, t) -> haskey(BLOCKS, lang) ? block_html(e, lang, s, t) : nothing,
        value=code -> (made = get(e.nodes, (:inline, b.path, code, 1), nothing); made isa Tuple && !made[2] ? made[1] : nothing),
        file=text -> (made = table_html(e, text)) !== nothing ? made : card_html(e, text, styled),
        columns=html_columns(e))
@@ -43181,18 +43168,19 @@ end
 
 const NAMES_SHOWN = 8                         # the most names in the list
 const NAME = r"[\p{L}_][\p{L}\p{N}_!]*"       # a name in code
-# The blocks that aren't code, and a block with no language. A `check` block's lines are Julia.
-const NO_NAMES = (MATTER, TOML_MATTER, HEX, BITS, SHEET, SPREADSHEET, DIAGRAM, MATH, TAKEOFF, SCHEDULE, filter(l -> !(l in (CHECK, RESULT)), collect(keys(BLOCKS)))..., "")
+# The blocks that aren't code, and a block with no language. Blocks with `block_is_code(T)` (ui, check, result) are Julia.
+const NO_NAMES = (MATTER, TOML_MATTER, HEX, BITS, MATH, (l for (l, T) in BLOCKS if !block_is_code(T))..., "")
+no_names(lang) = isempty(lang) || lang in (MATTER, TOML_MATTER, HEX, BITS, MATH) || (haskey(BLOCKS, lang) && !block_is_code(BLOCKS[lang]))
 
-"The language that code in `lang` shares its names with. `jl`, a live block and a `check` block are Julia."
-shared_lang(lang) = (l = lowercase(lang); l in JULIA || l in (LIVE, CHECK, RESULT) ? "julia" : l)
+"The language that code in `lang` shares its names with. `jl` and Julia-backed blocks (`ui`, `check`, `result`) are Julia."
+shared_lang(lang) = (l = lowercase(lang); l in JULIA || (haskey(BLOCKS, l) && block_is_code(BLOCKS[l])) ? "julia" : l)
 
 "Each name in the page's code of the language `lang`, with the places it's written: a line and a column"
 page_names(e, lang) = get!(e.flows, (:names, e.buf.path, e.buf.version, lang)) do
   b = e.buf
   found = Dict{String,Vector{Pos}}()
   for (i, line) in enumerate(kinds(b))
-    (line.kind == Kind.code && !(line.lang in NO_NAMES) && shared_lang(line.lang) == lang) || continue
+    (line.kind == Kind.code && !no_names(line.lang) && shared_lang(line.lang) == lang) || continue
     for t in tokens(b.lines[i], lang)
       t.kind in (:plain, :call, :type) || continue
       for m in eachmatch(NAME, t.text)
@@ -43239,7 +43227,7 @@ code_offered(e) = begin
   # its way, and a caret that comes back to where it was has no list either.
   get(e.nodes, :typed_at, nothing) == (b.path, b.version, b.caret) || (delete!(e.nodes, :typed_at); return nothing)
   line = kinds(b)[i]
-  (line.kind == Kind.code && !(line.lang in NO_NAMES)) || return nothing
+  (line.kind == Kind.code && !no_names(line.lang)) || return nothing
   chars = collect(b.lines[i])
   # In the middle of a word, nothing is offered
   col < length(chars) && isnamechar(chars[col+1]) && return nothing
@@ -43676,7 +43664,7 @@ page_bounds(e) = begin
   kept = get(e.nodes, :bounds, nothing)
   kept !== nothing && kept[1] == (b.path, b.version) && return kept[2]
   ks = kinds(b)
-  julia(i) = ks[i].kind == Kind.code && !(ks[i].lang in NO_NAMES) && shared_lang(ks[i].lang) == "julia"
+  julia(i) = ks[i].kind == Kind.code && !no_names(ks[i].lang) && shared_lang(ks[i].lang) == "julia"
   found = Bound[]
   # A file of code is one language from its first line to its last
   whole = b.view == :code && !isempty(ks) && julia(1)
@@ -43740,7 +43728,7 @@ words, or "" when nothing is known. Only Julia code has them.
 """
 name_notes(e, i::Int, names) = begin
   line = kinds(e.buf)[i]
-  (line.kind == Kind.code && !(line.lang in NO_NAMES) && shared_lang(line.lang) == "julia") || return fill("", length(names))
+  (line.kind == Kind.code && !no_names(line.lang) && shared_lang(line.lang) == "julia") || return fill("", length(names))
   m = scope(e)
   mine = scope_names(e)[1]
   reach = filter(made -> inreach(made, i), page_bounds(e))
@@ -43907,7 +43895,7 @@ caret_brackets(e) = begin
   b = e.buf
   i = b.caret[1]
   ks = kinds(b)
-  julia(l) = ks[l].kind == Kind.code && !(ks[l].lang in NO_NAMES) && shared_lang(ks[l].lang) == "julia"
+  julia(l) = ks[l].kind == Kind.code && !no_names(ks[l].lang) && shared_lang(ks[l].lang) == "julia"
   julia(i) || return nothing
   from = i
   while from > 1 && i - from < CALL_LINES && julia(from - 1); from -= 1 end
@@ -44925,8 +44913,6 @@ describe_window(e::Editor) = begin
   isempty(fresh(e)) || redraw_in!(e, 1/30)
   find_tick!(e)
   sound_tick!(e)
-  takeoff_tick!(e)
-  schedule_tick!(e)
   blocks_tick!(e)
   point_tick!(e)
   scrub_tick!(e)
@@ -45219,7 +45205,10 @@ adopt_settings!(o, e) = begin
   o
 end
 
-settings_file() = joinpath(homedir(), "Library", "Application Support", "Ladder", "settings")
+"The file of Ladder's settings that a test gives, so that it doesn't change yours, or \"\" for the usual one"
+const SETTINGS_FILE = Ref("")
+
+settings_file() = isempty(SETTINGS_FILE[]) ? joinpath(homedir(), "Library", "Application Support", "Ladder", "settings") : SETTINGS_FILE[]
 
 # The app was called Kaydown until 18 November 2026, and its folders in
 # ~/Library had that name. The first time Ladder starts, it gives them its own
@@ -45690,7 +45679,7 @@ name_at(b::Buffer, at::Pos) = begin
   i, col = at
   1 <= i <= length(b.lines) || return nothing
   line = kinds(b)[i]
-  (line.kind == Kind.code && !(line.lang in NO_NAMES) && shared_lang(line.lang) == "julia") || return nothing
+  (line.kind == Kind.code && !no_names(line.lang) && shared_lang(line.lang) == "julia") || return nothing
   chars = collect(b.lines[i])
   part(c) = isnamechar(c) || c == '!'
   start = stop = clamp(col, 0, length(chars))
@@ -45875,7 +45864,7 @@ name_uses(e, n::NameAt) = begin
   pattern = Regex("(?<![\\w!@.])\\Q$(n.name)\\E(?![\\w!])")
   out = Tuple{Int,Int}[]
   for i in rows
-    (1 <= i <= length(ks) && ks[i].kind == Kind.code && !(ks[i].lang in NO_NAMES) && shared_lang(ks[i].lang) == "julia") || continue
+    (1 <= i <= length(ks) && ks[i].kind == Kind.code && !no_names(ks[i].lang) && shared_lang(ks[i].lang) == "julia") || continue
     span === nothing && any(s -> i in s, others) && continue
     line = b.lines[i]
     for m in eachmatch(pattern, line)
@@ -46264,7 +46253,7 @@ const PAGE_GETTER = Ref{Function}(Remote.curl)
 page_online(e) = PAGE_GETTER[] !== Remote.curl || on_screen(e)
 
 "The languages of the code blocks that a page from a web server shows as more than their code. They run no code, read nothing of the Mac and ask no server."
-const SHOWN_BLOCKS = (MATTER, TOML_MATTER, DIAGRAM, MATH, COMMENT)
+const SHOWN_BLOCKS = (MATTER, TOML_MATTER, MATH, COMMENT, (l for (l, T) in BLOCKS if block_safe(T))...)
 
 """
 Make each code block of a page that somebody else wrote one that only shows
@@ -48883,7 +48872,7 @@ const REPLY_SIZE = 14px                  # how tall the text of the agent's pane
 const REPLY_NAME = ".ladder-reply.md"    # the name of the page that holds a reply of the agent. No file has it.
 
 "The blocks that show in what an agent says in a session: the ones that only draw what's written. Any other shows as its code."
-const REPLY_BLOCKS = (SHOWN_BLOCKS..., "chart")
+const REPLY_BLOCKS = (SHOWN_BLOCKS..., (l for (l, T) in BLOCKS if !block_safe(T) && block_reply(T))...)
 
 "The path of a page that holds what an agent said in a session that runs in the folder `dir`. Its pictures and links are from that folder."
 reply_page(dir) = joinpath(dir, REPLY_NAME)

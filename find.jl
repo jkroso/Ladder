@@ -80,6 +80,8 @@ const WHATS = (todo=what_is("to-do items", "to-dos", "todos", "todo", "to-do", "
                contact=what_is("contacts", "contact", "people", one="block of contacts", many="blocks of contacts", langs=("contact",)),
                gallery=what_is("galleries", "gallery", one="gallery", langs=("gallery",)),
                map=what_is("maps", "map", one="map", langs=("map",)),
+               view=what_is("views", "view", "view blocks", one="view block", langs=("view", "web")),
+               result=what_is("results", "result", "result blocks", one="result block", langs=("result",)),
                find=what_is("find lists", "find list", "finds", one="find list", langs=(FIND,)),
                filter=what_is("filters", "filter", one="filter", langs=("filter",)),
                save=what_is("save blocks", "save block", "saves", one="save block", langs=("save",)),

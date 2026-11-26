@@ -320,7 +320,7 @@ end
   other = joinpath(dir, "other.md")
   write(other, "- [ ] One\n- [ ] Two\n\n```schedule\n```\n\nThe end.\n")
   K.open!(e, other); frames()
-  u = e.nodes[(:schedule, other, 1)]
+  u = K.block_view(e, K.SCHEDULE, 1)
   today = S.workday(Dates.today(), false)
   @test length(u.tasks) == 2 && u.tasks[1].start == today
   # The first change writes the day that the work starts
@@ -331,7 +331,7 @@ end
   empty = joinpath(dir, "empty.md")
   write(empty, "# Nothing to do\n\n```schedule\n```\n\nThe end.\n")
   K.open!(e, empty); frames()
-  @test isempty(e.nodes[(:schedule, empty, 1)].tasks)
+  @test isempty(K.block_view(e, K.SCHEDULE, 1).tasks)
   # A page with no schedule shows no days beside its to-do items
   plain = joinpath(dir, "plain.md")
   write(plain, "- [ ] One\n- [ ] Two\n\nThe end.\n")
@@ -359,7 +359,7 @@ end
   The end.
   """)
   K.open!(e, job); frames()
-  u = e.nodes[(:schedule, job, 1)]
+  u = K.block_view(e, K.SCHEDULE, 1)
   nov(n) = Date(2026, 11, n)
   # Every two days from Monday 9: the run that's due on Sunday 15 is done on Monday 16
   runs = K.task_runs(u, 2)
@@ -409,7 +409,7 @@ end
   The end.
   """)
   K.open!(e, job); frames()
-  u = e.nodes[(:schedule, job, 1)]
+  u = K.block_view(e, K.SCHEDULE, 1)
   nov(n) = Date(2026, 11, n)
   water = u.tasks[2]
   # The first bar is on the 10th, after the pour, and two more are on the 11th and 12th, however many days show
@@ -451,7 +451,7 @@ end
   The end.
   """)
   K.open!(e, job); frames()
-  u = e.nodes[(:schedule, job, 1)]
+  u = K.block_view(e, K.SCHEDULE, 1)
   W = "Water the slab every day for 3 days"
   lines() = (s = K.block_lines(e.buf, K.SCHEDULE, 1); e.buf.lines[s[1]+1:s[2]-1])
   nov(n) = Date(2026, 11, n)

@@ -36,7 +36,7 @@ const w = Window(e, size=(1000px, 900px))
 frames(n=2) = foreach(_ -> frame(w), 1:n)
 e.panel = true   # the sidebar shows
 frames()
-const v = e.nodes[(:schedule, page, 1)]
+const v = K.block_view(e, K.SCHEDULE, 1)
 shot(name) = haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], name), w)
 
 at((x, y)) = (w.mouse = typeof(w.mouse)(px(x), px(y)); onmouse(w, MouseMove(Vec2{px}(px(x), px(y)), w)); frames(1))

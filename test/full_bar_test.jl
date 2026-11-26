@@ -38,7 +38,7 @@ e.panel = true   # the sidebar shows
 # The window showed another file before, so the arrow that goes back has a file to go to
 K.open!(e, joinpath(dir, "other.md")); K.open!(e, page)
 frames(3)
-const v = e.nodes[(:schedule, page, 1)]
+const v = K.block_view(e, K.SCHEDULE, 1)
 shot(name) = haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], name), w)
 key(k) = (onkey(w, KeyPress{k}(0, w)); frames())
 

@@ -57,8 +57,7 @@ try
   frames(n=2) = foreach(_ -> frame(w), 1:n)
   frames()
   block(lang) = e.nodes[(:block, lang, page, 1)]
-  v, board, calendar, hours, chart = block(K.DAY_BLOCK), block(K.BOARD), block(K.CALENDAR), block(K.TIMELOG), block(K.CHART)
-  schedule = e.nodes[(:schedule, page, 1)]
+  v, board, calendar, hours, chart, schedule = block(K.DAY_BLOCK), block(K.BOARD), block(K.CALENDAR), block(K.TIMELOG), block(K.CHART), block(K.SCHEDULE)
   shot(name) = haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], name), w)
   at((x, y)) = (w.mouse = typeof(w.mouse)(px(x), px(y)); onmouse(w, MouseMove(Vec2{px}(px(x), px(y)), w)); frames(1))
   press(place) = (at(place); w.keys |= Keys.mouse_left; onkey(w, KeyPress{Keys.mouse_left}(0, w)); frames(1))
