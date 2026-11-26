@@ -21,6 +21,9 @@ const shop = joinpath(dir, "shop")
 const kiosk = joinpath(dir, "kiosk")
 mkpath(joinpath(shop, "sales"))
 mkpath(kiosk)
+const depot = joinpath(dir, "depot")
+mkpath(depot)
+mkpath(joinpath(dir, "plain"))   # a folder with no kind
 write(joinpath(shop, "bank.md"), "# Bank\n")
 write(joinpath(shop, "sales", "june.md"), "# June\n")
 write(joinpath(dir, "page.md"), "# A page\n")
@@ -37,6 +40,25 @@ shop_menu() = K.Column(K.width(grow=K.grow), K.height(grow=K.grow), name="Shop m
 K.side_menu(e, d::ShopDirectory) = shop_menu()
 K.side_menu(e, d::ShopDirectory, o) = shop_menu()
 K.bread_crumb(e, d::ShopDirectory, o) = word("Shop › $(o.path.name)")
+
+# A kind of folder whose side menu has a compact form: a rail 60px wide, which stays while the sidebar is closed
+@def struct DepotDirectory <: K.AbstractDirectory end
+FS.kinds[FSPath(depot)] = DepotDirectory
+@def mutable struct RailMenu <: K.SemanticUI end
+K.describe(m::RailMenu) = K.Column(K.width(grow=K.grow), K.height(grow=K.grow), name="Rail menu", word(K.editor(m).panel ? "Depot menu" : "D"))
+"Every rectangle in `r`, as it was last drawn"
+flat(r, out=Any[]) = (push!(out, r); hasproperty(r, :children) && foreach(c -> flat(c, out), r.children); out)
+"The buttons of the top bar that are drawn, by what each does"
+bar_buttons(r=K.rect(e.nodes[:topbar]), out=Symbol[]) = begin
+  # a rectangle is from a box, and the box of a button is from the button
+  hasproperty(r.from, :from) && r.from.from isa K.ToolButton && push!(out, r.from.from.action)
+  hasproperty(r, :children) && foreach(c -> bar_buttons(c, out), r.children)
+  out
+end
+K.compact_width(::RailMenu) = 60px
+K.side_button(m::RailMenu) = K.editor(m).panel ? word("fold") : nothing   # the rail has no button in the bar
+K.shows_lock(e, ::DepotDirectory) = false   # its page is no file that's only shown
+K.side_menu(e, d::DepotDirectory) = K.node!(RailMenu, e, :rail_menu)
 
 # A kind of folder that makes the whole window: one line of words, under the top bar and the file finder
 @def struct KioskDirectory <: K.AbstractDirectory end
@@ -152,4 +174,36 @@ end
   @test K.nofile(e)
   @test K.window_object(e) === K.directory(e) && K.window_object(e) isa ShopDirectory
   @test texts(side()) == ["Sales", "Bank", "Shop settings"]
+end
+
+@testset "a side menu with a compact form stays, narrower, while the sidebar is closed" begin
+  rail() = texts(K.describe(e.nodes[:rail_menu]))
+  K.open!(e, depot); frames()
+  @test e.panel && K.side_least(e) == 60px && K.side_w(e) == K.panel_w(e)
+  @test drawn("Rail menu").width == K.panel_w(e) && rail() == ["Depot menu"]
+  # the menu is always there, and opens and closes itself, so the top bar's own button for the sidebar goes
+  @test !(:panel in bar_buttons()) && :back in bar_buttons()
+  # the menu's own button is in that place
+  @test "fold" in bar()
+  # the kind says that its page has no lock in the top bar. A plain folder's page has one.
+  locked() = any(r -> r.from isa K.ReadOnly, (c.from for c in flat(K.rect(e.nodes[:topbar])) if hasproperty(c.from, :from)))
+  @test !locked()
+  K.open!(e, joinpath(dir, "plain")); frames()
+  @test locked()
+  K.open!(e, depot); frames()
+  # closed, the menu is its compact form: as wide as the kind says, from the top of the window to the bottom
+  K.toggle_panel!(e); sleep(0.3); frames()
+  @test !e.panel && K.side_w(e) == 60px
+  r = drawn("Rail menu")
+  @test r !== nothing && r.left == 0px && r.top == 0px && r.width == 60px && r.height == 700px
+  @test rail() == ["D"] && !(:panel in bar_buttons()) && !("fold" in bar())
+  # the page has the room beside it
+  @test K.page_room(e)[1] == 1000px - 60px
+  @test K.text_width(e) <= 1000px - 60px - 2K.PAGE_X
+  # Ladder's own sidebar has no compact form: closed, it's gone, and the page has the window's width
+  K.open!(e, joinpath(dir, "page.md")); frames()
+  @test K.side_least(e) == 0px && K.side_w(e) == 0px && drawn("Files") === nothing && :panel in bar_buttons()
+  @test K.page_room(e)[1] == 1000px
+  K.toggle_panel!(e); sleep(0.3); frames()
+  @test drawn("Files") !== nothing && K.side_w(e) == K.panel_w(e)
 end

@@ -1826,7 +1826,7 @@ end
 "How wide and how tall the page's space in the window is: beside the sidebar, and under the top bar"
 page_room(e) = begin
   w, h = window_size(e)
-  side = lowered(e) === nothing ? panel_w(e) * opened(e) : 0px
+  side = lowered(e) === nothing ? side_w(e) : 0px
   (max(w - side, 1px), max(h - above_page(e), 1px))
 end
 
@@ -12020,7 +12020,7 @@ fill_spot(e, r) = begin
   right = r.left + r.width + FILL_GAP
   right + FILL_SIDE <= w - FILL_GAP && return (right, top)
   left = r.left - FILL_GAP - FILL_SIDE
-  left >= panel_w(e) * opened(e) + FILL_GAP && return (left, top)
+  left >= side_w(e) + FILL_GAP && return (left, top)
   (right - 2FILL_GAP - FILL_SIDE, top + FILL_GAP)
 end
 
@@ -27595,7 +27595,9 @@ text_width(e) = begin
   # The numbers of a file's lines have room on the left of the text
   # The lines of a block that fill the window have no sidebar beside them
   alone = lowered(e) !== nothing
-  room = w - ((e.panel || sliding(e)) && !alone ? panel_w(e) : 0px) - 2PAGE_X - gutter(e)
+  # A side menu's compact form keeps its width beside the text while the sidebar is closed
+  beside = alone ? 0px : e.panel || sliding(e) ? panel_w(e) : side_least(e)
+  room = w - beside - 2PAGE_X - gutter(e)
   # A file of code or of text takes all the room that the window has, and so do a CSV file's table and
   # the lines of a block that fill the window. A page is no wider than the settings say. A page of a blog is
   # as wide as its site's text, for as many words to a line. A page with comments leaves room for them at its right.
@@ -27612,7 +27614,7 @@ scrolled to the right.
 """
 text_left(e) = begin
   w, _ = window_size(e)
-  side = lowered(e) === nothing ? panel_w(e) * opened(e) : 0px
+  side = lowered(e) === nothing ? side_w(e) : 0px
   # The lines of a file's bytes start at the left too, and scroll to the right as numbered lines do
   numbered(e.buf) || bytes_page(e.buf) ? side + PAGE_X + gutter(e) - sideways(e) : side + text_inset(e, w - side)
 end
@@ -30637,7 +30639,7 @@ toggle_right!(e) = (e.nodes[:right_slid] = (right_opened(e), time()); e.right = 
 "How wide the panel at the right is when it's open. A narrow window makes it narrower, so the page keeps room beside it."
 right_w(e) = begin
   w, _ = window_size(e)
-  left = lowered(e) === nothing ? panel_w(e) * opened(e) : 0px
+  left = lowered(e) === nothing ? side_w(e) : 0px
   px(round(num(clamp((w - left) * 0.4, 200px, RIGHT_W))))
 end
 
@@ -30839,7 +30841,7 @@ bar_back(e) = begin
   hides_bar(e) || return ()
   full = filled(e)
   # A side menu that a kind of folder made has no colour of Ladder's over its top
-  side = full || lowered(e) !== nothing || as_app(e) || own_side_menu(e) ? 0px : panel_w(e) * opened(e)
+  side = full || lowered(e) !== nothing || as_app(e) || own_side_menu(e) ? 0px : side_w(e)
   right = full || right_view(e) === nothing ? 0px : right_w(e) * right_opened(e)
   line = border(1px, :solid, colours.line)
   (Row(width(grow=grow), height(TOPBAR_H), Alignment.Start, offset_y=bar_top(e), background(colours.bg), line[:bottom],
@@ -32150,7 +32152,7 @@ tablebar(e) = begin
     [node!(() -> TableButton(action=a, label=l), e, (:table, a)) for (a, l) in TABLE_ACTIONS[1:(isspread(it.content) ? 4 : end)]]...)
   # The page's text is in the middle of the space beside the file panel
   w, _ = window_size(e)
-  side = panel_w(e) * opened(e)
+  side = side_w(e)
   left = side + max(PAGE_X, (w - side - e.width) / 2) + item_room(e, it)[1]
   (Row(width(grow=grow), height(grow=grow), Alignment.Start, padding(top, 0px, 0px, left), bar),)
 end
@@ -32284,6 +32286,14 @@ describe(::ReadOnly) = Box(width(LOCK_W), height(28px), Alignment.Center, Icon(l
 
 "The lock in the top bar of `e`"
 lock_part(e) = node!(() -> ReadOnly(), e, :read_only)
+
+"""
+True when the top bar has a lock while the page shows `o`, a file or a folder
+that's only shown: nothing can be typed in it. A kind of folder whose own page
+takes changes its own way, as a company's books take a new invoice, has a
+method of this that says false.
+"""
+shows_lock(e, o) = true
 
 draw(ctx, size, ui::ConcreteRect, b::Tipped) = (b.rect = (ui.left, ui.top, ui.width, ui.height); nothing)
 
@@ -32696,31 +32706,36 @@ describe(t::TopBar) = begin
   # then, not the one that shows it either, and the file's name is in the middle of the window.
   full = filled(e)
   showing = full ? 0.0 : opened(e)   # how far the sidebar shows, from 0 to 1
-  buttons = full ? () : (button(e, :panel, "layout-sidebar"), hidden_button(e)...)
+  room = full ? 0px : side_w(e)      # how wide it is now. A side menu's compact form keeps some width while it's closed.
+  # A side menu with a compact form is always there, so the bar's own button that shows and hides the sidebar goes.
+  # The menu can have a button of its own in that place: see `side_button`.
+  toggles = !full && side_least(e) == 0px
+  own_button = full || toggles ? nothing : side_button(e.nodes[:side_menu])
+  buttons = full ? () : ((toggles ? (button(e, :panel, "layout-sidebar"),) : own_button === nothing ? () : (own_button,))..., hidden_button(e)...)
   # The two arrows are at the sidebar's right edge, as far in as the right end of a row of its list. They
   # ride on that edge while the sidebar slides open, once it has passed the other buttons.
   arrows = full ? () : history_buttons(e)
   # Each button is 30px wide with 2px after it. The arrows have 8px after them, and so has the last
   # button when there are no arrows. The dot beside the sidebar's button has room of its own.
-  need = mac_buttons_room(e) + 32px * length(buttons) + (isempty(arrows) ? 8px : 72px) + (!full && waiting_dot(e) ? DOT_GAP + DOT_W : 0px)
-  over = max(need, panel_w(e) * showing)
+  need = mac_buttons_room(e) + 32px * length(buttons) + (isempty(arrows) ? 8px : 72px) + (toggles && waiting_dot(e) ? DOT_GAP + DOT_W : 0px)
+  over = max(need, room)
   # Ladder's own name is in the middle of the bar, so the left end is as wide as the right. A kind of folder's own
   # path has all the room from the buttons over the sidebar, so it can start at the page's left edge.
   crumb = bread_crumb(e, window_object(e))
   own = !(crumb isa Title)
-  left = own ? max(need - panel_w(e) * showing, 0px) :
-               max(150px * (1 - showing), need - panel_w(e) * showing, min(side, wide - panel_w(e) * showing - side - TITLE_ROOM))
+  left = own ? max(need - room, 0px) :
+               max(150px * (1 - showing), need - room, min(side, wide - room - side - TITLE_ROOM))
   # The slider never pushes the right end out of a narrow window, so the ladder stays under the mouse. The words
   # before the slider lose their start then: see `said_part`.
-  side = min(side, max(side - grown, wide - panel_w(e) * showing - left))
-  beside > 0px && (side = max(side, min(left, wide - panel_w(e) * showing - left)))
-  e.nodes[:title_room] = wide - panel_w(e) * showing - left - side   # the name is cut short to fit in it
+  side = min(side, max(side - grown, wide - room - left))
+  beside > 0px && (side = max(side, min(left, wide - room - left)))
+  e.nodes[:title_room] = wide - room - left - side   # the name is cut short to fit in it
   # The path that Ladder's own name opens into goes when a kind of folder shows something else there
   own && (w = window_of(e); w !== nothing && any(p -> p.key == :title_trail, popups(w)) && close_popup!(w, :title_trail))
   # The top bar lies over the top of the sidebar. The file's name is in the
   # middle of the space beside the sidebar, so it moves as the sidebar slides.
   Row(width(grow=grow), height(TOPBAR_H), name="TopBar", offset_y=bar_top(e),
-    Row(fixed(left + panel_w(e) * showing), height(grow=grow),
+    Row(fixed(left + room), height(grow=grow),
       # The close, minimise and zoom buttons sit over the first 84px. In full screen they're hidden, and the buttons slide left.
       Row(fixed(over), height(grow=grow), padding(0px, 8px, 0px, mac_buttons_room(e)), child_gap=2px,
         buttons..., Box(width(grow=grow)), arrows...)),
@@ -32739,7 +32754,7 @@ describe(t::TopBar) = begin
       (page_covered(e) || nofile(e) ? right_part(e) :
        readonly(b) && (page_object(e) isa BlogFolder || page_object(e) isa NewsFolder) ? (more..., mode..., outside...) :
        shown ? ((isempty(b.about) ? () : (said_part(b.about, side - LOCK_W - (isempty(outside) ? 0px : 40px) - (isempty(mode) ? 0px : MODE_W + grown)),))...,
-                      (term_shown(e) || !(readonly(b) || b.fixed) ? () : (lock_part(e),))...,   # a terminal is yours to type in, and so is a CSV file
+                      (term_shown(e) || !(readonly(b) || b.fixed) || !shows_lock(e, page_object(e)) ? () : (lock_part(e),))...,   # a terminal is yours to type in, and so is a CSV file
                       mode...,
                       outside...) :
                      (more..., job_part(e)..., agent_part(e)..., checks..., diff_part(e)..., commit_part(e)..., mode...,
@@ -36298,23 +36313,71 @@ The kind's menu has the sidebar's room. It's as wide as the sidebar, which you
 drag, and it runs from the top of the window to the bottom, so the window's
 buttons and the left end of the top bar lie over its top: `above_page(e)` is
 how tall that part is. It slides in and out as the sidebar does.
+
+A kind's menu can have a compact form, which stays while the sidebar is
+closed: a method of `compact_width` for the menu's node says how wide that is.
+The menu then never slides out. It narrows to that width, and it's laid out as
+wide as it shows. While the sidebar is closed, `e.panel` is false, and the
+menu draws its compact form. Such a menu is always there, so the top bar's own
+button that shows and hides the sidebar goes. A method of `side_button` for the
+menu's node gives a button of the menu's own for that place.
 """
 side_menu(e, o) = side_menu(e, o.parent, o)
 side_menu(e, ::Nothing) = side_menu(e, nothing, nothing)
 side_menu(e, d, o) = node!(Sidebar, e, :sidebar)
 
 """
-What's at the left of the window of `e` while the sidebar is open: Ladder's
-sidebar, or the side menu that a kind of folder has in its place, in the
-sidebar's room.
+How wide the side menu `menu` stays while the sidebar is closed: its compact
+form, like a rail of icons. 0px is a menu that goes when the sidebar closes,
+as Ladder's sidebar does. A kind of folder has a method of this for the node
+that its `side_menu` gives.
+"""
+compact_width(menu) = 0px
+
+"""
+The button that the top bar has for the side menu `menu`, in the place of its
+own button that shows and hides the sidebar: a node 30px wide at the most, or
+nothing. The top bar lies over the top of the menu and takes the clicks there,
+so a button in that place is the bar's to draw. It's asked only for a menu
+with a compact form. Its click calls `toggle_panel!(e)`.
+"""
+side_button(menu) = nothing
+
+"""
+Find the side menu of the window of `e` for this frame, before anything is
+laid out: the page beside it needs its width. `side_part` shows it.
+"""
+side_tick!(e) = begin
+  menu = side_menu(e, window_object(e))
+  own = !(menu isa Sidebar)
+  e.nodes[:side_menu] = menu
+  e.nodes[:own_side_menu] = own
+  e.nodes[:side_least] = own ? clamp(compact_width(menu), 0px, panel_w(e)) : 0px
+  nothing
+end
+
+"How wide the side menu stays while the sidebar is closed: its compact form's width, or 0px"
+side_least(e) = get(e.nodes, :side_least, 0px)
+
+"""
+How wide the sidebar is now, or the side menu that a kind of folder has in its
+place: all of its width while it's open, none while it's closed, or the width
+of its compact form, and between the two while it slides.
+"""
+side_w(e) = (least = side_least(e); least + (panel_w(e) - least) * opened(e))
+
+"""
+What's at the left of the window of `e`: Ladder's sidebar, or the side menu
+that a kind of folder has in its place, in the sidebar's room.
 """
 side_part(e) = begin
-  menu = side_menu(e, window_object(e))
-  e.nodes[:own_side_menu] = !(menu isa Sidebar)
+  haskey(e.nodes, :side_menu) || side_tick!(e)
+  menu = e.nodes[:side_menu]
   menu isa Sidebar && return menu
-  wide = panel_w(e)
-  shows = wide * opened(e)
-  # The menu keeps its width while it slides, as the sidebar does. Once it's open nothing clips it, so a shadow of its own shows whole.
+  wide, shows = panel_w(e), side_w(e)
+  # A menu with a compact form narrows to it, and is laid out as wide as it shows
+  side_least(e) > 0px && return Row(fixed(shows), height(grow=grow), Alignment.Start, clip=sliding(e), name="Side menu", menu)
+  # Another keeps its width while it slides, as the sidebar does. Once it's open nothing clips it, so a shadow of its own shows whole.
   Row(fixed(shows), height(grow=grow), Alignment.Start, clip=opened(e) < 1, name="Side menu",
     Column(fixed(wide), height(grow=grow), Alignment.Start, offset_x=shows - wide, menu))
 end
@@ -36827,7 +36890,7 @@ end
 "Where the finder's box is in the window: its left side, its top and its width. It's centred beside the sidebar."
 finder_place(e) = begin
   W = num(window_size(e)[1])
-  left = lowered(e) === nothing ? num(panel_w(e)) * opened(e) : 0.0
+  left = lowered(e) === nothing ? num(side_w(e)) : 0.0
   room = W - left
   wide = min(FINDER_WIDE, room - OMNI_LEFT - OMNI_RIGHT)
   (x=left + round((room - wide) / 2), y=FINDER_TOP, w=wide)
@@ -38435,7 +38498,7 @@ end
 "How wide the bar is inside, for the tag, the chips and the Run button"
 palette_room(e) = begin
   wide = num(window_size(e)[1])
-  left = lowered(e) === nothing ? num(panel_w(e)) * opened(e) : 0.0
+  left = lowered(e) === nothing ? num(side_w(e)) : 0.0
   wide - left - OMNI_LEFT - OMNI_RIGHT - 2 - 2OMNI_BAR_X
 end
 
@@ -38455,7 +38518,7 @@ while the bar slides. The strip is `band` here.
 """
 palette_plan(e, p::CommandPalette) = begin
   W, H = num(window_size(e)[1]), num(window_size(e)[2])
-  left = lowered(e) === nothing ? num(panel_w(e)) * opened(e) : 0.0
+  left = lowered(e) === nothing ? num(side_w(e)) : 0.0
   chips = p.command === nothing ? Wanted[] : palette_chips(p)
   room = palette_room(e)
   lines, more = p.command === nothing ? (Any[], false) : palette_bar_lines(e, p, chips, room)
@@ -40622,7 +40685,7 @@ comment_balance(e, space) = (extra = comment_room(e); clamp(space - 2PAGE_X - e.
 with_comments(e, page) = begin
   comment_room(e) == 0px && return page
   w, _ = window_size(e)
-  before = comment_balance(e, w - panel_w(e) * opened(e))
+  before = comment_balance(e, w - side_w(e))
   Row(Alignment.Start, Box(fixed(before)), page, Box(fixed(COMMENT_GAP * e.zoom)), node!(Comments, e, :comments))
 end
 
@@ -41821,7 +41884,7 @@ outcome_over(e) = begin
   (isempty(list) || isempty(e.layout) || readonly(e.buf)) && return ()
   (zooming(e) === nothing && full_block(e) === nothing && e.popup == :none) || return ()
   w, h = window_size(e)
-  side = panel_w(e) * opened(e)
+  side = side_w(e)
   x0 = text_left(e)
   y0 = above_page(e) + PAGE_TOP - e.scroll.offset
   size = body(e).size * 0.8
@@ -42154,7 +42217,7 @@ Detail(of, lines, rows, what; search=nothing) =
 end
 
 "How wide the open box of a function or a module is: as wide as the window has room for, up to `DETAIL_W`"
-detail_wide(e) = (w = window_size(e)[1]; clamp(w - panel_w(e) * opened(e) - 2OUTCOME_EDGE - 16px, 280px, DETAIL_W))
+detail_wide(e) = (w = window_size(e)[1]; clamp(w - side_w(e) - 2OUTCOME_EDGE - 16px, 280px, DETAIL_W))
 
 """
 The documentation that the module `mod` wrote, by the name that it's for. An app
@@ -43908,7 +43971,7 @@ callbox(e) = begin
   k, across = spot(f, start[2])
   w, _ = window_size(e)
   # The box stays beside the list of files, and each method has one line of it: see `call_fit`
-  edge = (lowered(e) === nothing ? panel_w(e) * opened(e) : 0px) + 8px
+  edge = (lowered(e) === nothing ? side_w(e) : 0px) + 8px
   room = w - 8px - edge - 22px
   listed = map(found.lines) do line
     pieces = call_fit(call_pieces(found.name, line, found.call), text -> measure(face, text), room)
@@ -44569,6 +44632,7 @@ describe_window(e::Editor) = begin
   look == e.look || (e.look = look; restyle!(e))
   use!(look == :site ? SITE : look == :news ? NEWS : getproperty(THEMES, e.theme))
   use_code_font!(e)
+  side_tick!(e)   # the side menu of this frame, and how wide it is
   win = window_of(e)
   if win !== nothing && e.applied != look_key(e)
     set_dark!(win, look_key(e) == :night)
@@ -44679,7 +44743,7 @@ top of the sidebar and the page.
 """
 window_body(e) = Row(width(grow=grow), height(grow=grow), Alignment.Start, background(colours.bg),
   # The lines of a block that fill the window take the sidebar's room too
-  (opened(e) > 0 && lowered(e) === nothing && !as_app(e) ? (side_part(e),) : ())...,
+  (side_w(e) > 0px && lowered(e) === nothing && !as_app(e) ? (side_part(e),) : ())...,
   Column(width(grow=grow), height(grow=grow), Alignment.Start,
     Box(width(grow=grow), height(above_page(e))),   # under the top bar
     node!(Page, e, :page)),
