@@ -19,6 +19,7 @@
 # from here never stops a commit that another program makes at that moment.
 
 @use "github.com/jkroso/Prospects.jl" @def
+@use "./ago" ago
 
 "How many seconds what git said stays good, before git is asked again"
 const FRESH = 2.0
@@ -504,16 +505,6 @@ at_commit(root::AbstractString, hash::AbstractString, rel::AbstractString) = ask
 
 "The changes of the file at `rel` since the last commit, as `git diff` writes them, or \"\". It asks git and waits."
 changes(root::AbstractString, rel::AbstractString) = something(ask(root, `diff HEAD -- $rel`), "")
-
-"How long ago `t` was, in a few words: `just now`, `5 min ago`, `3 h ago`, `4 days ago`, or the date"
-ago(t::Real, now::Real=time()) = begin
-  s = now - t
-  s < 90 ? "just now" :
-  s < 3600 ? "$(round(Int, s / 60)) min ago" :
-  s < 86400 ? "$(round(Int, s / 3600)) h ago" :
-  s < 14 * 86400 ? (d = round(Int, s / 86400); d == 1 ? "yesterday" : "$d days ago") :
-  Libc.strftime("%-d %b %Y", t)
-end
 
 # --- what one commit holds ------------------------------------------------------------
 #

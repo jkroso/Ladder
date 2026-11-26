@@ -23,7 +23,7 @@
 # It changes only the cells that it's asked to: the rest of the row stays as the
 # file has it, quotes and all. It draws nothing.
 
-@use "./chart" isnumber
+@use "./numbers" isnumber
 @use Dates: Dates, Date, DateTime
 
 const MOST_COLUMNS = 40

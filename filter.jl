@@ -41,7 +41,7 @@
 # This file reads and writes those lines, and finds the rows that meet the
 # conditions. It draws nothing, and reads no file.
 
-@use "./chart" number
+@use "./numbers" number
 
 "The language of a code block that is a filter"
 const FILTER = "filter"

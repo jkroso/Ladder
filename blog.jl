@@ -46,6 +46,7 @@
 # of such a blog is a section like any other.
 
 @use Dates: Dates, Date
+@use "./macfile" made
 
 "The folder in a blog's folder that Ladder writes the site into"
 const SITE = "docs"
@@ -106,21 +107,6 @@ body(lines) = begin
   (!isempty(lines) && rstrip(lines[1]) in ("---", "+++")) || return lines
   k = findnext(l -> rstrip(l) == rstrip(lines[1]), lines, 2)
   k === nothing ? lines : lines[k+1:end]
-end
-
-"""
-When the file at `path` was made, in seconds since 1970, as macOS keeps it.
-Saving a file again doesn't change it. It's when the file was last saved
-where the Mac can't say.
-"""
-made(path::AbstractString) = begin
-  # Julia's stat fills libuv's uv_stat_t: twelve numbers of 8 bytes, then the times of access, change, status change and making, of 16 bytes each.
-  # A time is its seconds, and then its nanoseconds in 4 bytes. The 4 bytes after those hold nothing that counts.
-  buf = fill!(Vector{UInt8}(undef, Int(ccall(:jl_sizeof_stat, Int32, ()))), 0x00)
-  (length(buf) >= 160 && ccall(:jl_stat, Int32, (Cstring, Ptr{UInt8}), path, buf) == 0) || return mtime(path)
-  secs, nanos = reinterpret(Int64, buf[145:160])
-  nanos = Int(nanos % UInt32)
-  secs > 0 ? secs + (nanos < 1_000_000_000 ? nanos / 1e9 : 0.0) : mtime(path)
 end
 
 "The ending of the file called `name` that makes it a post, or nothing. With `others`, a book review and the code of a page are posts too."

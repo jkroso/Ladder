@@ -43,7 +43,7 @@
 # It draws nothing.
 
 @use Dates: Dates, Date, Day
-@use "./chart" number
+@use "./numbers" number isnumber
 @use "./schedule" => Schedules
 
 "The language of a block that adds rows to a table"
@@ -195,9 +195,6 @@ tick_words(cells, blanks::Bool) = begin
 end
 
 # --- numbers --------------------------------------------------------------------------
-
-"True when the cell `text` is a number, like 12, -4.5, \$4,200, 15% or 12 L"
-isnumber(text) = number(text) !== nothing
 
 "The digits `digits` of a number, with a comma at each thousand of the part before its point"
 grouped(digits::AbstractString) = begin

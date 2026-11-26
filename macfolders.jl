@@ -18,26 +18,11 @@
 @use "github.com/jkroso/Prospects.jl" @def
 @use "github.com/jkroso/UI.jl/Interface/objc" libobjc cls sel msg get_value nsstring jstring with_pool
 @use Dates: Dates, Date
+@use "./macfile" resource date_of added made
 
 const Object = Ptr{Cvoid}
 
 # --- dates ------------------------------------------------------------------------------
-
-"What macOS says of the file at `path` under `key`, a key of an NSURL that names a date: the date in seconds, or nothing"
-date_of(path, key) = begin
-  Sys.isapple() || return nothing
-  try
-    with_pool() do
-      url = msg(cls("NSURL"), "fileURLWithPath:", nsstring(path))
-      out = Ref{Object}(C_NULL)
-      ok = ccall((:objc_msgSend, libobjc), Bool, (Object, Object, Ref{Object}, Object, Object),
-                 url, sel("getResourceValue:forKey:error:"), out, nsstring(key), C_NULL)
-      (ok && out[] != C_NULL) ? get_value(Float64, out[], "timeIntervalSince1970") : nothing
-    end
-  catch
-    nothing
-  end
-end
 
 """
 What the Finder calls the kind of the folder or the file at `path`, as its Kind
@@ -49,22 +34,13 @@ finder_kind(path::AbstractString) = begin
   Sys.isapple() || return isdir(path) ? "Folder" : "Document"
   try
     with_pool() do
-      url = msg(cls("NSURL"), "fileURLWithPath:", nsstring(path))
-      out = Ref{Object}(C_NULL)
-      ok = ccall((:objc_msgSend, libobjc), Bool, (Object, Object, Ref{Object}, Object, Object),
-                 url, sel("getResourceValue:forKey:error:"), out, nsstring("NSURLLocalizedTypeDescriptionKey"), C_NULL)
-      (ok && out[] != C_NULL) ? jstring(out[]) : "Document"
+      said = resource(path, "NSURLLocalizedTypeDescriptionKey")
+      said != C_NULL ? jstring(said) : "Document"
     end
   catch
     "Document"
   end
 end
-
-"When the folder or the file at `path` came into the folder that it's in, as the Finder's Date Added. It's when it last changed where macOS doesn't say."
-added(path::AbstractString) = something(date_of(path, "NSURLAddedToDirectoryDateKey"), Some(mtime(path)))
-
-"When the folder or the file at `path` was made. It's when it last changed where macOS doesn't say."
-made(path::AbstractString) = something(date_of(path, "NSURLCreationDateKey"), Some(mtime(path)))
 
 "The day of the time `t`, in the Mac's own time zone"
 day(t::Real) = Date(Libc.strftime("%Y-%m-%d", t))

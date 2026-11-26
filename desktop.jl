@@ -20,7 +20,8 @@
 # stays in the middle when the window changes its size.
 
 @use "github.com/jkroso/Prospects.jl" @def
-@use "github.com/jkroso/UI.jl/Interface/objc" libobjc cls sel msg nsstring jstring with_pool
+@use "github.com/jkroso/UI.jl/Interface/objc" cls msg nsstring jstring with_pool
+@use "./macfile" resource date_of
 
 const AppKit = "/System/Library/Frameworks/AppKit.framework/AppKit"
 const Object = Ptr{Cvoid}
@@ -101,15 +102,6 @@ const papers = Ref{Function}(wallpaper)
   hidden::Bool = false
 end
 
-"What macOS says of the file at `path` under `key`, one of the keys of an NSURL: an object, or C_NULL"
-resource(path, key) = begin
-  url = msg(cls("NSURL"), "fileURLWithPath:", nsstring(path))
-  out = Ref{Object}(C_NULL)
-  ok = ccall((:objc_msgSend, libobjc), Bool, (Object, Object, Ref{Object}, Object, Object),
-             url, sel("getResourceValue:forKey:error:"), out, nsstring(key), C_NULL)
-  ok ? out[] : C_NULL
-end
-
 # The facts of each path, with the time that the file had changed when they were read
 const known = Dict{String,Tuple{Float64,Facts}}()
 
@@ -130,8 +122,8 @@ facts(path::AbstractString) = begin
       with_pool() do
         said = resource(path, "NSURLLocalizedTypeDescriptionKey")
         said == C_NULL || (kind = jstring(said))
-        date = resource(path, "NSURLCreationDateKey")
-        date == C_NULL || (made = ccall((:objc_msgSend, libobjc), Float64, (Object, Object), date, sel("timeIntervalSince1970")))
+        date = date_of(path, "NSURLCreationDateKey")
+        date === nothing || (made = date)
         flag = resource(path, "NSURLIsHiddenKey")
         flag == C_NULL || (hidden = jstring(msg(flag, "description")) == "1")
       end
