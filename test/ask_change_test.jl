@@ -1,8 +1,8 @@
-# Tests for a change that's asked for, in main.jl: the command Ask For Change
+# Tests for a change that's asked for, in main.jl: the command Ask Agent
 # takes what to change, a block of Julia code or a part of the window, and
 # words. It starts with what the caret is on, and a click chooses another. An
-# agent changes the code, and Ladder runs the code that changed. Ask About
-# takes a question, and the agent's answer shows in a card. The command Keep This Change adds the function at the caret to the
+# agent changes the code, and Ladder runs the code that changed, or its answer
+# to a question shows in a card. The command Keep This Change adds the function at the caret to the
 # startup page. Run them with `julia -O0 --project=. test/ask_change_test.jl`.
 # The agent here is a small script, so no real agent runs. They draw windows
 # that aren't on the screen.
@@ -70,7 +70,7 @@ picker(win=w) = window_tool(win)::K.CodePicker
 const code = K.build_editor(source)
 const cw = Window(code, size=(700px, 800px))
 frames(cw, 3)
-"What Ask For Change offers in the window of `o`, with the caret at `at`"
+"What Ask Agent offers in the window of `o`, with the caret at `at`"
 offered(o, at) = (o.buf.caret = o.buf.anchor = at; frames(K.window_of(o), 2); K.choices_for(K.ToChange, o))
 
 "Draw frames of the window `win` until the agent has ended, for a few seconds at most"
@@ -85,10 +85,12 @@ end
 "Ask for a change to `c` with the script `script` as the agent, and wait for the agent"
 ask(script, c, words; win=w) = begin
   K.AGENT_COMMAND[] = `sh $script`
-  K.ask_for_change!(win.ui, c, words)
+  K.ask_agent!(win.ui, c, words)
   finish(win)
   picker(win).asked
 end
+"Ask Agent the question `words` about `c` with the script `script` as the agent, and wait for the card of its answer"
+ask_question(script, c, words) = (K.AGENT_COMMAND[] = `sh $script`; K.ask_agent!(e, c, words); finish(); picker().about)
 asked() = read(joinpath(dir, "asked.txt"), String)
 
 "Press the key `k` in window `win` with the keys `held` down"
@@ -113,6 +115,8 @@ click(win, x, y) = begin
 end
 "The middle of line `i` of the page of `o`, a little in from its left"
 on_line(o, i) = (it = K.item(o, i); (o.origin[1] + 30px, o.origin[2] + it.top + it.tall / 2))
+"A point on line `i` of `o` to the right of the palette's list of choices, which takes a click on it"
+beside_list(o, i) = (o.origin[1] + 320px, on_line(o, i)[2])
 middle(r) = (r.left + r.width / 2, r.top + r.height / 2)
 
 @testset "what the agent said, and the parts of a file's code" begin
@@ -166,7 +170,7 @@ end
   e.buf.caret = e.buf.anchor = (3, 0)
   frames(w)
   press(w, Keys.p, Keys.cmd, Keys.shft)
-  typed(w, "ask for change")
+  typed(w, "ask agent")
   press(w, Keys.enter)
   p = K.palette(e)
   said() = K.chip_value(p, K.palette_chips(p), 1)
@@ -183,7 +187,7 @@ end
   # With the keyboard in the node's chip, a click on the page's `julia` block chooses it, and the keyboard goes on to the words
   press(w, Keys.tab, Keys.shft)
   @test p.at == 1 && K.click_chip(e, p) == 1
-  click(w, on_line(e, 10)...)
+  click(w, beside_list(e, 10)...)
   @test said().words == "x = 1" && p.at == 2 && e.popup == :commands && e.buf.caret == (3, 0)
   # A click on the bar chooses the thing that the block shows
   press(w, Keys.tab, Keys.shft)
@@ -192,7 +196,7 @@ end
   # ⇧ and a click add a second thing, B in orange, and the chip shows both letters. Again takes it out.
   press(w, Keys.tab, Keys.shft)
   w.keys |= Keys.shft
-  click(w, on_line(e, 10)...)
+  click(w, beside_list(e, 10)...)
   w.keys ⊻= Keys.shft
   @test said() isa K.Things && [x.words for x in said().all] == ["Level", "x = 1"] && p.at == 1
   @test letters() == [(1, "A", K.CHIP_MARKS[1]), (1, "B", K.CHIP_MARKS[2])]
@@ -208,7 +212,7 @@ end
   @test occursin("A: a part of its window, a Level.", prompt) && occursin("B: a block of Julia code on a page of Markdown, in the file", prompt)
   @test occursin("The user's words: make A look like B", prompt)
   w.keys |= Keys.shft
-  click(w, on_line(e, 10)...)
+  click(w, beside_list(e, 10)...)
   w.keys ⊻= Keys.shft
   @test said().node === node()
   # ⌥↑ works from the words too
@@ -240,20 +244,20 @@ end
   K.AGENT_COMMAND[] = `sh $wider`
   K.focus(code)
   press(cw, Keys.p, Keys.cmd, Keys.shft)
-  typed(cw, "ask for change")
+  typed(cw, "ask agent")
   press(cw, Keys.enter)
   p = K.palette(code)
   chips = K.palette_chips(p)
-  @test p.command.name == :ask_for_change && [K.chip_name(c) for c in chips] == ["Node", "Request"] && K.chip_kind(code, chips[1]) == :search
+  @test p.command.name == :ask_agent && [K.chip_name(c) for c in chips] == ["Node", "Request"] && K.chip_kind(code, chips[1]) == :search
   # The node is the block that the caret is in, so the keyboard is in the words
   @test K.chip_value(p, chips, 1).words == "wide(l::Level)" && p.at == 2
   # With the keyboard in the node's chip, a click on another block of the file chooses it, and a click on the first chooses it again
   @test K.num(on_line(code, 17)[2]) < K.palette(code).plan.band.y
   press(cw, Keys.tab, Keys.shft)
-  click(cw, on_line(code, 17)...)
+  click(cw, beside_list(code, 17)...)
   @test K.chip_value(p, chips, 1).words == "describe(l::Level)" && p.at == 2
   press(cw, Keys.tab, Keys.shft)
-  click(cw, on_line(code, 14)...)
+  click(cw, beside_list(code, 14)...)
   @test K.chip_value(p, chips, 1).words == "wide(l::Level)" && code.buf.caret == (14, 3)
   # ⌥↑ takes the whole file, which nothing holds, and ⌥↓ goes back to the block
   press(cw, Keys.up, Keys.opt)
@@ -340,14 +344,15 @@ end
   @test_throws ErrorException K.undo_change!(e)
   write(source, replace(read(source, String), "# a line of mine\n" => ""))
   # Words with nothing in them ask for nothing
-  @test_throws ErrorException K.ask_for_change!(e, first(offered(e, (3, 0))), "  ")
+  @test_throws ErrorException K.ask_agent!(e, first(offered(e, (3, 0))), "  ")
 end
 
 @testset "an agent that stops, changes nothing, or leaves code that doesn't run" begin
   level = first(offered(e, (3, 0)))
   a = ask(stopped, level, "make it green")
   @test a.failed && a.said == "The agent stopped. No network."
-  a = ask(quiet, level, "is it blue?")
+  # A request that can't be a question, as Fix It's, says when nothing changed
+  a = (K.AGENT_COMMAND[] = `sh $quiet`; K.ask_change!(e, level, "make it blue"); finish(); picker().asked)
   @test !a.failed && a.said == "Nothing changed. I looked, and it's as you say."
   # Code that fails as it loads: the label says so. The file's block has nothing to show until the code is put right.
   a = ask(broken, level, "make it wider")
@@ -373,7 +378,7 @@ esc!() = (press(w, Keys.escape); e.buf.reading = false; frames(w, 2))
   # An agent that changes the file, and then works on
   half = agent("half.sh", "sed -i '' 's/^wide(l::Level) = 80px/wide(l::Level) = 60px/' \"$source\"\nexec sleep 30")
   K.AGENT_COMMAND[] = `sh $half`
-  K.ask_for_change!(e, level, "make it thinner")
+  K.ask_agent!(e, level, "make it thinner")
   from = time()
   while !occursin("60px", read(source, String)) && time() - from < 10
     frames(w, 1); sleep(0.05)
@@ -409,31 +414,19 @@ esc!() = (press(w, Keys.escape); e.buf.reading = false; frames(w, 2))
   @test occursin("wide(l::Level) = 80px", read(source, String))
   # An agent that changed nothing says so
   K.AGENT_COMMAND[] = `sh -c "exec sleep 30"`
-  K.ask_for_change!(e, level, "make it red")
+  K.ask_agent!(e, level, "make it red")
   frames(w, 2)
   left, top, wide, tall = K.close_spot(picker().asked.label)
   click(w, left + wide / 2, top + tall / 2)
   finish()
   @test picker().asked.stopped && picker().asked.said == "You stopped the agent. Nothing changed."
   # So does the command, which says so when no agent works
-  K.ask_for_change!(e, level, "make it blue")
+  K.ask_agent!(e, level, "make it blue")
   K.stop_agent!(e)
   finish()
   @test picker().asked.stopped
   @test_throws ErrorException K.stop_agent!(e)
   picker().asked = nothing
-  # An agent that's answering a question keeps working after Esc too. A click on its label stops it, and there's no card.
-  K.ask_about!(e, level, "why is it blue?")
-  @test picker().about.ended == 0
-  process = picker().about.process
-  frames(w, 2)
-  esc!()
-  @test picker().about !== nothing && !process_exited(process)
-  left, top, wide, tall = picker().about.label
-  click(w, left + wide / 2, top + tall / 2)
-  @test picker().about === nothing
-  sleep(0.2)
-  @test process_exited(process)
 end
 
 @testset "a paragraph that an agent works on keeps its line while the agent works" begin
@@ -446,7 +439,7 @@ end
   r = K.asked_rect(e, para)
   @test r !== nothing && K.num(r.top) > 100 && r.height < 60px
   K.AGENT_COMMAND[] = `sh -c "exec sleep 30"`
-  K.ask_for_change!(e, para, "make it bigger")
+  K.ask_agent!(e, para, "make it bigger")
   frames(w, 3)
   # The label of what was asked is on the paragraph's top edge, not under the top bar where a thing that doesn't show has it
   @test picker().asked.ended == 0 && picker().asked.label[2] == K.num(K.asked_rect(e, para).top) - 18
@@ -455,28 +448,17 @@ end
   picker().asked = nothing
 end
 
-@testset "Ask About shows the agent's answer in a card beside the thing, and changes nothing" begin
+@testset "an answer of Ask Agent shows in a card beside the thing" begin
   level = first(offered(e, (3, 0)))
   answers = agent("answers.sh", "true", "The bar is blue because describe(l::Level) gives it a steelblue background.", "", "It is 12 pixels tall.")
   before = read(source, String)
-  "Ask the question `words` about `c` with the script `script` as the agent, and wait for the answer"
-  ask_about(script, c, words) = begin
-    K.AGENT_COMMAND[] = `sh $script`
-    K.ask_about!(e, c, words)
-    from = time()
-    while picker().about.ended == 0 && time() - from < 20
-      frames(w, 1)
-      sleep(0.05)
-    end
-    frames(w)
-    picker().about
-  end
-  q = ask_about(answers, level, "  why is it blue? ")
-  @test q.words == "why is it blue?" && !q.failed
+  picker().asked = picker().about = nothing
+  q = ask_question(answers, level, "  why is it blue? ")
+  @test q.words == "why is it blue?"
   @test q.answer == "The bar is blue because describe(l::Level) gives it a steelblue background.\n\nIt is 12 pixels tall."
-  # The agent was told what the thing is, the question, and to change nothing. Nothing changed.
-  @test occursin("a question about a part of its window, a Level.", asked()) && occursin("The user's question: why is it blue?", asked())
-  @test occursin("Don't change any file.", asked()) && read(source, String) == before
+  # The agent was told what the thing is, the words, and to change nothing for a question. Nothing changed.
+  @test occursin("A: a part of its window, a Level.", asked()) && occursin("The user's words: why is it blue?", asked())
+  @test occursin("For a question, don't change any file.", asked()) && read(source, String) == before
   # The card is at the right of the bar, with the question, then each paragraph of the answer
   r = rect(node())
   left, top, wide, tall = q.card
@@ -491,29 +473,24 @@ end
   @test picker().about === nothing
   @test e.buf.caret == was
   # Esc leaves it, so that an answer stays until you've read it
-  ask_about(answers, level, "why?")
+  ask_question(answers, level, "why?")
   esc!()
-  @test picker().about !== nothing && picker().about.ended > 0
+  @test picker().about !== nothing
   picker().about = nothing
   # A thing at the bottom of a window with no room at its side has its card over it
   @test K.answer_place((left=10px, top=500px, width=880px, height=60px), 380.0, 120.0, (900.0, 600.0)) == (10.0, 370.0)
   @test K.answer_place((left=10px, top=100px, width=880px, height=60px), 380.0, 120.0, (900.0, 600.0)) == (10.0, 170.0)
-  # An agent that stops says so in the card. Words with nothing in them ask nothing.
-  q = ask_about(stopped, level, "why?")
-  @test q.failed && q.answer == "The agent stopped. No network."
-  picker().about = nothing
-  @test_throws ErrorException K.ask_about!(e, level, "  ")
-  # The palette asks for the thing, which starts as what the caret is on, and the question
+  # The palette asks for the thing, which starts as what the caret is on, and the words
   K.focus(e)
   e.buf.caret = e.buf.anchor = (3, 0)
   frames(w)
   press(w, Keys.p, Keys.cmd, Keys.shft)
-  typed(w, "ask about")
+  typed(w, "ask agent")
   press(w, Keys.enter)
   p = K.palette(e)
-  @test p.command.name == :ask_about && [K.chip_name(c) for c in K.palette_chips(p)] == ["Node", "Question"] && p.at == 2
+  @test p.command.name == :ask_agent && [K.chip_name(c) for c in K.palette_chips(p)] == ["Node", "Request"] && p.at == 2
   @test K.chip_value(p, K.palette_chips(p), 1).node === node()
-  # The question is what the command is for, so its chip takes the room that's left on the bar, up to OMNI_WORDS_MOST
+  # The words are what the command is for, so their chip takes the room that's left on the bar, up to OMNI_WORDS_MOST
   frames(w)
   room = K.palette_room(e)
   place(k) = only(filter(pl -> pl.what == :chip && pl.k == k, p.plan.places))
@@ -527,11 +504,10 @@ end
   @test !p.plan.more && run().y == place(2).y && run().x + run().w <= p.plan.bar.x + p.plan.bar.w
   @test K.input(e).scroll > 0
   # Words for a command that isn't for them, like Rename In Code's new name, are as wide as they are
-  @test !K.wide_words(Val(:rename_in_code)) && K.wide_words(Val(:ask_for_change)) && K.wide_words(Val(:ask_agent))
+  @test !K.wide_words(Val(:rename_in_code)) && K.wide_words(Val(:ask_agent))
   press(w, Keys.escape); press(w, Keys.escape)
-  # The agent that answers can read files, and can't change them. Each agent prints its steps as lines of JSON.
+  # Each agent prints its steps as lines of JSON
   K.AGENT_COMMAND[] = nothing
-  @test K.agent_command(e, changes=false).exec[end-2:end] == ["--allowedTools", "Read,Grep,Glob", "-p"]
   @test occursin("--output-format stream-json --verbose", join(K.agent_command(e).exec, " "))
 end
 
@@ -557,62 +533,46 @@ end
     echo '{"type":"result","subtype":"success","result":"It reads the level from the block."}'
     """)
   K.AGENT_COMMAND[] = `sh $steps`
-  K.ask_about!(e, first(offered(e, (3, 0))), "where does the level come from?")
-  q = picker().about
+  K.ask_agent!(e, first(offered(e, (3, 0))), "where does the level come from?")
+  a = picker().asked
   from = time()
-  while isempty(q.step) && time() - from < 10
+  while isempty(a.step) && time() - from < 10
     frames(w, 1); sleep(0.05)
   end
-  @test q.step == "Reading level.jl" && q.ended == 0
-  while q.ended == 0 && time() - from < 20
-    frames(w, 1); sleep(0.05)
-  end
-  frames(w)
-  @test q.answer == "It reads the level from the block."
+  @test a.step == "Reading level.jl" && a.ended == 0
+  finish()
+  @test picker().about.answer == "It reads the level from the block."
   picker().about = nothing
 end
 
-@testset "the card's buttons ask more, or ask for a change, with what was asked before" begin
+@testset "the card's button asks more, with what was asked before" begin
   level = first(offered(e, (3, 0)))
   answers = agent("more.sh", "true", "It's blue because of its background.")
-  K.AGENT_COMMAND[] = `sh $answers`
-  K.ask_about!(e, level, "why is it blue?")
-  from = time()
-  while picker().about.ended == 0 && time() - from < 20
-    frames(w, 1); sleep(0.05)
-  end
-  frames(w)
-  q = picker().about
-  @test [a for (a, _) in q.buttons] == [:ask_about, :ask_for_change]
-  "Where the button of the card that does `action` is"
-  button(q, action) = last(only(filter(b -> b[1] == action, q.buttons)))
-  # Ask More: the palette asks about the same thing, with the keyboard in the question
-  left, top, wide, tall = button(q, :ask_about)
-  click(w, px(left + wide / 2), px(top + tall / 2))
+  picker().asked = picker().about = nothing
+  q = ask_question(answers, level, "why is it blue?")
+  "Click the button Ask More of the card `q`"
+  ask_more(q) = ((left, top, wide, tall) = q.button; click(w, px(left + wide / 2), px(top + tall / 2)))
+  # Ask More: the palette asks Ask Agent about the same thing, with the keyboard in the words
+  ask_more(q)
   p = K.palette(e)
-  @test picker().about === nothing && e.popup == :commands && p.command.name == :ask_about && p.at == 2
+  @test picker().about === nothing && e.popup == :commands && p.command.name == :ask_agent && p.at == 2
   @test K.chip_value(p, K.palette_chips(p), 1).node === node()
   typed(w, "and why is it short?")
   press(w, Keys.enter); press(w, Keys.enter)
-  from = time()
-  while picker().about.ended == 0 && time() - from < 20
-    frames(w, 1); sleep(0.05)
-  end
-  frames(w)
-  # The agent is told the question before and its answer
-  @test occursin("The user's question: and why is it short?", asked())
+  finish()
+  # The agent is told the question before and its answer, and the new card keeps them
+  @test occursin("The user's words: and why is it short?", asked())
   @test occursin("Before this, the user asked about it, and an agent answered:\n\nQuestion: why is it blue?\nAnswer: It's blue because of its background.", asked())
   @test length(picker().about.talk) == 1
-  # Change It: the palette asks for a change to the same thing, and the agent is told both questions and answers
-  left, top, wide, tall = button(picker().about, :ask_for_change)
-  click(w, px(left + wide / 2), px(top + tall / 2))
-  @test e.popup == :commands && p.command.name == :ask_for_change && p.at == 2 && K.chip_value(p, K.palette_chips(p), 1).node === node()
+  # Ask More again, for a change: the agent is told both questions and answers
+  ask_more(picker().about)
+  @test e.popup == :commands && p.command.name == :ask_agent && p.at == 2 && K.chip_value(p, K.palette_chips(p), 1).node === node()
   K.AGENT_COMMAND[] = `sh $quiet`
   typed(w, "make it red")
   press(w, Keys.enter); press(w, Keys.enter)
   finish()
   @test occursin("The user's words: make it red", asked()) && occursin("Question: why is it blue?", asked()) && occursin("Question: and why is it short?", asked())
-  picker().asked = nothing
+  picker().asked = picker().about = nothing
   # What was asked before goes only with the same thing
   @test K.follow_up!(e, [level]) == Tuple{String,String}[]
   e.nodes[:follow_up] = (places=[level], talk=[("a", "b")])
@@ -631,7 +591,7 @@ end
   @test !a.failed && a.said == "It's three times now." && "twice(x) = 3x" in shown.buf.lines
 end
 
-@testset "Ask For Change asks the agent that works on the page with you" begin
+@testset "Ask Agent asks the agent that works on the page with you" begin
   K.Agent.place[] = mktempdir()
   # The agent waits for the page, as `ladder wait` does. Its process is this one, so it runs.
   waits() = (write(joinpath(K.Agent.folder(), "$(getpid()).wait"), realpath(page) * "\nClaude\n"); sleep(0.6); frames(w, 3))
@@ -649,17 +609,17 @@ end
   @test K.agent_logo("Codex")[1] == "agent-codex" && K.agent_logo("the agent") === nothing && K.agent_logo("") === nothing
   @test haskey(K.icon_cache, "agent-claude") && K.icon_cache["agent-claude"].viewbox == (0f0, 0f0, 24f0, 24f0)
   level = first(offered(e, (3, 0)))
-  K.ask_for_change!(e, level, "make the bar shorter")
+  K.ask_agent!(e, level, "make the bar shorter")
   a = picker().asked
   told = got()
   @test a.by == "Claude" && a.sent && a.ended == 0 && !isfile(oneshot)
-  @test startswith(told, "The user asked you for a change from Ladder, on the page $(e.buf.path).")
+  @test startswith(told, "The user asked you for a change, or asked you a question, from Ladder, on the page $(e.buf.path).")
   @test occursin("The user's words: make the bar shorter", told) && occursin("A: A Level of the page, on lines 3 to 5", told)
   @test occursin("Ladder draws it with the code in the file $(level.file), lines $(level.first) to $(level.last).", told)
   frames(w, 2)
   @test startswith(K.asked_label(a), "Asked Claude: make the bar shorter")
   # Another change waits in the queue until Claude has done this one, and its label says its place
-  K.ask_for_change!(e, level, "and red")
+  K.ask_agent!(e, level, "and red")
   q = K.ask_queue(e)
   @test length(q) == 1 && q[1][1].words == "and red" && picker().asked === a && !isfile(sent)
   frames(w, 2)
@@ -683,7 +643,7 @@ end
   K.send!(e)
   got()
   frames(w, 2)
-  K.ask_for_change!(e, level, "make it green")
+  K.ask_agent!(e, level, "make it green")
   a = picker().asked
   @test a.by == "Claude" && !a.sent && !isfile(sent) && startswith(K.asked_label(a), "For Claude when it waits for the page again")
   waits()
@@ -707,7 +667,7 @@ end
   click_close()
   @test picker().asked === nothing
   # Esc leaves a change that Claude hasn't got. A click on its label opens a field to change its words.
-  K.ask_for_change!(e, level, "make it blue")
+  K.ask_agent!(e, level, "make it blue")
   a = picker().asked
   @test !a.sent && endswith(K.asked_label(a), "Click to change it")
   esc!()
@@ -728,17 +688,18 @@ end
   frames(w, 2)
   @test picker().asked === nothing && K.sharer(e) == ""
   # So the next change goes to a new agent
-  K.ask_for_change!(e, level, "make it blue")
+  K.ask_agent!(e, level, "make it blue")
   finish()
-  @test isfile(oneshot) && isempty(picker().asked.by)
-  picker().asked = nothing
+  # It changed nothing and said nothing, so what it said shows in a card, as an answer does
+  @test isfile(oneshot) && picker().asked === nothing && picker().about.answer == "The agent said nothing."
+  picker().about = nothing
   K.Agent.place[] = ""
 end
 
 @testset "Ask Agent takes a change or a question, and an answer shows in a card" begin
   level = first(offered(e, (3, 0)))
   picker().asked = picker().about = nothing
-  # Words that ask for a change: the agent changes the code, as for Ask For Change
+  # Words that ask for a change: the agent changes the code
   any_height = agent("any_height.sh", "sed -i '' -E 's/height\\([0-9]+px\\)/height(12px)/' \"$source\"", "The bar is 12 pixels tall now.")
   a = (K.AGENT_COMMAND[] = `sh $any_height`; K.ask_agent!(e, level, "make the bar thinner"); finish(); picker().asked)
   @test a.asks && a.changed && a.said == "The bar is 12 pixels tall now." && picker().about === nothing
@@ -750,7 +711,7 @@ end
   K.ask_agent!(e, level, "why is it blue?")
   finish()
   q = picker().about
-  @test picker().asked === nothing && q !== nothing && q.ended > 0 && q.words == "why is it blue?" && q.answer == "I looked, and it's as you say."
+  @test picker().asked === nothing && q !== nothing && q.words == "why is it blue?" && q.answer == "I looked, and it's as you say."
   frames(w, 2)
   @test q.card !== nothing
   picker().about = nothing
@@ -813,7 +774,6 @@ end
   ENV["PATH"] = bin * ":" * ENV["PATH"]
   c = K.agent_command(e)
   @test c.exec == [fake, "--permission-mode", "acceptEdits", "-p"] && startswith(only(filter(startswith("PATH="), c.env)), "PATH=$bin:/opt/homebrew/bin:")
-  @test K.agent_command(e, changes=false).exec == [fake, "--permission-mode", "plan", "-p"]
   @test_throws ErrorException K.agent_path(K.AgentKind("Nobody", "no-such-agent-command", String[], String[], String[]))
   K.AGENT_COMMAND[], ENV["PATH"] = was
   # The setting is kept with the others
@@ -1246,15 +1206,7 @@ end
   picker().asked = picker().about = nothing
   K.AGENT_COMMAND[] = `sh $quiet`
   "Ask the question `words` about the level, and wait for the answer"
-  ask(words) = begin
-    K.ask_about!(e, level, words)
-    from = time()
-    while picker().about.ended == 0 && time() - from < 20
-      frames(w, 1); sleep(0.05)
-    end
-    frames(w)
-    picker().about
-  end
+  ask(words) = ask_question(quiet, level, words)
   q = ask("why is it blue?")
   @test q.answer == "I looked, and it's as you say." && q.card !== nothing
   # A click on the page leaves the card
@@ -1268,9 +1220,8 @@ end
   @test a.answers == [(asked="why is it blue?", answer="I looked, and it's as you say.", by="Claude")] && K.same_things([a.thing], [level])
   frames(w, 2)
   @test any(p -> p.key == K.box_key(a), popups(w))
-  # So does an answer of Ask Agent, which shows in a card too
-  K.ask_agent!(e, level, "and why there?")
-  finish()
+  # So does the next answer
+  ask("and why there?")
   @test [x.asked for x in a.answers] == ["why is it blue?", "and why short?"] && picker().about.words == "and why there?"
   K.close_ask!(a, w)
   picker().asked = picker().about = nothing

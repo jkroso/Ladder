@@ -299,16 +299,15 @@
 #     each choice at once, and Esc puts it back. See "a look before you choose".
 #   - Click the number of a line, in a file that git keeps, to see the commit
 #     that last changed the line. See "when a line last changed".
-#   - Run the command Ask For Change, choose a block of the file's code or a
-#     part of the window, and say what you want in words. An agent changes the
-#     code. ⌥↑ makes the thing bigger, and ⇧ and a click add another. Show
-#     Change lists each change that an agent made, and Undo Change takes back
-#     the newest. Keep This Change keeps a function of Ladder's own for each
-#     start. Ask About takes a question in place of a change, and the agent's
-#     answer shows beside the thing, with buttons to ask more or ask for a
-#     change. While an agent works, the label says what it's doing. See "ask
-#     for a change to a thing", "ask about a thing" and "what the agents
-#     changed".
+#   - Run the command Ask Agent, choose a block of the file's code or a part
+#     of the window, and say what you want in words. An agent changes the
+#     code, or its answer to a question shows in a card beside the thing, with
+#     a button to ask more. ⌥↑ makes the thing bigger, and ⇧ and a click add
+#     another. Show Change lists each change that an agent made, and Undo
+#     Change takes back the newest. Keep This Change keeps a function of
+#     Ladder's own for each start. While an agent works, the label says what
+#     it's doing. See "ask for a change to a thing", "ask an agent", "the card
+#     of an answer" and "what the agents changed".
 #   - A function that a page's code makes is a command of the palette. See "a
 #     page's own commands".
 #   - Write a code block in the language `check`, with a line of Julia for
@@ -38033,7 +38032,7 @@ paler(c) = RGBA(0.6c.r + 0.4, 0.6c.g + 0.4, 0.6c.b + 0.4, 1.0)
 """
 The chip that a click on the window chooses a thing for: the one that the
 keyboard is in, when it's for a thing in the window. It's nothing while the
-keyboard is in another chip, like the words of Ask About, so the mouse then
+keyboard is in another chip, like the words of Ask Agent, so the mouse then
 picks nothing out on the page and a click there chooses nothing.
 """
 click_chip(e, p::CommandPalette) = begin
@@ -38222,7 +38221,7 @@ end
 True for a command that changes nothing that you'd want to look at before it
 runs, like Go To or Theme. The palette runs it as soon as each of its chips
 has something, with no press of Run. A command that changes a file, or that
-starts something that takes a while, like Rename or Ask For Change, waits for
+starts something that takes a while, like Rename or Ask Agent, waits for
 Run. A command that takes nothing runs at once anyway.
 """
 runs_at_once(::Val) = false
@@ -38601,10 +38600,10 @@ end
 
 """
 True when the words that the command `name` asks for are what it's for, as the
-question of Ask About is. Their chip is wide before anything is typed in it.
+words of Ask Agent are. Their chip is wide before anything is typed in it.
 """
 wide_words(::Val) = false
-wide_words(::Union{Val{:ask_about},Val{:ask_for_change},Val{:ask_agent}}) = true
+wide_words(::Val{:ask_agent}) = true
 
 const OMNI_WORDS_LEAST, OMNI_WORDS_MOST = 240.0, 560.0   # how wide the chip of such words is, when the bar has room
 
@@ -44824,7 +44823,6 @@ describe_window(e::Editor) = begin
   term_tick!(e)
   ask_tick!(e)
   session_tick!(e)
-  about_tick!(e)
   live_checks_tick!(e)
   file_checks_tick!(e)
   rename_tick!(e)
@@ -45688,7 +45686,7 @@ go_to_definition!(e) = definition!(e, e.buf.caret) || error("Nothing here says w
 # name of its own with those letters. A name after a dot, and words in a
 # string or a comment, stay as they are. It's one change, which ⌘Z takes back.
 # The name starts as the one at the caret, and a click on another chooses it,
-# as the node of Ask For Change does.
+# as the node of Ask Agent does.
 
 "A name of the page's own Julia code where it's written: its line, and the column where it starts"
 struct NameAt
@@ -46682,9 +46680,9 @@ page_title(e) = something(first_answer(PAGE_TITLES, e), email_title(e), Some(not
 # A function draws each thing that a window shows: the method of `describe`
 # for the thing's type. Hold ⌘ and ⌥ and click a thing, and its line stays,
 # with buttons on its top edge after its label. Show Code shows that method in
-# a window beside this one. Change and Explain open the command
-# palette with Ask For Change or Ask About, with the thing as its A, ready for the words of
-# the change or the question. A click anywhere else, or Esc, takes the line
+# a window beside this one. The agent's logo opens the command palette with
+# Ask Agent, with the thing as its A, ready for the words of the change or
+# the question. A click anywhere else, or Esc, takes the line
 # and its buttons away. While ⌘ and ⌥ are down, a line
 # goes round the thing under the mouse, with a label: the name of its type,
 # and the file and the line of its method.
@@ -47011,16 +47009,17 @@ tool_input(t::CodePicker, w, ::KeyPress{Keys.mouse_left}) = begin
   # A click on the card of an agent's answer takes it away, and does nothing else. A click anywhere else leaves
   # it, so that an answer stays until you've read it.
   q = t.about
-  if q !== nothing && q.ended > 0 && q.card !== nothing
+  if q !== nothing && q.card !== nothing
     x, y = num(w.mouse[1]), num(w.mouse[2])
     left, top, wide, tall = q.card
     if left <= x <= left + wide && top <= y <= top + tall
       t.about = nothing
       t.swallow = true
       redraw_in!(t.editor, 0)
-      # A button on the card asks again, or asks for a change, about the same things
-      for (action, (left, top, wide, tall)) in q.buttons
-        left <= x <= left + wide && top <= y <= top + tall && (follow_up_on!(t.editor, q, action); break)
+      # Its button Ask More asks again about the same things
+      if q.button !== nothing
+        left, top, wide, tall = q.button
+        left <= x <= left + wide && top <= y <= top + tall && follow_up_on!(t.editor, q)
       end
       return true
     end
@@ -47028,12 +47027,6 @@ tool_input(t::CodePicker, w, ::KeyPress{Keys.mouse_left}) = begin
   # The labels of requests and the buttons of checks are under the window's popups, as the field of a request in
   # place is. A click on a popup goes to the popup, and never to a label that it covers.
   picks(t, w) || popup_at(w, w.mouse) === nothing || return false
-  # A click on the label of an agent that answers a question stops it
-  if q !== nothing && q.ended == 0 && q.label !== nothing
-    x, y = num(w.mouse[1]), num(w.mouse[2])
-    left, top, wide, tall = q.label
-    left <= x <= left + wide && top <= y <= top + tall && (t.swallow = true; stop_agents!(t.editor, Any[q]); return true)
-  end
   # The × at the end of the label of a request takes it away, with the field of its words. A click on the rest of the
   # label of one that an agent works on opens the field, with the questions and answers about its words. One on the
   # label of a request that waits opens a field to change it, and one on the label of a change that ended shows it.
@@ -47960,8 +47953,8 @@ end
 
 # --- ask for a change to a thing ----------------------------------------------------------
 #
-# The command Ask For Change takes two things: what to change, and what you
-# want in words, like "make this bar thinner". What to change is one of:
+# The command Ask Agent takes two things: what to change, and what you want
+# in words, like "make this bar thinner". What to change is one of:
 #
 #   - A block of Julia code: in a file of Julia code, a piece of code that
 #     starts at the top of the file, like a function with its documentation,
@@ -48078,14 +48071,13 @@ end
 
 """
 The command that the agent that Settings chose for `e` is started with. The
-words go after it. With `changes` false, the agent can read files and can't
-change them, for a question. The command's own folder and Homebrew's are on
-its PATH, as a command of Node, like Gemini's, needs `node`.
+words go after it. The command's own folder and Homebrew's are on its PATH,
+as a command of Node, like Gemini's, needs `node`.
 """
-agent_command(e; changes=true) = begin
+agent_command(e) = begin
   AGENT_COMMAND[] === nothing || return AGENT_COMMAND[]
   k = agent_kind(e.ai)
-  kind_command(k, changes ? k.change : k.look)
+  kind_command(k, k.change)
 end
 
 "The command of the agent `k` with the options `options`, which the words go after, with its own folder and Homebrew's on its PATH"
@@ -48309,7 +48301,7 @@ agent_text(printed::AbstractString) = begin
 end
 
 """
-Something that Ask For Change can change: a block of a file of Julia code,
+Something that Ask Agent can change: a block of a file of Julia code,
 or a part of the window, by the function that draws it. `words` and `note`
 are what the palette's list says of it. The code is lines `first` to `last`
 of the file `file`. `node` is the part of the window, or nothing for a block.
@@ -48414,7 +48406,7 @@ file_parts(file::AbstractString) = begin
 end
 
 """
-What Ask For Change offers for the part `x` of the window: the function that
+What Ask Agent offers for the part `x` of the window: the function that
 draws it, where that function is in a file on this Mac. It's nothing for a
 part that no such function draws.
 """
@@ -48436,7 +48428,7 @@ end
 drawn_parts(x) = x isa FileBlock && x.value isa SemanticUI ? (x.value, x) : (x,)
 
 """
-What Ask For Change offers to change in the window of `e`, from the nearest:
+What Ask Agent offers to change in the window of `e`, from the nearest:
 the block of Julia code that the caret is in, each part of the window in
 focus that a function in a file on this Mac draws, and the other blocks of
 Julia code in the window.
@@ -48460,7 +48452,7 @@ end
 chip_start(::Type{ToChange}, e) = (found = choices_for(ToChange, e); isempty(found) ? nothing : first(found))
 
 """
-What a click at the mouse of the window `w` chooses for Ask For Change: the
+What a click at the mouse of the window `w` chooses for Ask Agent: the
 nearest part of the window that a function in a file on this Mac draws. On
 the page's text, it's the block of Julia code there, if there's one, unless
 the mouse is on something that a file other than Ladder's own draws, like the
@@ -48490,7 +48482,7 @@ shown_at(e, c::ToChange) = asked_rect(e, c)
 whole_file(c::ToChange) = c.node === nothing && c.first == 1 && c.note == "the whole file"
 
 """
-What holds the thing `c` of Ask For Change, for ⌥↑: for a part of the window,
+What holds the thing `c` of Ask Agent, for ⌥↑: for a part of the window,
 the nearest part round it that a function in a file on this Mac draws, and
 for a block of Julia code, the whole file that it's in. A part that covers
 the same place on the screen, like one that only holds another, is passed
@@ -48516,7 +48508,7 @@ chip_wider(c::ToChange, e) = begin
 end
 
 """
-What the thing `c` of Ask For Change is, in words for an agent, and the first
+What the thing `c` of Ask Agent is, in words for an agent, and the first
 line of its code. A part of the window is told with the words that it shows
 and what the window shows, so that a question about what it says, like "is
 this spelt right?", has an answer: see `part_words`.
@@ -48641,8 +48633,8 @@ end
 reload_changed!(::Nothing, file::AbstractString, before::Vector{String}) = (0, "")
 
 """
-A change that an agent was asked to make to `places`, the things of Ask For
-Change. `before` and `after` have the text of each file that the things are
+A change that an agent was asked to make to `places`, the things of Ask
+Agent. `before` and `after` have the text of each file that the things are
 in, before the agent started and after it ended. `said` is what there is to
 say when it has ended, at the time `ended`. `label` is where the label with
 those words was drawn last, for a click on it. `undone` is true once Undo
@@ -48651,12 +48643,12 @@ words. `stopped` is true when you stopped the agent before it ended.
 
 A change that went to the agent that works on a page with you has the
 agent's name in `by`, and the page's path in `page`: see "ask the agent of the
-page". `sent` is true once the agent has it, and `talk` is what was asked
-about the things before, in words for the agent.
+page". `sent` is true once the agent has it. `talk` has the questions that
+were asked about the things before, each with its answer: see `follow_up!`.
 
 `asks` is true when the words can ask a question as well as for a change, as
 Ask Agent's do: see "ask an agent". An answer that changes nothing then shows
-in a card, as Ask About's does.
+in a card: see "the card of an answer".
 """
 @def mutable struct AskedChange
   words::String = ""
@@ -48677,7 +48669,7 @@ in a card, as Ask About's does.
   by::String = ""
   page::String = ""
   sent::Bool = false
-  talk::String = ""
+  talk::Vector{Tuple{String,String}} = Tuple{String,String}[]
   asks::Bool = false
   reply::String = ""         # the file that the page's agent writes its answer to, for words that can be a question
 end
@@ -48712,8 +48704,10 @@ text_lines(s::AbstractString) = String.(split(replace(s, "\r\n" => "\n"), '\n'))
 Ask an agent to make the change to the things `places` that `words` say. The
 picker of the window of `e` shows how it goes. `prompt` is what the agent is
 told, when it's other than the words that ask for a change, as for Fix Check.
+`talk` has the questions that were asked about the things before, each with
+its answer.
 """
-ask_change!(e, places::AbstractVector, words::AbstractString; prompt=change_prompt(places, words), asks=false) = begin
+ask_change!(e, places::AbstractVector, words::AbstractString; prompt=change_prompt(places, words), asks=false, talk=follow_up!(e, places)) = begin
   t = code_picker(e)
   files = unique(c.file for c in places)
   # The agent reads the files, so what a window shows of one and didn't write goes to its file first
@@ -48721,9 +48715,9 @@ ask_change!(e, places::AbstractVector, words::AbstractString; prompt=change_prom
     !isempty(o.buf.path) && page_key(o.buf.path) in files && dirty(o.buf) && writes(o.buf) && save!(o.buf)
   end
   before = Dict(f => read(f, String) for f in files)
-  a = AskedChange(words=words, places=collect(places), before=before, asks=asks)
+  a = AskedChange(words=words, places=collect(places), before=before, asks=asks, talk=talk)
   # What you asked about the things before, from the card of an answer, goes with your words
-  prompt *= talk_words(follow_up!(e, places))
+  prompt *= talk_words(talk)
   try
     a.process, a.out = start_agent(agent_command(e), prompt, dirname(first(files)), a)
   catch err
@@ -48792,7 +48786,7 @@ ask_tick!(e) = begin
           show_answer!(e, a, isempty(said) ? "The agent said nothing." : said)
         else
           said = strip(replace(said, "**" => ""))
-          card!(e, AskedAbout(words=a.words, places=a.places, answer=isempty(said) ? "The agent said nothing." : String(said), ended=time()))
+          card!(e, AskedAbout(words=a.words, places=a.places, talk=a.talk, answer=isempty(said) ? "The agent said nothing." : String(said)))
           t.asked = nothing
         end
       end
@@ -48807,26 +48801,6 @@ ask_tick!(e) = begin
   nothing
 end
 
-"""
-Ask an agent for a change to `node`, in the words of `request`, like "make
-this bar thinner". `node` is a block of Julia code, or a part of the window,
-which the agent changes the function that draws. ⇧ and a click give it more
-than one, and the words can name each by its letter: "make A look like B".
-See "ask for a change to a thing".
-"""
-ask_for_change!(e, node::Union{ToChange,Things}, request::String) = begin
-  words = String(strip(request))
-  isempty(words) && error("Say what should change, in a few words.")
-  # The agent that works on the page with you gets it, when there's one: see "ask the agent of the page"
-  name = sharer(e)
-  agent_free(e, command=isempty(name))
-  places = collect(each_thing(node))
-  # What you asked about the things before, from the card of an answer, goes with your words
-  talk = talk_words(follow_up!(e, places))
-  # It waits while an agent works on a request before it: see "a queue of requests"
-  queue_ask!(e, words, places, isempty(name) ? said -> ask_change!(e, places, said, prompt=change_prompt(places, said) * talk) :
-                                               said -> ask_sharer!(e, name, places, said, talk=talk))
-end
 
 # --- agent mode ----------------------------------------------------------------------------
 #
@@ -50599,10 +50573,11 @@ end
 
 # --- ask an agent ---
 #
-# Ask Agent takes a thing as Ask For Change does, and words that ask for a
-# change or ask a question: "make this bar thinner", or "why is this bar
-# red?". The agent does what the words ask. A change shows as Ask For Change's
-# does, and an answer shows in a card beside the thing, as Ask About's does.
+# Ask Agent takes a thing (see "ask for a change to a thing"), and words that
+# ask for a change or ask a question: "make this bar thinner", or "why is
+# this bar red?". The agent does what the words ask. A change shows with a
+# label on the thing, and an answer shows in a card beside the thing: see "the
+# card of an answer".
 # The line round a thing that a click with ⌘ and ⌥ down chose has a button
 # for it, which is the agent's logo: see `CODE_BUTTONS`. The agent is the one
 # that shares the page, if one does, or else the one that Settings chose.
@@ -50828,7 +50803,7 @@ Show the agent's answer `said` to the question of the request `a` under its
 words, with a field under the answer to ask more. When the words have a
 field already, the answer goes in it, under the answers before. The keyboard
 stays where it is. When the thing doesn't show now, the answer is in a card,
-as Ask About's is, so that it's never lost. See "a request in place".
+so that it's never lost. See "a request in place".
 """
 show_answer!(e, a::AskedChange, said) = begin
   isempty(a.places) && return nothing
@@ -50836,7 +50811,7 @@ show_answer!(e, a::AskedChange, said) = begin
   had = box_about(e, first(a.places))
   had === nothing || (add_answer!(had, x); return nothing)
   shown = open_ask!(e, AskBox(of=e, thing=first(a.places), answers=Any[x]))
-  shown === nothing && card!(e, AskedAbout(words=a.words, places=a.places, answer=said, ended=time()))
+  shown === nothing && card!(e, AskedAbout(words=a.words, places=a.places, talk=a.talk, answer=said))
   nothing
 end
 
@@ -51331,9 +51306,11 @@ end
 
 """
 Ask an agent for a change to `node`, or a question about it, in the words of
-`request`, like "make this bar thinner" or "why is this bar red?". The agent
-changes the code, or its answer shows in a card beside the thing. See "ask an
-agent".
+`request`, like "make this bar thinner" or "why is this bar red?". `node` is
+a block of Julia code, or a part of the window, which the agent changes the
+function that draws. ⇧ and a click give it more than one, and the words can
+name each by its letter: "make A look like B". The agent changes the code,
+or its answer shows in a card beside the thing. See "ask an agent".
 """
 ask_agent!(e, node::Union{ToChange,Things}, request::String) = begin
   words = String(strip(request))
@@ -51342,17 +51319,17 @@ ask_agent!(e, node::Union{ToChange,Things}, request::String) = begin
   agent_free(e, command=isempty(name))
   places = collect(each_thing(node))
   # What you asked about the things before, from the card of an answer, goes with your words
-  talk = talk_words(follow_up!(e, places))
+  talk = follow_up!(e, places)
   # It waits while an agent works on a request before it: see "a queue of requests"
-  queue_ask!(e, words, places, isempty(name) ? said -> ask_change!(e, places, said, prompt=either_prompt(places, said) * talk, asks=true) :
+  queue_ask!(e, words, places, isempty(name) ? said -> ask_change!(e, places, said, prompt=either_prompt(places, said), asks=true, talk=talk) :
                                                said -> ask_sharer!(e, name, places, said, asks=true, talk=talk))
 end
 
 """
-Open the palette with the command `command`, Ask For Change or Ask About, with
-the part `x` of the window as its thing, and the keyboard in the words. The
-buttons Change and Explain on the line round a thing that a click
-with ⌘ and ⌥ down chose do this.
+Open the palette with the command `command`, like Ask Agent, with the part
+`x` of the window as its thing, and the keyboard in the words. The agent's
+logo on the line round a thing that a click with ⌘ and ⌥ down chose does
+this.
 """
 ask_with!(e, command::Symbol, x) = begin
   c = part_choice(x)
@@ -51439,7 +51416,7 @@ end
 #
 # A page can be shared with an agent: an agent like Claude Code wrote it, and
 # waits for you to send it back (see "a page that an agent waits for"). Then
-# Ask For Change asks that agent, not a new one. It knows what the page is
+# Ask Agent asks that agent, not a new one. It knows what the page is
 # for, and a new agent wouldn't. The agent gets your words and what you marked,
 # as `ladder wait` prints them, with the lines that you changed in the page, as
 # the Nudge button sends them. Ladder knows that the agent has done the change
@@ -51478,7 +51455,7 @@ on_page_lines(e, x) = begin
   nothing
 end
 
-"The thing `c` of Ask For Change, in words for the agent of the page of `e`: what it is, the page's lines that show it, and the code that draws it"
+"The thing `c` of Ask Agent, in words for the agent of the page of `e`: what it is, the page's lines that show it, and the code that draws it"
 thing_told(e, c::ToChange) = begin
   if c.node isa PickedText
     where = c.first == c.last ? "line $(c.first)" : "lines $(c.first) to $(c.last)"
@@ -51503,7 +51480,7 @@ change that `words` say to the things `places`. It gets them now if it waits
 for the page, and when it waits again if it doesn't. See "ask the agent of the
 page".
 """
-ask_sharer!(e, name, places::AbstractVector, words::AbstractString; asks=false, talk=talk_words(follow_up!(e, places))) = begin
+ask_sharer!(e, name, places::AbstractVector, words::AbstractString; asks=false, talk=follow_up!(e, places)) = begin
   t = code_picker(e)
   # What you asked about the things before, from the card of an answer, goes with your words
   a = AskedChange(words=words, places=collect(places), by=name, page=e.buf.path, talk=talk, asks=asks)
@@ -51529,7 +51506,7 @@ hand_change!(e, a::AskedChange) = begin
   a.before = Dict(f => read(f, String) for f in files if isfile(f))
   # Words that can be a question get a file for the answer, which shows under the things: see `show_answer!`
   a.asks && isempty(a.reply) && (a.reply = Agent.answer_file())
-  hand_over!(e, ws, Agent.request(b.path, b.told, b.lines, a.words, [thing_told(e, c) for c in a.places], a.talk, question=a.asks, reply=a.reply))
+  hand_over!(e, ws, Agent.request(b.path, b.told, b.lines, a.words, [thing_told(e, c) for c in a.places], talk_words(a.talk), question=a.asks, reply=a.reply))
   a.by, a.sent = first(ws).name, true
   true
 end
@@ -51574,23 +51551,20 @@ asked_label(a::AskedChange; open=true) =
 
 # --- stop an agent ---
 #
-# The × on its label stops the agent that's making a change, and a click on the
-# label of one that answers a question. So does the command Stop Agent. Esc doesn't, as it's easy to
-# press by mistake. What the agent changed before it stopped stays in its
+# The × on its label stops the agent that's working on a request. So does the
+# command Stop Agent. Esc doesn't, as it's easy to press by mistake. What the agent changed before it stopped stays in its
 # files, and doesn't run, because it can be half done. Undo Change puts it
 # back, and Show Change shows it.
 
-"The agents that are working in the window of `e` now: the one making a change, and the one answering a question"
+"The agents that are working in the window of `e` now: the one that works on a request, if one does"
 working_agents(e) = begin
   t = get(e.nodes, :code_picker, nothing)
-  t isa CodePicker || return Any[]
-  Any[a for a in (t.asked, t.about) if a !== nothing && a.ended == 0]
+  t isa CodePicker && t.asked !== nothing && t.asked.ended == 0 ? Any[t.asked] : Any[]
 end
 
 """
-Stop the agent that's working in the window of `e`: the one making a change,
-and the one answering a question. What it changed so far stays in its files,
-and doesn't run. Undo Change puts it back. See "stop an agent".
+Stop the agent that's working on a request in the window of `e`. What it
+changed so far stays in its files, and doesn't run. Undo Change puts it back. See "stop an agent".
 """
 stop_agent!(e) = begin
   found = working_agents(e)
@@ -51600,12 +51574,9 @@ end
 
 "Stop each agent of `found`, which are working in the window of `e`, as `stop_agent!` does"
 stop_agents!(e, found) = begin
-  t = code_picker(e)
   for a in found
     a.process === nothing || process_exited(a.process) || kill(a.process)
-    a isa AskedChange && (a.stopped = true)
-    # A question that you stopped has no answer to show
-    a === t.about && (t.about = nothing)
+    a.stopped = true
   end
   redraw_in!(e, 0)
   nothing
@@ -51613,52 +51584,38 @@ end
 
 works_here(e, ::Val{:stop_agent}) = !isempty(working_agents(e))
 
-# --- ask about a thing ---
+# --- the card of an answer ---
 #
-# The command Ask About takes a thing as Ask For Change does, the block of code
-# or the part of the window that the caret is on, or one that a click chooses,
-# and a question in your own words, like "why is this bar red?". An agent reads
-# the code and answers, and changes no file. The answer shows in a card beside
-# the thing. Ask More on the card asks another question about the same
-# thing, and Change It asks for a change to it: the agent gets the questions
-# and answers so far with the new words. A click on the card takes it away.
-# Esc and a click anywhere else leave it, and so does a new question: the
-# answer then goes to a field under its thing, as an answer in place does.
-# While an agent works, the label on the thing says what it's doing, like
-# "Reading main.jl", and a click on the label stops it: see `agent_step`.
+# When the words of Ask Agent ask a question, and the agent changes nothing,
+# its answer shows in a card beside the thing. Ask More on the card opens Ask
+# Agent with the same things, and the agent gets the questions and answers so
+# far with the new words. A click on the card takes it away. Esc and a click
+# anywhere else leave it, and so does a new answer: the card's answer then
+# goes to a field under its thing, as an answer in place does.
 
 """
-A question that an agent was asked about `places`, the things of Ask About.
-`answer` is what it said, once it has ended, at the time `ended`. `step` is
-what the agent is doing until then. `talk` has the questions that were asked
-about the things before, each with its answer. `card` is where the card with
-the answer was drawn last, and `buttons` where each of its buttons was, for a
-click on them. `label` is where the label on the thing was drawn last, while
-the agent works.
+An agent's answer `answer` to the words `words` about `places`, which changed
+nothing: see "the card of an answer". `talk` has the questions that were
+asked about the things before, each with its answer. `card` is where the card
+was drawn last, and `button` where its button Ask More was, for a click on
+them.
 """
 @def mutable struct AskedAbout
   words::String = ""
   places::Vector{Any} = Any[]
   talk::Vector{Tuple{String,String}} = Tuple{String,String}[]
-  process::Any = nothing
-  out::Any = nothing         # a task that reads what the agent prints
-  gone::Float64 = 0.0        # when the agent's process was first seen to have ended
-  step::String = ""
   answer::String = ""
-  failed::Bool = false
-  ended::Float64 = 0.0
   card::Any = nothing
-  buttons::Vector{Any} = Any[]
-  label::Any = nothing
+  button::Any = nothing
 end
 
-"True when `as` and `bs` are the same things of Ask About, in the same order"
+"True when `as` and `bs` are the same things, in the same order"
 same_things(as, bs) = length(as) == length(bs) && all(((a, b),) -> (a.file, a.first, a.last, a.node) == (b.file, b.first, b.last, b.node), zip(as, bs))
 
 """
 The questions and answers about the things `places` that the card of an answer
-handed on, when you clicked Ask More or Change It on it. They go once. Other
-things have none.
+handed on, when you clicked Ask More on it, or that a field of a request in
+place has. They go once. Other things have none.
 """
 follow_up!(e, places) = begin
   f = pop!(e.nodes, :follow_up, nothing)
@@ -51669,104 +51626,34 @@ end
 talk_words(talk) = isempty(talk) ? "" :
   "\nBefore this, the user asked about it, and an agent answered:\n\n" * join(("Question: $q\nAnswer: $a\n" for (q, a) in talk), "\n")
 
-"What an agent is told when the user asks the question `words` about the things `cs`: what each is, where its code is, and the question"
-about_prompt(cs::AbstractVector, words, talk=Tuple{String,String}[]) = begin
-  told = if length(cs) == 1
-    c = only(cs)
-    what, start = thing_words(c)
-    """
-    The user of the app Ladder has a question about $what.
-
-    It's in the file $(c.file), lines $(c.first) to $(c.last). It starts:
-
-        $start
-    """
-  else
-    parts = map(enumerate(cs)) do (n, c)
-      what, start = thing_words(c)
-      "$('A' + n - 1): $what, in the file $(c.file), lines $(c.first) to $(c.last). It starts:\n\n    $start\n"
-    end
-    "The user of the app Ladder has a question about some things. The user marked them in the window with letters, and the question can name them by their letters:\n\n$(join(parts, "\n"))"
-  end
-  told * talk_words(talk) * """
-
-  The user's question: $words
-
-  Read the code, or the files that the window shows, to find the answer. Don't change any file. Answer in a few short sentences of plain words, with no Markdown, as the answer shows in a small card beside the thing.
-  """
-end
-
 """
-Ask an agent the question `question` about `node`, like "why is this bar
-red?". `node` is a block of Julia code, or a part of the window. The agent
-reads the code and changes nothing, and its answer shows in a card beside the
-thing. See "ask about a thing".
-"""
-ask_about!(e, node::Union{ToChange,Things}, question::String) = begin
-  question = String(strip(question))
-  isempty(question) && error("Write the question.")
-  t = code_picker(e)
-  t.about !== nothing && t.about.ended == 0 && error("The agent is still answering the last question.")
-  command = agent_command(e, changes=false)   # it says so now if this Mac has no agent
-  places = collect(each_thing(node))
-  q = AskedAbout(words=question, places=places, talk=follow_up!(e, places))
-  try
-    q.process, q.out = start_agent(command, about_prompt(places, question, q.talk), dirname(first(places).file), q)
-  catch err
-    q.answer, q.failed, q.ended = "The agent didn't start. " * trouble(err), true, time()
-  end
-  card!(e, q)
-  redraw_in!(e, 0)
-  nothing
-end
-
-"""
-Show the card of the question `q` and its answer. The answer of a card that
-shows already goes to a field under its thing, as an answer in place does, so
-that a new question never takes the place of an answer that you haven't
-read. See "a request in place".
+Show the card of the answer `q`. The answer of a card that shows already goes
+to a field under its thing, as an answer in place does, so that a new answer
+never takes the place of one that you haven't read. See "a request in place".
 """
 card!(e, q::AskedAbout) = begin
   t = code_picker(e)
   was = t.about
   t.about = q
-  (was === nothing || was === q || was.ended == 0 || isempty(was.places)) && return q
+  (was === nothing || was === q || isempty(was.places)) && return q
   x = box_answer(was.words, was.answer, e.ai)
   had = box_about(e, first(was.places))
   had === nothing ? open_ask!(e, AskBox(of=e, thing=first(was.places), answers=Any[x]), anyway=true) : add_answer!(had, x)
   q
 end
 
-"In each frame: when the agent that was asked a question has ended, keep its answer"
-about_tick!(e) = begin
-  t = get(e.nodes, :code_picker, nothing)
-  (t isa CodePicker && t.about !== nothing && t.about.ended == 0) || return nothing
-  a = t.about
-  yield()   # the agent's end is noticed by a task, which gets its turn here
-  process_exited(a.process) && a.gone == 0 && (a.gone = time())
-  if a.gone > 0 && (istaskdone(a.out) || time() - a.gone > 2)
-    printed = agent_text(istaskdone(a.out) && !istaskfailed(a.out) ? fetch(a.out) : "")
-    a.failed = !success(a.process)
-    said = strip(replace(printed, "**" => ""))
-    a.answer = a.failed ? "The agent stopped. " * agent_said(printed) : isempty(said) ? "The agent said nothing." : String(said)
-    a.ended = time()
-  end
-  redraw_in!(e, 0.1)
-  nothing
-end
-
 const ANSWER_WIDE = 380.0   # how wide the card of an answer is, at most
 const ANSWER_LINE = 17.0    # how tall each line of it is
 const ANSWER_BACK = colorant"rgb(50,50,50)"   # the dark grey of a tooltip
 const ANSWER_BUTTON = colorant"rgb(82,82,82)"
-const ANSWER_BUTTONS = 34.0   # the room at the bottom of the card for its buttons
+const ANSWER_BUTTONS = 34.0   # the room at the bottom of the card for its button
 
 "The lines of the card of an answer: the question, then the answer, each paragraph wrapped to `room` px, as many as `most`"
 answer_lines(q::AskedAbout, room, most) = begin
   ask, say = Face(SANS, "Semibold", 12px, TIP_INK, false), Face(SANS, "", 12px, TIP_INK, false)
   lines = Any[(ask, l) for l in wrapped(ask, q.words, room)]
   push!(lines, (say, ""))
-  paragraphs = split(q.ended == 0 ? "The agent is reading the code…" : q.answer, r"\n\s*\n")
+  paragraphs = split(q.answer, r"\n\s*\n")
   for (k, para) in enumerate(paragraphs)
     k > 1 && push!(lines, (say, ""))
     append!(lines, [(say, l) for l in wrapped(say, replace(para, r"\s+" => " "), room)])
@@ -51792,55 +51679,44 @@ answer_place(r, wide, tall, room) = begin
   (max(8.0, W - wide - 16), max(40.0, H - tall - 16))
 end
 
-"The card with an agent's answer, beside the thing that it's about, with a line round each thing. While the agent reads, a label says what was asked."
+"The card with an agent's answer, beside the thing that it's about, with a line round each thing"
 draw_answer(ctx, w, t::CodePicker) = begin
   q = t.about
   q === nothing && return nothing
   e = t.editor
-  q.label = nothing
   for (n, c) in enumerate(q.places)
     r = asked_rect(e, c)
-    label = n == 1 && q.ended == 0 ? asking_words(q.words, q.step) * "  ·  Click to stop it" : length(q.places) > 1 ? string('A' + n - 1) : ""
-    # The label of what was asked is where a click stops the agent. A thing that doesn't show has it under the top bar, as a change does.
-    working = n == 1 && q.ended == 0
-    r === nothing && !working && continue
-    at = pick_mark(ctx, w, r, label; colour=CHIP_MARKS[mod1(n, length(CHIP_MARKS))], busy=working)
-    working && (q.label = at)
+    r === nothing || pick_mark(ctx, w, r, length(q.places) > 1 ? string('A' + n - 1) : ""; colour=CHIP_MARKS[mod1(n, length(CHIP_MARKS))])
   end
-  q.ended == 0 && (q.card = nothing; redraw_in!(e, SPIN_FRAME); return nothing)
   W, H = num(w.size[1]), num(w.size[2])
   wide = min(ANSWER_WIDE, W - 32)
   lines = answer_lines(q, wide - 24, max(3, floor(Int, (H - 120) / ANSWER_LINE)))
   tall = length(lines) * ANSWER_LINE + 20 + ANSWER_BUTTONS
   x, y = answer_place(asked_rect(e, first(q.places)), wide, tall, (W, H))
-  round_box(ctx, x, y, wide, tall, 8; fill=q.failed ? PICK_FAILED : ANSWER_BACK)
+  round_box(ctx, x, y, wide, tall, 8; fill=ANSWER_BACK)
   for (k, (face, words)) in enumerate(lines)
     isempty(words) || write_ink(ctx, words, x + 12, y + 10 + k * ANSWER_LINE - 4, face)
   end
-  # Two buttons at the bottom: another question about the same things, or a change to them
+  # A button at the bottom asks more about the same things
   face = Face(SANS, "Medium", 12px, TIP_INK, false)
   left, top = x + 12, y + tall - ANSWER_BUTTONS + 2
-  empty!(q.buttons)
-  for (action, words) in ((:ask_about, "Ask More"), (:ask_for_change, "Change It"))
-    across = num(measure(face, words)) + 20
-    round_box(ctx, left, top, across, 24, 6; fill=ANSWER_BUTTON)
-    write_ink(ctx, words, left + 10, top + 16, face)
-    push!(q.buttons, (action, (left, top, across, 24.0)))
-    left += across + 8
-  end
+  across = num(measure(face, "Ask More")) + 20
+  round_box(ctx, left, top, across, 24, 6; fill=ANSWER_BUTTON)
+  write_ink(ctx, "Ask More", left + 10, top + 16, face)
+  q.button = (left, top, across, 24.0)
   q.card = (x, y, wide, tall)
   nothing
 end
 
 """
-What a click on a button of the card of the answer `q` does: it opens the
-palette with Ask About or Ask For Change, as `action` says, with the same
-things in its first chip and the keyboard in its words. The questions and
-answers so far go to the agent with the words: see `follow_up!`.
+What a click on the button Ask More of the card of the answer `q` does: it
+opens the palette with Ask Agent, with the same things in its first chip and
+the keyboard in its words. The questions and answers so far go to the agent
+with the words: see `follow_up!`.
 """
-follow_up_on!(e, q::AskedAbout, action::Symbol) = begin
+follow_up_on!(e, q::AskedAbout) = begin
   e.nodes[:follow_up] = (places=q.places, talk=[q.talk; (q.words, q.answer)])
-  open_palette!(e, COMMANDS[action])
+  open_palette!(e, COMMANDS[:ask_agent])
   p = palette(e)
   chips = palette_chips(p)
   isempty(chips) && return nothing
@@ -52027,17 +51903,15 @@ keep_change!(e) = begin
   nothing
 end
 
-add_command!(ask_for_change!, title="Ask an agent to change a block of code, or a part of the window, in your own words")
 add_command!(ask_agent!, title="Ask an agent for a change to a block of code or a part of the window, or a question about it, in your own words")
-add_command!(ask_about!, title="Ask an agent a question about a block of code, or a part of the window, and see the answer beside it")
 add_command!(show_change!, title="Show each change that an agent made, the newest first, and reject any part of one")
 add_command!(undo_change!, title="Put back the files that an agent changed last, as they were before")
 
-# Show Code takes the same node as Ask For Change: see "the code of a thing"
+# Show Code takes the same node as Ask Agent: see "the code of a thing"
 """
 Show the code of `node`: the function that draws a part of the window, in a
 window beside this one, or a block of Julia code. `node` starts as what the
-caret is on, as the node of Ask For Change does, and a click chooses another.
+caret is on, as the node of Ask Agent does, and a click chooses another.
 """
 show_code!(e, node::ToChange) = begin
   if node.node !== nothing

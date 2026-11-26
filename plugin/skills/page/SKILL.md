@@ -20,7 +20,7 @@ So a page does two jobs. It shows the user more than the terminal can. And it is
 4. Tell the user, in one or two sentences, what is on the page and what you need from them. Tell them to click your logo at the top right of Ladder, or press ⌘Return, when they are done. Then end your turn.
 5. When `ladder wait` stops, its output is what the user changed. Read it, and do what it asks.
 6. If you change the page, edit the file. Ladder shows your change in less than a second, so do not run `ladder show` again.
-7. If the work on the page goes on, run `ladder wait <file>` in the background again. If the work is done, do not, unless the user asked for a change with Ask For Change (see below). The Nudge button shows in Ladder only while a `ladder wait` runs.
+7. If the work on the page goes on, run `ladder wait <file>` in the background again. If the work is done, do not, unless the user asked for a change with Ask Agent (see below). The Nudge button shows in Ladder only while a `ladder wait` runs.
 
 If the user answers in the terminal and not on the page, do what they say. A `ladder wait` that still runs does no harm.
 
@@ -57,7 +57,7 @@ How to read it:
 
 ### A change that the user asks for
 
-While you wait, the user can also ask you for a change in their own words. They select words and right-click them, or click your logo beside a block, or use the command Ask Agent or Ask For Change. Then `ladder wait` prints this:
+While you wait, the user can also ask you for a change in their own words. They select words and right-click them, or click your logo beside a block, or use the command Ask Agent. Then `ladder wait` prints this:
 
 ```
 The user asked you for a change from Ladder, on the page /Users/sam/shop/.ladder/plan.md.

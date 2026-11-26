@@ -100,7 +100,7 @@ end
   w.keys ⊻= Keys.cmd; w.keys ⊻= Keys.opt
 end
 
-@testset "Ask For Change and Show Code can take a run" begin
+@testset "Ask Agent and Show Code can take a run" begin
   move(spot(3, "bold")...)
   c = K.chip_click(K.ToChange, e, w)
   @test c isa K.ToChange && c.words == "Bold" && c.node isa K.TextRun

@@ -256,17 +256,17 @@ The command Show Code does the same. Press ⌘⇧P and run it: a blue A goes rou
 
 You can ask Claude Code to change one thing of the window, or ask it a question about the thing. The thing can be a block, a part of a block like the bar of the `progress` block above, a part of Ladder like the count of words, or a block of Julia code. Ladder starts Claude Code, and gives it your words and the place of the function that draws the thing. This needs Claude Code on your Mac. To use Codex, Gemini or Grok instead, choose it under Agent in Settings.
 
-To ask for a change:
+To ask for a change, or ask a question:
 
 1. If the caret can go on the thing, put it there.
-2. Press ⌘⇧P, type Ask For Change, and press Return.
+2. Press ⌘⇧P, type Ask Agent, and press Return.
 3. Look for the blue line with the letter A. It goes round the thing that Claude Code gets.
 4. If the A is round the wrong thing, click the thing that you mean. The A moves to it.
-5. Type what you want, like `make this bar thinner`, and press Return.
+5. Type what you want, like `make this bar thinner` or `why is this bar red?`, and press Return.
 
-Claude Code changes the function, and the thing is drawn the new way. While it works, a label on the thing says what it's doing, like `Reading progress.jl`. The label then says what changed.
+For a change, Claude Code changes the function, and the thing is drawn the new way. While it works, a label on the thing says what it's doing, like `Reading progress.jl`. The label then says what changed. For a question, Claude Code changes nothing, and its answer shows in a card beside the thing.
 
-To start from the thing itself, hold ⌘ and ⌥, click it, and click the agent's logo on its blue line. That runs Ask Agent, which takes a change or a question. The A is already round the thing, so type what you want and press Return. A change shows as below, and an answer shows in a card beside the thing.
+To start from the thing itself, hold ⌘ and ⌥, click it, and click the agent's logo on its blue line. That runs Ask Agent too. The A is already round the thing, so type what you want and press Return.
 
 To ask about some words, select them, right-click them and choose Ask Claude…. The menu names the agent that Settings chose, or the one that shares the page. A box goes round the words, with a field under them. Type a change or a question, and press Return. The box stays round the words while the agent works, and its label says how the request goes. With nothing selected, the box goes round the line that the caret is on. Click the label to open the field again, with your questions, the answers and what the agent is doing. The Close button under the field closes only the field. The × at the end of the label takes the box away, with its answers. If Ladder started an agent for the request, the × stops it. Esc, a click on the page and another field leave the field as it is, with what you typed.
 
@@ -285,7 +285,7 @@ After you press Return:
 - Click the label after the change to see what Claude Code changed. The page lists each change since Ladder started, the newest first. Each part has a Reject button that takes it out again, and Reject all takes out the whole change.
 - The command Undo Change puts back all of the newest change. Run it again to put back the one before.
 
-To ask a question in place of a change, run Ask About, and choose the thing in the same way. Or hold ⌘ and ⌥, click the thing, and click the agent's logo on its blue line. Type a question like `why is this bar red?` and press Return. Claude Code reads the code and changes nothing. Its answer shows in a card beside the thing. Click Ask More on the card for another question about the same thing, or Change It to ask for a change to it. Claude Code gets your earlier questions and its answers with your new words. Click the card to close it. Esc and a click anywhere else leave it open, so that you don't lose an answer before you read it.
+The card of an answer has a button, Ask More. Click it to ask another question about the same thing, or to ask for a change to it. Claude Code gets your earlier questions and its answers with your new words. Click the card to close it. Esc and a click anywhere else leave it open, so that you don't lose an answer before you read it.
 
 In a file of code, Fix It and Ask For Checks give Claude Code one check or one function. The next section says how.
 
@@ -306,7 +306,7 @@ Ladder opens a Julia file as code that you change, however long the file is. The
 - Put the caret on a check, or move the mouse over it, and buttons show beside it. Show Steps runs the check again, and writes what each line of the function came to at the end of the line. It shows the values that the function was given, how many times a line in a loop ran, and why the function stopped. Esc takes the values away. A check that fails has Fix It too. Fix It asks Claude Code to make the check pass. Claude Code changes the function, or changes the check when the check is wrong, and says which.
 - Run Ask For Checks in a function to have Claude Code write checks of it. It works out the value that each call should give from what the function is for, not from what it does now. So a check can find a fault that's already there.
 
-To change a block of the file's code in words, like one function, put the caret in it and run Ask For Change. Click another block to change that one instead. Type what you want and press Return. Claude Code changes the block, and the window shows the new lines.
+To change a block of the file's code in words, like one function, put the caret in it and run Ask Agent. Click another block to change that one instead. Type what you want and press Return. Claude Code changes the block, and the window shows the new lines.
 
 ## Sheets
 
@@ -1127,9 +1127,9 @@ To talk with an agent beside the page, with no terminal, press ⌘⇧P and run A
 
 The button at the right end of the top bar hides the outline. Nothing hides the agent's pane: to work without the agent, leave agent mode. The page stays beside the outline, and the agent's pane has the rest of the window, so a wider window gives the agent more room. To give the agent more or less of the window, drag the gap between its pane and the page. Ladder keeps the width, and two clicks on the gap give the page its paper shape again. The two panes are dark on every theme, so that the page stands out between them. Run Agent Mode again to put the window back as it was. The session stays until you close the window, so you can go on with it later.
 
-To ask an agent about one part of the window, no agent has to wait. Run Ask For Change or Ask About, and Ladder starts Claude Code with that part and your words. [Ask an agent about one thing](#ask-an-agent-about-one-thing) says how.
+To ask an agent about one part of the window, no agent has to wait. Run Ask Agent, and Ladder starts Claude Code with that part and your words. [Ask an agent about one thing](#ask-an-agent-about-one-thing) says how.
 
-When an agent works on the page with you, Ask For Change and Ask Agent ask that agent, not a new one, because it knows what the page is for. It answers a question in its own window, not in a card. It gets your words, the part that you marked and the lines that you changed. If it's still working on what you sent before, it gets them when it waits for the page again. Until then, click the label to change your words or take them back.
+When an agent works on the page with you, Ask Agent asks that agent, not a new one, because it knows what the page is for. It answers a question in its own window, not in a card. It gets your words, the part that you marked and the lines that you changed. If it's still working on what you sent before, it gets them when it waits for the page again. Until then, click the label to change your words or take them back.
 
 An agent can ask a question in a block of its own. Click an answer, or type one in the field, and then send the page. A round mark means that you choose one answer, and a square box means that you choose as many as you like.
 

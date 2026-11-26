@@ -206,7 +206,7 @@ end
   @test list.frame.w == plan.bar.w - 2 * 87 && list.frame.x - plan.bar.x == plan.bar.x + plan.bar.w - (list.frame.x + list.frame.w)
   shot(w, "omni-open.png")
   # It lists every command that makes sense here, in the order of their names
-  @test names(e) == sort(names(e)) && first(names(e)) == "Add To Favourites" && "Ask About" in names(e)
+  @test names(e) == sort(names(e)) && first(names(e)) == "Add To Favourites" && "Ask Agent" in names(e) && !("Ask About" in names(e))
   @test "Save" in names(e) && "Theme" in names(e) && "Insert" in names(e) && "Go To" in names(e)
   @test !("Left" in names(e)) && !("Commands" in names(e)) && !("Erase Back" in names(e))
   # ⌘⇧P again closes it. It stays in the window while it slides down.
@@ -337,7 +337,7 @@ end
   press(w, Keys.down)
   @test said(e, 1) == K.Colours(:night) && p.at == 1 && e.theme == :night
   # Return takes the row, and Theme runs at once: it changes nothing that you'd want to look at first
-  @test K.runs_at_once(Val(:theme)) && !K.runs_at_once(Val(:rename)) && !K.runs_at_once(Val(:ask_for_change))
+  @test K.runs_at_once(Val(:theme)) && !K.runs_at_once(Val(:rename)) && !K.runs_at_once(Val(:ask_agent))
   press(w, Keys.enter)
   @test e.theme == :night && e.popup == :none && w.focus === e && p.before === nothing
   take(w, "go to")

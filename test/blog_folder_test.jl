@@ -256,7 +256,6 @@ end
   @test occursin("a ListingRow. It shows these words: \"future city.md\", \"If we started from scratch\"", what)
   @test occursin("The window shows $city.", what)
   @test occursin("\"If we started from scratch\"", K.either_prompt([c], "Is this spelt right?"))
-  @test occursin("\"future city.md\"", K.about_prompt([c], "Is this spelt right?"))
   # A part that isn't drawn now shows no words
   @test K.shown_words(K.ListingRow()) == String[]
 end
