@@ -16,6 +16,7 @@ include(joinpath(@__DIR__, "dsstore_fake.jl"))   # `store` makes the bytes of a 
 
 const px = K.px
 const M = K.Mac
+const T = K.Trash
 
 const dir = mktempdir()
 K.SETTINGS_FILE[] = joinpath(dir, "settings")
@@ -192,7 +193,7 @@ end
   v = view(bin)
   @test v.trash
   @test shown(bin) == ["— Today", "plan.pdf", "notes 10.42.07 am.md", "— Previous 7 Days", "stray.txt"]
-  @test v.origins["plan.pdf"] == M.Origin(folder=desk, name="plan.pdf")
+  @test v.origins["plan.pdf"] == T.Origin(folder=desk, name="plan.pdf")
   @test v.origins["notes 10.42.07 am.md"].name == "notes.md"
   @test !haskey(v.origins, "stray.txt")
   shot("trash")

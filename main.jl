@@ -423,6 +423,10 @@ end
 @use "./notes" => Notes
 @use "./zip" => Zips
 @use "./macfolders" => Mac
+@use "./macfile" => MacFiles
+@use "./trash" => Trash
+@use "./picture_words" => PictureWords
+@use "./app/facts" APP_ID   # the Ladder app's name for macOS
 @use "./folders" => Folders
 @use "./blog" => Blogs
 @use "./news" => News
@@ -1660,7 +1664,7 @@ has no other place for it.
 """
 entries(e, d::AbstractDirectory) = begin
   dir = string(d.path)
-  trash = Sys.isapple() && dir == homedir() ? basename(Mac.trash()) : ""
+  trash = Sys.isapple() && dir == homedir() ? basename(Trash.trash()) : ""
   ignored = Folders.ignored()
   shows(n) = e.hidden ? n != ".DS_Store" : !left_out(joinpath(dir, n), ignored) || n == trash
   found = FSObject[]
@@ -39125,7 +39129,6 @@ end
 # message, not with an argument, so the app keeps a list of the files it's
 # been asked for and the window opens them.
 
-const APP_ID = "com.jkroso.ladder"                   # the Ladder app's name for macOS, as app/build.jl gives it
 const MARKDOWN_TYPE = "net.daringfireball.markdown"   # macOS's name for the kind of file that Markdown is
 
 "macOS's object for the kind of file that Markdown is"
@@ -46283,7 +46286,7 @@ const GOT_MARK = APP_ID * ".got"
 fingerprint(bytes) = (h = 0xcbf29ce484222325; for x in bytes; h = (h ⊻ x) * 0x00000100000001b3; end; string(h, base=16))
 
 "The fingerprint of what the server last sent for the file at `path`, or \"\""
-got_mark(path::AbstractString) = (data = Mac.extra(path, GOT_MARK); data === nothing ? "" : String(data))
+got_mark(path::AbstractString) = (data = MacFiles.extra(path, GOT_MARK); data === nothing ? "" : String(data))
 
 "Keep `value` in the extended attribute `name` of the file at `path`"
 mark_file!(path, name, value) = (Sys.isapple() && ccall(:setxattr, Cint, (Cstring, Cstring, Ptr{UInt8}, Csize_t, UInt32, Cint),
@@ -46646,7 +46649,7 @@ const COPY_ADDRESSES = Dict{String,String}()
 
 "The address of the page on the web that the file at `path` is a copy of, or \"\" when it's no copy"
 copied_from(path::AbstractString) = isempty(path) || isremote(path) ? "" : get!(COPY_ADDRESSES, String(path)) do
-  data = Mac.extra(path, COPY_MARK)
+  data = MacFiles.extra(path, COPY_MARK)
   data === nothing ? "" : String(data)
 end
 
@@ -57993,7 +57996,8 @@ cursor(::ZipView) = :arrow
 # Ladder knows four of the Mac's folders by where they are: Downloads,
 # Pictures, the folder that the Mac saves screenshots to, and the Trash. A
 # click on one in the sidebar shows it in the page its own way, and the sidebar
-# lists what it holds. macfolders.jl reads what macOS knows of their files.
+# lists what it holds. macfile.jl, trash.jl and picture_words.jl read what
+# macOS knows of their files, and macfolders.jl names their days.
 #
 # Downloads and the Trash each show as a list with the newest thing first, in
 # the groups of days that the Finder has: Today, Yesterday, Previous 7 Days,
@@ -58031,7 +58035,7 @@ push!(BLOCK_ICONS, "download", "trash", "arrow-counterclockwise", "folder2-open"
 entry_icon(::DownloadsDirectory) = "download"
 entry_icon(::TrashDirectory) = "trash"
 # The folder of the Mac's Trash is called .Trash, and the Mac calls it the Trash
-entry_name(d::TrashDirectory) = string(d.path) == Mac.trash() ? "Trash" : basename(string(d.path))
+entry_name(d::TrashDirectory) = string(d.path) == Trash.trash() ? "Trash" : basename(string(d.path))
 
 "The folder that the Mac saves screenshots to, when that isn't its Desktop, and when macOS was asked. It's asked again after 10 seconds."
 const SCREENSHOTS = Ref((0.0, ""))
@@ -58052,7 +58056,7 @@ mac_kind(path::AbstractString) = begin
   home = homedir()
   path == joinpath(home, "Downloads") ? DownloadsDirectory :
   path == joinpath(home, "Pictures") ? PicturesDirectory :
-  path == Mac.trash() ? TrashDirectory :
+  path == Trash.trash() ? TrashDirectory :
   path == screenshots_place() ? ScreenshotsDirectory : nothing
 end
 
@@ -58080,7 +58084,7 @@ filelist_fact(path::AbstractString) = begin
   length(LIST_FACTS) > 20_000 && empty!(LIST_FACTS)
   folder = isdir(st)
   it = ListItem(name=basename(path), path=path, folder=folder, size=folder ? 0 : Int(st.size),
-                when=Mac.added(path), site=folder ? "" : Mac.site(path))
+                when=MacFiles.added(path), site=folder ? "" : MacFiles.site(path))
   LIST_FACTS[path] = (st.mtime, it)
   it
 end
@@ -58094,7 +58098,7 @@ entries(e, d::ListDirectory) =
   path::String = ""
   trash::Bool = false                         # it's the Trash
   lines::Vector{Any} = Any[]                  # the words over a group of days, or a `ListItem`, in the order that they show
-  origins::Dict{String,Mac.Origin} = Dict{String,Mac.Origin}()   # where each thing in the Trash was, by its name there
+  origins::Dict{String,Trash.Origin} = Dict{String,Trash.Origin}()   # where each thing in the Trash was, by its name there
   read::Float64 = 0.0                         # when the folder was read
   problem::String = ""                        # why the folder can't be read, or ""
   chosen::Set{String} = Set{String}()         # the names of the lines that are chosen
@@ -58138,7 +58142,7 @@ filelist_read!(e, v::FileList) = begin
   shows(n) = n != ".DS_Store" && n != ".localized" && (v.trash || e.hidden || !left_out(joinpath(v.path, n), ignored))
   items = [filelist_fact(joinpath(v.path, n)) for n in names if shows(n)]
   sort!(items, by=it -> -it.when, alg=MergeSort)
-  v.origins = v.trash ? Mac.origins(v.path, disk=TRASH_DISK[]) : Dict{String,Mac.Origin}()
+  v.origins = v.trash ? Trash.origins(v.path, disk=TRASH_DISK[]) : Dict{String,Trash.Origin}()
   lines, group = Any[], ""
   for it in items
     g = Mac.day_name(it.when)
@@ -58248,7 +58252,7 @@ filelist_put_back!(v::FileList, names) = begin
     origin = get(v.origins, n, nothing)
     origin === nothing && (v.said = "The Finder kept no note of where $n was."; continue)
     try
-      Mac.put_back!(joinpath(v.path, n), origin)
+      Trash.put_back!(joinpath(v.path, n), origin)
     catch err
       v.said = trouble(err)
     end
@@ -58478,7 +58482,7 @@ files. Each line is the words over a group or one row of squares.
 tiles_lay!(v::TilesView, wide) = begin
   query = tiles_query(v)
   # The words of more pictures can have been read since the last time
-  key = (v.tiles, wide, query, isempty(query) ? 0 : Mac.version[], v.placed)
+  key = (v.tiles, wide, query, isempty(query) ? 0 : PictureWords.version[], v.placed)
   v.made !== nothing && v.made[1] === key[1] && v.made[2:5] == key[2:5] && return
   v.made = key
   v.wide = wide
@@ -58524,7 +58528,7 @@ end
 "True when the picture `t` shows the words `query`. A picture whose words macOS hasn't read yet is read soon, and it's false until then."
 tile_says(t::Tile, query) = begin
   (t.kind == :picture && lowercase(splitext(t.name)[2]) in (PICTURES..., MAC_PICTURES...)) || return false
-  text = Mac.words(t.path, t.when)
+  text = PictureWords.words(t.path, t.when)
   text !== nothing && occursin(query, text)
 end
 
@@ -58708,9 +58712,9 @@ describe(v::TilesView) = begin
   wide = max(num(e.width), TILE_SIDE)
   tiles_places!(e, v)
   # With nothing typed, nobody asks for the words of the pictures that still wait
-  isempty(tiles_query(v)) && v.made !== nothing && !isempty(v.made[3]) && Mac.stop_reading!()
+  isempty(tiles_query(v)) && v.made !== nothing && !isempty(v.made[3]) && PictureWords.stop_reading!()
   tiles_lay!(v, wide)
-  waits = isempty(tiles_query(v)) ? 0 : Mac.reading()
+  waits = isempty(tiles_query(v)) ? 0 : PictureWords.reading()
   waits > 0 && redraw_in!(e, 0.2)   # the grid fills as the pictures are read
   n = length(v.lines)
   _, high = window_size(e)
@@ -59003,7 +59007,7 @@ folder_items!(e, t::FolderTable) = begin
     # macOS can refuse to say, as it does for the Trash before Ladder has Full Disk Access
     st = try stat(path) catch; nothing end
     own = st === nothing ? 0.0 : st.mtime
-    FolderItem(path=path, object=o, folder=folder, kind=get!(() -> Mac.finder_kind(path), t.kindof, path),
+    FolderItem(path=path, object=o, folder=folder, kind=get!(() -> MacFiles.finder_kind(path), t.kindof, path),
                size=folder ? get(bytes, path, 0) : st === nothing ? 0 : Int(st.size), sized=!folder || haskey(bytes, path),
                when=folder ? max(own, get(deep, path, 0.0)) : own, known=!folder || haskey(deep, path))
   end

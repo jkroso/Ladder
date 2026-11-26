@@ -18,6 +18,7 @@ include(joinpath(@__DIR__, "png_fake.jl"))   # `write_png` writes a small pictur
 
 const px = K.px
 const M = K.Mac
+const W = K.PictureWords
 
 const dir = mktempdir()
 K.SETTINGS_FILE[] = joinpath(dir, "settings")
@@ -28,8 +29,8 @@ K.trasher[] = path -> (push!(trashed, basename(path)); rm(path; recursive=true);
 # One check further down asks macOS itself.
 const said = Dict("Screenshot 2.png" => "Invoice 1042\nTotal  \$310.00", "Screenshot 3.png" => "A page about boats")
 const asked = String[]
-M.reader[] = path -> (push!(asked, basename(path)); get(said, basename(path), ""))
-M.words_file[] = joinpath(dir, "words.tsv")
+W.reader[] = path -> (push!(asked, basename(path)); get(said, basename(path), ""))
+W.words_file[] = joinpath(dir, "words.tsv")
 # The map's picture comes from the pretend program, and is kept in the test's folder
 K.Maps.HELPER[] = Fake.helper
 K.MEDIA_CACHE[] = joinpath(dir, "media")
@@ -205,7 +206,7 @@ end
 read_all() = begin
   started = time()
   frames(2)
-  while M.reading() > 0 && time() - started < 30
+  while W.reading() > 0 && time() - started < 30
     sleep(0.01)
     frames(1)
   end
@@ -223,7 +224,7 @@ end
   @test sort(filter(startswith("Screenshot"), asked)) == ["Screenshot 1.png", "Screenshot 2.png", "Screenshot 3.png"]
   shot("words")
   # The words are in small letters with one space between them, whatever the picture has
-  @test M.words(joinpath(shots, "Screenshot 2.png")) == "invoice 1042 total \$310.00"
+  @test W.words(joinpath(shots, "Screenshot 2.png")) == "invoice 1042 total \$310.00"
   v.field.text = "TOTAL \$310"
   read_all()
   @test shown(shots) == ["Yesterday", ["Screenshot 2.png"]]
@@ -242,18 +243,18 @@ end
 @testset "each picture is read once, and what was read is kept in a file" begin
   shots = joinpath(pics, "Screenshots")
   n = length(asked)
-  @test isfile(M.words_file[])
+  @test isfile(W.words_file[])
   # A new start of Ladder reads the file, and asks about no picture again
-  M.loaded[] = ""
-  @test M.words(joinpath(shots, "Screenshot 3.png")) == "a page about boats"
-  @test length(asked) == n && M.reading() == 0
+  W.loaded[] = ""
+  @test W.words(joinpath(shots, "Screenshot 3.png")) == "a page about boats"
+  @test length(asked) == n && W.reading() == 0
   # A picture that changed is read again
   run(`touch $(joinpath(shots, "Screenshot 3.png"))`)
-  @test M.words(joinpath(shots, "Screenshot 3.png")) === nothing
+  @test W.words(joinpath(shots, "Screenshot 3.png")) === nothing
   started = time()
-  while M.reading() > 0 && time() - started < 30; sleep(0.01); end
+  while W.reading() > 0 && time() - started < 30; sleep(0.01); end
   @test length(asked) == n + 1
-  @test M.words(joinpath(shots, "Screenshot 3.png")) == "a page about boats"
+  @test W.words(joinpath(shots, "Screenshot 3.png")) == "a page about boats"
 end
 
 if Sys.isapple()
@@ -262,7 +263,7 @@ if Sys.isapple()
     K.open!(e, K.object(e, pics) === nothing ? pics : pics)
     frames()
     save_png(file, w)   # the window shows the page of the Pictures folder
-    text = lowercase(M.read_words(file))
+    text = lowercase(W.read_words(file))
     @test occursin("pictures", text)
   end
 end
@@ -336,9 +337,9 @@ end
 
 close(w)
 delete!(K.PLACE_KINDS, pics)
-M.reader[] = M.read_words
-M.words_file[] = M.usual_words_file()
-M.loaded[] = ""
+W.reader[] = W.read_words
+W.words_file[] = W.usual_words_file()
+W.loaded[] = ""
 K.TILE_PLACER[] = K.photo_place
 K.Maps.HELPER[] = K.Maps.run_program
 K.MEDIA_CACHE[] = ""
