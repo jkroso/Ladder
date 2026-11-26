@@ -437,6 +437,7 @@ end
 @use InteractiveUtils: clipboard
 @use InteractiveUtils: code_native, code_llvm
 @use Dates: Dates, Date, Day
+@use Base64: base64encode
 
 # --- look --------------------------------------------------------------------
 
@@ -30559,6 +30560,8 @@ and the copy is what goes in. An app that takes screenshots puts its picture
 on the clipboard as a file like that, and macOS removes the file later.
 """
 paste!(e) = begin
+  part = agent_part_of(e)
+  part !== nothing && part[2] == :field && return paste_for_agent!(part[1], e)
   b = e.buf
   paths = Pasteboard.files()
   if isempty(paths)
@@ -48732,10 +48735,11 @@ is_reply(path::AbstractString) = endswith(path, REPLY_NAME) && basename(path) ==
 
 # --- what a session holds ---
 
-"Words that you gave the agent. `about` is what the window showed then, like the heading that the caret was under."
+"Words that you gave the agent. `about` is what the window showed then, like the heading that the caret was under. `pictures` are the files of the pictures that went with them."
 @def mutable struct YouSaid
   words::String = ""
   about::String = ""
+  pictures::Vector{String} = String[]
 end
 
 "What the agent said, as Markdown. `whole` is false while its words still come, and `n` goes up with each change to them."
@@ -48885,7 +48889,7 @@ ended!(s::AgentSession, wrong) = begin
     note!(s, "$(s.agent) doesn't have this session any more, so a new one starts here. It doesn't know what was said before.")
     started = try
       start!(s, session_command(s))
-      tell!(s, Dict("type" => "user", "message" => Dict("role" => "user", "content" => s.sent)))
+      tell!(s, user_message(s.sent, k == 0 ? String[] : s.items[k].pictures))
       true
     catch err
       note!(s, err isa ErrorException ? err.msg : "Ladder couldn't start $(s.agent): $(sprint(showerror, err))", true)
@@ -48922,12 +48926,12 @@ tell!(s::AgentSession, o) = begin
 end
 
 "Give the agent of the session `s` the words `words`. `about` is what the window shows, and `told` says it to the agent."
-say!(s::AgentSession, words, about="", told="") = begin
-  push!(s.items, YouSaid(words=String(words), about=String(about)))
-  content = isempty(told) ? String(words) : told * "\n\n" * words
+say!(s::AgentSession, words, about="", told=""; pictures=String[]) = begin
+  push!(s.items, YouSaid(words=String(words), about=String(about), pictures=copy(pictures)))
+  content = join(filter(!isempty, [String(told), String(words), isempty(pictures) ? "" : pictures_note(s, pictures)]), "\n\n")
   s.sent = content
   if !s.turns
-    tell!(s, Dict("type" => "user", "message" => Dict("role" => "user", "content" => content)))
+    tell!(s, user_message(content, pictures))
   elseif s.busy
     push!(s.queue, content)   # the agent's program takes one thing at a time
   else
@@ -48936,6 +48940,50 @@ say!(s::AgentSession, words, about="", told="") = begin
   s.busy = true
   s.version += 1
   s
+end
+
+"""
+What Ladder writes to Claude's program for your words: the message with
+`content`, the text, and before it each of `pictures` as a picture, for
+Claude to see. A picture that can't be read is left out: its file's path is
+in the text.
+"""
+user_message(content, pictures=String[]) = begin
+  shown = filter(!isnothing, [picture_block(path) for path in pictures])
+  said = isempty(shown) ? content : Any[shown..., Dict("type" => "text", "text" => content)]
+  Dict("type" => "user", "message" => Dict("role" => "user", "content" => said))
+end
+
+"The words that say which files the pictures `pictures` are in. An agent that works by turns has only these words, and reads the files."
+pictures_note(s::AgentSession, pictures) =
+  (s.turns ? "With these words come these pictures, in files that you can read:\n" : "The pictures with these words are also in these files:\n") * join(pictures, "\n")
+
+# The kinds of picture that Claude takes, and how many bytes one can have. Claude takes 5 MB of base64, which is 3.75 MB of bytes.
+const AGENT_PICTURE_KINDS = Dict(".png" => "image/png", ".jpg" => "image/jpeg", ".jpeg" => "image/jpeg", ".gif" => "image/gif", ".webp" => "image/webp")
+const AGENT_PICTURE_MOST = 3_500_000
+
+"The picture in the file at `path` as a part of a message to Claude, or nothing when it can't be read"
+picture_block(path) = try
+  file = sendable_picture(path)
+  Dict("type" => "image", "source" => Dict("type" => "base64", "media_type" => AGENT_PICTURE_KINDS[lowercase(splitext(file)[2])], "data" => base64encode(read(file))))
+catch
+  nothing
+end
+
+"""
+The file at `path`, or a copy of it that Claude takes: a PNG file, or a JPEG
+file when the PNG has too many bytes, no more than 1568 pixels on its longer
+side. Claude makes a picture that size itself, so nothing is lost. macOS's
+`sips` makes the copy.
+"""
+sendable_picture(path) = begin
+  haskey(AGENT_PICTURE_KINDS, lowercase(splitext(path)[2])) && filesize(path) <= AGENT_PICTURE_MOST && return path
+  out = joinpath(mktempdir(), "picture.png")
+  run(pipeline(`sips -Z 1568 -s format png $path --out $out`, stdout=devnull, stderr=devnull))
+  filesize(out) <= AGENT_PICTURE_MOST && return out
+  jpeg = joinpath(dirname(out), "picture.jpg")
+  run(pipeline(`sips -s format jpeg -s formatOptions 80 $out --out $jpeg`, stdout=devnull, stderr=devnull))
+  jpeg
 end
 
 "Stop what the agent of the session `s` is doing. The session goes on, and what the agent changed so far stays."
@@ -50009,7 +50057,8 @@ with the first words.
 send_words!(p::AgentPane) = begin
   e = editor(p)
   words = String(strip(join(p.field.buf.lines, "\n")))
-  isempty(words) && return nothing
+  pictures = filter(isfile, attached(p))
+  isempty(words) && isempty(pictures) && return nothing
   b = e.buf
   s = try
     writes(b) && (dirty(b) || !isfile(b.path)) && save!(b)
@@ -50021,7 +50070,7 @@ send_words!(p::AgentPane) = begin
   end
   p.error = ""
   about, told = pane_context(p, e)
-  say!(s, words, about, told)
+  say!(s, words, about, told; pictures=pictures)
   p.follow = true
   # A new field takes the keyboard, when the old one had it
   w = window_of(e)
@@ -50031,6 +50080,114 @@ send_words!(p::AgentPane) = begin
   redraw_in!(e, SOON)
   nothing
 end
+
+# --- pictures that go with your words ---
+
+"The pictures that go with the words in the field of the pane `p`, as files. A new field starts with none."
+attached(p::AgentPane) = get!(() -> String[], p.field.nodes, :pictures)
+
+"A test puts a folder of its own here, for the pictures that agent mode keeps"
+const AGENT_PICTURES = Ref("")
+
+"""
+The folder that keeps the pictures that you paste for the agent of the pane
+`p`. A session's file has them in the media folder beside it, so the file
+shows them again when it's opened. Agent mode has them in Ladder's caches,
+since nothing keeps its session after the window closes.
+"""
+agent_pictures(p::AgentPane) = begin
+  dir = on_page(p) && !isempty(p.file) ? joinpath(dirname(abspath(p.file)), PAGE_MEDIA) :
+        isempty(AGENT_PICTURES[]) ? joinpath(homedir(), "Library", "Caches", "Ladder", "Agent pictures") : AGENT_PICTURES[]
+  mkpath(dir)
+  dir
+end
+
+"The files that Ladder wrote for the pictures in the field of the pane `p`, which go when a picture is taken away before it's sent"
+made_pictures(p::AgentPane) = get!(() -> String[], p.field.nodes, :made_pictures)
+
+"""
+Put the picture at `path` with the words of the pane `p`. `made` is true for
+a file that Ladder wrote for it. A picture in a folder of temporary files, like
+a screenshot app's, is copied first, since macOS removes it later.
+"""
+attach!(p::AgentPane, path; made=false) = begin
+  if any(t -> startswith(path, t), PASSING)
+    path = cp(path, unused(agent_pictures(p), splitext(basename(path))...))
+    made = true
+  end
+  made && push!(made_pictures(p), path)
+  path in attached(p) || push!(attached(p), path)
+  redraw_in!(editor(p), SOON)
+  path
+end
+
+"Take the picture at `path` away from the words of the pane `p`. A file that Ladder wrote for it goes too."
+unattach!(p::AgentPane, path) = begin
+  filter!(!=(path), attached(p))
+  path in made_pictures(p) && (filter!(!=(path), made_pictures(p)); rm(path, force=true))
+  redraw_in!(editor(p), SOON)
+  nothing
+end
+
+"""
+Paste into the field `sub` of the pane `p`. A picture goes with your words,
+whether it was copied as a file in the Finder or as itself, like a
+screenshot. Another file goes in as its path, and anything else as text.
+"""
+paste_for_agent!(p::AgentPane, sub) = begin
+  paths = Pasteboard.files()
+  if isempty(paths)
+    text = Sys.isapple() ? Pasteboard.text() : clipboard()
+    # A picture that's copied from a web page comes with its address as text, and the picture is what's wanted
+    found = isempty(strip(text)) || occursin(r"^\s*\w+://\S+\s*$", text) ? Pasteboard.media() : nothing
+    if found !== nothing && ispicture("pasted." * found[1])
+      path = unused(agent_pictures(p), "pasted-" * Libc.strftime("%Y%m%d-%H%M%S", time()), "." * found[1])
+      write(path, found[2])
+      return attach!(p, path; made=true)
+    end
+    return each_selection!(() -> type!(sub, replace(text, "\r\n" => "\n", '\r' => '\n', '\t' => "  ")), sub)
+  end
+  pictures = [path for path in paths if isfile(path) && ispicture(path)]
+  foreach(path -> attach!(p, path), pictures)
+  others = [occursin(' ', path) ? "\"$path\"" : path for path in paths if !(path in pictures)]
+  isempty(others) || each_selection!(() -> type!(sub, join(others, " ")), sub)
+  nothing
+end
+
+"""
+The key of a small picture of the file at `path`, with how wide and how tall
+it shows: `tall` high and no more than three times as wide. The key is nothing
+when macOS has no picture for the file, which then shows as a square.
+"""
+picture_size(path, tall) = begin
+  key = isfile(path) ? thumbnail(path, 400) : nothing
+  key === nothing && return (nothing, tall, tall)
+  shape = image_aspect(key)
+  wide, high = tall * shape > 3tall ? (3tall, 3tall / shape) : (tall * shape, tall)
+  (key, px(round(num(wide))), px(round(num(high))))
+end
+
+"A small picture of the file at `path`, `tall` high, with its corners rounded: see `picture_size`"
+small_picture(path, tall) = begin
+  key, wide, high = picture_size(path, tall)
+  key === nothing ? Box(fixed(wide), height(high), radius(8px), Alignment.Center, justify=Alignment.Center, background(on_glass(0.12)),
+                        Icon("image", size=tall / 3, color=colours.faint)) :
+                    Image(key, fixed(wide), height(high), radius(8px))
+end
+
+"The pictures that go with the words in the field of the pane `p`, in a row, each with a button in its corner that takes it away"
+attached_row(p::AgentPane, e) = begin
+  tall = PICTURE_TALL * talk_zoom(e)
+  Row(height(tall), Alignment.End, child_gap=8px, name="Pictures",
+    (begin
+       _, wide, high = picture_size(path, tall)
+       Stack(fixed(wide), height(high), Alignment.Start, name="Picture", small_picture(path, tall),
+         Row(width(grow=grow), justify=Alignment.End, padding(4px), pane_button(p, :unattach, path)))
+     end for path in attached(p))...)
+end
+
+# How tall a picture is in the field and in what you said, at the pane's own size
+const PICTURE_TALL = 64px
 
 "End the session of the pane `p`, and start with nothing. The next words start a new session."
 new_session!(p::AgentPane) = begin
@@ -50178,9 +50335,11 @@ talk_row(p::AgentPane, e, it::YouSaid, room) = begin
   about = isempty(it.about) ? () :
     (Row(height(18px), Alignment.Center, child_gap=5px, Icon("file-earmark-text", size=11px, color=colours.faint),
          Box(label(shortened(pane_face(e, colours.faint; size=11.5px), it.about, inside), 11.5px * talk_zoom(e), color=colours.faint))),)
+  pictures = isempty(it.pictures) ? () :
+    (Row(Alignment.End, child_gap=8px, padding(2px, 0px, 2px, 0px), name="Your pictures", (small_picture(path, PICTURE_TALL * talk_zoom(e)) for path in it.pictures)...),)
+  words = isempty(it.words) ? () : (Box(padding(13px, 8px), radius(12px), background(on_glass(0.09)), words_block(e, it.words, colours.ink, inside; size=REPLY_SIZE)),)
   Column(width(grow=grow), Alignment.End, child_gap=3px, padding(6px, 0px, 2px, 0px), name="You said",
-    about...,
-    Box(padding(13px, 8px), radius(12px), background(on_glass(0.09)), words_block(e, it.words, colours.ink, inside; size=REPLY_SIZE)))
+    about..., pictures..., words...)
 end
 
 "What the agent said, as a page of Ladder's as wide as `room`"
@@ -50241,8 +50400,11 @@ pane_foot(p::AgentPane, e, room) = begin
   ends = (max(one + 8px, 28px) + 14px) / 2   # one line of words, the room over and under it, and the border
   right, left = max(6px, ends - 15px), max(14px, ends - 5px)
   drop = max(0px, ends - 21px)   # 21px: the button's half, the room under the words, and the border
+  # Pictures that go with the words are over them, in the slot
+  pictures = isempty(attached(p)) ? () : (Box(width(grow=grow), height(PICTURE_TALL * talk_zoom(e) + 8px), Alignment.Start, padding(4px, 4px, 4px, 0px), attached_row(p, e)),)   # top, right, bottom, left
+  above = isempty(pictures) ? 0px : PICTURE_TALL * talk_zoom(e) + 8px
   # The button's box is as tall as the words' box. A Row leaves a child where it is when the alignment would move it 1.5px or less.
-  over = max(tall + 8px, 28px + drop) - 28px - drop
+  over = max(above + tall + 8px, 28px + drop) - 28px - drop
   doc = Box(width(grow=grow), height(tall), Alignment.Start, clip=true, node!(Document, sub, :document))
   who = pane_agent(p, e)
   empty = sub.buf.lines == [""]
@@ -50251,7 +50413,7 @@ pane_foot(p::AgentPane, e, room) = begin
   Box(width(grow=grow), padding(4px, PANE_X - 4px, slot ? 18px : PANE_X - 4px, PANE_X - 4px), name="Agent foot",
     Row(width(grow=grow), Alignment.End, padding(6px, right, 6px, left), radius(ends), child_gap=SEND_ROOM - 28px,   # top, right, bottom, left
         background(on_glass(0.07)), border(1px, :solid, on_glass(0.1)),
-      Box(width(grow=grow), padding(0px, 4px), text),   # one line of words is as tall as the button, or taller
+      Column(width(grow=grow), Alignment.Start, pictures..., Box(width(grow=grow), padding(0px, 4px), text)),   # one line of words is as tall as the button, or taller
       Box(padding(over, 0px, drop, 0px), pane_button(p, s !== nothing && s.busy && empty ? :stop : :send))))
 end
 
@@ -50281,6 +50443,10 @@ describe(b::PaneButton) = begin
   elseif b.action == :new
     Box(fixed(28px), height(28px), radius(6px), Alignment.Center, justify=Alignment.Center, name="New session", background(over ? on_glass(0.1) : clear),
       Icon("plus-lg", size=14px, color=colours.dim))
+  elseif b.action == :unattach
+    Box(fixed(20px), height(20px), radius(10px), Alignment.Center, justify=Alignment.Center, name="Take away",
+        background(over ? RGBA(0, 0, 0, 0.85) : RGBA(0, 0, 0, 0.6)),
+      Icon("x-lg", size=9px, color=RGBA(1, 1, 1, 1)))
   elseif b.action == :steps
     # A run of steps as one line. `what` is where the run starts and how many it holds, or 0 while they show.
     k, n = b.what
@@ -50344,6 +50510,7 @@ onkey(b::PaneButton, ev::KeyPress{Keys.mouse_left}) = begin
   b.action == :send && send_words!(p)
   b.action == :stop && s !== nothing && stop!(s)
   b.action == :new && new_session!(p)
+  b.action == :unattach && unattach!(p, b.what)
   b.action in (:allow, :refuse) && s !== nothing && answer!(s, b.what, b.action == :allow)
   b.action == :steps && (k = b.what[1]; k in p.open ? delete!(p.open, k) : push!(p.open, k))
   hide_tooltip!(ev.window)
@@ -50356,7 +50523,8 @@ onmouse(b::PaneButton, ev::MouseMove) = begin
   # The send button shows what goes with your words while the mouse is on it, so its tooltip says that they go together
   tip = b.action == :send ? (isempty(first(pane_context(b.of, editor(b.of)))) ? "Send  ⏎" : "Send with context  ⏎") :
         b.action == :stop ? "Stop the agent. What it changed so far stays." :
-        b.action == :new ? "End this session, and start a new one" : b.action == :agent ? "Choose the agent" : ""
+        b.action == :new ? "End this session, and start a new one" : b.action == :agent ? "Choose the agent" :
+        b.action == :unattach ? "Don't send this picture" : ""
   r = isempty(tip) ? nothing : rect(b)
   r === nothing || show_tooltip!(ev.window, tip_label(tip), r.left, r.top, r.width, r.height; placement=:bottom, gap=6px)
   nothing
@@ -50682,7 +50850,12 @@ talk_mark(kind, about=nothing) = TALK_MARK * kind * (about === nothing ? "" : " 
 talk_body(text) = join((occursin(r"^\\*<!-- ladder:", l) ? "\\" * l : l for l in split(text, '\n')), "\n")
 
 "The mark and the words of the part of a session's file that keeps `it`, something that a session holds"
-talk_part(it::YouSaid) = (talk_mark("you", isempty(it.about) ? nothing : Dict("about" => it.about)), it.words)
+talk_part(it::YouSaid) = begin
+  about = Dict{String,Any}()
+  isempty(it.about) || (about["about"] = it.about)
+  isempty(it.pictures) || (about["pictures"] = it.pictures)
+  (talk_mark("you", isempty(about) ? nothing : about), it.words)
+end
 talk_part(it::AgentReply) = (talk_mark("agent"), rstrip(it.text))
 talk_part(it::AgentStep) = (talk_mark("step", Dict("tool" => it.tool, "state" => String(it.state))), it.words)
 talk_part(it::AgentWants) = (talk_mark("asked", Dict("tool" => it.tool, "answer" => String(it.answer), "detail" => it.detail)), it.words)
@@ -50720,7 +50893,8 @@ read_talk(text::AbstractString) = begin
     if kind == "session"
       agent, folder, id = said("agent"), said("folder"), said("id")
     elseif kind == "you"
-      push!(items, YouSaid(words=words, about=said("about")))
+      pictures = json_field(about, "pictures")
+      push!(items, YouSaid(words=words, about=said("about"), pictures=pictures isa AbstractVector ? String[p for p in pictures if p isa AbstractString] : String[]))
     elseif kind == "agent"
       push!(items, AgentReply(text=words, whole=true, n=1))
     elseif kind == "step"

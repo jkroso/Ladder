@@ -9,6 +9,8 @@
 @use "../main" => K
 @use "github.com/jkroso/MiniFB.jl" Window KeyPress KeyRelease MouseMove Keys onkey onmouse Typed ontype
 @use "github.com/jkroso/UI.jl/Interface/draw" frame
+@use "github.com/jkroso/UI.jl/Interface/save" save_scene
+@use "github.com/jkroso/UI.jl/Interface/objc" libobjc cls sel msg nsstring
 const px = K.px
 
 const dir = realpath(mktempdir())
@@ -675,6 +677,90 @@ try
     frames()
     @test e.ai == "Claude" && pane.session === nothing
     K.TURN_COMMAND[] = nothing
+  end
+
+  @testset "A pasted picture goes with your words, and its button takes it away" begin
+    K.agent_mode(e) || (K.agent_mode!(e); frames(w, 3))
+    # ⌘V reads a clipboard that only this test uses
+    pb = K.Pasteboard.private_board()
+    K.Pasteboard.other[] = pb
+    put(kind, value::String) = (msg(pb, "clearContents"); ccall((:objc_msgSend, libobjc), Bool, (Ptr{Cvoid}, Ptr{Cvoid}, Ptr{Cvoid}, Ptr{Cvoid}), pb, sel("setString:forType:"), nsstring(value), nsstring(kind)))
+    put(kind, bytes::Vector{UInt8}) = begin
+      msg(pb, "clearContents")
+      data = ccall((:objc_msgSend, libobjc), Ptr{Cvoid}, (Ptr{Cvoid}, Ptr{Cvoid}, Ptr{UInt8}, UInt), cls("NSData"), sel("dataWithBytes:length:"), bytes, length(bytes))
+      ccall((:objc_msgSend, libobjc), Bool, (Ptr{Cvoid}, Ptr{Cvoid}, Ptr{Cvoid}, Ptr{Cvoid}), pb, sel("setData:forType:"), data, nsstring(kind))
+    end
+    kept = joinpath(dir, "kept pictures")
+    K.AGENT_PICTURES[] = kept
+    try
+      # A screenshot app's picture is a file in a folder of temporary files, which is where this test's folder is
+      shot = joinpath(dir, "Screenshot 1.png")
+      save_scene(shot, K.Row(K.width(160px), K.height(80px), K.background(K.colorant"rgb(60,120,200)")), (160px, 80px))
+      @test any(t -> startswith(shot, t), K.PASSING)
+      K.focus(pane.field); frames()
+      put("public.file-url", "file://" * replace(shot, " " => "%20"))
+      press(Keys.v, Keys.cmd)
+      @test K.attached(pane) == [joinpath(kept, "Screenshot 1.png")] && read(K.attached(pane)[1]) == read(shot) && pane.field.buf.lines == [""]
+      # It shows over the words, in the slot, at its own shape, with its button in its corner. The slot's ends stay as round.
+      foot, picture, x, send = named("Agent foot"), named("Picture"), named("Take away"), named("Send")
+      slot = foot.children[1]
+      @test picture !== nothing && picture.height == K.PICTURE_TALL && picture.width == 2K.PICTURE_TALL && picture.top > slot.top && picture.top + picture.height < send.top
+      # It starts where the words do
+      @test abs(K.num(picture.left - slot.children[1].left)) < 1
+      @test x !== nothing && abs(K.num(x.left + x.width - (picture.left + picture.width - 4px))) < 0.01 && abs(K.num(x.top - picture.top - 4px)) < 0.01
+      r = K.num(slot.from.radius.tl)
+      @test abs(K.num(slot.top + slot.height - (send.top + send.height / 2)) - r) < 0.5 && abs(K.num(slot.left + slot.width - (send.left + send.width / 2)) - r) < 0.5
+      # A picture that's copied as itself, like a screenshot that went to the clipboard, is written to a file
+      put("public.png", read(shot))
+      press(Keys.v, Keys.cmd)
+      @test length(K.attached(pane)) == 2 && startswith(basename(K.attached(pane)[2]), "pasted-") && dirname(K.attached(pane)[2]) == kept
+      # Its button takes it away, and the file that Ladder wrote for it
+      second = K.attached(pane)[2]
+      xs = [r for r in flat(K.rect(e)) if hasproperty(r.from, :name) && r.from.name == "Take away"]
+      @test length(xs) == 2
+      click(xs[2].left + 10px, xs[2].top + 10px)
+      @test K.attached(pane) == [joinpath(kept, "Screenshot 1.png")] && !isfile(second)
+      # A file that isn't a picture goes in as its path, and text as text
+      notes = joinpath(dir, "notes.txt"); write(notes, "x")
+      put("public.file-url", "file://" * notes)
+      press(Keys.v, Keys.cmd)
+      put("public.utf8-plain-text", " in it?")
+      press(Keys.v, Keys.cmd)
+      @test pane.field.buf.lines == [notes * " in it?"] && length(K.attached(pane)) == 1
+      # Claude gets the picture before your words, and the words say which file it's in
+      pane.field.buf.lines = ["What's in this?"]
+      n = length(heard_lines())
+      press(Keys.enter)
+      ok = until(() -> pane.session !== nothing && !pane.session.busy)
+      said = heard_lines()[n+1:end]
+      kept_shot = joinpath(kept, "Screenshot 1.png")
+      @test ok && length(said) == 1 && occursin("\"type\":\"image\"", said[1]) && occursin("\"media_type\":\"image/png\"", said[1]) &&
+            occursin(K.base64encode(read(shot)), said[1]) && occursin("What's in this?\\n\\nThe pictures with these words are also in these files:\\n$kept_shot", said[1])
+      @test isempty(K.attached(pane)) && isfile(kept_shot)
+      you = items()[findlast(it -> it isa K.YouSaid, items())]
+      @test you.pictures == [kept_shot] && you.words == "What's in this?"
+      frames(w, 3)
+      @test named("Your pictures") !== nothing && named("Picture") === nothing
+      # Only pictures, with no words, can go too
+      put("public.png", read(shot))
+      press(Keys.v, Keys.cmd)
+      press(Keys.enter)
+      ok = until(() -> !pane.session.busy)
+      @test ok && items()[findlast(it -> it isa K.YouSaid, items())].words == "" && occursin("\"type\":\"image\"", last(heard_lines()))
+      # A picture of a kind that Claude doesn't take goes as a PNG file, and one with too many bytes goes smaller
+      tiff = joinpath(dir, "shot.tiff")
+      run(pipeline(`sips -s format tiff $shot --out $tiff`, stdout=devnull))
+      @test endswith(K.sendable_picture(tiff), ".png") && K.sendable_picture(shot) == shot
+      @test K.picture_block(joinpath(dir, "none.png")) === nothing
+      # The file of a session keeps the pictures
+      s = pane.session
+      back = K.read_talk(K.talk_text(s))
+      kept_back = [it.pictures for it in back.items if it isa K.YouSaid]
+      @test kept_back[end-1:end] == [[kept_shot], items()[findlast(it -> it isa K.YouSaid, items())].pictures] && length(kept_back[end]) == 1
+    finally
+      K.Pasteboard.other[] = C_NULL
+      K.AGENT_PICTURES[] = ""
+    end
   end
 
   @testset "Closing the window ends the agent's program" begin
