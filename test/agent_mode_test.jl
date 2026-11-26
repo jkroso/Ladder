@@ -229,7 +229,7 @@ try
       <h1 style="margin:0">The shop <a href="#">#</a></h1><p style="height:200px">Words.</p>
       <h2>Paint</h2><div style="height:900px"></div>
       <h3>Colours</h3><div style="height:900px"></div>
-      <h2>Brushes</h2><div style="height:900px"></div>
+      <h2>Brushes</h2><p>Buy <b>soft</b> brushes for the walls.</p><div style="height:900px"></div>
       <h2> </h2>
       <h2>Done</h2><div style="height:900px"></div></body>""")
     eh = K.build_editor(html)
@@ -247,7 +247,7 @@ try
     words = [r.from.content for r in all_rects if hasproperty(r.from, :content)]
     @test "The shop" in words && "3 sections" in words
     # At the top of the page, the section in view is the page's title. The agent hears no caret: the page has none.
-    @test K.page_context(eh) == ("The shop", "<ladder>\nThe window shows the file $html.\nThe section in view is \"The shop\".\n</ladder>")
+    @test K.page_context(eh) == ("The shop", "<ladder>\nThe window shows the file $html.\nThe section in view is \"The shop\".\nNothing is selected.\n</ladder>")
     # A click on a heading puts it near the top of the window, and the outline marks it
     brushes = rows[3]
     at = K.rect(brushes)
@@ -256,7 +256,32 @@ try
     frames(wh, 3)
     top = K.html_outline(eh)[2][brushes.line]   # the page's title is the first of its headings
     @test abs(K.Browsers.scrolled(b) - (top - 24)) < 1 && brushes.now && !rows[1].now
-    @test K.page_context(eh) == ("Brushes", "<ladder>\nThe window shows the file $html.\nThe section in view is \"Brushes\".\n</ladder>")
+    @test K.page_context(eh) == ("Brushes", "<ladder>\nThe window shows the file $html.\nThe section in view is \"Brushes\".\nNothing is selected.\n</ladder>")
+    # Two clicks on a word select it, and the agent gets its exact text and the paragraph that holds it, as the page shows them
+    ws = K.Browsers.page_words(b)
+    t = String(reduce(vcat, [w.letters for w in ws]))
+    soft = length(SubString(t, 1, prevind(t, first(findfirst("soft", t)))))   # the place before "soft" in the page's words
+    spot(place) = (w = ws[K.Browsers.Select.words_at(ws, place)]; r = K.rect(b);
+                   (r.left + px(w.edges[place - w.from + 1] + 0.5), r.top + px(w.top + w.tall / 2 - K.Browsers.scrolled(b))))
+    hit((x, y)) = begin
+      wh.mouse = typeof(wh.mouse)(x, y)
+      onmouse(wh, MouseMove(wh.mouse, wh))
+      wh.keys |= Keys.mouse_left; onkey(wh, KeyPress{Keys.mouse_left}(0, wh))
+      wh.keys ⊻= Keys.mouse_left; onkey(wh, KeyRelease{Keys.mouse_left}(0, wh))
+    end
+    hit(spot(soft + 2)); hit(spot(soft + 2))
+    frames(wh, 2)
+    @test K.Browsers.selected_words(b) == "soft"
+    @test K.page_context(eh) == ("Brushes · selection", "<ladder>\nThe window shows the file $html.\nThe section in view is \"Brushes\".\n" *
+      "The selection's exact text:\n<selection>\nsoft\n</selection>\nIt's in this paragraph:\n<paragraph>\nBuy soft brushes for the walls.\n</paragraph>\n</ladder>")
+    # One click puts the caret there: the agent gets the words before it, and its paragraph
+    sleep(0.5)
+    hit(spot(soft))
+    frames(wh, 2)
+    @test K.Browsers.selected_words(b) == ""
+    @test endswith(K.page_context(eh)[2], "\nThe caret is where the user last clicked, after \"Buy\" in this paragraph:\n<paragraph>\nBuy soft brushes for the walls.\n</paragraph>\nNothing is selected.\n</ladder>")
+    # What the agent is told at the start says how to read these
+    @test occursin("<paragraph>", K.session_brief()) && occursin("where the user last clicked", K.session_brief())
     # The wheel moves the page on, and the outline follows it
     K.Browsers.scroll!(b, K.html_outline(eh)[2][rows[4].line] - 10)
     frames(wh, 3)
@@ -271,7 +296,7 @@ try
     frames(wh, 2)
     words = [r.from.content for r in flat(K.rect(eh)) if hasproperty(r.from, :content)]
     @test "Bare" in words && "No headings" in words
-    @test K.page_context(eh) == ("shop.html", "<ladder>\nThe window shows the file $html.\n</ladder>")
+    @test K.page_context(eh) == ("shop.html", "<ladder>\nThe window shows the file $html.\nNothing is selected.\n</ladder>")
     K.close_agent!(eh)
   end
 
