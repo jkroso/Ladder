@@ -624,7 +624,13 @@ load!(v::DesignView) = begin
 end
 
 "End SolidCraft's program for `v`. What wasn't saved is lost."
-close!(v::DesignView) = (v.model === nothing || Designs.close!(v.model); v.model = nothing; nothing)
+close!(v::DesignView) = begin
+  v.model === nothing || Designs.close!(v.model)
+  v.model = nothing
+  over = pop!(v.parts, :over, nothing)
+  over === nothing || GLs.drop!(over)
+  nothing
+end
 
 "True when the design has changes that aren't in its file"
 edited(v::DesignView) = v.model !== nothing && Designs.edited(v.model)
@@ -3566,7 +3572,8 @@ stage!(v::DesignView, share) = begin
     v.parts[:direct] = stage !== nothing
     v.stage = stage !== nothing ? stage : something(GLs.Stage(), false)
     v.parts[:stage_for] = share
-    delete!(v.parts, :over)
+    over = pop!(v.parts, :over, nothing)
+    over === nothing || GLs.drop!(over)
   end
   v.stage !== false && share != C_NULL && get(v.parts, :direct, false) === true
 end
@@ -3580,9 +3587,12 @@ caller lets go of the image when it has drawn it.
 lent_image(v::DesignView, g, w, h) = begin
   over = get(v.parts, :over, nothing)
   if over === nothing || over.size != (w, h)
-    fbo = GLs.over!(v.stage, over === nothing ? 0 : over.fbo)
-    fbo == 0 && return C_NULL
-    v.parts[:over] = over = (size=(w, h), fbo=fbo)
+    over = GLs.over!(v.stage, over)
+    if over === nothing
+      delete!(v.parts, :over)
+      return C_NULL
+    end
+    v.parts[:over] = over
   end
   info = Ref(Skia.gr_gl_framebufferinfo_t(over.fbo, 0x8058, false))   # 0x8058 is GL_RGBA8
   target = Skia.gr_backendrendertarget_new_gl(Cint(w), Cint(h), Cint(0), Cint(0), info)

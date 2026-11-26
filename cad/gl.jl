@@ -33,20 +33,44 @@ const GL = "/System/Library/Frameworks/OpenGL.framework/OpenGL"
 current() = ccall((:CGLGetCurrentContext, GL), Ptr{Cvoid}, ())
 setcurrent(c) = ccall((:CGLSetCurrentContext, GL), Int32, (Ptr{Cvoid},), c)
 
-# The OpenGL contexts of stages that Julia has freed. Julia can run a finalizer
-# in the middle of drawing the window, or on another thread, so the finalizer
-# only lists the context. `destroy_gone!` destroys it later, as web/gl.jl does.
+# The OpenGL contexts of stages that Julia has freed, and the framebuffers of
+# `over!` that are no longer needed, each with the context it was made in.
+# Julia can run a finalizer in the middle of drawing the window, or on another
+# thread, so the finalizer only lists what's gone. `destroy_gone!` frees it
+# later, as web/gl.jl does.
 const GONE = Ptr{Cvoid}[]
+const GONE_FBOS = Tuple{Ptr{Cvoid},UInt32}[]
 const GOING = Threads.SpinLock()
 
-"Destroy the contexts of the stages that Julia has freed, except one that's current"
+"Destroy the framebuffers and contexts that Julia has freed, each in its own context and never a context that's current"
 destroy_gone!() = begin
-  isempty(GONE) && return
+  isempty(GONE_FBOS) && isempty(GONE) && return
   lock(GOING)
+  fbos = copy(GONE_FBOS)
+  empty!(GONE_FBOS)
   gone = copy(GONE)
   empty!(GONE)
   unlock(GOING)
   now = current()
+  for (c, fbo) in fbos
+    if c == now
+      glDeleteFramebuffers(1, Ref(fbo))
+      if ccall((:CGLGetContextRetainCount, GL), UInt32, (Ptr{Cvoid},), c) > 1
+        ccall((:CGLReleaseContext, GL), Cvoid, (Ptr{Cvoid},), c)
+      else
+        push!(gone, c)
+      end
+    else
+      if setcurrent(c) == 0
+        try
+          glDeleteFramebuffers(1, Ref(fbo))
+        finally
+          setcurrent(now)
+        end
+      end
+      ccall((:CGLReleaseContext, GL), Cvoid, (Ptr{Cvoid},), c)
+    end
+  end
   for c in gone
     if c == now
       lock(GOING)
@@ -699,23 +723,78 @@ picture!(s::Stage, w::Int, h::Int, e::Eye, things, background; reach=1000.0, cut
   read ? s.pixels : nothing
 end
 
+"A framebuffer of another context that shows a stage's last picture: see `over!`."
+mutable struct Over
+  cgl::Ptr{Cvoid}
+  fbo::UInt32
+  size::Tuple{Int,Int}
+end
+
+"List `o`'s framebuffer to be deleted by `destroy_gone!`. Safe in a finalizer."
+retire!(o::Over) = begin
+  lock(GOING)
+  c, fbo = o.cgl, o.fbo
+  if fbo != 0 && c != C_NULL
+    push!(GONE_FBOS, (c, fbo))
+    o.cgl, o.fbo = C_NULL, UInt32(0)
+  end
+  unlock(GOING)
+  nothing
+end
+
+"Let go of `o`'s framebuffer and delete it now, in the context it was made in"
+drop!(o::Over) = (retire!(o); destroy_gone!(); nothing)
+
 """
 A framebuffer of the current context that has the stage's last picture, for
-a context that shares with the stage: see `Stage(share)`. `fbo` is the one
-that `over!` gave before, or 0 for none. Call it again when the picture
+a context that shares with the stage: see `Stage(share)`. `o` is the `Over`
+that `over!` gave before, or nothing for none. Call it again when the picture
 changes size, since a context sees a change that another made to a
 renderbuffer only when it's attached again. What's bound is bound again
 after, so Skia, which draws with the context, finds it as it left it.
 """
-over!(s::Stage, fbo=0) = begin
+over!(s::Stage, o::Union{Over,Nothing}=nothing) = begin
+  destroy_gone!()
+  now = current()
+  now == C_NULL && return nothing
+  if o !== nothing && o.cgl != now
+    drop!(o)
+    o = nothing
+  end
   draw, read = Ref{GLint}(0), Ref{GLint}(0)
   glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, draw)
   glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, read)
-  fbo == 0 && (fbo = made(glGenFramebuffers))
+  fbo = o === nothing || o.fbo == 0 ? made(glGenFramebuffers) : o.fbo
   glBindFramebuffer(GL_FRAMEBUFFER, fbo)
   glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, s.colour)
   complete = glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE
   glBindFramebuffer(GL_DRAW_FRAMEBUFFER, draw[])
   glBindFramebuffer(GL_READ_FRAMEBUFFER, read[])
-  complete ? fbo : (glDeleteFramebuffers(1, Ref(fbo)); UInt32(0))
+  if !complete
+    glDeleteFramebuffers(1, Ref(fbo))
+    if o !== nothing
+      o.fbo = UInt32(0)
+      c = o.cgl
+      o.cgl = C_NULL
+      if c != C_NULL
+        if ccall((:CGLGetContextRetainCount, GL), UInt32, (Ptr{Cvoid},), c) > 1
+          ccall((:CGLReleaseContext, GL), Cvoid, (Ptr{Cvoid},), c)
+        else
+          lock(GOING)
+          push!(GONE, c)
+          unlock(GOING)
+        end
+      end
+    end
+    return nothing
+  end
+  if o === nothing
+    ccall((:CGLRetainContext, GL), Ptr{Cvoid}, (Ptr{Cvoid},), now)
+    o = Over(now, fbo, (s.wide, s.high))
+    finalizer(retire!, o)
+  else
+    o.fbo = fbo
+    o.size = (s.wide, s.high)
+  end
+  o
 end
