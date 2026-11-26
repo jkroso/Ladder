@@ -34,7 +34,8 @@
 # seconds, and keeps the program in a folder of the Mac's caches. That needs
 # Swift, which comes with Xcode and its command line tools.
 
-@use "./map" => Maps
+@use "./swift" target programs kept!
+@use "./swift" => Swift
 @use "./web/select" => Select
 
 const SOURCE = joinpath(@__DIR__, "webpage.swift")
@@ -43,28 +44,12 @@ const SOURCE = joinpath(@__DIR__, "webpage.swift")
 const FAILED = "Ladder can't draw this email as it was sent."
 const NO_SWIFT = "Ladder needs Swift to draw an email as it was sent. It comes with Xcode's command line tools."
 
-"What the program is compiled for: this Mac's kind of processor, and macOS 26, as Ladder's other programs are"
-target() = "$(Sys.ARCH == :aarch64 ? "arm64" : "x86_64")-apple-macos26.0"
-
-"The folder of the Mac's caches that keeps the program that's compiled from the source"
-programs() = joinpath(homedir(), "Library", "Caches", "Ladder")
-
 """
 The command that runs the program with `args`. The program is compiled from
 the source, and kept in the folder `dir`. If it isn't compiled yet, the
 command compiles it first.
 """
-command(args; dir=programs()) = begin
-  # A change to the source makes a program of a new name
-  program = joinpath(dir, "webpage-program-" * string(hash(read(SOURCE)), base=16))
-  isfile(program) && return `$program $args`
-  mkpath(dir)
-  # A program compiled from older source isn't needed. One that's being compiled from this source now is left alone.
-  foreach(f -> startswith(f, "webpage-program-") && !startswith(f, basename(program)) && rm(joinpath(dir, f), force=true), readdir(dir))
-  # It's compiled to a name of this run's own and renamed once it's whole, so a program that's there is always whole
-  script = """swiftc -O -parse-as-library -target $(target()) "\$1" -o "\$2.\$\$" && mv "\$2.\$\$" "\$2" && p="\$2" && shift 2 && exec "\$p" "\$@" """
-  `sh -c $script sh $SOURCE $program $args`
-end
+command(args; dir=programs()) = Swift.command(SOURCE, "webpage-program-", args; dir)
 
 """
 Start the program that draws the HTML in the file `source` on a page `wide`
@@ -178,21 +163,19 @@ file(folder, html, wide, zoom, pictures) = joinpath(folder, string(hash((html, w
 
 """
 The pictures of `html` on a page `wide` px wide, kept in `folder`. `kept!` in
-map.jl says what the `state` is, and `shot(p.file)` reads what was made once
+swift.jl says what the `state` is, and `shot(p.file)` reads what was made once
 it's `:there`. `zoom` makes everything in the page that much bigger. With
 `pictures`, the page gets its pictures from the web. Without `start`, nothing
 is made that isn't kept already.
 """
 picture!(folder, html, wide; zoom=1.0, pictures=false, start=true) = begin
   out = file(folder, html, wide, zoom, pictures)
-  p = Maps.kept!(out; start) do part, err
+  kept!(out; start, failed=FAILED, no_swift=NO_SWIFT) do part, err
     stem = chopsuffix(out, ".txt")
     source = stem * ".html"
     write(source, html)
     HELPER[](source, wide, zoom, pictures, stem, part, err)
   end
-  # What's wrong is said in words about an email, not about a map
-  p.state == :failed ? merge(p, (problem=p.problem == Maps.NO_SWIFT ? NO_SWIFT : FAILED,)) : p
 end
 
 """

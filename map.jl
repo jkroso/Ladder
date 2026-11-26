@@ -44,7 +44,8 @@
 # which takes a few seconds, and keeps the program in a folder of the Mac's
 # caches. That needs Swift, which comes with Xcode and its command line tools.
 
-@use "github.com/jkroso/UI.jl/Interface/objc" cls msg nsstring jstring with_pool
+@use "./swift" target programs kept! settle! jobs RETRY Kept
+@use "./swift" => Swift
 @use Base64: base64encode
 @use Printf: @sprintf
 
@@ -54,7 +55,6 @@ const ZOOM = 15       # the zoom of a block that names none
 const ZOOMS = 3:19    # the least and the most that a block can ask for: a continent, and one building
 const TALL = 280      # how tall the picture of a map is, in px
 const SCALE = 2       # how many pixels of the picture's file go to a px, as map.swift has it
-const RETRY = 60      # seconds after the program fails before Ladder runs it again
 
 "A latitude and a longitude, in degrees"
 const LatLon = NTuple{2,Float64}
@@ -248,42 +248,17 @@ end
 const SOURCE = joinpath(@__DIR__, "map.swift")
 
 "The program in the Ladder app, or nothing when Ladder runs from its source"
-bundled() = begin
-  Sys.isapple() || return nothing
-  path = with_pool() do
-    jstring(msg(msg(cls("NSBundle"), "mainBundle"), "pathForAuxiliaryExecutable:", nsstring("map")))
-  end
-  isfile(path) ? path : nothing
-end
-
-"What the program is compiled for: this Mac's kind of processor, and macOS 26, the first whose MapKit finds an address"
-target() = "$(Sys.ARCH == :aarch64 ? "arm64" : "x86_64")-apple-macos26.0"
+bundled() = Swift.bundled("map")
 
 "Compile map.swift into the program at `out`. The app's build runs it."
-compile(out) = run(`swiftc -O -parse-as-library -target $(target()) $SOURCE -o $out`)
-
-"The folder of the Mac's caches that keeps the program that's compiled from the source"
-programs() = joinpath(homedir(), "Library", "Caches", "Ladder")
+compile(out) = Swift.compile(SOURCE, out)
 
 """
 The command that runs the program with `args`: the program in the app, or the
 one compiled from the source, which is kept in the folder `dir`. If that isn't
 compiled yet, the command compiles it first.
 """
-command(args; dir=programs()) = begin
-  app = bundled()
-  app === nothing || return `$app $args`
-  # A change to the source makes a program of a new name
-  program = joinpath(dir, "map-program-" * string(hash(read(SOURCE)), base=16))
-  isfile(program) && return `$program $args`
-  mkpath(dir)
-  # A program compiled from older source isn't needed. One that's being compiled from this source now is left alone.
-  foreach(f -> startswith(f, "map-program-") && !startswith(f, basename(program)) && rm(joinpath(dir, f), force=true), readdir(dir))
-  # It's compiled to a name of this run's own and renamed once it's whole. So a program that's there is always
-  # whole, also when two pictures are asked for at once and each compiles it.
-  script = """swiftc -O -parse-as-library -target $(target()) "\$1" -o "\$2.\$\$" && mv "\$2.\$\$" "\$2" && p="\$2" && shift 2 && exec "\$p" "\$@" """
-  `sh -c $script sh $SOURCE $program $args`
-end
+command(args; dir=programs()) = Swift.command(SOURCE, "map-program-", args; app="map", dir)
 
 """
 Start the program that makes the picture of the map whose middle is `centre`.
@@ -327,61 +302,11 @@ const OPENER = Ref{Any}(open_app)
 "Open the Maps app of the Mac at `place`"
 open_place(place::AbstractString) = try OPENER[](app_link(place)) catch; nothing end
 
-# What's known of each file that isn't kept yet, by the file: the program that makes it, the number that
-# the program ended with, or the state that it ended in with when that was and what to say
-const jobs = Dict{String,Any}()
-
 "What to say when Apple's maps have no such place"
 const LOST = "Ladder can't find this place. Check the address."
 "What to say when the picture can't be made for now"
 const FAILED = "Ladder can't get this map now."
 const NO_SWIFT = "Ladder needs Swift to make a map. It comes with Xcode's command line tools."
-
-"What `picture!` and `found!` give: the state of a file, the file, what to say when it can't be made, and in how many seconds to ask again"
-const Kept = @NamedTuple{state::Symbol, file::String, problem::String, wait::Float64}
-
-"""
-The state of the file `target`, which a program makes and Ladder keeps:
-
-- `:there` when the file is kept.
-- `:coming` while the program makes it. Ask again in `wait` seconds.
-- `:failed` for a minute after the program couldn't make it, as with no
-  network. Ladder tries again after that minute.
-- `:lost` when Apple's maps have no such place. Ladder doesn't try again.
-- `:none` when it isn't kept and, with `start=false`, it wasn't asked for.
-
-`problem` is what to tell the person when the state is `:failed` or `:lost`.
-`make(part, err)` starts the program, which writes the file to `part` and why
-it failed to `err`.
-"""
-kept!(make, target; start=true) = begin
-  got(state, problem="", wait=Inf) = (state=state, file=target, problem=problem, wait=Float64(wait))
-  settle!()
-  isfile(target) && return got(:there)
-  job = get(jobs, target, nothing)
-  job isa Base.Process && return got(:coming, "", 0.2)
-  if job isa Integer
-    job = jobs[target] = finish!(target, job)
-    isfile(target) && (delete!(jobs, target); return got(:there))
-  end
-  if job isa Tuple
-    state, when, problem = job
-    state == :lost && return got(:lost, problem)
-    left = RETRY - (time() - when)
-    (left > 0 || !start) && return got(:failed, problem, left > 0 ? left : Inf)
-  end
-  start || return got(:none)
-  part, err = target * ".part", target * ".err"
-  jobs[target] = try
-    mkpath(dirname(target))
-    foreach(f -> rm(f, force=true), (part, err))
-    make(part, err)
-  catch
-    1
-  end
-  # A function that has made the file already has it kept in the same call
-  jobs[target] isa Base.Process ? got(:coming, "", 0.2) : kept!(make, target, start=false)
-end
 
 """
 The picture of the map whose middle is the latitude and the longitude
@@ -389,7 +314,7 @@ The picture of the map whose middle is the latitude and the longitude
 says what its `state` is.
 """
 picture!(folder, centre, zoom, wide, tall, dark; start=true) =
-  kept!(file(folder, centre, zoom, wide, tall, dark); start) do part, err
+  kept!(file(folder, centre, zoom, wide, tall, dark); start, failed=FAILED, lost=LOST, no_swift=NO_SWIFT) do part, err
     HELPER[](rounded(centre), zoom, wide, tall, dark, part, err)
   end
 
@@ -399,48 +324,11 @@ address of a latitude and a longitude. `kept!` says what its `state` is, and
 `facts(f.file)` reads it once it's there. A place is asked for once, however
 many pictures show it.
 """
-found!(folder, place; start=true) = kept!((part, err) -> FINDER[](place, part, err), place_file(folder, place); start)
-
-"""
-Keep the file of each program that has finished, whichever file is asked for
-now. So a picture is kept though its block asks for another by then, as when
-the + is clicked twice.
-"""
-settle!() = for (target, job) in collect(jobs)
-  (job isa Base.Process && process_exited(job)) || continue
-  # A program that was stopped didn't make the file, whatever number it ended with
-  done = finish!(target, success(job) ? 0 : max(1, job.exitcode))
-  done[1] == :there ? delete!(jobs, target) : (jobs[target] = done)
-end
-
-"""
-The program that makes the file `target` ended with `code`. Keep the file, or
-note why there's none. It gives the state, when that was, and what to say.
-"""
-finish!(target, code) = begin
-  part, err = target * ".part", target * ".err"
-  state = try
-    if code == 0 && isfile(part) && filesize(part) > 0
-      mv(part, target, force=true)
-      (:there, time(), "")
-    elseif code == 2
-      (:lost, time(), LOST)
-    else
-      (:failed, time(), code == 127 ? NO_SWIFT : FAILED)
-    end
-  catch
-    (:failed, time(), FAILED)
-  end
-  foreach(f -> rm(f, force=true), (part, err))
-  state
-end
+found!(folder, place; start=true) =
+  kept!((part, err) -> FINDER[](place, part, err), place_file(folder, place); start, failed=FAILED, lost=LOST, no_swift=NO_SWIFT)
 
 """
 The file `target` turned out not to hold what it should, as a picture that
 was cut short. Take it away, so that Ladder makes it again in a minute.
 """
-spoiled!(target) = begin
-  rm(target, force=true)
-  jobs[target] = (:failed, time(), FAILED)
-  nothing
-end
+spoiled!(target) = Swift.spoiled!(target; failed=FAILED)

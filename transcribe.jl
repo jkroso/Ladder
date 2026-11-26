@@ -19,45 +19,23 @@
 # which takes a few seconds, and keeps the program in a folder of the Mac's
 # caches. That needs Swift, which comes with Xcode and its command line tools.
 
-@use "github.com/jkroso/UI.jl/Interface/objc" cls msg nsstring jstring with_pool
+@use "./swift" target programs
+@use "./swift" => Swift
 
 const SOURCE = joinpath(@__DIR__, "transcribe.swift")
 
 "The program in the Ladder app, or nothing when Ladder runs from its source"
-bundled() = begin
-  Sys.isapple() || return nothing
-  path = with_pool() do
-    jstring(msg(msg(cls("NSBundle"), "mainBundle"), "pathForAuxiliaryExecutable:", nsstring("transcribe")))
-  end
-  isfile(path) ? path : nothing
-end
-
-"What the program is compiled for: this Mac's kind of processor, and macOS 26, the first that has SpeechAnalyzer"
-target() = "$(Sys.ARCH == :aarch64 ? "arm64" : "x86_64")-apple-macos26.0"
+bundled() = Swift.bundled("transcribe")
 
 "Compile transcribe.swift into the program at `out`. The app's build runs it."
-compile(out) = run(`swiftc -O -parse-as-library -target $(target()) $SOURCE -o $out`)
+compile(out) = Swift.compile(SOURCE, out)
 
 """
 The command that transcribes `file`: the program in the app, or the one compiled
 from the source. If that isn't compiled yet, the command compiles it first.
 `flags` go to the program before the file, like "--times".
 """
-command(file, flags::String...) = begin
-  args = [flags..., file]
-  app = bundled()
-  app === nothing || return `$app $args`
-  dir = joinpath(homedir(), "Library", "Caches", "Ladder")
-  # A change to the source makes a program of a new name
-  program = joinpath(dir, "transcribe-" * string(hash(read(SOURCE)), base=16))
-  isfile(program) && return `$program $args`
-  mkpath(dir)
-  # A program compiled from older source isn't needed
-  foreach(f -> startswith(f, "transcribe-") && rm(joinpath(dir, f), force=true), readdir(dir))
-  # It's compiled to another name and renamed once it's whole, so a program that's there is always whole
-  script = """swiftc -O -parse-as-library -target $(target()) "\$1" -o "\$2.part" && mv "\$2.part" "\$2" && p="\$2" && shift 2 && exec "\$p" "\$@" """
-  `sh -c $script sh $SOURCE $program $args`
-end
+command(file, flags::String...) = Swift.command(SOURCE, "transcribe-", [flags..., file]; app="transcribe")
 
 mutable struct Transcription
   file::String
