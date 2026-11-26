@@ -554,6 +554,8 @@ You can change the page. Click where you want the caret, and type. A click on a 
 
 When you go to a page that the browser folder has already, the file shows at once, and Ladder asks the server for the page. If you haven't changed the file, what the server sends takes its place. If you have, your changes stay, and Ladder asks you whether to show what the site has now, when it has something new. The command Reload Page asks the server again, and asks you first if you changed the page.
 
+The browser folder has a globe for its icon. Open it, and its page is a desktop of your favourite sites, on your Mac's wallpaper, in place of its folders and files. To add a site, click the star in the top bar of one of its pages. The star fills in, and a click on it again takes the site off. Each site has the icon that it gives a phone's home screen, or its small icon on a white tile, with its name under it. Click an icon twice to go to its site. Drag the icons where you want them, as on any desktop. Right-click a site to copy its address or take it off. Ladder keeps the sites as links in `Favourites.md`, at the top of the browser folder. Right-click the wallpaper and choose Edit Favourites to change their names there.
+
 In a page of your own, a click on a link to an address that ends in `.md` shows that page in Ladder. Any other web address opens in your browser.
 
 ## Views of other files

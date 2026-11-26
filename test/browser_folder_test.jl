@@ -177,5 +177,66 @@ end
   @test e.buf.path == at("example.com/docs/index.md") && "https://example.com/docs/" in asked[n+1:end]
 end
 
+"The words of each Text in the geometry `node`"
+texts(node, out=String[]) = begin
+  node isa K.Text ? push!(out, node.content) : node isa K.GeometricUI && foreach(n -> texts(n, out), node.children)
+  out
+end
+
+@testset "the browser folder is a desktop of your favourite sites" begin
+  # The desktop looks the same on each Mac that runs the tests. The Mac's desktop is sorted by kind, which a site hasn't.
+  K.Desks.looker[] = () -> K.Desks.Look(order=:kind)
+  K.Desks.papers[] = () -> ""
+  K.FINDER_LOOK[] = (0.0, K.Desks.Look())
+  K.WALLPAPER[] = (0.0, "", nothing)
+  favourites = at("Favourites.md")
+  # The folder has a globe for its icon. The folder of each site in it is a plain folder.
+  @test K.found_kind(browser) == K.BrowserDirectory && K.entry_icon(K.FS.get(K.FSPath(browser))) == "globe"
+  @test K.FS.get(K.FSPath(at("example.com"))) isa K.FS.Directory
+  # The page of favourites at the top of the folder is a page of your own, not of a site
+  @test !K.in_browser(favourites) && K.in_browser(at("example.com/docs/index.md")) && K.in_browser(at("example.com"))
+
+  # A page from the web has an empty star in the top bar. A click on it makes the page a favourite, named by its heading.
+  K.show_path!(e, at("example.com/docs/index.md")); frames()
+  star() = only(K.favourite_bar(e))
+  @test star().icon == "star" && K.works_here(e, Val(:add_to_favourites)) && !K.works_here(e, Val(:remove_from_favourites))
+  K.BUTTONS[:favourite].run(e); frames()
+  @test K.Sites.list(favourites) == [K.Sites.Site("Docs", "https://example.com/docs/")]
+  @test star().icon == "star-fill" && !K.works_here(e, Val(:add_to_favourites)) && K.works_here(e, Val(:remove_from_favourites))
+  # A page of your own has no star
+  K.show_path!(e, favourites); frames()
+  @test isempty(K.favourite_bar(e))
+
+  # The folder's page is a desktop with an icon for the site. Without a picture of the site's icon, its tile has its first letter.
+  write(favourites, read(favourites, String) * "- [Guide](https://example.com/docs/guide.html)\n")
+  K.open_folder!(e, browser); frames()
+  v = e.nodes[(:desktop, browser)]
+  @test v isa K.SitesView && e.buf.path == browser
+  @test v.names == ["Docs", "Guide"] && v.sites["Guide"] == "https://example.com/docs/guide.html"
+  words = texts(K.describe(v))
+  @test "Docs" in words && "D" in words && "Guide" in words && "G" in words
+  # Sorted by name, as a site has no kind
+  @test K.desktop_look(v).order == :name && v.spots["Docs"][2] < v.spots["Guide"][2]
+  # An icon dropped on another one doesn't go into it, though the site's name is a folder's
+  @test !K.takes_drops(v, "Docs")
+
+  # Two clicks, or Return, go to the site
+  K.desktop_enter!(v, "Guide"); frames()
+  guide = e.buf.path
+  @test K.web_address(guide) == "https://example.com/docs/guide.html"
+  # ⌘⌫ takes a site off. The page of favourites keeps its other lines.
+  K.open_folder!(e, browser); frames()
+  v = e.nodes[(:desktop, browser)]
+  K.desktop_remove!(v, ["Docs"]); frames()
+  @test v.names == ["Guide"] && occursin("# Favourites", read(favourites, String))
+  # Remove from Favourites on the page itself takes it off too
+  K.show_path!(e, guide); frames()
+  K.remove_from_favourites!(e); frames()
+  @test isempty(K.Sites.list(favourites)) && only(K.favourite_bar(e)).icon == "star"
+  # With no favourites, the desktop says how to add one
+  K.open_folder!(e, browser); frames()
+  @test "Your favourite sites show here." in texts(K.describe(e.nodes[(:desktop, browser)]))
+end
+
 K.PAGE_GETTER[], K.BROWSER[] = was_getter, was_browser
 K.BROWSER_FOLDER[] = ""

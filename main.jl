@@ -424,6 +424,7 @@ end
 @use "./folders" => Folders
 @use "./blog" => Blogs
 @use "./news" => News
+@use "./sites" => Sites
 @use "./feeds" => Feeds
 @use "github.com/jkroso/UI.jl/Interface/draw" Bubble
 @use "github.com/jkroso/UI.jl/Interface/draw" popups sync_mouse! popup_at tab!
@@ -45939,8 +45940,15 @@ const BROWSER_FOLDER = Ref("")
 "The folder that keeps each page and file that Ladder gets from the web, at its place on its site"
 browser_folder() = isempty(BROWSER_FOLDER[]) ? joinpath(home_folder(), "Browser") : BROWSER_FOLDER[]
 
-"True when `path` is a file or a folder in the browser folder"
-in_browser(path::AbstractString) = !isempty(path) && startswith(path, browser_folder() * "/")
+"""
+True when `path` is a file or a folder in the browser folder, of a site. A file
+at the top of the folder, like Favourites.md, is of no site: it's a page of your own.
+"""
+in_browser(path::AbstractString) = begin
+  root = browser_folder() * "/"
+  (!isempty(path) && startswith(path, root)) || return false
+  occursin('/', SubString(path, ncodeunits(root) + 1)) || isdir(path)
+end
 
 """
 The file of the browser folder that keeps what's at `address`, or nothing when
@@ -51485,8 +51493,17 @@ page_view(e, d::DesktopDirectory) = desktop!(e, string(d.path))
 page_fills(e, ::DesktopDirectory) = true
 page_covers(e, ::DesktopDirectory) = true
 
+"""
+A page of icons on a wallpaper, as the Mac's desktop is. Each kind has the same
+fields as `DesktopView`, and methods for what its icons are and do:
+`desktop_names`, `icon_face`, `desktop_open!`, `desktop_enter!`,
+`desktop_remove!`, `takes_drops`, `desktop_menu!` and `icon_menu!`. The rest, like
+where each icon goes, a drag and the arrow keys, is the same for each kind.
+"""
+abstract type AbstractDesktop <: SemanticUI end
+
 "What the page shows of a folder that's a desktop"
-@def mutable struct DesktopView <: SemanticUI
+@def mutable struct DesktopView <: AbstractDesktop
   path::String = ""
   names::Vector{String} = String[]                 # the folders and files that have an icon, as the folder was last read
   read::Float64 = 0.0                              # when it was read
@@ -51539,6 +51556,9 @@ desktop_look(dir) = begin
   Desks.look(desktop_kept(dir), FINDER_LOOK[][2])
 end
 
+"How the icons of the desktop `v` look"
+desktop_look(v::DesktopView) = desktop_look(v.path)
+
 "The key of the picture of the Mac's wallpaper, or nothing when macOS names none. macOS is asked again after 3 seconds, so a new wallpaper shows here too."
 wallpaper_key() = begin
   at, file, key = WALLPAPER[]
@@ -51563,7 +51583,7 @@ desktop_names(e, v::DesktopView) = begin
 end
 
 "Read the folder of the desktop `v` again, a second after it was last read. An icon whose file left is no longer chosen, and its place is forgotten."
-desktop_read!(e, v::DesktopView) = begin
+desktop_read!(e, v::AbstractDesktop) = begin
   time() - v.read < 1 && v.read > Folders.changed() && return
   v.read = time()
   v.names = desktop_names(e, v)
@@ -51633,20 +51653,26 @@ name_line(s, look, chosen) = begin
     chosen ? white : Stack([Box(offset_x=px(x), offset_y=px(y), words(RGBA(0, 0, 0, dark))) for (x, y, dark) in NAME_SHADOWS]..., white))
 end
 
-"The icon of the folder or the file called `name` on the desktop `v`, with its middle at `at`"
-desktop_icon(v::DesktopView, e, look, name, at, budget) = begin
+"""
+The picture of the icon of the folder or the file called `name` on the desktop
+`v`, as big as `look` says. `budget` is how many more pictures this frame can make.
+"""
+icon_face(e, v::DesktopView, name, look, budget) = begin
+  path = joinpath(v.path, name)
+  side = look.icon
+  key = desktop_picture(e, path, look, budget)
+  key === nothing && return Icon(isdir(path) ? "folder-fill" : "file-earmark-fill", size=px(0.8side), color=RGBA(1, 1, 1, 0.9))   # the Finder's picture isn't made yet, or this isn't a Mac
+  shape = image_aspect(key)
+  Image(key, fixed(px(shape >= 1 ? side : side * shape)), height(px(shape >= 1 ? side / shape : side)))
+end
+
+"The icon called `name` on the desktop `v`, with its middle at `at`"
+desktop_icon(v::AbstractDesktop, e, look, name, at, budget) = begin
   path = joinpath(v.path, name)
   side = look.icon
   chosen = name in v.chosen
   x, y = v.dragging && chosen ? at .+ v.moved : at
-  key = desktop_picture(e, path, look, budget)
-  face = if key === nothing
-    # The Finder's picture isn't made yet, or this isn't a Mac
-    Icon(isdir(path) ? "folder-fill" : "file-earmark-fill", size=px(0.8side), color=RGBA(1, 1, 1, 0.9))
-  else
-    shape = image_aspect(key)
-    Image(key, fixed(px(shape >= 1 ? side : side * shape)), height(px(shape >= 1 ? side / shape : side)))
-  end
+  face = icon_face(e, v, name, look, budget)
   box = side + 2ICON_PAD
   picture = Box(fixed(px(box)), height(px(box)), radius(7px), (chosen || name == v.over ? (background(DESKTOP_SHADE),) : ())..., face)
   wide = Desks.cell(look)[1] - 4
@@ -51668,19 +51694,19 @@ wallpaper_part(w, h) = begin
 end
 
 "The box that a drag from the wallpaper draws, as its left, top, right and bottom, or nothing"
-desktop_band(v::DesktopView) = begin
+desktop_band(v::AbstractDesktop) = begin
   p = v.press
   (p === nothing || !isempty(p.name) || v.moved == (0.0, 0.0)) && return nothing
   a, b = p.at, p.at .+ v.moved
   (min(a[1], b[1]), min(a[2], b[2]), max(a[1], b[1]), max(a[2], b[2]))
 end
 
-describe(v::DesktopView) = begin
+describe(v::AbstractDesktop) = begin
   e = editor(v)
   win = window_of(e)
   w, h = num.(page_room(e))
   v.area = (w, h)
-  look = desktop_look(v.path)
+  look = desktop_look(v)
   desktop_read!(e, v)
   # The button can come up where the window doesn't hear it, like over a menu
   v.press === nothing || win === nothing || Keys.mouse_left in win.keys || drop!(v)
@@ -51692,22 +51718,26 @@ describe(v::DesktopView) = begin
   band = desktop_band(v)
   Stack(fixed(px(w)), height(px(h)), Alignment.Start, clip=true, name="Desktop",
     wallpaper_part(w, h),
+    (isempty(v.names) ? desktop_note(v, w, h) : ())...,
     [desktop_icon(v, e, look, n, v.spots[n], budget) for n in order]...,
     (band === nothing ? () : (Box(fixed(px(band[3] - band[1])), height(px(band[4] - band[2])), offset_x=px(band[1]), offset_y=px(band[2]),
                                   background(RGBA(1, 1, 1, 0.16)), border(1px, :solid, RGBA(1, 1, 1, 0.65))),))...)
 end
 
-cursor(::DesktopView) = :arrow
+cursor(::AbstractDesktop) = :arrow
+
+"What the desktop `v` shows in its middle when it has no icons: nodes, or `()`. A folder's desktop shows only its wallpaper."
+desktop_note(v::AbstractDesktop, w, h) = ()
 
 "Where `pos`, a place in the window, is on the desktop `v`, from the desktop's top left corner. It's nothing until the desktop has been drawn."
-desktop_at(v::DesktopView, pos) = begin
+desktop_at(v::AbstractDesktop, pos) = begin
   r = rect(v)
   r === nothing ? nothing : (num(pos[1]) - num(r.left), num(pos[2]) - num(r.top))
 end
 
 "The name of the icon of the desktop `v` that's at `at`, on its picture or on its name, or nothing. `but` are names to pass over."
-icon_at(v::DesktopView, at; but=()) = begin
-  look = desktop_look(v.path)
+icon_at(v::AbstractDesktop, at; but=()) = begin
+  look = desktop_look(v)
   half = look.icon / 2 + ICON_PAD
   for name in reverse(v.names)
     name in but && continue
@@ -51722,12 +51752,22 @@ icon_at(v::DesktopView, at; but=()) = begin
 end
 
 "Give the keyboard to the desktop that the page shows, or to the text when it shows none"
-focus_desktop!(e) = (v = get(e.nodes, (:desktop, e.buf.path), nothing); v isa DesktopView ? focus(v) : focus(e))
+focus_desktop!(e) = (v = get(e.nodes, (:desktop, e.buf.path), nothing); v isa AbstractDesktop ? focus(v) : focus(e))
 
 "Open the icon called `name` of the desktop `v` in the page, as the Finder does: a file shows its page, and a folder its own page or a list of what's in it"
 desktop_open!(v::DesktopView, name) = (open_folder!(editor(v), joinpath(v.path, name)); nothing)
 
-onkey(v::DesktopView, ev::KeyPress{Keys.mouse_left}) = begin
+"What Return does to the icon called `name` of the desktop `v`, when it's the one that's chosen: it renames its file, as in the Finder"
+desktop_enter!(v::DesktopView, name) = rename!(editor(v), joinpath(v.path, name), at=:desktop)
+
+"What ⌘⌫ does to the icons of the desktop `v` that are called `names`: their files go to the Trash"
+desktop_remove!(v::DesktopView, names) = desktop_trash!(v, names)
+
+"True when icons that are dropped on the icon called `name` of the desktop `v` go into it, as they go into a folder"
+takes_drops(v::DesktopView, name) = isdir(joinpath(v.path, name))
+takes_drops(::AbstractDesktop, name) = false
+
+onkey(v::AbstractDesktop, ev::KeyPress{Keys.mouse_left}) = begin
   w = ev.window
   at = desktop_at(v, w.mouse)
   at === nothing && return handled
@@ -51760,7 +51800,7 @@ onkey(v::DesktopView, ev::KeyPress{Keys.mouse_left}) = begin
 end
 
 # Each move of a drag comes here, since the button went down on the desktop
-onmouse(v::DesktopView, ev::MouseMove) = begin
+onmouse(v::AbstractDesktop, ev::MouseMove) = begin
   p = v.press
   (p === nothing || !(Keys.mouse_left in ev.window.keys)) && return nothing
   at = desktop_at(v, ev.position)
@@ -51769,32 +51809,32 @@ onmouse(v::DesktopView, ev::MouseMove) = begin
   if isempty(p.name)
     # A drag from the wallpaper chooses the icons that its box touches, with the ones that ⌘ kept
     l, t, r, b = something(desktop_band(v), (at..., at...))
-    half = desktop_look(v.path).icon / 2
+    half = desktop_look(v).icon / 2
     touched = [n for (n, s) in v.spots if s[1] + half >= l && s[1] - half <= r && s[2] + half >= t && s[2] - half <= b]
     v.chosen = union(p.more ? p.before : Set{String}(), touched)
   elseif v.dragging || hypot(v.moved...) > 4
     v.dragging = true
     under = icon_at(v, at, but=v.chosen)
-    v.over = under !== nothing && isdir(joinpath(v.path, under)) ? under : ""
+    v.over = under !== nothing && takes_drops(v, under) ? under : ""
   end
   redraw_in!(v, 0)
   handled
 end
 
-onkey(v::DesktopView, ::KeyRelease{Keys.mouse_left}) = (drop!(v); handled)
+onkey(v::AbstractDesktop, ::KeyRelease{Keys.mouse_left}) = (drop!(v); handled)
 
 """
 End the drag of the desktop `v`. Icons that were dropped on a folder go into
 it. On a desktop that nothing sorts, the others stay where they were dropped,
 and Ladder keeps their places. A sorted desktop puts them back.
 """
-drop!(v::DesktopView) = begin
+drop!(v::AbstractDesktop) = begin
   p = v.press
   p === nothing && return
   e = editor(v)
   v.press = nothing
   if v.dragging
-    look = desktop_look(v.path)
+    look = desktop_look(v)
     if !isempty(v.over)
       into = joinpath(v.path, v.over)
       for name in collect(v.chosen)
@@ -51855,7 +51895,7 @@ desktop_sort(dir) = begin
 end
 
 "Keep each icon of the desktop `v` where it is now, so that it stays there when nothing sorts the desktop"
-desktop_freeze!(v::DesktopView) = begin
+desktop_freeze!(v::AbstractDesktop) = begin
   k = desktop_kept(v.path)
   foreach(((name, at),) -> k.places[name] = Desks.share(at, v.area), v.spots)
   k
@@ -51866,11 +51906,11 @@ Sort the desktop `v` as `choice` says, one of `DESKTOP_SORTS`. With None or
 Snap to Grid the icons stay where the last order put them, as they do in the
 Finder, and from then on each stays where you put it.
 """
-desktop_sort!(v::DesktopView, choice) = begin
+desktop_sort!(v::AbstractDesktop, choice) = begin
   e = editor(v)
   k = desktop_kept(v.path)
   if choice in ("None", "Snap to Grid")
-    desktop_look(v.path).order == :none || desktop_freeze!(v)
+    desktop_look(v).order == :none || desktop_freeze!(v)
     k.order, k.snap = :none, choice == "Snap to Grid"
   elseif haskey(DESKTOP_ORDERS, choice)
     k.order = DESKTOP_ORDERS[choice]
@@ -51883,9 +51923,9 @@ Put the icons of the desktop `v` in the cells of the grid, once. With an
 `order`, they fill the grid in that order. Without one, each goes to the cell
 that's nearest to it, or to the first free cell when another icon has that one.
 """
-desktop_clean!(v::DesktopView, order=nothing) = begin
+desktop_clean!(v::AbstractDesktop, order=nothing) = begin
   e = editor(v)
-  look = desktop_look(v.path)
+  look = desktop_look(v)
   look.order == :none || return
   k = desktop_kept(v.path)
   g = Desks.grid(v.area, look)
@@ -51911,7 +51951,7 @@ desktop_new!(v::DesktopView, kind::Symbol, at) = begin
   e = editor(v)
   path = kind == :folder ? free_path(e, v.path, "Untitled") : free_path(e, v.path, "Untitled", ".md")
   try kind == :folder ? mkdir(path) : touch(path) catch; return end   # the disk said no
-  look = desktop_look(v.path)
+  look = desktop_look(v)
   if look.order == :none
     Desks.place!(desktop_kept(v.path), basename(path), at, v.area, look)
     desktop_keep!(e, v.path)
@@ -51943,7 +51983,7 @@ desktop_menu!(v::DesktopView, w, at) = begin
   end
   # The way that the desktop is sorted now has a tick. A sorted desktop has nothing to clean up, as in the Finder.
   ticked = [(sorts, findfirst(==(desktop_sort(v.path)), DESKTOP_SORTS))]
-  off = desktop_look(v.path).order == :none ? Int[] : [cleans - 1, cleans]
+  off = desktop_look(v).order == :none ? Int[] : [cleans - 1, cleans]
   system_menu(w, DESKTOP_MENU, act; off, ticked) || drawn_menu!(w, DESKTOP_MENU, act; off, ticked)
   nothing
 end
@@ -51977,7 +52017,7 @@ desktop_trash!(v::DesktopView, names) = begin
   nothing
 end
 
-onkey(v::DesktopView, ev::KeyPress{Keys.mouse_right}) = begin
+onkey(v::AbstractDesktop, ev::KeyPress{Keys.mouse_right}) = begin
   w = ev.window
   at = desktop_at(v, w.mouse)
   at === nothing && return handled
@@ -51998,11 +52038,11 @@ Choose the icon of the desktop `v` that's nearest to the chosen one in the
 direction (`dx`, `dy`), as an arrow key does. With no icon chosen, it's the
 first one of the desktop's order.
 """
-desktop_step!(v::DesktopView, dx, dy) = begin
+desktop_step!(v::AbstractDesktop, dx, dy) = begin
   isempty(v.names) && return
   from = length(v.chosen) == 1 ? get(v.spots, only(v.chosen), nothing) : nothing
   if from === nothing
-    look = desktop_look(v.path)
+    look = desktop_look(v)
     v.chosen = Set([first(look.order == :none ? sort(v.names, by=n -> (-v.spots[n][1], v.spots[n][2])) : Desks.sorted(v.path, v.names, look.order))])
     return
   end
@@ -52019,7 +52059,7 @@ desktop_step!(v::DesktopView, dx, dy) = begin
   nothing
 end
 
-onkey(v::DesktopView, ev::KeyPress{K}) where K = begin
+onkey(v::AbstractDesktop, ev::KeyPress{K}) where K = begin
   w = ev.window
   e = editor(v)
   cmd, none = only_held(w, Keys.cmd), unmodified(w)
@@ -52027,11 +52067,11 @@ onkey(v::DesktopView, ev::KeyPress{K}) where K = begin
   if K == Keys.down && cmd
     foreach(n -> desktop_open!(v, n), names)
   elseif K in (Keys.backspace, Keys.delete) && cmd
-    desktop_trash!(v, names)
+    desktop_remove!(v, names)
   elseif K == Keys.a && cmd
     v.chosen = Set(v.names)
   elseif K == Keys.enter && none && length(names) == 1
-    rename!(e, joinpath(v.path, only(names)), at=:desktop)
+    desktop_enter!(v, only(names))
   elseif none && K in (Keys.left, Keys.right, Keys.up, Keys.down)
     desktop_step!(v, (K == Keys.right) - (K == Keys.left), (K == Keys.down) - (K == Keys.up))
   else
@@ -52040,6 +52080,290 @@ onkey(v::DesktopView, ev::KeyPress{K}) where K = begin
   redraw_in!(v, 0)
   handled
 end
+
+# --- the browser folder: a desktop of your favourite sites ------------------------------------
+#
+# The browser folder, ~/Browser, has a globe for its icon, and its page is a
+# desktop of the sites that you chose as favourites, in place of its folders
+# and files. Each site is an icon on the Mac's wallpaper, with its name under
+# it. The icon is the one that the site has for a phone's home screen, or else
+# the small one that its pages name, on a white tile. A site with neither has
+# the first letter of its name, on a tile of a colour of its own.
+#
+# The star in the top bar of a page from the web makes the page a favourite,
+# and a click on the full star takes it off. Add to Favourites and Remove from
+# Favourites in the command palette do the same. Ladder keeps the favourites
+# in a page of your own, Favourites.md at the top of the browser folder, so you
+# can change their names and their order there: see sites.jl. Edit Favourites,
+# in the menu of the desktop, shows that page.
+#
+# The icons are laid out, chosen and dragged as on any desktop. Sort By has
+# only None, Snap to Grid and Name, since a site has no kind, size or date. Two
+# clicks on an icon, or Return, go to the site in the window. ⌘⌫, and Remove
+# from Favourites in an icon's menu, take a site off the list.
+
+"The browser folder, whose page is a desktop of your favourite sites. The folder of each site in it is of the kind that it would be anywhere else."
+@def struct BrowserDirectory <: AbstractDirectory end
+FS.kind(::BrowserDirectory, path::FSPath) = folder_kind(path)
+
+push!(BLOCK_ICONS, "globe", "star", "star-fill")
+entry_icon(::BrowserDirectory) = "globe"
+
+"A click on the browser folder in the sidebar shows its desktop in the page, and the sidebar lists what it holds"
+open!(e, d::BrowserDirectory; record=true) = (open!(e, string(d.path); record); go_folder!(e, string(d.path)))
+
+page_view(e, d::BrowserDirectory) = (path = string(d.path); node!(() -> SitesView(path=path), e, (:desktop, path)))
+page_fills(e, ::BrowserDirectory) = true
+page_covers(e, ::BrowserDirectory) = true
+
+"The page that keeps your favourite sites"
+favourites_file() = joinpath(browser_folder(), Sites.NAME)
+
+"What the page shows of the browser folder: an icon for each favourite site, on the Mac's wallpaper. It has the fields of a `DesktopView`."
+@def mutable struct SitesView <: AbstractDesktop
+  path::String = ""
+  names::Vector{String} = String[]                 # the names of the sites, as Favourites.md was last read
+  read::Float64 = 0.0
+  area::NTuple{2,Float64} = (0.0, 0.0)
+  spots::Dict{String,NTuple{2,Float64}} = Dict{String,NTuple{2,Float64}}()
+  chosen::Set{String} = Set{String}()
+  press::Any = nothing
+  moved::NTuple{2,Float64} = (0.0, 0.0)
+  dragging::Bool = false
+  over::String = ""
+  clicked::Tuple{Float64,String} = (0.0, "")
+  sites::Dict{String,String} = Dict{String,String}()   # the web address of each site, by its name
+end
+
+"The names of the favourite sites, in the order of Favourites.md. The view `v` keeps the address of each."
+desktop_names(e, v::SitesView) = begin
+  sites = Sites.list(favourites_file())
+  v.sites = Dict(s.name => s.address for s in sites)
+  String[s.name for s in sites]
+end
+
+"""
+How the icons of the sites look: as on the Mac's desktop. A site has no kind,
+size or date, so a desktop of sites that the Mac's desktop would sort by one
+of those is sorted by name.
+"""
+desktop_look(v::SitesView) = begin
+  l = desktop_look(v.path)
+  l.order in (:none, :name) ? l : Desks.Look(order=:name, snap=l.snap, icon=l.icon, gap=l.gap, text=l.text, previews=l.previews)
+end
+
+"The picture of each site's icon that Ladder has found, by the address of the site's home page"
+const SITE_PICTURES = Dict{String,String}()
+
+"""
+The key of the picture of the icon of the site of `address`, or nothing while
+Ladder has none. It's the site's icon for a phone's home screen,
+apple-touch-icon.png, when the site has one: it's big and sharp. Else it's the
+icon that the site's home page names, or its favicon.ico. Ladder gets each
+once, and keeps it with the pictures of the link cards.
+"""
+site_picture(e, address) = begin
+  Cards.isaddress(address) || return nothing
+  home = Cards.origin(address) * "/"
+  kept = get(SITE_PICTURES, home, nothing)
+  kept === nothing || return kept
+  ask = online(e)
+  file, coming = Cards.picture!(home * "apple-touch-icon.png", cards_dir(); ask)
+  big = file === nothing ? nothing : picture_key(file)
+  big === nothing || return (SITE_PICTURES[home] = big)
+  card, reading = Cards.lookup!(home, cards_dir(); ask)
+  file, getting = Cards.picture!(isempty(card.icon) ? home * "favicon.ico" : card.icon, cards_dir(); ask)
+  (coming || reading || getting) && redraw_in!(e, 0.2)   # look again soon
+  small = file === nothing ? nothing : picture_key(file)
+  # The small icon shows until Ladder knows that the site has no big one
+  small === nothing || coming || (SITE_PICTURES[home] = small)
+  small
+end
+
+"The colours of the tiles of the sites that have no icon. A site has the same one each time, by its name."
+const SITE_TILES = (RGBA(0.89, 0.33, 0.27, 1.0), RGBA(0.95, 0.58, 0.18, 1.0), RGBA(0.31, 0.65, 0.35, 1.0), RGBA(0.16, 0.6, 0.65, 1.0),
+                    RGBA(0.23, 0.47, 0.85, 1.0), RGBA(0.48, 0.36, 0.8, 1.0), RGBA(0.82, 0.32, 0.56, 1.0), RGBA(0.45, 0.47, 0.5, 1.0))
+
+"The tile of the site called `name`: its icon on white, or the first letter of its name on a colour of its own"
+icon_face(e, v::SitesView, name, look, budget) = begin
+  side = look.icon
+  key = site_picture(e, get(v.sites, name, ""))
+  corner = px(0.22side)
+  tile(colour, part) = Box(fixed(px(side)), height(px(side)), radius(corner), Alignment.Center, justify=Alignment.Center, clip=true, background(colour), part)
+  if key === nothing
+    colour = SITE_TILES[mod(Int(hash(Sites.host(get(v.sites, name, name))) % 1024), length(SITE_TILES)) + 1]
+    # A Box of its own keeps the letter as wide as it is, so it's in the tile's middle
+    return tile(colour, Box(label(uppercase(string(first(name))), px(0.45side), color=RGBA(1, 1, 1, 1), weight="Semibold")))
+  end
+  src = image_source(key)
+  shape = src.width / max(src.height, 1)
+  # An icon that's sharp at the tile's size fills it. A small one is in its middle, at half the size.
+  fill = min(src.width, src.height) >= 1.5side
+  room = fill ? side : side / 2
+  # The tile's clip is square, so an icon that fills it rounds its own corners
+  tile(RGBA(1, 1, 1, 1), Image(key, fixed(px(shape >= 1 ? room : room * shape)), height(px(shape >= 1 ? room / shape : room)), (fill ? (radius(corner),) : ())...))
+end
+
+"With no favourite sites, the desktop says how to add one"
+desktop_note(v::SitesView, w, h) =
+  (Box(fixed(px(w)), height(px(h)), Alignment.Center, justify=Alignment.Center, name="Note",
+     Column(Alignment.Center, padding(18px, 12px), radius(10px), child_gap=6px, background(RGBA(0, 0, 0, 0.45)),
+       Box(label("Your favourite sites show here.", 15px, color=RGBA(1, 1, 1, 1), weight="Semibold")),
+       Box(label("To add a site, click the star in the top bar of one of its pages.", 13px, color=RGBA(1, 1, 1, 0.85))))),)
+
+"Go to the site called `name` of the desktop `v`, in the window. What isn't a page of Markdown or HTML opens in your browser, as a link does."
+desktop_open!(v::SitesView, name) = begin
+  address = get(v.sites, name, "")
+  isempty(address) || get_page!(editor(v), address, else_browser=true)
+  nothing
+end
+
+"Return goes to the chosen site"
+desktop_enter!(v::SitesView, name) = desktop_open!(v, name)
+
+"⌘⌫ takes the chosen sites off the favourites"
+desktop_remove!(v::SitesView, names) = begin
+  e = editor(v)
+  foreach(n -> haskey(v.sites, n) && Sites.remove!(favourites_file(), v.sites[n]), names)
+  sites_changed!()
+  e.buf.path == v.path && focus(v)
+  nothing
+end
+
+"Draw each window again, as Favourites.md changed"
+sites_changed!() = foreach(o -> redraw_in!(o, 0), editors)
+
+"""
+Read the names of the favourite sites again. `Sites.list` reads Favourites.md
+only when it has changed, so this is on each frame, and a change there shows
+at once. A site that went is no longer chosen, and its place is forgotten.
+"""
+desktop_read!(e, v::SitesView) = begin
+  names = desktop_names(e, v)
+  names == v.names && return
+  v.names = names
+  intersect!(v.chosen, names)
+  k = desktop_kept(v.path)
+  isempty(names) || (Desks.prune!(k, names) && desktop_keep!(e, v.path))
+  nothing
+end
+
+"Show Favourites.md, where you change the names and the order of the favourite sites. Ladder makes it when it isn't there."
+edit_favourites!(e) = begin
+  file = favourites_file()
+  isfile(file) || try mkpath(dirname(file)); write(file, Sites.TOP) catch; return e end
+  show_path!(e, file)
+end
+
+# The menu of the wallpaper of the desktop of sites
+const SITES_SORTS = ["None", "Snap to Grid", "-", "Name"]
+const SITES_MENU = Any["Edit Favourites", "-", "Sort By" => SITES_SORTS, "Clean Up", "Clean Up By Name", "-", "Change Wallpaper…", "Show in Finder"]
+
+"Show the menu of the desktop of sites `v`, for a right-click on its wallpaper"
+desktop_menu!(v::SitesView, w, at) = begin
+  e = editor(v)
+  look = desktop_look(v)
+  act(i, j=0) = begin
+    name = SITES_MENU[i] isa Pair ? first(SITES_MENU[i]) : SITES_MENU[i]
+    name == "Edit Favourites" ? (edit_favourites!(e); nothing) :
+    name == "Sort By" ? desktop_sort!(v, get(SITES_SORTS, j, "")) :
+    name == "Clean Up" ? desktop_clean!(v) :
+    name == "Clean Up By Name" ? desktop_clean!(v, :name) :
+    name == "Change Wallpaper…" ? (open_url(WALLPAPER_SETTINGS); nothing) :
+    name == "Show in Finder" ? show_in_finder(v.path) : nothing
+  end
+  sorts = findfirst(x -> x isa Pair, SITES_MENU)
+  now = look.order == :none ? (look.snap ? "Snap to Grid" : "None") : "Name"
+  ticked = [(sorts, findfirst(==(now), SITES_SORTS))]
+  # A sorted desktop has nothing to clean up, as in the Finder
+  off = look.order == :none ? Int[] : [sorts + 1, sorts + 2]
+  system_menu(w, SITES_MENU, act; off, ticked) || drawn_menu!(w, SITES_MENU, act; off, ticked)
+  nothing
+end
+
+"Show the menu of the site called `name` of the desktop `v`. When more than one site is chosen, the menu is for them all."
+icon_menu!(v::SitesView, w, name) = begin
+  e = editor(v)
+  names = sort!(collect(v.chosen))
+  items = length(names) > 1 ? ["Open", "-", "Remove from Favourites"] : ["Open", "Copy Address", "-", "Remove from Favourites"]
+  act(i) = begin
+    item = get(items, i, "")
+    item == "Open" ? foreach(n -> desktop_open!(v, n), names) :
+    item == "Copy Address" ? copy_text!(e, get(v.sites, name, "")) :
+    item == "Remove from Favourites" ? desktop_remove!(v, names) : nothing
+    nothing
+  end
+  system_menu(w, items, act) || drawn_menu!(w, items, act)
+  nothing
+end
+
+"""
+The name that a favourite gets for the page from the web that `e` shows. A
+site's home page gives the name of its site, when it says one, and any other
+page its title. Else it's the page's first heading, or the name of its computer.
+"""
+favourite_name(e) = begin
+  path, address = e.buf.path, web_address(e.buf.path)
+  if lowercase(splitext(path)[2]) in HTMLS
+    c = try Cards.card(read(path), address) catch; Cards.Card(address) end
+    home = Cards.path(address) in ("", "/")
+    name = home && !isempty(c.site) ? c.site : c.title
+    isempty(name) || return name
+  end
+  for line in e.buf.lines[1:min(end, 60)]
+    m = match(r"^(?:title:\s*|#\s+)(\S.*?)\s*$", line)
+    m === nothing || return String(strip(m[1], ['"', '\'']))
+  end
+  Sites.host(address)
+end
+
+"True when the page from the web that `e` shows is a favourite"
+is_favourite(e) = in_browser(e.buf.path) && Sites.isfavourite(favourites_file(), web_address(e.buf.path))
+
+"""
+Add to Favourites: put the page from the web that shows on the desktop of the
+browser folder, with its title for its name. Ladder writes it at the end of
+Favourites.md.
+"""
+add_to_favourites!(e) = begin
+  in_browser(e.buf.path) || return e
+  address, name = web_address(e.buf.path), favourite_name(e)
+  added = try Sites.add!(favourites_file(), name, address) catch; false end
+  sites_changed!()
+  say_result!(e, added ? "$name is a favourite now. It shows in the browser folder." : "This page is a favourite already.")
+end
+
+"Remove from Favourites: take the page from the web that shows off the desktop of the browser folder"
+remove_from_favourites!(e) = begin
+  in_browser(e.buf.path) || return e
+  gone = try Sites.remove!(favourites_file(), web_address(e.buf.path)) catch; false end
+  sites_changed!()
+  gone ? say_result!(e, "This page isn't a favourite now.") : e
+end
+
+works_here(e, ::Val{:add_to_favourites}) = in_browser(e.buf.path) && !is_favourite(e)
+works_here(e, ::Val{:remove_from_favourites}) = is_favourite(e)
+add_command!(add_to_favourites!, title="Put the page from the web that shows on the browser folder's desktop of favourite sites", kind=:look)
+add_command!(remove_from_favourites!, title="Take the page from the web that shows off the browser folder's desktop of favourite sites", kind=:look)
+
+"""
+The star in the top bar of a page from the web. It's full while the page is a
+favourite, and a click takes it off. While it's empty, a click makes the page
+a favourite.
+"""
+favourite_bar(e) = begin
+  in_browser(e.buf.path) || return ()
+  b = button(e, :favourite, "star")
+  b.icon = is_favourite(e) ? "star-fill" : "star"
+  (b,)
+end
+BAR_PARTS[:favourite] = favourite_bar
+BUTTONS[:favourite] = (
+  run=e -> is_favourite(e) ? remove_from_favourites!(e) : add_to_favourites!(e),
+  tip=e -> is_favourite(e) ? "A favourite site. Click to take it off the browser folder's desktop" :
+                             "Click to put this page on the browser folder's desktop of favourite sites",
+  off=e -> false,
+  strong=false)
 
 # --- the kinds of folder that Ladder finds by itself ----------------------------------------
 #
@@ -52053,6 +52377,7 @@ end
 #   - the Mac's Downloads folder, its Pictures folder, the folder that it saves
 #     screenshots to and its Trash each have a kind: see "the Mac's own folders"
 #   - ~/News is a folder of news: see "a folder of news"
+#   - ~/Browser is the browser folder, with a globe for its icon: see "the browser folder"
 #
 # A kind that code gave the folder by its path comes first, and then the kind
 # that the folder's own page gives it. So a page still makes any of these
@@ -52066,6 +52391,7 @@ found_kind(path::AbstractString) = begin
   k = get(PLACE_KINDS, path, nothing)
   k === nothing || return k
   path == news_folder() && return NewsDirectory
+  path == browser_folder() && return BrowserDirectory
   k = mac_kind(path)
   k === nothing || return k
   # Obsidian keeps its settings for a folder of notes in a folder of this name. A folder
