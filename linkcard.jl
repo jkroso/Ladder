@@ -17,6 +17,7 @@
 # picture's and the icon's. It draws nothing.
 
 @use "./web/entities" entities latin LATIN_NAMES
+@use "./web/fetch" => Webfetch
 @use "./web/url" resolve site_name
 
 """
@@ -230,8 +231,6 @@ const PICTURE_BYTES = 8_000_000   # a picture that's bigger than this isn't kept
 const SECONDS = 20                # how long a page or a picture can take to come
 const RETRY = 300.0               # seconds after a page couldn't be had before Ladder asks for it again
 const SOON = 10.0                 # and after the first time, because a site that's busy says no for a moment
-# Many sites give a page only to a program that says it's a browser
-const AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
 
 """
 Start to get what's at the web address `url` into `file`, and no more than its
@@ -240,9 +239,7 @@ first `most` bytes. It gives a function that's true once that has ended.
 moved, gives up after `SECONDS`, and writes nothing when the site says no.
 """
 curl(url, file, most) = begin
-  ask = `curl --silent --fail --location --max-redirs 5 --proto =http,https --proto-redir =http,https --compressed
-              --connect-timeout 10 --max-time $SECONDS --user-agent $AGENT -- $url`
-  job = run(pipeline(pipeline(ask, stderr=devnull), pipeline(`head -c $most`, stdout=file, stderr=devnull)), wait=false)
+  job = Webfetch.start(url, file; redirs=5, seconds=SECONDS, most)
   () -> process_exited(job)
 end
 

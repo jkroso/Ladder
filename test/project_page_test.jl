@@ -163,7 +163,7 @@ if Sys.isapple() && Sys.which("ffmpeg") !== nothing
     @test lost isa K.MediaNote && lost.words == "Downloading the sound…"
     # The two parts of the video share one download. It asks for the address with its ? and without its #.
     @test length(calls("later.mov")) == 1
-    @test endswith(only(calls("later.mov")), "--continue-at - --output $(K.media_file("$site/media/later.mov")).part $site/media/later.mov?key=ab12")
+    @test endswith(only(calls("later.mov")), "--continue-at - --output $(K.media_file("$site/media/later.mov")).part -- $site/media/later.mov?key=ab12")
     # What `curl` has got so far isn't played
     write(K.media_file("$site/media/later.mov") * ".part", "half")
     frames()

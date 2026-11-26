@@ -30,6 +30,7 @@
 #     label("https://example.com/a/b.md")        # "example.com/a/b.md", for the top bar
 
 @use "./web/files" => Webfiles
+@use "./web/fetch" => Webfetch
 @use "./web/url" resolve
 
 "What Ladder says it wants from a server: Markdown first, then plain text, then anything"
@@ -165,10 +166,8 @@ It gives a function that's true once that has ended. A server's page that
 says what went wrong, like one for 404, is got too: the number says so.
 """
 curl(address, file, about) = begin
-  ask = `curl --silent --location --max-redirs 8 --proto =http,https --proto-redir =http,https --compressed
-              --connect-timeout 10 --max-time $SECONDS --max-filesize $BIGGEST --user-agent $(Webfiles.AGENT)
-              --header $("Accept: " * ACCEPT) --output $file --write-out "%{url_effective}\n%{content_type}\n%{http_code}\n" -- $address`
-  job = run(pipeline(ask, stdout=about, stderr=devnull), wait=false)
+  job = Webfetch.start(address, file; fail=false, seconds=SECONDS, biggest=BIGGEST, headers=["Accept: " * ACCEPT], about,
+                       write_out=["%{url_effective}", "%{content_type}", "%{http_code}"])
   () -> process_exited(job)
 end
 
