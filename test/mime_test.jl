@@ -427,6 +427,13 @@ end
   @test md("<html><head><title>T</title><style>p{color:red}</style></head><body><script>if (a < b) alert('<p>')</script>" *
            "<!-- a <b>comment</b> -->shown<div style=\"DISPLAY: none\">hidden <div>deep</div></div><span hidden>no</span>" *
            "<p style=\"max-height:0px;overflow:hidden\">no</p><span class=\"preheader\">no</span><![if !mso]> yes<![endif]></body></html>") == ["shown yes"]
+  # Short comments, self-closing raw tags, fallback elements, raw iframes and CDATA
+  @test md("<!-->shown<!---> too") == ["shown too"]
+  @test md("<html><head><title/></head><body><p>Hello</p></body></html>") == ["Hello"]
+  @test md("<script src=\"a.js\"/>Hello</script>") == ["Hello"]
+  @test md("shown<noframes><p>no</p></noframes><noembed><p>no</p></noembed>") == ["shown"]
+  @test md("<iframe><iframe src=\"x\"></iframe>after") == ["after"] && M.markdown("<iframe>fallback") == ""
+  @test md("<p><![CDATA[a > b]]></p><svg><![CDATA[no]]></svg>") == ["a > b"]
   # Tables: one that puts things beside each other becomes its cells. The short cells of a row go on one line,
   # with a — between two of them, whether or not the row was closed and whatever boxes the cells' words are in.
   @test md("<table><tr><td>Total</td><td>\$45.00</td></tr><tr><td>Tax<td>\$4.50<tr><td><p>A</p></td><td><p>B</p></td></tr></table>") ==
@@ -520,7 +527,8 @@ const GMAIL_REPLY = """
 end
 
 @testset "HTML that breaks the rules" begin
-  for html in ("<", "<<<>>>", "<p", "<a href=", "<a href=\"x", "</", "</p", "<!--", "<!-- x", "<![CDATA[", "&", "&#;", "&#x;", "<b><i>cross</b></i>",
+  for html in ("<", "<<<>>>", "<p", "<a href=", "<a href=\"x", "</", "</p", "<!--", "<!-- x", "<![CDATA[", "<!doctype é", "<script>x</script é",
+               "&", "&#;", "&#x;", "<b><i>cross</b></i>",
                "</div></div>text", "<table><td>no row", "<ul><ul><ul>", "<pre>open", "<pre><b>x</pre></b>", "<style>never closed", "<script>x",
                "<td>a</table></td>", "<img>", "<img src=cid:>", "<a><a><a>", "<p =x>", "<p a=b=c 'q'>t", "<blockquote><li><pre><h1>x", "\0<b>\0</b>",
                "<o:p/><v:shape/>text", "<h9>big</h9>", "<table><th>only", "<table><tr><th>a<th>b<tr><td><table><tr><td>in</table>")

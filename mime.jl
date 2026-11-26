@@ -42,6 +42,7 @@
 @use Base64: base64encode
 @use Dates: Dates, DateTime
 @use "./web/entities" entities latin LATIN_NAMES
+@use "./web/dom" Token RAW tokens
 
 "One part of an email, or a whole email"
 struct Part
@@ -516,115 +517,6 @@ stamp(seconds::Real) = replace(Libc.strftime("%-d %b %Y, %-I:%M %p", seconds), "
 # see it becomes a link with those words, and one without is left out. So a
 # picture that tells the sender you opened the email never loads.
 
-"A tag or a run of text of a page of HTML"
-struct Token
-  kind::Symbol                 # :text, :open or :close
-  name::String                 # of a tag, in lower case
-  attrs::Dict{String,String}
-  text::String                 # of a run of text, with each name like &amp; as its character
-  empty::Bool                  # the tag closes itself: <o:p/>
-end
-
-const NO_ATTRS = Dict{String,String}()
-
-iswhite(b::UInt8) = b == SPACE || b == TAB || b == LF || b == CR || b == 0x0c
-
-"""
-What a tag says after its name, from byte `i` of `html`: each `name=value`, with the names in lower
-case. It also gives where the tag ends, and whether the tag closes itself.
-"""
-attributes(html, i) = begin
-  attrs = Dict{String,String}()
-  b = codeunits(html)
-  n = length(b)
-  empty = false
-  while i <= n
-    if iswhite(b[i])
-      i += 1
-    elseif b[i] == UInt8('/')
-      empty = true
-      i += 1
-    elseif b[i] == UInt8('>')
-      return (attrs, i + 1, empty)
-    else
-      empty = false
-      j = i
-      while j <= n && !iswhite(b[j]) && b[j] != UInt8('=') && b[j] != UInt8('>') && b[j] != UInt8('/')
-        j += 1
-      end
-      if j == i   # an = with no name
-        i += 1
-        continue
-      end
-      name = lowercase(String(b[i:j-1]))
-      i = j
-      while i <= n && iswhite(b[i])
-        i += 1
-      end
-      value = ""
-      if i <= n && b[i] == UInt8('=')
-        i += 1
-        while i <= n && iswhite(b[i])
-          i += 1
-        end
-        if i <= n && (b[i] == UInt8('"') || b[i] == UInt8('\''))
-          j = something(findnext(==(b[i]), b, i + 1), n + 1)
-          value = String(b[i+1:j-1])
-          i = j + 1
-        else
-          j = i
-          while j <= n && !iswhite(b[j]) && b[j] != UInt8('>')
-            j += 1
-          end
-          value = String(b[i:j-1])
-          i = j
-        end
-      end
-      haskey(attrs, name) || (attrs[name] = entities(value))
-    end
-  end
-  (attrs, n + 1, empty)
-end
-
-# What's in these isn't the page's text, and a < in it starts no tag
-const UNREAD = ("script", "style", "title", "textarea", "xmp")
-
-"The tags and the runs of text of a page of HTML. Comments are left out, and so is what's in a script or a style."
-tokens(html::String) = begin
-  out = Token[]
-  i, n = 1, ncodeunits(html)
-  say(a, b) = a <= b && push!(out, Token(:text, "", NO_ATTRS, entities(SubString(html, a, thisind(html, b))), false))
-  while i <= n
-    lt = findnext('<', html, i)
-    lt === nothing && (say(i, n); break)
-    say(i, lt - 1)
-    rest = SubString(html, lt)
-    if startswith(rest, "<!--")
-      close = findnext("-->", html, lt + 4)
-      i = close === nothing ? n + 1 : last(close) + 1
-    elseif startswith(rest, "<!") || startswith(rest, "<?")
-      gt = findnext('>', html, lt)
-      i = gt === nothing ? n + 1 : gt + 1
-    elseif (m = match(r"^</([A-Za-z][^\s/>]*)[^>]*>?", rest)) !== nothing
-      push!(out, Token(:close, lowercase(m[1]), NO_ATTRS, "", false))
-      i = lt + ncodeunits(m.match)
-    elseif (m = match(r"^<([A-Za-z][^\s/>]*)", rest)) !== nothing
-      name = lowercase(m[1])
-      attrs, i, empty = attributes(html, lt + ncodeunits(m.match))
-      if name in UNREAD
-        close = findnext(Regex("</$name\\b[^>]*>?", "i"), html, min(i, n + 1))
-        i = close === nothing ? n + 1 : last(close) + 1
-      else
-        push!(out, Token(:open, name, attrs, "", empty))
-      end
-    else
-      push!(out, Token(:text, "", NO_ATTRS, "<", false))
-      i = lt + 1
-    end
-  end
-  out
-end
-
 "A run of text of a line, and how it's drawn"
 struct Seg
   text::String
@@ -668,7 +560,7 @@ Writer(picture, alts=false) = Writer(String[], Seg[], Open[], false, false, 0, n
 
 const VOID = Set(["area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"])
 # What's in these isn't the text of an email
-const SKIPPED = Set(["head", "noscript", "template", "svg", "math", "select", "object", "iframe", "audio", "video", "canvas", "map", "datalist"])
+const SKIPPED = Set(["head", "noscript", "template", "svg", "math", "select", "object", "audio", "video", "canvas", "map", "datalist", RAW...])
 # A line ends before and after each of these
 const LINES = Set(["div", "section", "article", "header", "footer", "main", "aside", "nav", "center", "form", "fieldset", "figure",
                    "figcaption", "address", "dl", "dt", "dd", "tbody", "thead", "tfoot", "caption", "details", "summary", "tr", "li"])
@@ -695,7 +587,7 @@ matching(toks, i) = begin
   name, depth = toks[i].name, 1
   for j in i+1:length(toks)
     toks[j].name == name || continue
-    depth += toks[j].kind == :open ? !toks[j].empty : toks[j].kind == :close ? -1 : 0
+    depth += toks[j].kind == :open ? !toks[j].closed : toks[j].kind == :close ? -1 : 0
     depth == 0 && return j
   end
   0
@@ -946,7 +838,7 @@ open!(w::Writer, toks, i) = begin
   t = toks[i]
   name = t.name
   if name in SKIPPED || hidden(t)
-    name in VOID && return i
+    (name in VOID || (t.closed && name in RAW)) && return i
     j = matching(toks, i)
     return j == 0 ? i : j
   end
@@ -961,7 +853,7 @@ open!(w::Writer, toks, i) = begin
     gap!(w)
   elseif name == "img"
     picture!(w, t)
-  elseif !(name in VOID || (t.empty && occursin(':', name)))
+  elseif !(name in VOID || (t.closed && occursin(':', name)))
     if name == "table"
       found = datatable(w, toks, i)
       if found !== nothing
@@ -1106,7 +998,7 @@ written(toks, picture; alts=false) = begin
   i = 1
   while i <= length(toks)
     t = toks[i]
-    t.kind == :text ? say!(w, t.text) : t.kind == :open ? (i = open!(w, toks, i)) : close!(w, t.name)
+    t.kind == :text ? say!(w, t.text) : t.kind == :open ? (i = open!(w, toks, i)) : t.kind == :close ? close!(w, t.name) : nothing
     i += 1
   end
   flush!(w)

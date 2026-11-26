@@ -158,7 +158,7 @@ tokens(html::String) = begin
     elseif startswith(rest, "<!") || startswith(rest, "<?")
       gt = findnext('>', html, lt)
       stop = gt === nothing ? n : gt
-      occursin(r"^<!doctype"i, rest) && push!(out, Token(:doctype, "", NO_ATTRS, html[lt:stop]))
+      occursin(r"^<!doctype"i, rest) && push!(out, Token(:doctype, "", NO_ATTRS, html[lt:thisind(html, stop)]))
       i = stop + 1
     elseif (m = match(r"^</([A-Za-z][^\s/>]*)[^>]*>?", rest)) !== nothing
       push!(out, Token(:close, lowercase(m[1]), NO_ATTRS, ""))
@@ -172,7 +172,7 @@ tokens(html::String) = begin
         stop = close === nothing ? n + 1 : first(close)
         i <= stop - 1 && push!(out, Token(:text, "", NO_ATTRS, html[i:prevind(html, stop)]))
         push!(out, Token(:close, name, NO_ATTRS, ""))
-        i = close === nothing ? n + 1 : last(close) + 1
+        i = close === nothing ? n + 1 : nextind(html, last(close))
       end
     else
       push!(out, Token(:text, "", NO_ATTRS, "<"))
