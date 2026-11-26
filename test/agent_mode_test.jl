@@ -221,6 +221,60 @@ try
     @test [r.title for r in rows] == ["Paint", "Brushes", "Done"] && rows[1].folded
   end
 
+  @testset "The outline of an HTML file lists the headings of its page, and the agent is told the one in view" begin
+    html = joinpath(dir, "shop.html")
+    write(html, """<!DOCTYPE html><title>Our shop</title>
+      <body style="margin:0;font:16px/20px Helvetica">
+      <h2 style="position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden">Skip to the words</h2>
+      <h1 style="margin:0">The shop <a href="#">#</a></h1><p style="height:200px">Words.</p>
+      <h2>Paint</h2><div style="height:900px"></div>
+      <h3>Colours</h3><div style="height:900px"></div>
+      <h2>Brushes</h2><div style="height:900px"></div>
+      <h2> </h2>
+      <h2>Done</h2><div style="height:900px"></div></body>""")
+    eh = K.build_editor(html)
+    wh = Window(eh, size=(900px, 700px))
+    frames(wh, 3)
+    K.agent_mode!(eh)
+    frames(wh, 3)
+    @test K.html_shown(eh) && K.agent_shows(eh)
+    b = eh.nodes[(:html, html)].browser
+    all_rects = flat(K.rect(eh))
+    rows = [r.from.from for r in all_rects if hasproperty(r.from, :from) && r.from.from isa K.OutlineRow]
+    # A heading as small as a dot and one with no words are left out, and so is the # that links to a heading
+    @test [r.title for r in rows] == ["Paint", "Colours", "Brushes", "Done"]
+    @test [r.depth for r in rows] == [0, 1, 0, 0] && rows[1].opens
+    words = [r.from.content for r in all_rects if hasproperty(r.from, :content)]
+    @test "The shop" in words && "3 sections" in words
+    # At the top of the page, the section in view is the page's title. The agent hears no caret: the page has none.
+    @test K.page_context(eh) == ("The shop", "<ladder>\nThe window shows the file $html.\nThe section in view is \"The shop\".\n</ladder>")
+    # A click on a heading puts it near the top of the window, and the outline marks it
+    brushes = rows[3]
+    at = K.rect(brushes)
+    wh.mouse = typeof(wh.mouse)(at.left + at.width - 20px, at.top + at.height / 2)
+    onkey(wh, KeyPress{Keys.mouse_left}(0, wh))
+    frames(wh, 3)
+    top = K.html_outline(eh)[2][brushes.line]   # the page's title is the first of its headings
+    @test abs(K.Browsers.scrolled(b) - (top - 24)) < 1 && brushes.now && !rows[1].now
+    @test K.page_context(eh) == ("Brushes", "<ladder>\nThe window shows the file $html.\nThe section in view is \"Brushes\".\n</ladder>")
+    # The wheel moves the page on, and the outline follows it
+    K.Browsers.scroll!(b, K.html_outline(eh)[2][rows[4].line] - 10)
+    frames(wh, 3)
+    @test rows[4].now && !brushes.now && first(K.page_context(eh)) == "Done"
+    # A page with no headings says so, with the title that its HTML gives it
+    write(html, "<title>Bare</title><p>Words.</p>")
+    for _ in 1:250
+      frames(wh, 1)
+      isempty(K.html_outline(eh)[1]) && break
+      sleep(0.02)
+    end
+    frames(wh, 2)
+    words = [r.from.content for r in flat(K.rect(eh)) if hasproperty(r.from, :content)]
+    @test "Bare" in words && "No headings" in words
+    @test K.page_context(eh) == ("shop.html", "<ladder>\nThe window shows the file $html.\n</ladder>")
+    K.close_agent!(eh)
+  end
+
   @testset "Return gives your words to the agent, with what the window shows, and its answer shows as a page" begin
     K.focus(pane.field)
     # The field is one line tall, with the round send button at its right
@@ -252,7 +306,8 @@ try
     @test ok
     said = heard_lines()
     @test length(said) == 1 && occursin("\"type\":\"user\"", said[1]) && occursin("Make a table", said[1])
-    @test occursin("<ladder>\\nThe window shows the file $page.\\nThe caret is on line", said[1]) && occursin("under the heading \\\"Brushes\\\".\\nNothing is selected.\\n</ladder>\\n\\nMake a table", said[1])
+    # The outline's click put the section Brushes at the top of the window
+    @test occursin("<ladder>\\nThe window shows the file $page.\\nThe section in view is \\\"Brushes\\\".\\nThe caret is on line", said[1]) && occursin("under the heading \\\"Brushes\\\".\\nNothing is selected.\\n</ladder>\\n\\nMake a table", said[1])
     @test pane.session.id == "test-session"
     # The pane's heading is in the top bar, after the window's own buttons, so the talk starts right under the bar
     head, plus = named("Agent head"), named("New session")

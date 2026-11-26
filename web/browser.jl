@@ -11,6 +11,7 @@
 #     can_back(b), can_forward(b)
 #     b.shown                              # the address of the page that shows, where its site moved it to
 #     b.title                              # what the page says its title is
+#     headings(b)                          # the page's headings, in order, with how far down the page each one is
 #     loading(b)                           # true while a page is on its way
 #     page_now(b)                          # the address that was asked for the page that shows, or that's on its way
 #     scroll!(b, 400)                      # put the top of the window 400 px down the page
@@ -523,6 +524,45 @@ named(b::Browser, name::AbstractString) = begin
   p = b.view.page
   i = findfirst(q -> attr(q.element, "id") == name || (q.element.tag == "a" && attr(q.element, "name") == name), p.list.places)
   i === nothing ? nothing : p.list.places[i].element
+end
+
+const Heading = @NamedTuple{level::Int, words::String, element::Element, top::Float64}
+
+"""
+The headings of the page that shows, in the order that its HTML has them:
+for each <h1> to <h6> that has a box and some words, its level, its words,
+its element, and how far down the page its top is, in px as it's drawn. A
+heading no bigger than a dot is left out: that's how a page hides a heading
+for screen readers. A # or ¶ at a heading's end, which links to the heading
+itself, isn't one of its words.
+"""
+headings(b::Browser) = begin
+  out = Heading[]
+  p = b.view.page
+  p === nothing && return out
+  seen = Base.IdSet{Element}()
+  for q in p.list.places
+    t = q.element.tag
+    (length(t) == 2 && t[1] == 'h' && '1' <= t[2] <= '6') || continue
+    # An element in lines of text has a place for each line. The first is its top.
+    q.element in seen && continue
+    push!(seen, q.element)
+    (q.wide <= 1 || q.tall <= 1) && continue
+    words = replace(strip(replace(text(q.element), r"\s+" => " ")), r"\s*[#¶§]$" => "")
+    isempty(words) || push!(out, (level=t[2] - '0', words=String(words), element=q.element, top=q.top * p.zoom))
+  end
+  # The boxes are in the order that they're drawn, which puts a box with a place of its own after the rest
+  sort!(out, by=h -> order_of(h.element))
+end
+
+"Where `e` is in its page: its place among its parent's children, after the same for each element that it's in, from the outside in"
+order_of(e::Element) = begin
+  key = Int[]
+  while e.parent !== nothing
+    push!(key, something(findfirst(c -> c === e, e.parent.children), 0))
+    e = e.parent
+  end
+  reverse!(key)
 end
 
 # --- the page's words that are selected -----------------------------------------------------

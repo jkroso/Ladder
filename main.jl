@@ -48863,7 +48863,7 @@ session_brief(alone::Bool=false) = alone ? """
 You are in Ladder, a Markdown app on the user's Mac. The user's window shows this conversation and nothing else, in place of a terminal. $BRIEF_SHOWS A link to a file, like [notes.md](notes.md), opens that file in the user's window when the user clicks it. Paths in links are from the folder that you started in.""" : """
 You are in Ladder, a Markdown app on the user's Mac. The user's window shows a page, with this conversation beside it. $BRIEF_SHOWS Answer a question here, in the conversation, and change the page only when the user asks for a change to it.
 
-Each message of the user starts with a block between <ladder> and </ladder>. Ladder wrote the block, not the user. It says which file the window shows, where the caret is, and what is selected. Lines and columns count from 1. A column is a place between characters: column 1 is before the first character of its line, so a selection ends before the character at its end column. The exact text of a selection is between <selection> and </selection>: it starts after the line break that follows <selection>, and ends before the line break in front of </selection>. Ladder saves the page to its file before each message, so the file has what the window shows, unless the block says otherwise. When the user asks for a change to the page, change its file: Ladder shows the change at once. Don't run `ladder show` or `ladder wait`: the page is open already, and the user talks to you here."""
+Each message of the user starts with a block between <ladder> and </ladder>. Ladder wrote the block, not the user. It says which file the window shows, which section of it is in view, where the caret is, and what is selected. The section in view is the one at the top of the window. A web page that an HTML file makes has no caret, so its block says only its file and its section. Lines and columns count from 1. A column is a place between characters: column 1 is before the first character of its line, so a selection ends before the character at its end column. The exact text of a selection is between <selection> and </selection>: it starts after the line break that follows <selection>, and ends before the line break in front of </selection>. Ladder saves the page to its file before each message, so the file has what the window shows, unless the block says otherwise. When the user asks for a change to the page, change its file: Ladder shows the change at once. Don't run `ladder show` or `ladder wait`: the page is open already, and the user talks to you here."""
 
 "What the agent of the session `s` is told of where it is: a session with a file of its own has no page beside it"
 session_brief(s::AgentSession) = session_brief(!isempty(s.file))
@@ -49897,8 +49897,10 @@ const MOST_PICKED = 6000   # characters. A longer selection goes to the agent as
 """
 What the window of `e` shows, for the agent: a few words for you, like the
 heading that the caret is under, and the block that says it to the agent,
-between `<ladder>` tags. The block has the caret's line and column, and
-says whether text is selected. A selection has where it starts and ends,
+between `<ladder>` tags. The block has the section at the top of the window,
+which the outline marks, the caret's line and column, and says whether text
+is selected. The page that an HTML file makes has no caret, so its block has
+only its file and its section. A selection has where it starts and ends,
 and its exact text between `<selection>` tags, with nothing put before its
 lines. So no text of the page can look like the block's end, but text that
 holds the closing tag itself, which goes as its range only.
@@ -49909,7 +49911,9 @@ page_context(e) = begin
   path = isremote(b.path) ? b.path : truepath(b.path)
   # Ladder saves the page before each message. A page that it couldn't save still has changes that the file lacks.
   shows = "The window shows the file $path." * (dirty(b) ? " The window has changes that aren't in the file yet." : "")
-  b.view in (:markdown, :code) || return (name(b), "<ladder>\n$shows\n</ladder>")
+  part = section_in_view(e)
+  seen = part === nothing ? "" : "\nThe section in view is \"$(part.title)\"."
+  b.view in (:markdown, :code) || return (part === nothing ? name(b) : part.title, "<ladder>\n$shows$seen\n</ladder>")
   n = b.caret[1]
   heads = filter(x -> x.level <= 6 && x.line <= n, page_outline(e))
   under = isempty(heads) ? "" : last(heads).title
@@ -49925,14 +49929,15 @@ page_context(e) = begin
       "$range Its exact text:\n<selection>\n$words\n</selection>"
   end
   caret = "The caret is on line $n, column $(b.caret[2] + 1)" * (isempty(under) ? "" : ", under the heading \"$under\"") * "."
-  told = "<ladder>\n$shows\n$caret\n$picked\n</ladder>"
+  told = "<ladder>\n$shows$seen\n$caret\n$picked\n</ladder>"
   # The few words for you say that a selection goes too
   some = lo == hi ? "" : lo[1] == hi[1] ? " · selection" : " · $(hi[1] - lo[1] + 1) lines selected"
   ((isempty(under) ? name(b) : under) * some, told)
 end
 
-"The headings and the components of the page that the window of `e` shows, or the places of a file of code. They're kept until the text changes."
+"The headings and the components of the page that the window of `e` shows, the places of a file of code, or the headings of the page that an HTML file makes. They're kept until the text changes."
 page_outline(e) = begin
+  html_shown(e) && return html_outline(e)[1]
   b = e.buf
   kept = get(e.nodes, :pane_outline, nothing)
   kept !== nothing && kept[1] === b && kept[2] == b.version && return kept[3]::Vector{Entry}
@@ -49940,6 +49945,24 @@ page_outline(e) = begin
           b.view == :code ? [Entry(h.line, h.what == "section" ? 1 : 2, h.words, h.what == "section" ? "text-left" : "braces", h.line) for h in code_places(e)] : Entry[]
   e.nodes[:pane_outline] = (b, b.version, found)
   found
+end
+
+"""
+The headings of the page that the HTML file of the window of `e` makes, as
+the outline lists them, and how far down the page the top of each one is,
+in px. That page has no lines, so a heading's `line` is its place in the
+list. They're kept until the page is laid out again.
+"""
+html_outline(e) = begin
+  b = html_browser(html_part(e))
+  p = b.view.page
+  kept = get(e.nodes, :html_outline, nothing)
+  kept !== nothing && kept[1] === p && return (kept[2], kept[3])
+  heads = Browsers.headings(b)
+  found = Entry[Entry(i, h.level, h.words, "type-h$(h.level)", i) for (i, h) in enumerate(heads)]
+  tops = Float64[h.top for h in heads]
+  e.nodes[:html_outline] = (p, found, tops)
+  (found, tops)
 end
 
 """
@@ -50303,9 +50326,16 @@ end
 
 # --- the outline ---
 
-"The line of the heading that the top of the window of `e` is in: the last of `entries` that starts above the first lines that show, or 0"
+"The line of the heading that the top of the window of `e` is in: the last of `entries` that starts above the first lines that show, or 0. A page that an HTML file makes has no lines, and gives the heading's place in `entries`."
 section_now(e, entries) = begin
-  (isempty(entries) || isempty(e.layout)) && return 0
+  isempty(entries) && return 0
+  if html_shown(e)
+    found, tops = html_outline(e)
+    edge = Browsers.scrolled(html_browser(html_part(e))) + 70   # a heading counts once it's near the top of the window
+    k = findlast(<=(edge), tops)
+    return k === nothing ? 0 : found[k].line
+  end
+  isempty(e.layout) && return 0
   edge = e.scroll.offset + 70px   # a heading counts once it's near the top of the window
   line = 1
   for it in e.layout
@@ -50314,6 +50344,14 @@ section_now(e, entries) = begin
   end
   k = findlast(x -> x.level <= 6 && x.line <= line, entries)
   k === nothing ? 0 : entries[k].line
+end
+
+"The heading of the section that's at the top of the window of `e`, which the outline marks, or nothing"
+section_in_view(e) = begin
+  entries = page_outline(e)
+  now = section_now(e, entries)
+  k = findfirst(x -> x.line == now && x.level <= 6, entries)
+  k === nothing ? nothing : entries[k]
 end
 
 describe(o::OutlinePane) = with_pane_colours() do
@@ -50325,7 +50363,9 @@ describe(o::OutlinePane) = with_pane_colours() do
   # A page that starts with its one biggest heading has that for its title, and its sections are the headings a level down
   titled = !isempty(heads) && first(heads).level == top && count(x -> x.level == top, heads) == 1 && first(heads).line == first(entries).line
   base = titled && length(heads) > 1 ? minimum(x -> x.level, heads[2:end]) : top
-  named = titled ? first(heads).title : isempty(b.path) ? "Untitled" : title(b.path)
+  # A page that HTML makes has a title of its own
+  said = html_shown(e) ? html_browser(html_part(e)).title : ""
+  named = titled ? first(heads).title : !isempty(said) ? said : isempty(b.path) ? "Untitled" : title(b.path)
   sections = count(x -> x.level == base, titled ? heads[2:end] : heads)
   now = section_now(e, entries)
   wide = right_w(e)
@@ -50349,7 +50389,7 @@ describe(o::OutlinePane) = with_pane_colours() do
     PaneColours(on=true, across=true),
     Column(width(grow=grow), height(44px), Alignment.Start, padding(PANE_X, 0px), child_gap=2px, justify=Alignment.Center,   # across, down
       Row(height(18px), Alignment.Center, label(shortened(face, named, wide - 2PANE_X), 14px, weight="Semibold")),
-      Row(height(16px), Alignment.Center, label(isempty(rows) ? "No headings yet" : sections == 1 ? "1 section" : "$sections sections", 12px, color=colours.dim))),
+      Row(height(16px), Alignment.Center, label(isempty(rows) ? (html_shown(e) ? "No headings" : "No headings yet") : sections == 1 ? "1 section" : "$sections sections", 12px, color=colours.dim))),
     reuse!(o.scroll, Column(width(grow=grow), Alignment.Start, padding(4px, 8px, 16px, 8px), child_gap=1px, rows...)),
     PaneColours(on=false, across=true))
 end
@@ -50378,6 +50418,10 @@ onkey(r::OutlineRow, ev::KeyPress{Keys.mouse_left}) = begin
   if r.opens && at !== nothing && ev.window.mouse[1] < at.left + 8px + OUTLINE_STEP * r.depth + 18px
     key = (r.level, r.title)
     key in o.folded ? delete!(o.folded, key) : push!(o.folded, key)
+  elseif html_shown(e)
+    # The heading goes near the top of the window. A page that HTML makes has no caret to move.
+    tops = html_outline(e)[2]
+    1 <= r.line <= length(tops) && Browsers.scroll!(html_browser(html_part(e)), tops[r.line] - 24)
   else
     note_place!(e)   # ⌘⌥← comes back here
     show_line!(e, r.caret)
