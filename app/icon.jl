@@ -15,6 +15,7 @@
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
 @use "github.com/jkroso/Font.jl/units" px
 @use Colors: @colorant_str, RGBA
+@use "./facts" ICON_FILE
 
 const CANVAS = 1024
 const SQUARE = 824
@@ -44,6 +45,6 @@ icon() =
         bar(0.55, pale),
         Box(width(14px), height(96px), radius(7px), background(accent)))))
 
-save_png(joinpath(@__DIR__, "icon.png"), (CANVAS * px, CANVAS * px), scale=(1.0, 1.0), opaque=false) do ctx, size
+save_png(ICON_FILE, (CANVAS * px, CANVAS * px), scale=(1.0, 1.0), opaque=false) do ctx, size
   draw(ctx, size, describe(icon(), size))
 end

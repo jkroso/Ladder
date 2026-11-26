@@ -42,17 +42,18 @@
 
 @use "github.com/jkroso/UI.jl/Interface/objc" cls msg nsstring jstring with_pool
 @use LibGit2: LibGit2
+@use "./app/facts" => Facts
 
 "The GitHub repo whose releases the app looks at. release.jl publishes to it."
-const REPO = "jkroso/Ladder"
+const REPO = Facts.REPO
 "The file of a release that names the newest version"
 const LATEST = "latest.txt"
 "The Ladder app's name for macOS, as app/build.jl gives it"
-const ID = "com.jkroso.ladder"
+const ID = Facts.APP_ID
 const EVERY = 24 * 60 * 60.0   # seconds from one look for a newer version to the next
 const RETRY = 60 * 60.0        # seconds until it looks again after it couldn't
 const POLL = 1.0               # seconds between two looks at a download that's running
-const LSREGISTER = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+const LSREGISTER = Facts.LSREGISTER
 
 "The address of latest.txt"
 feed() = get(ENV, "LADDER_UPDATE_FEED", "https://github.com/$REPO/releases/latest/download/$LATEST")
@@ -88,7 +89,7 @@ Updater(app, version; feed=feed(), dir=waiting_room(), rule=nothing, register=LS
   Updater(app, version, feed, dir, rule, register, true, :idle, nothing, nothing, "", "", v"0", nothing, false, "", 0.0, false, 0)
 
 "The folder where a new version waits"
-waiting_room() = joinpath(homedir(), "Library", "Application Support", "Ladder", "update")
+waiting_room() = joinpath(Facts.support_dir(), "update")
 
 "The updater of the app that's running"
 const mine = Ref{Union{Nothing,Updater}}(nothing)
@@ -129,7 +130,7 @@ rule(u::Updater) = begin
 end
 
 "True when app/build.jl built the app at `app` on this Mac, and not for a release"
-built_here(app) = success(pipeline(`plutil -extract LadderBuiltHere raw $(joinpath(app, "Contents", "Info.plist"))`, stdout=devnull, stderr=devnull))
+built_here(app) = success(pipeline(`plutil -extract $(Facts.BUILT_HERE_KEY) raw $(joinpath(app, "Contents", "Info.plist"))`, stdout=devnull, stderr=devnull))
 
 "True when Ladder can change the file or folder at `path`"
 writable(path) = ccall(:access, Cint, (Cstring, Cint), path, 2) == 0
@@ -233,7 +234,7 @@ Write latest.txt into `dir` for the release of `version`, whose zip file is
 `zip`. `macos` is the oldest macOS that the version runs on. It returns the
 path of latest.txt. release.jl calls this.
 """
-announce(dir, version, zip; macos="12.0") = begin
+announce(dir, version, zip; macos=Facts.MIN_MACOS) = begin
   sum = first(split(readchomp(`/usr/bin/shasum -a 256 $zip`)))
   text = "version=$version\nfile=$(basename(zip))\nsha256=$sum\nmacos=$macos\n"
   parse_feed(text) === nothing && error("Ladder can't read a latest.txt for version $version and the file $(basename(zip)). ",

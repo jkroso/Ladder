@@ -1,5 +1,5 @@
 # Builds Ladder as a standalone Mac app with JuliaC. build.jl includes this
-# file and calls `build_app`:
+# file and calls `Bundle.build_app`:
 #
 #     julia --project=. app/build.jl
 #     julia --project=. app/build.jl --install
@@ -41,18 +41,12 @@
 #
 # The app's entry point is app.jl, which starts with start.jl.
 
-using JuliaC, Kip
+module Bundle
 
-const root = normpath(joinpath(@__DIR__, ".."))
-const out = joinpath(root, "build")
+using JuliaC, Kip
+@use "./facts" => Facts
 
 option(name, default) = get(ENV, "APP_$name", default)
-const cpu = option("CPU", "apple-m1")
-const strips = split(option("STRIP", ""), ',', keepempty=false)
-const imaged = option("FORM", "image") == "image"
-# An app that can compile a cache keeps every library. A package that it loads later can need one
-# that Ladder itself never loads: Poppler's needs the libiconv that the image names and doesn't use.
-const prune = option("PRUNE", imaged ? "0" : "1") == "1"
 
 "The name of the Developer ID certificate in your keychain, or `-` when there's none"
 developer_id() = try
@@ -61,8 +55,12 @@ developer_id() = try
 catch
   "-"
 end
-const signer = option("SIGN", developer_id())
-const releasing = option("RELEASE", "0") == "1"
+
+"The certificate name to sign the app with, from APP_SIGN or the keychain"
+default_signer() = option("SIGN", developer_id())
+
+"True when building a release (APP_RELEASE=1)"
+is_releasing() = option("RELEASE", "0") == "1"
 
 """
 A new folder with a copy of `dir`'s project files and nothing else. JuliaC
@@ -77,10 +75,13 @@ project_files(dir) = begin
   copy
 end
 
-const project = project_files(option("PROJECT", root))
-# JuliaC hides Julia's own list of packages from the build, so the folder of Kip goes into the build's copy of the project
-let kip = option("KIP", "")
+"Prepare a clean copy of the Julia project to build from, applying APP_PROJECT and APP_KIP"
+prepare_project() = begin
+  project = project_files(option("PROJECT", Facts.ROOT))
+  # JuliaC hides Julia's own list of packages from the build, so the folder of Kip goes into the build's copy of the project
+  kip = option("KIP", "")
   isempty(kip) || run(`$(Base.julia_cmd()) --startup-file=no --project=$project -e "using Pkg; Pkg.develop(path=ARGS[1])" $kip`)
+  project
 end
 
 # --- the packages Kip gets from GitHub ------------------------------------------
@@ -97,7 +98,7 @@ end
 source_files(dir) = begin
   found = String[]
   for (folder, folders, files) in walkdir(dir)
-    filter!(f -> !startswith(f, ".") && f != "build", folders)
+    filter!(f -> !startswith(f, ".") && f != Facts.BUILD_DIR_NAME, folders)
     append!(found, joinpath(folder, f) for f in files if endswith(f, ".jl") || endswith(f, ".md"))
   end
   found
@@ -109,7 +110,7 @@ one of those packages names. Each key is a `(user, repo)`.
 """
 find_packages() = begin
   places = Dict{Tuple{String,String},String}()
-  waiting = [root]
+  waiting = [Facts.ROOT]
   while !isempty(waiting)
     for file in source_files(pop!(waiting)), m in eachmatch(r"\"github\.com/([\w\-.]+)/([\w\-.]+)", read(file, String))
       key = (String(m[1]), String(m[2]))
@@ -126,14 +127,13 @@ find_packages() = begin
   places
 end
 
-const packages = find_packages()
-
 "The packages that the app would be built from a folder with changes that aren't committed"
-uncommitted() = sort!(["$user/$repo" for ((user, repo), place) in packages
-                       if isdir(joinpath(place, ".git")) && Kip.LibGit2.isdirty(Kip.LibGit2.GitRepo(place))])
+uncommitted(packages=find_packages()) =
+  sort!(["$user/$repo" for ((user, repo), place) in packages
+         if isdir(joinpath(place, ".git")) && Kip.LibGit2.isdirty(Kip.LibGit2.GitRepo(place))])
 
 "A folder to be Kip's own while the app is built. It holds a link to where each package is."
-package_links() = begin
+package_links(packages) = begin
   dir = mktempdir()
   for ((user, repo), place) in packages
     mkpath(joinpath(dir, "repos", user))
@@ -150,7 +150,17 @@ square to show for the app. `plist` holds more keys for its Info.plist. `helpers
 are the paths of other programs to put in Contents/MacOS beside the app's own.
 Returns the path to the app.
 """
-build_app(; name, program, id, entry, version="1.0", threads=nothing, icon=nothing, plist="", helpers=String[]) = begin
+build_app(; name, program, id, entry, version="1.0", threads=nothing, icon=nothing, plist="", helpers=String[],
+            releasing=is_releasing(), signer=default_signer(), packages=find_packages()) = begin
+  cpu = option("CPU", "apple-m1")
+  strips = split(option("STRIP", ""), ',', keepempty=false)
+  imaged = option("FORM", "image") == "image"
+  # An app that can compile a cache keeps every library. A package that it loads later can need one
+  # that Ladder itself never loads: Poppler's needs the libiconv that the image names and doesn't use.
+  prune = option("PRUNE", imaged ? "0" : "1") == "1"
+  project = prepare_project()
+
+  out = Facts.BUILD_DIR
   bundle = joinpath(out, program)
   app = joinpath(out, name * ".app")
   contents = joinpath(app, "Contents")
@@ -160,8 +170,8 @@ build_app(; name, program, id, entry, version="1.0", threads=nothing, icon=nothi
   # Kip normally keeps a compiled cache of each file it loads. Julia can't make
   # those while it builds an app, so Kip includes the files directly instead.
   ENV["KIP_FROZEN"] = "1"
-  ENV["KIP_DIR"] = package_links()
-  changed = uncommitted()
+  ENV["KIP_DIR"] = package_links(packages)
+  changed = uncommitted(packages)
   isempty(changed) || println("Building with the changes that aren't committed in ", join(changed, ", ", " and "))
 
   options = threads === nothing ? Dict{String,String}() : Dict("threads" => threads)
@@ -204,7 +214,7 @@ build_app(; name, program, id, entry, version="1.0", threads=nothing, icon=nothi
       <key>CFBundleShortVersionString</key><string>$version</string>
       <key>CFBundlePackageType</key><string>APPL</string>
       <key>CFBundleExecutable</key><string>$program</string>
-      <key>LSMinimumSystemVersion</key><string>12.0</string>
+      <key>LSMinimumSystemVersion</key><string>$(Facts.MIN_MACOS)</string>
       <key>NSHighResolutionCapable</key><true/>
     $(plist)</dict>
     </plist>
@@ -214,12 +224,12 @@ build_app(; name, program, id, entry, version="1.0", threads=nothing, icon=nothi
   loaded = self_test(contents, executable)
   println("The self-test loaded ", length(loaded), " libraries, ", count(startswith(contents), loaded), " of them the app's own")
   if prune
-    println("Pruning removed ", mb(prune_libraries(contents, loaded)))
+    println("Pruning removed ", mb(prune_libraries(contents, loaded; imaged)))
     println("Stand-ins for unused libraries saved ", mb(stub_unused_libraries(contents)))
     self_test(contents, executable)
   end
 
-  sign(app)
+  sign(app; signer, releasing)
 
   println("\nBuilt in ", round(build_time / 60, digits=1), " minutes with cpu=$cpu strip=$(join(strips, ','))",
           prune ? " pruned" : "")
@@ -227,7 +237,6 @@ build_app(; name, program, id, entry, version="1.0", threads=nothing, icon=nothi
   for part in ("MacOS/$program", "lib", "share", (imaged ? ("lib/$program.dylib", "libexec") : ())...)
     println("  ", rpad(part, 18), lpad(mb(disk_size(joinpath(contents, part))), 10))
   end
-  "--install" in ARGS && install(app)
   app
 end
 
@@ -250,7 +259,7 @@ starter!(contents, program, threads) = begin
   macos = joinpath(contents, "MacOS")
   mkpath(macos)
   flags = threads === nothing ? String[] : ["-DTHREADS=\"$threads\""]
-  run(`clang -O1 $(joinpath(@__DIR__, "starter.c")) -DIMAGE=\"$program.dylib\" $flags -o $(joinpath(macos, program))
+  run(`clang -O1 $(Facts.STARTER_FILE) -DIMAGE=\"$program.dylib\" $flags -o $(joinpath(macos, program))
        -L$(joinpath(contents, "lib")) -ljulia -Wl,-rpath,@executable_path/../lib`)
   mkpath(joinpath(contents, "bin"))
   cp(joinpath(Sys.BINDIR, "julia"), joinpath(contents, "bin", "julia"))
@@ -287,11 +296,11 @@ privacy settings know an app by its signature. A certificate's signature names
 the app and its developer, so each new build is the same app to them. A build
 signed with `-` is known only by its own contents, so each one is a new app.
 """
-sign(app) = begin
+sign(app; signer=default_signer(), releasing=is_releasing()) = begin
   # Every build has the entitlements, not only a release. JavaScriptCore compiles a page's scripts only in an app
   # that has com.apple.security.cs.allow-jit. Without it, it only interprets them, many times slower, and the
   # first run of a big page's scripts, like a three.js city, runs out of time.
-  entitlements = joinpath(@__DIR__, "entitlements.plist")
+  entitlements = Facts.ENTITLEMENTS_FILE
   signer == "-" && return run(`codesign --force --deep --entitlements $entitlements --sign - $app`)
   # Pruning deletes libraries and leaves the links that pointed to them. codesign refuses an app with a link to nothing.
   for (dir, _, names) in walkdir(app), name in names
@@ -338,8 +347,8 @@ self_test(contents, executable) = begin
   # can't read what's in them, or in a copy of UI.jl beside Ladder
   sandbox = """(version 1)(allow default)
     (deny file-read* (subpath "$(joinpath(homedir(), ".julia"))") (subpath "$(joinpath(homedir(), ".kip"))"))
-    (deny file-read-data (subpath "$(rstrip(root, '/'))") (subpath "$(joinpath(dirname(rstrip(root, '/')), "UI.jl"))"))
-    (allow file-read-data (subpath "$out"))"""
+    (deny file-read-data (subpath "$(rstrip(Facts.ROOT, '/'))") (subpath "$(joinpath(dirname(rstrip(Facts.ROOT, '/')), "UI.jl"))"))
+    (allow file-read-data (subpath "$(Facts.BUILD_DIR)"))"""
   for _ in 1:20
     output, errors = IOBuffer(), IOBuffer()
     cmd = addenv(`sandbox-exec -p $sandbox $executable --self-test --libraries`, "JULIA_DEPOT_PATH" => depot)
@@ -368,7 +377,7 @@ disk_size(path) = isfile(path) ? filesize(path) : sum(filesize, files_in(path), 
 Delete each library in the app that the self-test didn't load, and the folders
 of data that only belong to those libraries. Returns how many bytes it freed.
 """
-prune_libraries(contents, loaded) = begin
+prune_libraries(contents, loaded; imaged=true) = begin
   removed = 0
   for path in vcat(files_in(joinpath(contents, "lib")), files_in(joinpath(contents, "share")))
     endswith(path, ".dylib") || occursin(".dylib.", path) || continue
@@ -436,8 +445,6 @@ stub_unused_libraries(contents) = begin
   before - disk_size(artifacts)
 end
 
-const lsregister = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
-
 """
 Copy `app` into /Applications, in place of any copy already there. Then tell
 macOS about it, so the Dock and Finder show its new icon.
@@ -446,6 +453,8 @@ install(app) = begin
   target = joinpath("/Applications", basename(app))
   rm(target, recursive=true, force=true)
   run(`ditto $app $target`)
-  run(`$lsregister -f $target`)
+  run(`$(Facts.LSREGISTER) -f $target`)
   println("Installed ", target)
+end
+
 end

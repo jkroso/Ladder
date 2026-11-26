@@ -11,6 +11,7 @@
 
 include("start.jl")
 
+@use "./facts" => Facts
 @use ".." build_editor open_editor move_old_folders! run_startup! startup_page STARTUP_FOLDER STARTUP WELCOME restyle! problems pages_dir SIDEBAR_ICONS FILE_ICONS todo_at inbox Agent INSERTS PLAN_ICONS SCHEDULE_ICONS BLOCK_ICONS window! editors settings_editor theme! Update open! level! SOURCE_FILES kinds LAST_RUN Terms
 @use "github.com/jkroso/MiniFB.jl" Window KeyPress KeyRelease MouseMove Keys onkey onmouse Typed ontype
 @use "github.com/jkroso/Font.jl/units" px
@@ -56,14 +57,12 @@ const page = read(WELCOME, String)
 
 const PAGES = dirname(WELCOME)
 "The text of each of the app's own pages, by the file's place in the folder of pages. The model, the video, the recording, the plan, the table and the pictures that the pages show are here too, as the bytes of their files."
-const pages = Dict(name => read(joinpath(PAGES, name), String)
-                   for name in ("welcome.md", "components.md", "julia.md", "settings/settings.md", "settings/code-editor.md", "settings/terminal.md", "settings/key-bindings.md", "schedule.md", "counter.md", "widgets.jl", "progress.jl", "wall.jl", "knot.stl", "satellite.glb", "bracket.sc", "session.vt", "knot.mp4", "hello.m4a", "plan.pdf", "costs.csv", "orders.json",
-                               "photos/1 footings.png", "photos/2 frame.png", "photos/3 roof.png", "photos/4 bricks.png", "photos/5 window.png", "photos/6 finished.png"))
+const pages = Dict(name => read(joinpath(PAGES, name), String) for name in Facts.WELCOME_FILES)
 
 "The `user/repo/file` that a file Kip got from GitHub has there, or nothing for any other file. A file of Ladder's own has a place too, so that the app can show the code that draws a thing."
 place(path) = begin
   ladder = realpath(dirname(@__DIR__))
-  startswith(path, ladder * "/") && return joinpath("jkroso", "Ladder", relpath(path, ladder))
+  startswith(path, ladder * "/") && return joinpath(Facts.REPO, relpath(path, ladder))
   if startswith(path, Kip.refs * "/")
     # Kip keeps a copy of each commit at refs/user/repo/commit
     user, repo, _, rest... = splitpath(relpath(path, Kip.refs))
@@ -85,13 +84,13 @@ const sources = [(path, place(path), read(path, String)) for path in keys(Kip.mo
 "The registered packages that were loaded by a GitHub path, as `user/repo`"
 const packages = [joinpath(m[1], m[2]) for m in (match(r"^github\.com/([^/]+)/([^/@]+)", k) for k in keys(Kip.modules)) if m !== nothing]
 "The Julia files that the pages load, and where each one was when the app was built"
-const code_files = Dict(name => realpath(joinpath(PAGES, name)) for name in ("widgets.jl", "progress.jl", "wall.jl"))
+const code_files = Dict(name => realpath(joinpath(PAGES, name)) for name in Facts.WELCOME_CODE)
 
 "The text of the `ladder` command for the terminal, which shows a file or what a pipe sends: see plugin/bin/ladder"
-const ladder_command = read(joinpath(dirname(@__DIR__), "plugin", "bin", "ladder"), String)
+const ladder_command = read(Facts.CLI_FILE, String)
 
 "Ladder's folder for its own files"
-support() = joinpath(homedir(), "Library", "Application Support", "Ladder")
+support() = Facts.support_dir()
 
 "Write `text` to `file` unless it holds that already"
 put(file, text) = (isfile(file) && read(file, String) == text) || (mkpath(dirname(file)); write(file, text))
@@ -154,7 +153,7 @@ unpack(dir) = begin
     SOURCE_FILES[file] = realpath(joinpath(welcome, name))
   end
   # The command for the terminal is in a folder that the user's PATH can name, as the welcome page says
-  command = joinpath(dir, "bin", "ladder")
+  command = joinpath(dir, "bin", Facts.PROGRAM)
   put(command, ladder_command)
   chmod(command, 0o755)
   pages_dir[] = welcome
@@ -167,7 +166,7 @@ error. An editor only runs the blocks that are on screen, so this scrolls down
 each page a screen at a time.
 """
 check_pages(dir) = begin
-  for name in ("welcome.md", "components.md", "julia.md", "settings/settings.md", "settings/code-editor.md", "settings/terminal.md", "settings/key-bindings.md", "schedule.md", "counter.md")
+  for name in Facts.WELCOME_PAGES
     empty!(problems)
     e = build_editor(joinpath(dir, name))
     w = Window(e, title="check", size=(1100px, 800px))
