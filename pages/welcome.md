@@ -1337,6 +1337,8 @@ The title and the section are what make the file an article, and the section is 
 
 You can write the file `.ladder` yourself too. It ends with a block like the one for a desktop, with `Ladder.NotesDirectory`, `Ladder.BlogDirectory`, `Ladder.DownloadsDirectory`, `Ladder.PicturesDirectory`, `Ladder.ScreenshotsDirectory` or `Ladder.NewsDirectory`. Show Folder As leaves a file that you wrote as it is.
 
+The code of a `.ladder` page can make a kind of folder of its own too: a type under `Ladder.AbstractDirectory`, which the page ends with. Methods for that type say how the window shows the folder and what's in it. `Ladder.page_view` gives what the page shows. `Ladder.side_menu` gives what the sidebar holds, in place of the tabs and the list of files. `Ladder.bread_crumb` gives what the middle of the top bar shows, in place of the file's name. `Ladder.window_view` makes all that the window shows.
+
 If the code of a `.ladder` page, or of your [startup page](settings/startup.md), stops with an error, a red toast at the bottom right of the window says which line stopped and why. The toast stays until you click its ×, or until the page runs again with nothing wrong.
 
 A zip file shows what it holds, without being unpacked: its folders and files, each file with its size and when it changed. Click a folder to open it, and click a file to see that one file. Ladder doesn't change a file that it shows from a zip file. Click Unpack to unpack the whole file beside itself, as two clicks in the Finder do.
