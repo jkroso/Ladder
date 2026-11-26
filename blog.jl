@@ -46,6 +46,7 @@
 # of such a blog is a section like any other.
 
 @use Dates: Dates, Date
+@use "./dates" => DatesRead
 @use "./macfile" made
 @use "./markdown" matter_keys after_matter
 
@@ -72,16 +73,8 @@ end
 "A post at the top of its blog's folder"
 Post(path, name, title, day::Date, draft::Bool) = Post(path, name, "", title, day, draft)
 
-const DAY = r"(?<!\d)(\d{4})-(\d{1,2})-(\d{1,2})(?!\d)"
-
 "The first day that's written in `text` like 2026-11-25, or nothing"
-day(text::AbstractString) = begin
-  for m in eachmatch(DAY, text)
-    y, mo, d = parse.(Int, m.captures)
-    Dates.validargs(Date, y, mo, d) === nothing && return Date(y, mo, d)
-  end
-  nothing
-end
+day(text::AbstractString) = DatesRead.day(text; iso=true, anywhere=true)
 
 "The ending of the file called `name` that makes it a post, or nothing. With `others`, a book review and the code of a page are posts too."
 ending(name::AbstractString, others::Bool=false) = begin
@@ -111,7 +104,7 @@ post(path::AbstractString, lines=readlines(path); section::AbstractString="") = 
     k = e == ".dom.jl" ? nothing : findfirst(l -> startswith(l, "# "), lines)
     title = m !== nothing ? String(m[1]) : k === nothing ? name : String(strip(lines[k][3:end]))
   end
-  d = something(day(get(said, "date", "")), startswith(name, r"\d{4}-\d") ? day(name) : nothing, Date(Libc.strftime("%Y-%m-%d", made(path))))
+  d = something(day(get(said, "date", "")), startswith(name, r"\d{4}-\d") ? day(name) : nothing, DatesRead.day(made(path)))
   draft = lowercase(get(said, "draft", "")) in ("true", "yes") || lowercase(get(said, "complete", "")) in ("false", "no")
   Post(String(path), name, String(section), title, d, draft)
 end

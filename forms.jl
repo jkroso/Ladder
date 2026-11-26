@@ -42,9 +42,9 @@
 # This file reads the block's lines, works out each field, and writes the row.
 # It draws nothing.
 
-@use Dates: Dates, Date, Day
+@use Dates: Dates, Date
 @use "./numbers" number isnumber
-@use "./schedule" => Schedules
+@use "./dates" => DatesRead
 
 "The language of a block that adds rows to a table"
 const FORM = "form"
@@ -94,41 +94,16 @@ const MOST_CHOICES = 6
 
 # --- days -----------------------------------------------------------------------------
 
-const WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
-
 """
 The day that `text`, typed in a field, names, or nothing when it names none.
-It reads what `Schedules.date` reads, like 2026-11-25, 25 Nov and 25/11, and
-also tomorrow, yesterday, a day of the week like fri (the next one after
-`today`), a number like 25 (the next 25th, from `today` on), and +3 (three
-days after `today`).
+It reads dates like 2026-11-25, 25 Nov and 25/11, and also today, tomorrow,
+yesterday, a day of the week like fri (the next one after `today`), a number
+like 25 (the next 25th, from `today` on), and +3 (three days after `today`).
 """
-day(text::AbstractString; today::Date=Dates.today()) = begin
-  s = lowercase(strip(text))
-  isempty(s) && return nothing
-  d = Schedules.date(s; today)
-  d === nothing || return d
-  s == "tomorrow" && return today + Day(1)
-  s == "yesterday" && return today - Day(1)
-  m = match(r"^\+(\d{1,3})$", s)
-  m === nothing || return today + Day(parse(Int, m[1]))
-  if occursin(r"^\d{1,2}$", s)
-    n = parse(Int, s)
-    for k in 0:62
-      Dates.day(today + Day(k)) == n && return today + Day(k)
-    end
-    return nothing
-  end
-  k = length(s) >= 3 ? findfirst(w -> startswith(w, s), WEEKDAYS) : nothing
-  k === nothing ? nothing : today + Day(mod1(k - Dates.dayofweek(today), 7))
-end
+day(text::AbstractString; today::Date=Dates.today()) = DatesRead.day(text; today, year=:same, relative=:all)
 
 "How the cell `text` writes a day: :iso for 2026-11-25, :words for 25 Nov 2026, :slashes for 25/11/2026, or nothing when it's no day"
-day_style(text::AbstractString) = begin
-  Schedules.date(text) === nothing && return nothing
-  occursin(r"^\d{4}-\d{1,2}-\d{1,2}$", text) ? :iso : occursin(r"^\d{1,2} [A-Za-z]{3,9} \d{4}$", text) ? :words :
-  occursin(r"^\d{1,2}/\d{1,2}/\d{4}$", text) ? :slashes : nothing
-end
+day_style(text::AbstractString) = DatesRead.style(text)
 
 "The day `d` as a cell, written in `style`"
 written(d::Date, style::Symbol) =

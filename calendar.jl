@@ -34,6 +34,7 @@
 # works out the days of each task.
 
 @use Dates: Dates, Date, Day
+@use "./dates" day ISO
 @use "./schedule" Todo Planned works
 
 "The language of a code block that is a calendar"
@@ -67,12 +68,6 @@ end
 id(t::Thing) = (t.kind, t.kind == :event ? string(t.line) : t.key)
 
 # --- reading -------------------------------------------------------------------------
-
-const DAY = r"(?<!\d)(\d{4})-(\d{1,2})-(\d{1,2})(?!\d)"
-
-"The date `y`-`m`-`d`, or nothing when there's no such day"
-day(y, m, d) = Dates.validargs(Date, y, m, d) === nothing ? Date(y, m, d) : nothing
-day(m::RegexMatch) = day(parse(Int, m[1]), parse(Int, m[2]), parse(Int, m[3]))
 
 "The first day of the month that `line` names, when it's a line like `month: 2026-11`, or nothing"
 month(line::AbstractString) = begin
@@ -135,17 +130,11 @@ const DAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 # --- the day in a to-do item's text --------------------------------------------------
 
 "The first day that's written in `text` like 2026-11-25, or nothing"
-stamp(text::AbstractString) = begin
-  for m in eachmatch(DAY, text)
-    d = day(m)
-    d === nothing || return d
-  end
-  nothing
-end
+stamp(text::AbstractString) = day(text; iso=true, anywhere=true)
 
 "`text` without the first day that's written in it, and without the brackets and the marks that were round that day"
 plain(text::AbstractString) = begin
-  for m in eachmatch(DAY, text)
+  for m in eachmatch(ISO, text)
     day(m) === nothing && continue
     before = rstrip(c -> isspace(c) || c in "([-–—:,", text[1:prevind(text, m.offset)])
     after = lstrip(c -> isspace(c) || c in ")]-–—:,", text[m.offset+ncodeunits(m.match):end])
@@ -159,7 +148,7 @@ Where `d` is written in `line`: how many characters come before it, and how
 many come before its end. It's nothing when the line doesn't have that day.
 """
 stamp_at(line::AbstractString, d::Date) = begin
-  for m in eachmatch(DAY, line)
+  for m in eachmatch(ISO, line)
     day(m) == d || continue
     from = length(line, 1, prevind(line, m.offset))
     return (from, from + length(m.match))
@@ -228,7 +217,7 @@ end
 "The block's lines when the event on line `k` is on the day `d`"
 moved(lines, k::Int, d::Date) = begin
   out = String[String(l) for l in lines]
-  1 <= k <= length(out) && (out[k] = replace(out[k], DAY => string(d), count=1))
+  1 <= k <= length(out) && (out[k] = replace(out[k], ISO => string(d), count=1))
   out
 end
 

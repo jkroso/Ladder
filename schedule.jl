@@ -39,6 +39,7 @@
 # works out the days of each task. It draws nothing.
 
 @use Dates: Dates, Date, Day, dayofweek
+@use "./dates" => DatesRead
 @use "./markdown" Kind Line classify spans isdone
 @use "./repeats" => Repeats
 
@@ -73,30 +74,12 @@ Schedule() = Schedule(nothing, false, String[], Entry[])
 
 # --- days --------------------------------------------------------------------------
 
-const MONTHS = ("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec")
-
-"The date `y`-`m`-`d`, or nothing when there's no such day"
-day(y, m, d) = Dates.validargs(Date, y, m, d) === nothing ? Date(y, m, d) : nothing
-
 """
 The day that `text` names, or nothing when it names none. It reads 2026-11-16,
-16 Nov 2026, 16 Nov, 16/11/2026 and 16/11. A day with no year is in the year
-of `today`.
+16 Nov 2026, 16 Nov, 16/11/2026, 16/11 and today. A day with no year is in the
+year of `today`.
 """
-date(text::AbstractString; today::Date=Dates.today()) = begin
-  s = lowercase(strip(text))
-  s == "today" && return today
-  m = match(r"^(\d{4})-(\d{1,2})-(\d{1,2})$", s)
-  m === nothing || return day(parse(Int, m[1]), parse(Int, m[2]), parse(Int, m[3]))
-  year(y) = y === nothing ? Dates.year(today) : (n = parse(Int, y); n < 100 ? 2000 + n : n)
-  m = match(r"^(\d{1,2})\s*([a-z]{3})[a-z]*\.?,?(?:\s+(\d{4}))?$", s)
-  if m !== nothing
-    month = findfirst(==(m[2]), MONTHS)
-    return month === nothing ? nothing : day(year(m[3]), month, parse(Int, m[1]))
-  end
-  m = match(r"^(\d{1,2})/(\d{1,2})(?:/(\d{2}|\d{4}))?$", s)
-  m === nothing ? nothing : day(year(m[3]), parse(Int, m[2]), parse(Int, m[1]))
-end
+date(text::AbstractString; today::Date=Dates.today()) = DatesRead.day(text; today, year=:same, relative=:today)
 
 "True when work is done on `d`"
 works(d::Date, weekends::Bool) = weekends || dayofweek(d) <= 5

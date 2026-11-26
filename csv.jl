@@ -24,7 +24,7 @@
 # file has it, quotes and all. It draws nothing.
 
 @use "./numbers" isnumber sortkey
-@use Dates: Dates, Date, DateTime
+@use "./dates" when dayfirst
 
 const MOST_COLUMNS = 40
 const MOST_ROWS = 5_000         # under the row of names
@@ -187,74 +187,6 @@ const NO = ("no", "n", "false", "✗", "✘")
 
 "True when `text` says yes, false when it says no, and nothing when it says neither"
 yesno(text::AbstractString) = (s = lowercase(strip(text)); s in YES ? true : s in NO ? false : nothing)
-
-const MONTH_NAMES = ("january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december")
-
-"The month that `word` names, like 11 for nov or November, or nothing"
-month_of(word) = (w = lowercase(word); length(w) < 3 ? nothing : findfirst(m -> startswith(m, w), MONTH_NAMES))
-
-# The time of day after a day, like 22:29, 22:29:05, 10:30 pm or 22:29:05.123Z. A time zone after it is left out.
-const CLOCK = raw"(?:(?:\s*,\s*|\s+|t)(\d{1,2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?\s*(am|pm)?\s*(?:z|utc|gmt|[+-]\d{2}:?\d{2}|[a-z]{3,4})?)?\s*$"
-const ISO_DAY = Regex(raw"^\s*(\d{4})[-/](\d{1,2})[-/](\d{1,2})" * CLOCK, "i")
-# A year of two digits is only after a slash, so a number like 1.2.10 is no day
-const NUMBER_DAY = Regex(raw"^\s*(\d{1,2})[/.-](\d{1,2})[/.-](\d{4}|(?<=/)\d{2})" * CLOCK, "i")
-const WORD_DAY = Regex(raw"^\s*(?:[a-z]{3,9}\.?,?\s+)?(\d{1,2})(?:st|nd|rd|th)?\s+([a-z]{3,9})\.?,?\s+(\d{4})" * CLOCK, "i")
-const MONTH_FIRST = Regex(raw"^\s*(?:[a-z]{3,9}\.?,?\s+)?([a-z]{3,9})\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})" * CLOCK, "i")
-
-"The time on day `y`-`m`-`d` at the time of day that `m` found from its 4th capture on, or nothing when there's no such day"
-at_time(y, mo, d, m::RegexMatch) = begin
-  Dates.validargs(Date, y, mo, d) === nothing || return nothing
-  h = m[4] === nothing ? 0 : parse(Int, m[4])
-  mi = m[5] === nothing ? 0 : parse(Int, m[5])
-  s = m[6] === nothing ? 0 : parse(Int, m[6])
-  if m[7] !== nothing
-    1 <= h <= 12 || return nothing
-    h = lowercase(m[7]) == "pm" ? h % 12 + 12 : h % 12
-  end
-  (h < 24 && mi < 60 && s < 60) || return nothing
-  DateTime(y, mo, d, h, mi, s)
-end
-
-"""
-The time that the cell `text` names, or nothing when it names none: a day like
-2026-11-25, 25/11/2026, 25 Nov 2026, Wed, 25 Nov 2026 or November 25, 2026,
-with or without a time of day after it. `dayfirst` says whether 3/4/2026 is
-the 3rd of April, as in Australia, or March the 4th. See `dayfirst`.
-"""
-when(text::AbstractString; dayfirst=true) = begin
-  year(y) = (n = parse(Int, y); length(y) == 2 ? 2000 + n : n)
-  m = match(ISO_DAY, text)
-  m === nothing || return at_time(parse(Int, m[1]), parse(Int, m[2]), parse(Int, m[3]), m)
-  m = match(NUMBER_DAY, text)
-  if m !== nothing
-    a, b = parse(Int, m[1]), parse(Int, m[2])
-    return dayfirst ? at_time(year(m[3]), b, a, m) : at_time(year(m[3]), a, b, m)
-  end
-  m = match(WORD_DAY, text)
-  if m !== nothing
-    month = month_of(m[2])
-    return month === nothing ? nothing : at_time(year(m[3]), month, parse(Int, m[1]), m)
-  end
-  m = match(MONTH_FIRST, text)
-  m === nothing && return nothing
-  month = month_of(m[1])
-  month === nothing ? nothing : at_time(year(m[3]), month, parse(Int, m[2]), m)
-end
-
-"""
-Whether the days in `cells` that are written with numbers, like 3/4/2026, have
-the day first. They do unless one of them has a number over 12 in its middle,
-like 4/23/2026, and none has one first.
-"""
-dayfirst(cells) = begin
-  for x in cells
-    m = match(r"^\s*(\d{1,2})[/.-](\d{1,2})[/.-]\d", x)
-    m === nothing && continue
-    parse(Int, m[1]) > 12 && return true
-    parse(Int, m[2]) > 12 && return false
-  end
-  true
-end
 
 "Whether the days in each column of `rows` that are written with numbers have the day first, as `dayfirst` says. The first row has the names."
 dayfirsts(rows) = begin
