@@ -391,7 +391,7 @@ warm_up() = begin
     e.plain && level!(e)
     frame(w); frame(w)
     sent = e.nodes[:sent_email]
-    (sent.shown !== nothing && length(sent.shown.shot.links) == 2 && !isempty(sent.shown.shot.words)) || error("An email wasn't laid out as it was sent")
+    (sent.shown !== nothing && length(sent.shown.page.links) == 2 && !isempty(sent.shown.page.words)) || error("An email wasn't laid out as it was sent")
     mouse(400, 300); mouse(500, 420)
     hold((Keys.mouse_left,)); onkey(w, KeyPress{Keys.mouse_left}(0, w)); mouse(650, 470)
     release((Keys.mouse_left,)); onkey(w, KeyRelease{Keys.mouse_left}(0, w)); frame(w)
