@@ -6,7 +6,7 @@
 
 @use Test: @test, @testset
 @use "../main" => K
-@use "github.com/jkroso/MiniFB.jl" Window KeyPress KeyRelease MouseMove Keys onkey onmouse Typed ontype
+@use "github.com/jkroso/MiniFB.jl" Window KeyPress KeyRelease MouseMove Keys onkey onmouse Typed ontype onfiledrop
 @use "github.com/jkroso/UI.jl/Interface/draw" frame
 const px = K.px
 
@@ -188,6 +188,21 @@ try
     @test ok && kept.id == "test-session" && map(typeof, kept.items) == [K.YouSaid, K.AgentStep, K.AgentReply]
     @test kept.items[1].words == "Make a table" && kept.items[2].words == "Reading notes.md" && startswith(kept.items[3].text, "## Paint\n\n| Colour")
     @test p.stamp == mtime(chat)
+  end
+
+  @testset "A picture that's dropped on the session goes with your words, and its copy is beside the file" begin
+    p = pane()
+    shot = joinpath(mktempdir(), "drop shot.png")
+    cp(joinpath(@__DIR__, "..", "app", "icon.png"), shot)
+    w.mouse = typeof(w.mouse)(w.size[1] / 2, w.size[2] / 3)
+    onfiledrop(w, [shot]); frames()
+    copy = joinpath(dirname(chat), ".media", "drop shot.png")
+    @test K.attached(p) == [copy] && read(copy) == read(shot) && w.focus === p.field
+    frames()
+    @test named("Picture") !== nothing
+    # Its button takes it away, with the copy
+    K.unattach!(p, copy)
+    @test isempty(K.attached(p)) && !isfile(copy)
   end
 
   @testset "⌘E shows the file's text, and the session comes back as it was" begin

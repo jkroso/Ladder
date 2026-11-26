@@ -32165,6 +32165,13 @@ markdown_for(e, path) = begin
 end
 
 onfiledrop(e::Editor, w::Window, paths) = begin
+  # What's dropped on an agent's pane goes to the agent with your words, as what's pasted there does
+  pane = agent_pane_at(e, w)
+  if pane !== nothing
+    give_files!(pane, paths)
+    focus(pane.field)
+    return nothing
+  end
   e.buf.view == :markdown || return nothing   # a file goes into a page as Markdown
   slideshow(e) === nothing || return nothing   # the text doesn't change while the page shows as slides
   # A PDF file or a picture that's dropped on a takeoff is its plan
@@ -50147,10 +50154,29 @@ paste_for_agent!(p::AgentPane, sub) = begin
     end
     return each_selection!(() -> type!(sub, replace(text, "\r\n" => "\n", '\r' => '\n', '\t' => "  ")), sub)
   end
+  give_files!(p, paths)
+end
+
+"Give the files and folders at `paths` to the agent of the pane `p` with your words: a picture goes with them, and anything else goes into them as its path"
+give_files!(p::AgentPane, paths) = begin
+  p.field === nothing && pane_field!(p)
+  sub = p.field
+  paths = [rstrip(String(path), '/') for path in paths if ispath(path)]
   pictures = [path for path in paths if isfile(path) && ispicture(path)]
   foreach(path -> attach!(p, path), pictures)
   others = [occursin(' ', path) ? "\"$path\"" : path for path in paths if !(path in pictures)]
   isempty(others) || each_selection!(() -> type!(sub, join(others, " ")), sub)
+  nothing
+end
+
+"The agent's pane that the mouse is on in the window `w` of `e`, or nothing: agent mode's pane, or a session's file that the page shows"
+agent_pane_at(e, w) = begin
+  x, y = w.mouse
+  for p in (chat_shown(e) ? chat_part(e) : nothing, agent_shows(e) ? agent_pane(e) : nothing)
+    p === nothing && continue
+    r = rect(p)
+    r !== nothing && r.left <= x < r.left + r.width && r.top <= y < r.top + r.height && return p
+  end
   nothing
 end
 

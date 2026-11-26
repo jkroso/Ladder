@@ -7,7 +7,7 @@
 
 @use Test: @test, @testset
 @use "../main" => K
-@use "github.com/jkroso/MiniFB.jl" Window KeyPress KeyRelease MouseMove Keys onkey onmouse Typed ontype
+@use "github.com/jkroso/MiniFB.jl" Window KeyPress KeyRelease MouseMove Keys onkey onmouse Typed ontype onfiledrop
 @use "github.com/jkroso/UI.jl/Interface/draw" frame
 @use "github.com/jkroso/UI.jl/Interface/save" save_scene
 @use "github.com/jkroso/UI.jl/Interface/objc" libobjc cls sel msg nsstring
@@ -727,6 +727,15 @@ try
       put("public.utf8-plain-text", " in it?")
       press(Keys.v, Keys.cmd)
       @test pane.field.buf.lines == [notes * " in it?"] && length(K.attached(pane)) == 1
+      # A picture that's dropped anywhere on the agent's pane goes with the words too, and the words take the keyboard
+      dropped = joinpath(dir, "dropped.png"); cp(shot, dropped)
+      K.focus(e); frames()
+      agent = named("Agent")
+      w.mouse = typeof(w.mouse)(agent.left + 40px, agent.top + 200px)
+      onfiledrop(w, [dropped]); frames()
+      @test K.attached(pane)[end] == joinpath(kept, "dropped.png") && w.focus === pane.field && length(K.attached(pane)) == 2
+      K.unattach!(pane, K.attached(pane)[end])
+      @test length(K.attached(pane)) == 1 && !isfile(joinpath(kept, "dropped.png")) && isfile(dropped)
       # Claude gets the picture before your words, and the words say which file it's in
       pane.field.buf.lines = ["What's in this?"]
       n = length(heard_lines())
