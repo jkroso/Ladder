@@ -112,9 +112,23 @@ const said_models = """{"type":"control_response","response":{"subtype":"success
 K.AGENT_MODELS["Claude"] = K.claude_list(replace(said_models, '\n' => ""))
 K.AGENT_MODELS["Grok"] = K.grok_list("You are not authenticated.\n\nDefault model: grok-4.7\n\nAvailable models:\n  * grok-4.7 (default)\n  - grok-4.6\n")
 K.AGENT_MODELS["Codex"] = K.model_list([K.AgentModel("gpt-5.5", "GPT-5.5"), K.AgentModel("gpt-5.4-mini", "GPT-5.4-Mini")])
+# Some of what `agy models` printed on 27 November 2026: a model with each effort is a line for each, in no order of effort
+K.AGENT_MODELS["Antigravity"] = K.antigravity_list("""
+  gemini-4-neon-high	Gemini 4 Neon (High)
+  gemini-4-neon-xhigh	Gemini 4 Neon (XHigh)
+  gemini-4-neon-medium	Gemini 4 Neon (Medium)
+  gemini-4-neon-low	Gemini 4 Neon (Low)
+  gemini-4-carbon-medium	Gemini 4 Carbon (Medium)
+  gemini-4-carbon-high	Gemini 4 Carbon (High)
+  gemini-4-carbon-low	Gemini 4 Carbon (Low)
+  gemini-pro-orchestrator-neon	Orchestrator (Neon)
+  gemini-3.8-flash-high	Gemini 3.8 Flash (High)
+  gemini-3.8-flash-low	Gemini 3.8 Flash (Low)
+  gpt-oss-120b-medium	GPT-OSS 120B (Medium)
+  """)
 
 # An agent that works by turns: it's started for each thing that you say, with the agent's name, the session's name and your words.
-# It prints the lines that Grok, Gemini and Codex print, as their real programs printed them on 26 November 2026 (Codex: as its source says).
+# It prints the lines that Grok, Antigravity and Codex print, as their real programs printed them on 26 and 27 November 2026 (Codex: as its source says).
 const turns = joinpath(dir, "turns.txt")
 const turner = joinpath(dir, "turn-agent")
 write(turner, replace(raw"""
@@ -125,6 +139,9 @@ say() { printf '%s\n' "$1"; }
 case "$words" in
 *'fail please'*) echo "warning: something small" >&2; echo "Error: no key for $agent" >&2; echo "at line 3" >&2; exit 1 ;;
 *'go slow'*) exec sleep 30 ;;
+*'bad model please'*)
+  say '{"event":"result","result":{"conversation_id":"","status":"ERROR","response":"","error":"invalid model selection: model x is not recognized\nAvailable models:\n  Gemini 4 Neon (High)"}}'
+  echo 'error: invalid model selection (--model "x" --effort ""): model x is not recognized' >&2; exit 1 ;;
 esac
 case "$agent" in
 Grok)
@@ -138,15 +155,18 @@ Grok)
   say '{"type":"text","data":"It has paint."}'
   say '{"type":"usage","usage":{"input_tokens":1}}'
   say '{"type":"end","stopReason":"end_turn","sessionId":"sess-Grok"}' ;;
-Gemini)
-  say 'MCP issues detected. Run /mcp list for status.{"type":"init","session_id":"sess-Gemini","model":"auto"}'
-  say '{"type":"message","role":"user","content":"Read the plan"}'
-  say '{"type":"message","role":"assistant","content":"I will read","delta":true}'
-  say '{"type":"message","role":"assistant","content":" it.","delta":true}'
-  say '{"type":"tool_use","tool_name":"read_file","tool_id":"c1","parameters":{"file_path":"plan.md"}}'
-  say '{"type":"tool_result","tool_id":"c1","status":"success","output":""}'
-  say '{"type":"message","role":"assistant","content":"It has paint.","delta":true}'
-  say '{"type":"result","status":"success","stats":{}}' ;;
+Antigravity)
+  step() { printf '{"event":"step_update","step_update":{"conversation_id":"sess-Antigravity","step_index":%s}}\n' "$1"; }
+  say '{"event":"init","conversation_id":"sess-Antigravity","init":{"model":"gemini-4-neon-low","cwd":"/tmp","tools":["read_file"],"permission_mode":"accept-edits"}}'
+  step '0,"state":"DONE","step_type":"user_input"'
+  step '1,"state":"ACTIVE","step_type":"agent_response","text_delta":"I will read"'
+  step '1,"state":"DONE","step_type":"agent_response","text_delta":" it.","duration_seconds":4.0,"usage":{"input_tokens":1}'
+  step '2,"state":"ACTIVE","step_type":"tool","tool_name":"read_file","tool_info":{"name":"read_file","parameters":{"Path":"/tmp/plan.md"}}'
+  step '2,"state":"DONE","step_type":"tool","tool_name":"read_file","duration_seconds":0.02,"tool_info":{"name":"read_file","parameters":{"Path":"/tmp/plan.md"},"output":"1 lines, 12 bytes"}'
+  step '3,"state":"DONE","step_type":"agent_response","duration_seconds":3.1'
+  step '4,"state":"ACTIVE","step_type":"agent_response","text_delta":"It has"'
+  step '4,"state":"DONE","step_type":"agent_response","text_delta":" paint.\n"'
+  say '{"event":"result","result":{"conversation_id":"sess-Antigravity","status":"SUCCESS","response":"I will read it.It has paint.\n","num_turns":1}}' ;;
 *)
   say '{"type":"thread.started","thread_id":"sess-Codex"}'
   say '{"type":"turn.started"}'
@@ -613,7 +633,7 @@ try
     @test ok && pane.session === nothing && named("Reply") === nothing
   end
 
-  @testset "A click on the agent's name lists the agents, and Grok, Gemini and Codex work by turns" begin
+  @testset "A click on the agent's name lists the agents, and Grok, Antigravity and Codex work by turns" begin
     name = named("Agent name")
     @test name !== nothing && name.top + name.height <= K.TOPBAR_H
     click(name.left + 10px, name.top + 10px)
@@ -623,7 +643,7 @@ try
     # Each agent has a row with its logo, and the pane's agent has a tick
     rows() = [r for r in flat(only(p for p in K.popups(w) if p.key == K.AGENT_MENU).scene) if hasproperty(r.from, :name) && r.from.name == "Agent row"]
     icons(r) = [x.from.from.name for x in flat(r) if hasproperty(x.from, :from) && x.from.from isa K.Icon]
-    @test [r.from.from.name for r in rows()] == ["Claude", "Codex", "Gemini", "Grok"]
+    @test [r.from.from.name for r in rows()] == ["Claude", "Antigravity", "Codex", "Grok"]
     @test icons(rows()[1]) == ["agent-claude", "check"] && icons(rows()[4]) == ["agent-grok"]
     @test all(r -> r.top >= K.TOPBAR_H - 12px, rows())
     # A click on a row makes that agent the pane's, and shuts the menu
@@ -635,23 +655,23 @@ try
     e.remember = true
     K.agent_listed!(e, "Codex", false)
     K.agent_listed!(e, "Claude", false)
-    @test K.listed_agents(e) == ["Claude", "Gemini", "Grok"]
-    @test [c.name for c in K.choices_for(K.AgentChoice, e)] == ["Claude", "Gemini", "Grok"]
+    @test K.listed_agents(e) == ["Claude", "Antigravity", "Grok"]
+    @test [c.name for c in K.choices_for(K.AgentChoice, e)] == ["Claude", "Antigravity", "Grok"]
     @test occursin("\nagentshidden=Claude,Codex\n", read(K.settings_file(), String))
     click(name.left + 10px, name.top + 10px)
     frames()
-    @test [r.from.from.name for r in rows()] == ["Claude", "Gemini", "Grok"]
+    @test [r.from.from.name for r in rows()] == ["Claude", "Antigravity", "Grok"]
     K.close_popup!(w, K.AGENT_MENU)
     empty!(K.AGENTS_HIDDEN[])
     K.load_settings!(e)
     @test K.AGENTS_HIDDEN[] == Set(["Claude", "Codex"])
     K.agent_listed!(e, "Codex", true)
     K.agent_listed!(e, "Claude", true)
-    @test K.listed_agents(e) == ["Claude", "Codex", "Gemini", "Grok"] && occursin("\nagentshidden=\n", read(K.settings_file(), String))
+    @test K.listed_agents(e) == ["Claude", "Antigravity", "Codex", "Grok"] && occursin("\nagentshidden=\n", read(K.settings_file(), String))
     e.remember = false
     frames()
     K.TURN_COMMAND[] = Cmd([turner])
-    for (agent, step) in (("Grok", "Reading plan.md"), ("Gemini", "Reading plan.md"), ("Codex", "Running cat plan.md"))
+    for (agent, step) in (("Grok", "Reading plan.md"), ("Antigravity", "Reading plan.md"), ("Codex", "Running cat plan.md"))
       K.pane_agent!(pane, agent)
       frames()
       @test e.ai == agent && pane.session === nothing && K.pane_agent(pane, e) == agent
@@ -662,7 +682,8 @@ try
       ok = until(() -> !s.busy && !K.running(s))
       its = items()
       @test ok && [typeof(i) for i in its] == [K.YouSaid, K.AgentReply, K.AgentStep, K.AgentReply]
-      @test its[2].text == "I will read it." && its[2].whole && its[4].text == "It has paint." && its[4].whole
+      # Antigravity ends what it says with a new line
+      @test its[2].text == "I will read it." && its[2].whole && rstrip(its[4].text) == "It has paint." && its[4].whole
       @test its[3].words == step && its[3].state == :done
       @test s.id == "sess-$agent"
       # The second turn names the session, so the agent goes on with it. No program runs between turns, and the pane says so.
@@ -767,31 +788,71 @@ try
     @test ok && [it.words for it in items()[end-1:end]] == ["The model is now Opus 5.5.", "You stopped Claude."]
     # An agent that works by turns gets the model with its next turn
     K.TURN_COMMAND[] = Cmd([turner])
-    K.pane_agent!(pane, "Gemini")
+    K.pane_agent!(pane, "Antigravity")
     frames()
     @test K.model_words(pane, e) == "Default"
     pane.field.buf.lines = ["Read the plan"]
     K.send_words!(pane)
     g = pane.session
     ok = until(() -> !g.busy && !K.running(g))
-    @test ok && g.running == "auto" && K.model_words(pane, e) == "Auto"
-    @test !("-m" in K.turn_options(g))
-    K.pane_model!(pane, "flash")
-    @test g.model == "flash" && K.model_words(pane, e) == "Flash" && last(g.items).words == "The model is now Flash."
+    @test ok && g.running == "gemini-4-neon-low" && K.model_words(pane, e) == "Gemini 4 Neon (Low)"
+    @test !("--model" in K.turn_options(g))
+    # Antigravity's menu has a row for each model, with a button for each of its efforts, from the least to the most
+    button = named("Model")
+    click(button.left + 10px, button.top + 10px)
+    frames()
+    menu = only(p for p in K.popups(w) if p.key == K.MODEL_MENU)
+    efforts(r) = [x.from.from.effort for x in flat(r) if hasproperty(x.from, :from) && x.from.from isa K.EffortButton]
+    filled(r) = [x.from.from.effort for x in flat(r) if hasproperty(x.from, :from) && x.from.from isa K.EffortButton && K.pane_model(pane, e) == x.from.from.model.id]
+    @test [r.from.from.name for r in rows()] == ["Gemini 4 Neon", "Gemini 4 Carbon", "Orchestrator (Neon)", "Gemini 3.8 Flash", "GPT-OSS 120B"]
+    @test [efforts(r) for r in rows()] == [["Low", "Medium", "High", "XHigh"], ["Low", "Medium", "High"], String[], ["Low", "High"], ["Medium"]]
+    @test icons(rows()[1]) == ["check"] && filled(rows()[1]) == ["Low"] && isempty(icons(rows()[2]))
+    # It's wider than a menu of models with no efforts, and it's all in the window, over the button
+    whole = only(x for x in flat(menu.scene) if hasproperty(x.from, :name) && x.from.name == "Model menu")
+    @test whole.width == K.model_menu_wide(pane) > K.MODEL_MENU_W && whole.left >= 0px && all(r -> r.top + r.height <= button.top, rows())
+    # Each effort is in a column, under the same effort of the other rows, and no name pushes them
+    lefts(effort) = unique(x.left for r in rows() for x in flat(r) if hasproperty(x.from, :from) && x.from.from isa K.EffortButton && x.from.from.effort == effort)
+    @test all(effort -> length(lefts(effort)) == 1, ["Low", "Medium", "High", "XHigh"])
+    # Every button of an effort is in its row
+    @test all(r -> all(x -> x.left + x.width <= r.left + r.width, [x for x in flat(r) if hasproperty(x.from, :from) && x.from.from isa K.EffortButton]), rows())
+    # A click on an effort chooses that model with that effort
+    high = only(x for x in flat(rows()[1]) if hasproperty(x.from, :from) && x.from.from isa K.EffortButton && x.from.from.effort == "High")
+    click(high.left + 5px, high.top + 5px)
+    @test !any(p -> p.key == K.MODEL_MENU, K.popups(w))
+    @test g.model == "gemini-4-neon-high" && K.model_words(pane, e) == "Gemini 4 Neon (High)" && last(g.items).words == "The model is now Gemini 4 Neon (High)."
+    # A click on a model's name keeps the effort, and Medium is for a model that hasn't that effort
+    click(button.left + 10px, button.top + 10px)
+    frames()
+    carbon = rows()[2]
+    click(carbon.left + 20px, carbon.top + 10px)
+    @test g.model == "gemini-4-carbon-high"
+    @test K.row_choice("Antigravity", K.model_rows(K.agent_models("Antigravity").listed)[4].second, "gemini-4-neon-xhigh").id == "gemini-3.8-flash-low"
+    @test K.row_choice("Antigravity", K.model_rows(K.agent_models("Antigravity").listed)[1].second, "gemini-4-carbon-high").id == "gemini-4-neon-high"
     options = K.turn_options(g)
-    @test options[findfirst(==("-m"), options) + 1] == "flash" && findfirst(==("-m"), options) < findfirst(==("--resume"), options)
+    @test options[findfirst(==("--model"), options) + 1] == "gemini-4-carbon-high" && findfirst(==("--model"), options) < findfirst(==("--conversation"), options)
+    @test options[findfirst(==("--conversation"), options) + 1] == "sess-Antigravity" && options[end] == "-p"
+    # A model that Antigravity hasn't got: what it says went wrong shows once, as its first line
+    pane.field.buf.lines = ["bad model please"]
+    n = length(g.items)
+    K.send_words!(pane)
+    ok = until(() -> !g.busy && !K.running(g))
+    @test ok && length(g.items) == n + 2 && last(g.items) isa K.SessionNote && last(g.items).bad
+    @test last(g.items).words == "invalid model selection: model x is not recognized"
     for (agent, model) in (("Grok", "grok-4.6"), ("Codex", "gpt-5.4-mini"))
       t = K.AgentSession(agent=agent, model=model, id="sess", turns=true)
       options = K.turn_options(t)
       @test options[findfirst(==("-m"), options) + 1] == model
     end
-    # The settings file keeps the model of each agent
+    # The settings file keeps the model of each agent. One that Gemini had before Antigravity took its place is left out.
     e.remember = true
-    K.model_chosen!(e, "Gemini", "pro")
-    @test occursin("\nmodels=Claude:opus,Gemini:pro\n", read(K.settings_file(), String))
+    K.model_chosen!(e, "Antigravity", "gemini-4-neon-high")
+    @test occursin("\nmodels=Antigravity:gemini-4-neon-high,Claude:opus\n", read(K.settings_file(), String))
     empty!(K.MODELS_CHOSEN[])
     K.load_settings!(e)
-    @test K.MODELS_CHOSEN[] == Dict("Claude" => "opus", "Gemini" => "pro")
+    @test K.MODELS_CHOSEN[] == Dict("Claude" => "opus", "Antigravity" => "gemini-4-neon-high")
+    write(K.settings_file(), replace(read(K.settings_file(), String), "models=" => "models=Gemini:pro,"))
+    K.load_settings!(e)
+    @test K.MODELS_CHOSEN[] == Dict("Claude" => "opus", "Antigravity" => "gemini-4-neon-high")
     e.remember = false
     K.TURN_COMMAND[] = nothing
     K.pane_agent!(pane, "Claude")

@@ -760,7 +760,8 @@ end
 end
 
 @testset "Settings chooses the agent that Ladder starts" begin
-  @test [k.name for k in K.AGENT_KINDS] == ["Claude", "Codex", "Gemini", "Grok"] && e.ai == "Claude" && K.asks_whom(e) == "Claude"
+  @test [k.name for k in K.AGENT_KINDS] == ["Claude", "Antigravity", "Codex", "Grok"] && e.ai == "Claude" && K.asks_whom(e) == "Claude"
+  @test K.agent_kind("Antigravity").command == "agy" && K.agent_kind("Antigravity").look == ["--mode", "plan", "-p"]
   @test K.agent_kind("Grok").look == ["--permission-mode", "plan", "-p"] && K.agent_kind("Nobody").name == "Claude"
   K.preferred_agent!(e, "Grok")
   @test e.ai == "Grok" && K.asks_whom(e) == "Grok" && K.agent_logo(K.asks_whom(e))[1] == "agent-grok"
@@ -776,13 +777,13 @@ end
   @test c.exec == [fake, "--permission-mode", "acceptEdits", "-p"] && startswith(only(filter(startswith("PATH="), c.env)), "PATH=$bin:/opt/homebrew/bin:")
   @test_throws ErrorException K.agent_path(K.AgentKind("Nobody", "no-such-agent-command", String[], String[], String[]))
   K.AGENT_COMMAND[], ENV["PATH"] = was
-  # The setting is kept with the others
+  # The setting is kept with the others. Gemini was there before Antigravity, which has its place now.
   write(K.settings_file(), "agent=Gemini\n")
   K.load_settings!(e)
-  @test e.ai == "Gemini"
+  @test e.ai == "Antigravity" && K.agent_kind("Gemini").name == "Antigravity"
   write(K.settings_file(), "agent=Nobody\n")
   K.load_settings!(e)
-  @test e.ai == "Gemini"
+  @test e.ai == "Antigravity"
   rm(K.settings_file())
   K.preferred_agent!(e, "Claude")
 end
@@ -795,7 +796,7 @@ end
   @test e.popup == :commands && p.command.name == :switch_agent
   # The agents are a list over the chip. One whose command isn't on this Mac says so.
   rows = K.palette_rows(e, p)
-  @test [r.name for r in rows] == ["Claude", "Codex", "Gemini", "Grok"]
+  @test [r.name for r in rows] == ["Claude", "Antigravity", "Codex", "Grok"]
   @test [r.note for r in rows] == [(try K.agent_path(k); "" catch; "not installed" end) for k in K.AGENT_KINDS]
   # Return takes the row, and the command runs at once: it changes no file
   foreach(_ -> press(w, Keys.down), 1:3)
