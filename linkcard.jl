@@ -17,7 +17,7 @@
 # picture's and the icon's. It draws nothing.
 
 @use "./web/entities" entities latin LATIN_NAMES
-@use "./web/url" resolve
+@use "./web/url" resolve site_name
 
 """
 What a web page says of itself. A text that the page doesn't give is empty.
@@ -37,13 +37,7 @@ end
 Card(url::AbstractString; title="", description="", image="", site="", icon="", page=true) = Card(url, title, description, image, site, icon, page)
 
 "True when `text` is a web address and nothing else: it starts with http:// or https://, and it names a computer"
-isaddress(text::AbstractString) = occursin(r"^https?://\S+$"i, text) && !isempty(host(text))
-
-"The name of the computer that the web address `url` is on, without a www. at its start: bunnings.com.au"
-host(url::AbstractString) = begin
-  m = match(r"^https?://(?:[^/?#@]*@)?([^/?#:@]+)"i, url)
-  m === nothing ? "" : String(replace(lowercase(m[1]), r"^www\." => ""))
-end
+isaddress(text::AbstractString) = occursin(r"^https?://\S+$"i, text) && !isempty(site_name(text))
 
 "The start of the web address `url`, as far as the first / after the name of its computer: https://www.bunnings.com.au"
 origin(url::AbstractString) = (m = match(r"^https?://[^/?#]+"i, url); m === nothing ? "" : String(m.match))
@@ -60,7 +54,7 @@ absolute(href::AbstractString, base::AbstractString) = begin
   href = String(strip(href))
   (isempty(href) || any(c -> isspace(c) || iscntrl(c), href)) && return ""
   full = resolve(base, href)
-  occursin(r"^https?://"i, full) && !isempty(host(full)) ? full : ""
+  occursin(r"^https?://"i, full) && !isempty(site_name(full)) ? full : ""
 end
 
 # --- reading the HTML of a page ---------------------------------------------------------
@@ -171,7 +165,7 @@ end
 
 "The line under a card's words: the name of the site, when the page gives one, and the name of the computer that it's on"
 source(c::Card) = begin
-  name = host(c.url)
+  name = site_name(c.url)
   isempty(c.site) || lowercase(c.site) == name ? name : c.site * " · " * name
 end
 

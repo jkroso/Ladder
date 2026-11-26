@@ -15,8 +15,8 @@ const SITE = "https://www.bunnings.com.au/paint/white-4l?colour=white#top"
 end
 
 @testset "the parts of an address" begin
-  @test C.host(SITE) == "bunnings.com.au" && C.host("http://Example.com:8080/a") == "example.com"
-  @test C.host("https://jake@host.local/x") == "host.local" && C.host("not an address") == ""
+  @test C.site_name(SITE) == "bunnings.com.au" && C.site_name("http://Example.com:8080/a") == "example.com"
+  @test C.site_name("https://jake@host.local/x") == "host.local" && C.site_name("not an address") == ""
   @test C.origin(SITE) == "https://www.bunnings.com.au" && C.path(SITE) == "/paint/white-4l" && C.path("https://example.com") == ""
   @test C.absolute("https://cdn.example.com/a.png", SITE) == "https://cdn.example.com/a.png"
   @test C.absolute("//cdn.example.com/a.png", SITE) == "https://cdn.example.com/a.png"

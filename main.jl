@@ -21268,7 +21268,7 @@ end
 link_glance(e, url) = (got = Cards.lookup!(url, cards_dir(), ask=online(e)); got[2] && redraw_in!(e, 0.2); got[1])
 
 "The words at the top of a card of a web page: its title, or the name of its computer"
-link_title(c, card) = isempty(c.title) ? Cards.host(card.content) : c.title
+link_title(c, card) = isempty(c.title) ? Cards.site_name(card.content) : c.title
 
 "How tall a card of a web page is: its picture, two lines of its title at most, and its site"
 link_card_tall(e, card) = begin
@@ -21634,7 +21634,7 @@ draw_link_card(ctx, e, card, w, x, y, z, H) = begin
   length(rows) > 2 && (rows = [rows[1], cut_to(canvas_face(size, colours.ink, "Semibold"), rows[2] * " " * join(rows[3:end], " "), w - 2NOTE_PAD)])
   draw_words(ctx, rows, x + pad, top + pad, size * z, size * NOTE_LEADING * z, colours.ink, style="Semibold", room=size)
   # A page with no title shows the name of its computer at the top, and its whole address under that
-  site = isempty(c.title) ? replace(card.content, r"^https?://(www\.)?"i => "") : isempty(c.site) ? Cards.host(card.content) : c.site
+  site = isempty(c.title) ? replace(card.content, r"^https?://(www\.)?"i => "") : isempty(c.site) ? Cards.site_name(card.content) : c.site
   draw_words(ctx, [cut_to(canvas_face(12.0), site, w - 2NOTE_PAD)], x + pad, top + pad + length(rows) * size * NOTE_LEADING * z + 2z, 12z, 14z, colours.dim, room=12.0)
 end
 

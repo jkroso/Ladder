@@ -16,6 +16,8 @@
 # The page can have other lines too, like a heading or a note. Ladder reads
 # only the links of its lists, and leaves the other lines as they are.
 
+@use "./web/url" site_name
+
 "The name of the page that keeps the favourite sites, at the top of the browser folder"
 const NAME = "Favourites.md"
 
@@ -42,8 +44,8 @@ unescaped(s::AbstractString) = replace(s, r"\\(.)" => s"\1")
 "The words `s`, as the words of a link: a [ or a ] has a \\ before it"
 escaped(s::AbstractString) = replace(s, r"([\\\[\]])" => s"\\\1")
 
-"The name of the computer of the web address `address`, without a www. at its start"
-host(address::AbstractString) = (m = match(r"^https?://(?:www\.)?([^/?#:]+)"i, address); m === nothing ? String(address) : lowercase(m[1]))
+"The name of the site of the web address `address`, like example.com, or `address` itself when it isn't a web address"
+host(address::AbstractString) = (name = site_name(address); isempty(name) ? String(address) : name)
 
 """
 The web address `address`, as Ladder compares it with another: the scheme and

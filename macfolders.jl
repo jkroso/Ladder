@@ -19,6 +19,7 @@
 @use "github.com/jkroso/UI.jl/Interface/objc" libobjc cls sel msg get_value nsstring jstring with_pool
 @use Dates: Dates, Date
 @use "./macfile" resource date_of added made
+@use "./web/url" site_name
 
 const Object = Ptr{Cvoid}
 
@@ -101,15 +102,9 @@ end
 "The addresses that the file at `path` was downloaded from, as the browser wrote them: the file's own address, and the page that had the link"
 sources(path::AbstractString) = (data = extra(path, "com.apple.metadata:kMDItemWhereFroms"); data === nothing ? String[] : texts(data))
 
-"The name of the site of the address `url`, like `github.com`, or \"\" when it has none"
-host(url::AbstractString) = begin
-  m = match(r"^[a-z][a-z0-9+.-]*://(?:[^/@]*@)?([^/:?#]+)"i, url)
-  m === nothing ? "" : String(replace(lowercase(m[1]), r"^www\." => ""))
-end
-
 "The site that the file at `path` was downloaded from: the site of the page that had the link, or else of the file's own address. It's \"\" for a file that wasn't downloaded."
 site(path::AbstractString) = begin
-  found = filter(!isempty, map(host, sources(path)))
+  found = filter(!isempty, map(site_name, sources(path)))
   isempty(found) ? "" : last(found)
 end
 

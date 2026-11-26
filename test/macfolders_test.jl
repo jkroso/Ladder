@@ -30,10 +30,10 @@ include(joinpath(@__DIR__, "dsstore_fake.jl"))   # `store` makes the bytes of a 
 end
 
 @testset "the site of an address" begin
-  @test M.host("https://www.github.com/jkroso/Ladder/releases/Ladder.zip") == "github.com"
-  @test M.host("http://user@Example.org:8080/a?b=1") == "example.org"
-  @test M.host("file:///Users/jake/a.pdf") == ""
-  @test M.host("not an address") == ""
+  @test M.site_name("https://www.github.com/jkroso/Ladder/releases/Ladder.zip") == "github.com"
+  @test M.site_name("http://user@Example.org:8080/a?b=1") == "example.org"
+  @test M.site_name("file:///Users/jake/a.pdf") == ""
+  @test M.site_name("not an address") == ""
 end
 
 @testset "when a file came into its folder" begin
