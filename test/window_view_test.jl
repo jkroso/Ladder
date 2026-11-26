@@ -58,6 +58,11 @@ end
 K.compact_width(::RailMenu) = 60px
 K.side_button(m::RailMenu) = K.editor(m).panel ? word("fold") : nothing   # the rail has no button in the bar
 K.shows_lock(e, ::DepotDirectory) = false   # its page is no file that's only shown
+const LOADS_W = Ref(0px)   # how wide the first of its page's parts in the top bar is
+# what its page is for, at the right end of the top bar
+K.page_actions(e, ::DepotDirectory) = (K.Box(K.fixed(LOADS_W[]), K.height(10px), name="Loads"), word("New load"))
+K.page_top(e, ::DepotDirectory) = 2px     # its page starts nearer the top bar than a page of text does,
+K.page_margin(e, ::DepotDirectory) = 10px   # and has less room at its sides
 K.side_menu(e, d::DepotDirectory) = K.node!(RailMenu, e, :rail_menu)
 
 # A kind of folder that makes the whole window: one line of words, under the top bar and the file finder
@@ -187,9 +192,20 @@ end
   @test "fold" in bar()
   # the kind says that its page has no lock in the top bar. A plain folder's page has one.
   locked() = any(r -> r.from isa K.ReadOnly, (c.from for c in flat(K.rect(e.nodes[:topbar])) if hasproperty(c.from, :from)))
-  @test !locked()
+  @test !locked() && "New load" in bar()
+  # what its page has there gets the room that it needs, so none of it lies over the middle of the bar
+  ends() = drawn("TopBar").children[end]
+  @test ends().width == 250px
+  LOADS_W[] = 400px; frames()
+  @test ends().width > 400px && drawn("Loads").width == 400px && drawn("Loads").left >= ends().left
+  @test "New load" in bar()
+  LOADS_W[] = 0px; frames()
+  @test ends().width == 250px
+  # and how much room its page has over it and at its sides
+  @test K.page_top(e) == 2px && K.page_x(e) == 10px
   K.open!(e, joinpath(dir, "plain")); frames()
-  @test locked()
+  @test locked() && !("New load" in bar())
+  @test K.page_top(e) == K.PAGE_TOP && K.page_x(e) == K.PAGE_X
   K.open!(e, depot); frames()
   # closed, the menu is its compact form: as wide as the kind says, from the top of the window to the bottom
   K.toggle_panel!(e); sleep(0.3); frames()

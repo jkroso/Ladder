@@ -27584,8 +27584,25 @@ geometry(node::GeometricUI) = detach!(node)
 "True when the page shows a CSV file as a table"
 sheet_page(b::Buffer) = b.view == :file && lowercase(splitext(b.path)[2]) in TABLES
 
-"How far under the top bar the page starts. A CSV file's table and a JSON file's tree start nearer than the text of a page does."
-page_top(e) = sheet_page(e.buf) || (e.buf.view == :file && json_page(e.buf)) ? SHEET_ABOVE : PAGE_TOP
+"How far under the top bar the page starts. A CSV file's table and a JSON file's tree start nearer than the text of a page does, and a kind of folder can say how near its own page starts."
+page_top(e) = begin
+  own = page_top(e, page_object(e))
+  own !== nothing ? own : sheet_page(e.buf) || (e.buf.view == :file && json_page(e.buf)) ? SHEET_ABOVE : PAGE_TOP
+end
+
+"""
+How far under the top bar the page of `o` starts, for a file or a folder that's
+shown its own way, or nothing for the room that a page of text has. What the
+page shows is `LIVE_GAP` further down. A kind of folder has a method of this,
+and of `page_margin`, for a page like a table, which wants less room round it.
+"""
+page_top(e, o) = nothing
+
+"How much room the page of `o` has at each side, for a file or a folder that's shown its own way, or nothing for the room that a page of text has"
+page_margin(e, o) = nothing
+
+"How much room the page has at each side: the least beside a page's text, or what the kind of the file or folder that shows says"
+page_x(e) = something(page_margin(e, page_object(e)), PAGE_X)
 
 "How wide the page's text is in the window"
 text_width(e) = begin
@@ -27597,7 +27614,7 @@ text_width(e) = begin
   alone = lowered(e) !== nothing
   # A side menu's compact form keeps its width beside the text while the sidebar is closed
   beside = alone ? 0px : e.panel || sliding(e) ? panel_w(e) : side_least(e)
-  room = w - beside - 2PAGE_X - gutter(e)
+  room = w - beside - 2page_x(e) - gutter(e)
   # A file of code or of text takes all the room that the window has, and so do a CSV file's table and
   # the lines of a block that fill the window. A page is no wider than the settings say. A page of a blog is
   # as wide as its site's text, for as many words to a line. A page with comments leaves room for them at its right.
@@ -27627,9 +27644,9 @@ are in the middle together, so the text is to the left of the middle.
 """
 text_inset(e, space) = begin
   extra = comment_room(e)
-  extra == 0px && return max(PAGE_X, (space - e.width) / 2)
+  extra == 0px && return max(page_x(e), (space - e.width) / 2)
   before = comment_balance(e, space)
-  max(PAGE_X, (space - e.width - extra - before) / 2) + before
+  max(page_x(e), (space - e.width - extra - before) / 2) + before
 end
 
 # A page of Markdown is laid out again in each frame, since what a block shows
@@ -28165,7 +28182,7 @@ describe(p::Page) = begin
   foot = page_foot(e)
   page = wraps(e) ?
     Row(width(grow=grow), Alignment.Start, justify=numbered(e.buf) ? Alignment.Start : Alignment.Center,
-        padding(page_top(e), PAGE_X, page_bottom(e), PAGE_X + gutter(e)),
+        padding(page_top(e), page_x(e), page_bottom(e), page_x(e) + gutter(e)),
       with_comments(e, foot === nothing ? node!(Document, e, :document) : Column(Alignment.Start, node!(Document, e, :document), foot))) :
     Row(width(grow=grow), Alignment.Start, padding(page_top(e), 0px, page_bottom(e), PAGE_X + gutter(e)), clip_x=true,
       Box(Alignment.Start, offset_x=-sideways(e), node!(Document, e, :document)))
@@ -32295,6 +32312,13 @@ method of this that says false.
 """
 shows_lock(e, o) = true
 
+"""
+What the right end of the top bar has for the page of `o`, a file or a folder
+that's shown its own way: nodes, like a button for what the page is for. A
+kind of folder has a method of this, as a company's books have New invoice.
+"""
+page_actions(e, o) = ()
+
 draw(ctx, size, ui::ConcreteRect, b::Tipped) = (b.rect = (ui.left, ui.top, ui.width, ui.height); nothing)
 
 onmouse(b::Tipped, ev::MouseMove) = begin
@@ -32689,6 +32713,11 @@ describe(t::TopBar) = begin
   grown = isempty(mode) ? 0px : slider_grown(e)
   said = shown && !isempty(b.about) ? spared_width(b.about, said_face()) + LOCK_W + 70px + grown : 0px
   side = max(isempty(more) && isempty(checks) ? 250px : 330px, said) + (isempty(mode) ? 0px : MODE_W)
+  # What the page itself puts at the right end, like its buttons, has the room that it needs there, with the bar's
+  # own parts. So a page's buttons never lie over the middle of the bar, which would take their clicks.
+  own_ends = shown ? page_actions(e, page_object(e)) : ()
+  isempty(own_ends) || (side = max(side, describe(Row(Alignment.Start, own_ends...), (9999px, 9999px)).width + 10px + said + LOCK_W +
+                                         (isempty(mode) ? 0px : MODE_W) + (isempty(outside) ? 0px : 40px)))
   ended_rename!(e)
   # The two ends of the bar are as wide as each other, so the file's name is in the middle of the space beside
   # the sidebar. A window can be too narrow for that, with a wide sidebar or more buttons at its right end. Then the
@@ -32753,7 +32782,7 @@ describe(t::TopBar) = begin
       # A page that has a panel at the right has the button that hides it, at the end
       (page_covered(e) || nofile(e) ? right_part(e) :
        readonly(b) && (page_object(e) isa BlogFolder || page_object(e) isa NewsFolder) ? (more..., mode..., outside...) :
-       shown ? ((isempty(b.about) ? () : (said_part(b.about, side - LOCK_W - (isempty(outside) ? 0px : 40px) - (isempty(mode) ? 0px : MODE_W + grown)),))...,
+       shown ? (own_ends..., (isempty(b.about) ? () : (said_part(b.about, side - LOCK_W - (isempty(outside) ? 0px : 40px) - (isempty(mode) ? 0px : MODE_W + grown)),))...,
                       (term_shown(e) || !(readonly(b) || b.fixed) || !shows_lock(e, page_object(e)) ? () : (lock_part(e),))...,   # a terminal is yours to type in, and so is a CSV file
                       mode...,
                       outside...) :
