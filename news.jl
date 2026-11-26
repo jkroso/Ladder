@@ -471,6 +471,13 @@ end
 "The line that starts each article in what the agent replies"
 const MARK = "=== ARTICLE ==="
 
+"""
+What every agent is told of a post on x.com: the story shows it as a link card
+on a line of its own, where the text tells of it, in place of a link and a
+quote. See linkcard.jl.
+"""
+const X_POSTS = "When a story tells of a post on x.com, show the post itself. Put it on a line of its own, after the paragraph that tells of it, as `![Sam Lee on X](https://x.com/samlee/status/1234567890)` with the post's own address. Ladder shows that line as a card with the post's picture and the first two lines of its words. The reader clicks the card to open the post and its replies. Don't link to the post in the text as well. Quote only the words of a long post that the story needs, and say who wrote it and why it matters."
+
 "What an agent says of the day `d`, like Wednesday 25 November 2026"
 long_day(d) = Dates.format(d, "E d U yyyy")
 
@@ -511,6 +518,8 @@ $(strip(interest.words))
 Search the web for news of this kind from $(long_day(since)) until now. Choose the stories that the reader would most want to know about: $most at most, and fewer when there's less news. Leave out a story that isn't new since $(long_day(since)).$(isempty(printed) ? "" : " Leave out these stories, which the paper has printed already, unless something new has happened in them:\n\n" * join(("- " * p for p in printed), "\n"))
 $(liked_words(liked))
 Write an article about each story, as a good newspaper writes it. Put the most important facts first. Write 3 to 6 short paragraphs in plain words. Say only what your sources say, and name a source in the text where that matters.
+
+$X_POSTS
 
 Reply with only the articles, one after another, each in this form:
 
@@ -714,6 +723,8 @@ The front matter is between the lines of `---`:
 - `by` is your name, like `Grok`.
 
 Under the front matter, write 3 to 6 short paragraphs in plain words, with the most important facts first. Say only what your sources say, and name a source in the text where that matters. Put no headings in the story. End with a `## Sources` heading and a link to each web page that you used.
+
+$(X_POSTS) `## Sources` needn't list a post that the story shows.
 
 ## What the reader thought
 

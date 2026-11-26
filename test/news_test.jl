@@ -340,6 +340,8 @@ end
   @test occursin("It keeps every article", N.instructions(days=0, zone=""))
   @test occursin("Read `feedback.csv`", text) && occursin("`liked: yes`", text) && occursin("Feeds.md", text)
   @test !occursin("time zone is", N.instructions(zone=""))
+  # A post on x.com shows as a card in the story, in what both kinds of agent read
+  @test occursin("![Sam Lee on X](https://x.com/", text) && occursin(N.X_POSTS, N.ask(N.Interest(name="X", words="Posts."), Dates.now()))
   # It follows the settings
   m = K.sandbox(e)
   Base.invokelatest(Core.eval, m, :(news_days!(14)))
