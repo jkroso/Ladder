@@ -16,7 +16,7 @@ const px = K.px
 const G = K.Git
 
 const dir = mktempdir()
-@eval K settings_file() = $(joinpath(dir, "settings"))
+K.SETTINGS_FILE[] = joinpath(dir, "settings")
 const hold = joinpath(dir, "code")
 const repo = joinpath(hold, "work")
 mkpath(joinpath(repo, "src", "deep"))

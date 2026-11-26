@@ -14,7 +14,7 @@
 const px = K.px
 
 const repo = realpath(mktempdir())
-@eval K settings_file() = $(joinpath(repo, ".settings"))
+K.SETTINGS_FILE[] = joinpath(repo, ".settings")
 const file = joinpath(repo, "walls.jl")
 git(args...; day=nothing) = begin
   env = copy(ENV)

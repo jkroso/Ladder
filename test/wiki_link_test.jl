@@ -52,7 +52,7 @@ end
 
 # A project: its top folder has an .obsidian folder, as an Obsidian vault does
 const dir = realpath(mktempdir())
-@eval K settings_file() = $(joinpath(dir, "settings"))
+K.SETTINGS_FILE[] = joinpath(dir, "settings")
 const top = joinpath(dir, "vault")
 mkpath(joinpath(top, ".obsidian"))
 mkpath(joinpath(top, "notes"))

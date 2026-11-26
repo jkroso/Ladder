@@ -16,7 +16,7 @@ const px = K.px
 const dir = joinpath(tempdir(), "ladder-block-handle-test")
 rm(dir, recursive=true, force=true)
 mkpath(dir)
-@eval K settings_file() = $(joinpath(dir, "settings"))
+K.SETTINGS_FILE[] = joinpath(dir, "settings")
 const page = joinpath(dir, "handles.md")
 const start = """
 ---

@@ -12,7 +12,7 @@
 const px = K.px
 
 const dir = mktempdir()
-@eval K settings_file() = $(joinpath(dir, "settings"))
+K.SETTINGS_FILE[] = joinpath(dir, "settings")
 const ran = joinpath(dir, "ran")   # a file that the code of a page would make, if it ran
 const browser = joinpath(dir, "Browser")
 K.BROWSER_FOLDER[] = browser

@@ -18,7 +18,7 @@ const px = K.px
 const dir = joinpath(tempdir(), "ladder-file-checks-test")
 rm(dir, recursive=true, force=true)
 mkpath(dir)
-@eval K settings_file() = $(joinpath(dir, "settings"))
+K.SETTINGS_FILE[] = joinpath(dir, "settings")
 
 const source = joinpath(dir, "shares.jl")
 write(source, """

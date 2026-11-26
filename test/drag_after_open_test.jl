@@ -14,7 +14,7 @@
 const px = K.px
 
 const dir = mktempdir()
-@eval K settings_file() = $(joinpath(dir, "settings"))
+K.SETTINGS_FILE[] = joinpath(dir, "settings")
 const long = joinpath(dir, "long.md")
 write(long, join(["Line $i of a long page, with enough words in it to make it a long line." for i in 1:300], "\n\n"))
 const short = joinpath(dir, "short.jl")

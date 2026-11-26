@@ -14,7 +14,7 @@
 const px = K.px
 
 const dir = mktempdir()
-@eval K settings_file() = $(joinpath(dir, "settings"))
+K.SETTINGS_FILE[] = joinpath(dir, "settings")
 const root = joinpath(dir, "Notes")
 mkpath(joinpath(root, "plans"))
 mkpath(joinpath(root, ".obsidian"))   # what makes the folder a folder of notes

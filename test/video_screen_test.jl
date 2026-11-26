@@ -18,7 +18,7 @@ const ffmpeg = something(Sys.which("ffmpeg"), "/opt/homebrew/bin/ffmpeg")
 if Sys.isapple() && isfile(ffmpeg)
 
 const dir = mktempdir()
-@eval K settings_file() = $(joinpath(dir, "settings"))
+K.SETTINGS_FILE[] = joinpath(dir, "settings")
 const video = joinpath(dir, "walk.mp4")
 run(pipeline(`$ffmpeg -nostdin -v error -y -f lavfi -i testsrc=d=8:s=320x180:r=24 -f lavfi -i sine=d=8 -c:v libx264 -g 24 -pix_fmt yuv420p -c:a aac $video`, stdout=devnull))
 

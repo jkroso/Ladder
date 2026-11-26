@@ -14,7 +14,7 @@
 const px = K.px
 
 const dir = realpath(mktempdir())
-@eval K settings_file() = $(joinpath(dir, "settings"))
+K.SETTINGS_FILE[] = joinpath(dir, "settings")
 const jobs = joinpath(dir, "jobs")
 mkpath(jobs)
 write(joinpath(jobs, "one.md"), "# One\n\nSee [[Two]].\n")

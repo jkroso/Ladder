@@ -29,7 +29,7 @@ const px = K.px
 end
 
 const dir = realpath(mktempdir())
-@eval K settings_file() = $(joinpath(dir, "settings"))
+K.SETTINGS_FILE[] = joinpath(dir, "settings")
 const top = joinpath(dir, "project")
 mkpath(joinpath(top, ".git"))
 mkpath(joinpath(top, "notes", "sub"))

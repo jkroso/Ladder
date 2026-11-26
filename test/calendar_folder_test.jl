@@ -20,7 +20,7 @@ K.calendar_day[] = Date(2026, 11, 18)
 nov(d) = Date(2026, 11, d)
 
 const dir = realpath(mktempdir())
-@eval K settings_file() = $(joinpath(dir, "settings"))
+K.SETTINGS_FILE[] = joinpath(dir, "settings")
 const jobs = joinpath(dir, "jobs")
 mkpath(jobs)
 const kitchen = joinpath(jobs, "kitchen.md")

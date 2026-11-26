@@ -15,7 +15,7 @@ const cmd, ctrl, opt, shift = Keys.cmd, Keys.ctrl, Keys.opt, Keys.shft
 
 const dir = mktempdir()
 # The settings that these tests keep go to a file of their own, not to the one that Ladder uses
-@eval K settings_file() = $(joinpath(dir, "settings"))
+K.SETTINGS_FILE[] = joinpath(dir, "settings")
 # A file that goes to the Trash here is only removed
 K.trasher[] = path -> (rm(path); true)
 

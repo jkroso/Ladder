@@ -22,15 +22,20 @@
 #   - A struct with new fields makes its file, and the files that use it, run
 #     again from the top. That takes longer, once.
 #   - A method that you delete stays until the process starts again.
-#   - Every test shares the one process. A test that counts the open windows,
-#     or that leaves a setting changed, can fail here and pass by itself. So
-#     run a test that fails here once in a process of its own, and do the same
-#     with the tests of what you changed before you call the work done:
+#   - Every test shares the one process. When a test ends, each Ref that its
+#     text sets, like `K.SETTINGS_FILE[] = ...` or `K.AGENT_COMMAND[] = ...`,
+#     gets back the value it had before the test: see put_back.jl. Other things
+#     stay as the test left them: the open windows, what's in a table of
+#     Ladder's, a function that a test defined again with `@eval K`. So a test
+#     can fail here and pass by itself. Run a test that fails here once in a
+#     process of its own, and do the same with the tests of what you changed
+#     before you call the work done:
 #     `KIP_FROZEN=1 julia -O0 --project=. test/board_view_test.jl`.
 #   - A test that saves pictures reads `LADDER_SHOTS` from this process, so
 #     set it when you start the process.
 
 using Kip, Logging
+include("put_back.jl")
 
 ENV["KIP_FROZEN"] = "1"   # Kip loads each file from its source, so each has a module to load changes into
 const REQUESTS = joinpath(@__DIR__, ".hot", "req")
@@ -58,6 +63,11 @@ reload_all!() =
     restart[] || break
   end
 
+# Ladder is loaded before the first test, so that its Refs are known, with their values, before
+# a test sets them. Then the first test's Refs go back too.
+@use "../main" => Ladder
+track!()
+
 "What a test file's own `exit()` throws here, so that the process stays open"
 struct Ended <: Exception
   code::Int
@@ -67,9 +77,11 @@ end
 run_test(path, log) = open(log, "w") do io
   redirect_stdio(stdout=io, stderr=io) do
     t = time()
+    m = Module(:HotTest)
+    before = nothing
     ok = try
       reload_all!()
-      m = Module(:HotTest)
+      before = refs_now()
       Core.eval(m, :(using Kip))
       Core.eval(m, :(include(path) = Base.include($m, path)))
       Core.eval(m, :(exit(code=0) = throw($Ended(code))))
@@ -81,6 +93,15 @@ run_test(path, log) = open(log, "w") do io
         e = e.error
       end
       e isa Ended ? e.code == 0 : (showerror(stderr, e, catch_backtrace()); println(stderr); false)
+    end
+    # The Refs that the test set go back to what they were, so the next test doesn't get them
+    if before !== nothing
+      try
+        back = put_back!(before, path, m)
+        isempty(back) || println("Put back: ", join(back, ", "))
+      catch e
+        println(stderr, "Couldn't put back the Refs that the test set: ", sprint(showerror, e))
+      end
     end
     # Watch the files that this test loaded, as they are now, so that a change that's saved later is seen
     track!()

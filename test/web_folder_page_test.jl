@@ -14,7 +14,7 @@
 const px = K.px
 
 const dir = mktempdir()
-@eval K settings_file() = $(joinpath(dir, "settings"))
+K.SETTINGS_FILE[] = joinpath(dir, "settings")
 K.BROWSER_FOLDER[] = joinpath(dir, "Browser")   # each page from the web goes in the test's own browser folder
 const ran = joinpath(dir, "ran")   # each run of a site's page adds a line to this file
 

@@ -14,7 +14,7 @@ const dir = joinpath(tempdir(), "ladder-cover-test")
 rm(dir, recursive=true, force=true)
 mkpath(joinpath(dir, "photos"))
 cp(joinpath(@__DIR__, "..", "pages", "photos", "3 roof.png"), joinpath(dir, "photos", "roof.png"))
-@eval K settings_file() = $(joinpath(dir, "settings"))
+K.SETTINGS_FILE[] = joinpath(dir, "settings")
 const page = joinpath(dir, "kitchen.md")
 write(page, """
 ---

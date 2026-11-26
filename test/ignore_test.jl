@@ -16,7 +16,7 @@ const px = K.px
 const H = K.Folders
 
 const dir = mktempdir()
-@eval K settings_file() = $(joinpath(dir, "settings"))
+K.SETTINGS_FILE[] = joinpath(dir, "settings")
 H.FILE[] = joinpath(dir, "home-list")
 const named = H.page()   # the page that Ladder names, before the tests name their own
 H.PAGE[] = joinpath(dir, "settings-pages", "ignored-files.md")

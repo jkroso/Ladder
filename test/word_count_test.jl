@@ -10,7 +10,7 @@
 const px = K.px
 
 const dir = mktempdir()
-@eval K settings_file() = $(joinpath(dir, "settings"))
+K.SETTINGS_FILE[] = joinpath(dir, "settings")
 
 window(text; name="page.md") = begin
   path = joinpath(dir, name)

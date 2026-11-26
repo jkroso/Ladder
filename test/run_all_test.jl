@@ -12,7 +12,7 @@ K.RUN_WAIT[] = Inf   # the code runs in a thread of its own, and each result is 
 const px = K.px
 
 const dir = mktempdir()
-@eval K settings_file() = $(joinpath(dir, "settings"))
+K.SETTINGS_FILE[] = joinpath(dir, "settings")
 const padding = join(("a$i = $i" for i in 1:40), "\n")
 const source = joinpath(dir, "sums.jl")
 write(source, """

@@ -13,7 +13,7 @@ const cmd = Keys.cmd
 
 const dir = mktempdir()
 # The settings that these tests keep go to a file of their own, not to the one that Ladder uses
-@eval K settings_file() = $(joinpath(dir, "settings"))
+K.SETTINGS_FILE[] = joinpath(dir, "settings")
 
 const top = joinpath(dir, "Work")
 const sub = joinpath(top, "Plans")

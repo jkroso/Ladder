@@ -14,7 +14,7 @@ const px = K.px
 const dir = mktempdir()
 # The settings that these tests keep go to a file of their own, not to the one that Ladder uses
 const kept = joinpath(dir, "settings")
-@eval K settings_file() = $kept
+K.SETTINGS_FILE[] = kept
 
 const LONG = join(["Paragraph $k of a slide that's too tall for the window, with enough words to fill a line or two of the page." for k in 1:16], "\n\n")
 const TEXT = """

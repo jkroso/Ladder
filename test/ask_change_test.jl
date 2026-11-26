@@ -18,7 +18,7 @@ const px = K.px
 const dir = joinpath(tempdir(), "ladder-ask-change-test")
 rm(dir, recursive=true, force=true)
 mkpath(dir)
-@eval K settings_file() = $(joinpath(dir, "settings"))
+K.SETTINGS_FILE[] = joinpath(dir, "settings")
 K.STARTUP_FOLDER[] = dir
 const page = joinpath(dir, "tank.md")
 const source = joinpath(dir, "level.jl")

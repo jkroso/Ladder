@@ -11,7 +11,7 @@ const px = K.px
 
 const dir = mktempdir()
 # The settings that these tests keep go to a file of their own, not to the one that Ladder uses
-@eval K settings_file() = $(joinpath(dir, "settings"))
+K.SETTINGS_FILE[] = joinpath(dir, "settings")
 
 for name in ("a.md", "b.md", "c.md")
   write(joinpath(dir, name), "# $name\n\nSome words.\n\n## Part of $name\n\nMore words.\n")

@@ -15,7 +15,7 @@
 
 const px = K.px
 const dir = mktempdir()
-@eval K settings_file() = $(joinpath(dir, "settings"))
+K.SETTINGS_FILE[] = joinpath(dir, "settings")
 
 # `top` has a page of its own, as Downloads has. `Plain` and `Sub` are plain folders.
 const top = mkpath(joinpath(dir, "top"))

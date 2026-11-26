@@ -24,7 +24,7 @@ K.MEDIA_CACHE[] = mktempdir()                          # the pictures are kept h
 K.Eml.CACHE[] = mktempdir()                            # and the files that came with an email here
 
 const dir = mktempdir()
-@eval K settings_file() = $(joinpath(dir, "settings"))   # the senders whose pictures you asked for are listed beside it
+K.SETTINGS_FILE[] = joinpath(dir, "settings")   # the senders whose pictures you asked for are listed beside it
 "Write an email file whose body is `body`, of the kind `type`, and give its path. With `file`, a PDF comes with it."
 email(name, body; type="text/html", file=false, from="Sam Lee <sam@example.com>") = begin
   head = "From: $from\r\nTo: you@example.com\r\nSubject: $name\r\nDate: Sat, 14 Nov 2026 09:32:00 +1100\r\nMIME-Version: 1.0\r\n"

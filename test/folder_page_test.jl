@@ -14,7 +14,7 @@ const FS = K.FS
 
 const dir = mktempdir()
 # The settings that these tests keep go to a file of their own, not to the one that Ladder uses
-@eval K settings_file() = $(joinpath(dir, "settings"))
+K.SETTINGS_FILE[] = joinpath(dir, "settings")
 const notes = joinpath(dir, "notes")
 const films = joinpath(dir, "films")
 mkpath(joinpath(notes, "old"))

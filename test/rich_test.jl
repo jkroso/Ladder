@@ -12,7 +12,7 @@ const px = K.px
 const dir = mktempdir()
 # The settings that these tests keep go to a file of their own, not to the one that Ladder uses
 const kept = joinpath(dir, "settings")
-@eval K settings_file() = $kept
+K.SETTINGS_FILE[] = kept
 
 "A window that isn't on the screen, on a file with `text` in it"
 window(text; name="page.md") = begin

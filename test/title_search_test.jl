@@ -15,7 +15,7 @@
 
 const px = K.px
 const dir = mktempdir()
-@eval K settings_file() = $(joinpath(dir, "settings"))
+K.SETTINGS_FILE[] = joinpath(dir, "settings")
 
 const jobs = mkpath(joinpath(dir, "Jobs"))
 const site = mkpath(joinpath(jobs, "Site"))

@@ -27,7 +27,7 @@ const dir = joinpath(tempdir(), "ladder-page-peek-test")
 rm(dir, recursive=true, force=true)
 mkpath(joinpath(dir, ".git"))   # the top of the project
 mkpath(joinpath(dir, "notes"))
-@eval K settings_file() = $(joinpath(dir, "settings"))
+K.SETTINGS_FILE[] = joinpath(dir, "settings")
 
 # A page in another folder, with front matter and headings
 const ideas = joinpath(dir, "notes", "Ideas.md")

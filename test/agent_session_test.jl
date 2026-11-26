@@ -11,7 +11,7 @@
 const px = K.px
 
 const dir = realpath(mktempdir())
-@eval K settings_file() = $(joinpath(dir, "settings"))
+K.SETTINGS_FILE[] = joinpath(dir, "settings")
 const notes = joinpath(dir, "notes.md")
 write(notes, "# Notes\n\nWords.\n")
 

@@ -14,7 +14,7 @@ const px = K.px
 
 const dir = mktempdir()
 const kept = joinpath(dir, "settings")
-@eval K settings_file() = $kept
+K.SETTINGS_FILE[] = kept
 
 const page = joinpath(dir, "notes.md")
 const other = joinpath(dir, "other.md")

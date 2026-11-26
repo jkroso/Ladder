@@ -16,7 +16,7 @@ const dir = mktempdir()
 write(joinpath(dir, "other.md"), "# The other page\n")
 # The level that these tests choose goes to a settings file of their own, not to the one that Ladder uses
 const kept = joinpath(dir, "settings")
-@eval K settings_file() = $kept
+K.SETTINGS_FILE[] = kept
 
 "A window that isn't on the screen, on a page with `text` in it"
 window(name, text; size=(1100px, 900px)) = begin

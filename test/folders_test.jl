@@ -18,7 +18,7 @@ const px = K.px
 const H = K.Folders
 
 const dir = mktempdir()
-@eval K settings_file() = $(joinpath(dir, "settings"))
+K.SETTINGS_FILE[] = joinpath(dir, "settings")
 H.FILE[] = joinpath(dir, "home-list")
 
 # A home folder with a repository, a folder on its Desktop, a folder of email, its Library and a hidden folder

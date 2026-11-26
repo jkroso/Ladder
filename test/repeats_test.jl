@@ -87,7 +87,7 @@ end
 const dir = joinpath(tempdir(), "ladder-repeats-test")
 rm(dir, recursive=true, force=true)
 mkpath(dir)
-@eval K settings_file() = $(joinpath(dir, "settings"))
+K.SETTINGS_FILE[] = joinpath(dir, "settings")
 const page = joinpath(dir, "jobs.md")
 const start = """
 # Jobs

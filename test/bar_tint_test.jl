@@ -15,7 +15,7 @@
 const px = K.px
 
 const dir = mktempdir()
-@eval K settings_file() = $(joinpath(dir, "settings"))   # agent mode keeps the card's width there
+K.SETTINGS_FILE[] = joinpath(dir, "settings")   # agent mode keeps the card's width there
 file(name, text) = (path = joinpath(dir, name); write(path, text); path)
 
 # A dark header over a light page, as many sites have

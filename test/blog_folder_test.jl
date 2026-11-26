@@ -16,7 +16,7 @@
 const px = K.px
 
 const dir = realpath(mktempdir())
-@eval K settings_file() = $(joinpath(dir, "settings"))
+K.SETTINGS_FILE[] = joinpath(dir, "settings")
 const blog = joinpath(dir, "blog")
 const remote = joinpath(dir, "remote.git")
 mkpath(joinpath(blog, "pics"))

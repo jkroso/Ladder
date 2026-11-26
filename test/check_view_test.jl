@@ -15,7 +15,7 @@
 const px = K.px
 
 const dir = mktempdir()
-@eval K settings_file() = $(joinpath(dir, "settings"))
+K.SETTINGS_FILE[] = joinpath(dir, "settings")
 const page = joinpath(dir, "room.md")
 write(page, """
 # A room

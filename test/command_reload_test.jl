@@ -11,7 +11,7 @@
 const px = K.px
 
 const dir = mktempdir()
-@eval K settings_file() = $(joinpath(dir, "settings"))
+K.SETTINGS_FILE[] = joinpath(dir, "settings")
 const source = joinpath(dir, "sums.jl")
 write(source, "area(w, h=2) = w * h\n\narea(3)\n")
 const e = K.build_editor(source)

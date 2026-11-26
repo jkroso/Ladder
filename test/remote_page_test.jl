@@ -14,7 +14,7 @@
 const px = K.px
 
 const dir = mktempdir()
-@eval K settings_file() = $(joinpath(dir, "settings"))
+K.SETTINGS_FILE[] = joinpath(dir, "settings")
 # Each page from the web goes in the browser folder, which is the test's own: see "the browser folder" in main.jl
 K.BROWSER_FOLDER[] = joinpath(dir, "Browser")
 "The web address of the page that the window shows, or of the file at `path` of the browser folder"

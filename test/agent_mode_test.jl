@@ -12,7 +12,7 @@
 const px = K.px
 
 const dir = realpath(mktempdir())
-@eval K settings_file() = $(joinpath(dir, "settings"))
+K.SETTINGS_FILE[] = joinpath(dir, "settings")
 const page = joinpath(dir, "plan.md")
 write(page, """
 # The plan

@@ -12,7 +12,7 @@
 const px = K.px
 
 const dir = mktempdir()
-@eval K settings_file() = $(joinpath(dir, "settings"))
+K.SETTINGS_FILE[] = joinpath(dir, "settings")
 
 "A window that isn't on the screen, on a file with `text` in it"
 window(text; name="page.md") = begin

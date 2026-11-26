@@ -12,7 +12,7 @@ const px = K.px
 
 const dir = mktempdir()
 # The settings that these tests keep go to a file of their own, not to the one that Ladder uses
-@eval K settings_file() = $(joinpath(dir, "settings"))
+K.SETTINGS_FILE[] = joinpath(dir, "settings")
 mkpath(joinpath(dir, "pages"))
 mkpath(joinpath(dir, "My mail", "Inbox"))
 mkpath(joinpath(dir, "Thing.app", "Contents"))

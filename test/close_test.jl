@@ -15,7 +15,7 @@ const cmd, opt = Keys.cmd, Keys.opt
 
 const dir = mktempdir()
 # The settings that these tests keep go to a file of their own, not to the one that Ladder uses
-@eval K settings_file() = $(joinpath(dir, "settings"))
+K.SETTINGS_FILE[] = joinpath(dir, "settings")
 
 "A folder of its own with the pages `names` in it, and a window that isn't on the screen on the first of them"
 window(names...) = begin

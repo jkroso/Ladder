@@ -16,7 +16,7 @@ const px = K.px
 const G = K.Git
 
 const dir = mktempdir()
-@eval K settings_file() = $(joinpath(dir, "settings"))
+K.SETTINGS_FILE[] = joinpath(dir, "settings")
 const repo = joinpath(dir, "work")
 mkpath(joinpath(repo, "src"))
 git(args...) = run(pipeline(setenv(`git -C $repo -c user.name=Test -c user.email=test@example.com -c commit.gpgsign=false $args`,

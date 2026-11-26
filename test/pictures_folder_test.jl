@@ -20,7 +20,7 @@ const px = K.px
 const M = K.Mac
 
 const dir = mktempdir()
-@eval K settings_file() = $(joinpath(dir, "settings"))
+K.SETTINGS_FILE[] = joinpath(dir, "settings")
 const trashed = String[]
 K.trasher[] = path -> (push!(trashed, basename(path)); rm(path; recursive=true); true)
 

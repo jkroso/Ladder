@@ -15,7 +15,7 @@ const px = K.px
 const Z = K.Zips
 
 const dir = mktempdir()
-@eval K settings_file() = $(joinpath(dir, "settings"))
+K.SETTINGS_FILE[] = joinpath(dir, "settings")
 K.ZIP_ROOM[] = joinpath(dir, "room")   # what's unpacked to be shown goes here, not beside the Mac's caches
 const work = joinpath(dir, "work")
 const src = joinpath(dir, "src", "plans")

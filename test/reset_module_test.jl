@@ -10,7 +10,7 @@
 const px = K.px
 
 const dir = mktempdir()
-@eval K settings_file() = $(joinpath(dir, "settings"))
+K.SETTINGS_FILE[] = joinpath(dir, "settings")
 
 # The live block shows the name of the module that it ran in, and how many times the page's code ran it
 const PAGE = """

@@ -14,7 +14,7 @@ const px = K.px
 
 const dir = mktempdir()
 # The settings that these tests keep go to a file of their own, not to the one that Ladder uses
-@eval K settings_file() = $(joinpath(dir, "settings"))
+K.SETTINGS_FILE[] = joinpath(dir, "settings")
 # What goes to the Trash here is only removed
 const trashed = String[]
 K.trasher[] = path -> (push!(trashed, path); rm(path; recursive=true); true)

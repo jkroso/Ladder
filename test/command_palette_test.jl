@@ -17,7 +17,7 @@ const px = K.px
 const dir = mktempdir()
 # The settings that these tests keep go to a file of their own, not to the one that Ladder uses
 const kept = joinpath(dir, "settings")
-@eval K settings_file() = $kept
+K.SETTINGS_FILE[] = kept
 
 const PAGE = "# Plans\n\nSome words.\n\n## Costs\n\nMore words.\n\n## Dates\n\nThe end.\n"
 

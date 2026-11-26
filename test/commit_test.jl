@@ -15,7 +15,7 @@ const px = K.px
 const G = K.Git
 
 const dir = mktempdir()
-@eval K settings_file() = $(joinpath(dir, "settings"))
+K.SETTINGS_FILE[] = joinpath(dir, "settings")
 const repo = joinpath(dir, "work")
 mkpath(repo)
 # The commits that Ladder makes here have a name and no signature, whatever the Mac's own settings of git say

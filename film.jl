@@ -361,7 +361,7 @@ make(out::AbstractString; scenes=SCENES, keep=false) = begin
   frames = mkpath(joinpath(dir, "frames"))
   # The settings of the film's window go to a file of their own, not to the one that Ladder uses
   settings = joinpath(dir, "settings")
-  Core.eval(K, :(settings_file() = $settings))
+  K.SETTINGS_FILE[] = settings
   page = joinpath(dir, "bathroom.md")
   write(page, PAGE)
   cp(joinpath(K.pages_dir[], "progress.jl"), joinpath(dir, "progress.jl"))

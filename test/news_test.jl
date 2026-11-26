@@ -19,7 +19,7 @@ const px = K.px
 const N = K.News
 
 const dir = mktempdir()
-@eval K settings_file() = $(joinpath(dir, "settings"))
+K.SETTINGS_FILE[] = joinpath(dir, "settings")
 N.FILE[] = joinpath(dir, "news-settings")
 const news = mkpath(joinpath(dir, "News"))
 K.NEWS_FOLDER[] = news

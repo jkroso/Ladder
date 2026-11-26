@@ -16,7 +16,7 @@ const D = K.Desks
 
 const dir = mktempdir()
 # What these tests keep goes to files of their own, not to the ones that Ladder uses
-@eval K settings_file() = $(joinpath(dir, "settings"))
+K.SETTINGS_FILE[] = joinpath(dir, "settings")
 # What goes to the Trash here is only removed
 const trashed = String[]
 K.trasher[] = path -> (push!(trashed, path); rm(path; recursive=true); true)

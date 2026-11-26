@@ -20,7 +20,7 @@ K.calendar_day[] = Date(2026, 11, 18)
 nov(d) = Date(2026, 11, d)
 
 const repo = realpath(mktempdir())
-@eval K settings_file() = $(joinpath(repo, ".settings"))
+K.SETTINGS_FILE[] = joinpath(repo, ".settings")
 const page = joinpath(repo, "job.md")
 git(args...; day=nothing) = begin
   env = copy(ENV)

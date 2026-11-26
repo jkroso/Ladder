@@ -15,7 +15,7 @@ const px = K.px
 const dir = joinpath(tempdir(), "ladder-long-file-test")
 rm(dir, recursive=true, force=true)
 mkpath(dir)
-@eval K settings_file() = $(joinpath(dir, "settings"))
+K.SETTINGS_FILE[] = joinpath(dir, "settings")
 
 # A file of Julia code that's longer than a preview shows: 9,000 functions, with some lines that
 # are too long for the window, a word that's too long for it, and characters that a keyboard doesn't type
