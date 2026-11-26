@@ -3309,10 +3309,14 @@ region_sheet(v::DesignView, s, n) = begin
   kept = get!(() -> Dict{Any,Any}(), v.parts, :sheets)
   length(kept) > 300 && empty!(kept)
   get!(kept, (objectid(s), n)) do
+    a = arrangement(v, s)
     f = Sketching.Frame(s["plane"])
     data = Float32[]
-    for (x1, x2, y1, y2) in Sketching.strips(regions(v, s), n)
-      quad!(data, Sketching.world(f, (x1, y1)), Sketching.world(f, (x2, y1)), Sketching.world(f, (x2, y2)), Sketching.world(f, (x1, y2)))
+    1 <= n <= length(a.regions) || return data
+    for t in Pieces.profile(a, [a.regions[n]]).triangles
+      for q in t
+        append!(data, Sketching.world(f, q))
+      end
     end
     data
   end
@@ -3420,8 +3424,8 @@ things(v::DesignView, size, dense, t) = begin
   asked = field !== nothing && field.kind == :profiles && active === nothing
   for (id, s) in m.sketches
     (asked || id == active) || any(p -> p.kind == :region && p.n == id, picks) || (h !== nothing && h.kind == :region && h.n == id) || continue
-    r = regions(v, s)
-    for n in 2:r.count+1
+    a = arrangement(v, s)
+    for n in eachindex(a.regions)
       p = (kind=:region, of=n, n=id)
       strong = among(picks, p) ? 0.5 : h !== nothing && h.kind == :region && same(h, p) ? 0.3 : asked || id == active ? 0.13 : 0.0
       strong > 0 && push!(out, GLs.Sheet((:region, objectid(s), n), region_sheet(v, s, n), rgba(id == active && !among(picks, p) ? SKETCH_BLUE : t.accent, strong)))
@@ -3639,24 +3643,13 @@ draw_origin(ctx, v::DesignView, t) = begin
   Ink.circle(ctx, at, 4.5, t.dim, 1.2)
 end
 
-"The closed regions of the sketch `s`, worked out when the sketch changes"
-regions(v::DesignView, s) = begin
+"The closed regions of the sketch `s` along its curves, worked out when the sketch changes: see pieces.jl"
+arrangement(v::DesignView, s) = begin
   id = Int(s["id"])
   kept = get(v.regions, id, nothing)
   kept !== nothing && kept[1] === s && return kept[2]
-  r = Sketching.Regions(s)
-  v.regions[id] = (s, r)
-  r
-end
-
-"The closed regions of the sketch `s` along its curves, as Ladder's pieces take them, worked out when the sketch changes: see pieces.jl"
-arrangement(v::DesignView, s) = begin
-  kept = get!(() -> Dict{Int,Any}(), v.parts, :arrangements)
-  id = Int(s["id"])
-  k = get(kept, id, nothing)
-  k !== nothing && k[1] === s && return k[2]
   a = Pieces.Arrangement(s)
-  kept[id] = (s, a)
+  v.regions[id] = (s, a)
   a
 end
 
@@ -3929,10 +3922,10 @@ region_under(v::DesignView, at; before=Inf) = begin
     spot = Sketching.on_plane(f, line)
     spot === nothing && continue
     Scenes.dot(Sketching.world(f, spot) .- line[1], line[2]) > before * (1 + 1e-4) + 1e-3 && continue
-    r = regions(v, s)
-    n = Sketching.region(r, spot)
-    n >= 2 || continue
-    inside = Sketching.inside(r, n)
+    a = arrangement(v, s)
+    n = Pieces.region_at(a, spot)
+    n > 0 || continue
+    inside = Pieces.inside(a, n)
     return (kind=:region, of=n, n=id, at=(inside[1], inside[2], 0.0))
   end
   nothing

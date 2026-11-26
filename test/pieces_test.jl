@@ -48,6 +48,36 @@ face(s, w) = s.face[findfirst(i -> Pieces.dot(s.normals[3i-2], w) > 0.999, eachi
   # A line from side to side cuts a rectangle in two
   c = Pieces.Arrangement(sketch(rectangle((0, 0), (40, 20))..., line((15, 0), (15, 20))))
   @test isapprox(Pieces.region(c, (5.0, 5.0)).outline.area, 300) && isapprox(Pieces.region(c, (30.0, 5.0)).outline.area, 500)
+  # Each region has an index, a bounding box, and a place well inside it clear of its edges and holes
+  @test length(a.regions) == 2
+  disc_i, ring_i = Pieces.region_at(a, (10.0, 10.0)), Pieces.region_at(a, (30.0, 10.0))
+  @test disc_i >= 1 && ring_i >= 1 && disc_i != ring_i && Pieces.region_at(a, (50.0, 10.0)) == 0
+  # A plate with 20 bolt holes and nested rings: region_at and inside agree on every region, and inside stays well clear of edges and holes
+  holes = [circle((10.0 + 20.0 * col, 10.0 + 20.0 * row), 4.0) for row in 0:3 for col in 0:4]
+  plate = Pieces.Arrangement(sketch(rectangle((0, 0), (100, 80))..., holes...))
+  @test length(plate.regions) == 21
+  plate_i = Pieces.region_at(plate, (2.0, 2.0))
+  @test plate_i > 0 && length(plate.regions[plate_i].holes) == 20
+  @test Pieces.region_at(plate, (-5.0, 40.0)) == 0
+  hole_is = [Pieces.region_at(plate, (10.0 + 20.0 * col, 10.0 + 20.0 * row)) for row in 0:3 for col in 0:4]
+  @test all(>(0), hole_is) && length(unique(hole_is)) == 20 && !(plate_i in hole_is)
+  for i in eachindex(plate.regions)
+    p = Pieces.inside(plate, i)
+    @test Pieces.region_at(plate, p) == i
+  end
+  # The point inside the plate is clear of the plate's sides and every bolt hole
+  in_plate = Pieces.inside(plate, plate_i)
+  @test 1.0 < in_plate[1] < 99.0 && 1.0 < in_plate[2] < 79.0
+  @test all(hypot(in_plate[1] - (10.0 + 20.0 * col), in_plate[2] - (10.0 + 20.0 * row)) > 4.5 for row in 0:3 for col in 0:4)
+  # Nested rings: outer square, middle circle, inner square
+  nested = Pieces.Arrangement(sketch(rectangle((0, 0), (60, 60))..., circle((30, 30), 20), rectangle((24, 24), (36, 36))...))
+  @test length(nested.regions) == 3
+  r_in, r_mid, r_out = Pieces.region_at(nested, (30.0, 30.0)), Pieces.region_at(nested, (45.0, 30.0)), Pieces.region_at(nested, (5.0, 5.0))
+  @test length(unique((r_in, r_mid, r_out))) == 3 && all(>(0), (r_in, r_mid, r_out))
+  @test all(i -> Pieces.region_at(nested, Pieces.inside(nested, i)) == i, 1:3)
+  # A degenerate loop that earcut can't fill gives no triangles rather than throwing
+  bad = Pieces.Loop(Int[1, 2], Int[1, 1], 1.0, 1, (0.0, 0.0), (1.0, 0.0))
+  @test isempty(Pieces.profile(a, [Pieces.Region(bad, Pieces.Loop[], (0.0, 0.0), (1.0, 0.0))]).triangles)
 end
 
 @testset "a region swept along its plane's normal, and round an axis" begin

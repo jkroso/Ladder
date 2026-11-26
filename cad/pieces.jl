@@ -16,15 +16,14 @@
 #
 #     a = Arrangement(sketch)             # the closed regions of a sketch, exactly
 #     r = region(a, (5.0, 2.0))           # the region at a place: the loop round it, and its holes
+#     i = region_at(a, (5.0, 2.0))        # the number of that region in `a.regions`, or 0
+#     inside(a, i)                        # a place well inside region i, clear of its edges and holes
 #     p = profile(a, [r])                 # its triangles, and the sides round it
 #     extrude("piece", frame, p, 0.0, 10.0)                  # a Shape, as scene.jl has them
 #     revolve("piece", frame, p, (0.0, 0.0, 0.0), (0.0, 1.0, 0.0), 0.0, π)
 #     box("piece", (0.0, 0.0, 10.0), (20.0, 20.0, 20.0))
 #     moved(body, "piece", p -> p .+ (10.0, 0.0, 0.0))
 #     inside(body, (1.0, 2.0, 3.0))       # is the point in the body?
-#
-# sketch.jl's `Regions` finds the region under the mouse on a grid, which is
-# quick, but has steps at its edges. The regions here follow the curves.
 
 @use "./scene" Vec3 Shape Edge dot cross unit len
 @use "./sketch" => Sketching
@@ -147,13 +146,24 @@ turned(x::Vec3, w::Vec3, angle) = turned(x, (0.0, 0.0, 0.0), w, angle)
 """
 A loop of an `Arrangement`: the numbers of its places in order, the curve that
 the side after each one is part of, the area it goes round (more than 0 when
-it goes counter-clockwise), and the group of curves that it's of.
+it goes counter-clockwise), the group of curves that it's of, and the corners
+of the box round it.
 """
 struct Loop
   corners::Vector{Int}
   curves::Vector{Int}
   area::Float64
   group::Int
+  low::Spot
+  high::Spot
+end
+
+"A region of a sketch: the loop round it, a loop round each hole in it, and the corners of the box round it"
+struct Region
+  outline::Loop
+  holes::Vector{Loop}
+  low::Spot
+  high::Spot
 end
 
 """
@@ -167,6 +177,8 @@ lines don't close anything off, and nor does a curve with a loose end.
 struct Arrangement
   places::Vector{Spot}
   loops::Vector{Loop}
+  regions::Vector{Region}
+  insides::Vector{Union{Nothing,Spot}}
 end
 
 Arrangement(sketch::AbstractDict) = begin
@@ -178,7 +190,7 @@ Arrangement(sketch::AbstractDict) = begin
       line[i] == line[i+1] || push!(pieces, (line[i], line[i+1], k))
     end
   end
-  isempty(pieces) && return Arrangement(Spot[], Loop[])
+  isempty(pieces) && return Arrangement(Spot[], Loop[], Region[], Union{Nothing,Spot}[])
   far = maximum(p -> max(abs(p[1][1]), abs(p[1][2]), abs(p[2][1]), abs(p[2][2])), pieces)
   near = 1e-7 * max(far, 1.0)    # places nearer than this are one place
   # Where each piece meets another, as how far along it that is
@@ -280,12 +292,26 @@ Arrangement(sketch::AbstractDict) = begin
       g = next(g)
     end
     area = 0.0
+    low, high = (Inf, Inf), (-Inf, -Inf)
     for (i, c) in enumerate(corners)
-      area += cross2(places[c], places[corners[mod1(i + 1, length(corners))]])
+      p = places[c]
+      low, high = min.(low, p), max.(high, p)
+      area += cross2(p, places[corners[mod1(i + 1, length(corners))]])
     end
-    push!(loops, Loop(corners, curves, area / 2, root(corners[1])))
+    push!(loops, Loop(corners, curves, area / 2, root(corners[1]), low, high))
   end
-  Arrangement(places, loops)
+  # Each positive-area loop is a region, smallest first so that a point lookup hits inner regions before outer ones
+  pos = sort!(Loop[l for l in loops if l.area > 0], by=l -> l.area)
+  holes = [Loop[] for _ in pos]
+  for h in loops
+    h.area < 0 || continue
+    p = places[h.corners[1]]
+    for (i, l) in enumerate(pos)
+      l.group != h.group && l.area > -h.area && encloses(places, l, p) && (push!(holes[i], h); break)
+    end
+  end
+  regions = Region[Region(pos[i], holes[i], pos[i].low, pos[i].high) for i in eachindex(pos)]
+  Arrangement(places, loops, regions, Union{Nothing,Spot}[nothing for _ in regions])
 end
 
 """
@@ -315,37 +341,82 @@ meet!(ts, i, j, a, b, c, d, near) = begin
 end
 
 "Is the place `p` inside the loop `l`?"
-encloses(a::Arrangement, l::Loop, p) = begin
+encloses(places::Vector{Spot}, l::Loop, p) = begin
+  (l.low[1] <= p[1] <= l.high[1] && l.low[2] <= p[2] <= l.high[2]) || return false
   in = false
   n = length(l.corners)
   for i in 1:n
-    u, v = a.places[l.corners[i]], a.places[l.corners[mod1(i + 1, n)]]
+    u, v = places[l.corners[i]], places[l.corners[mod1(i + 1, n)]]
     ((u[2] > p[2]) != (v[2] > p[2])) && p[1] < u[1] + (p[2] - u[2]) * (v[1] - u[1]) / (v[2] - u[2]) && (in = !in)
   end
   in
 end
+encloses(a::Arrangement, l::Loop, p) = encloses(a.places, l, p)
 
-"The number of the smallest loop round a region that's round the place `p`, and isn't of the group `not`, or 0"
-smallest(a::Arrangement, p, not=0) = begin
-  best = 0
-  for (i, l) in enumerate(a.loops)
-    l.area > 0 && l.group != not && (best == 0 || l.area < a.loops[best].area) && encloses(a, l, p) && (best = i)
+"Is the place `p` inside the region `r` of `a`, and clear of its holes?"
+in_region(a::Arrangement, r::Region, p) = begin
+  (r.low[1] <= p[1] <= r.high[1] && r.low[2] <= p[2] <= r.high[2]) || return false
+  encloses(a.places, r.outline, p) || return false
+  for h in r.holes
+    encloses(a.places, h, p) && return false
   end
-  best
+  true
 end
 
-"A region of a sketch: the loop round it, and a loop round each hole in it"
-struct Region
-  outline::Loop
-  holes::Vector{Loop}
+"The number of the region of the arrangement `a` at the place `p`, from 1 to `length(a.regions)`, or 0 when `p` is in none"
+region_at(a::Arrangement, p) = begin
+  for (i, r) in enumerate(a.regions)
+    in_region(a, r, p) && return i
+  end
+  0
 end
 
 "The region of the arrangement `a` at the place `p` of its sketch, or nothing when `p` is in none"
-region(a::Arrangement, p) = begin
-  i = smallest(a, p)
-  i == 0 && return nothing
-  out = a.loops[i]
-  Region(out, Loop[l for l in a.loops if l.area < 0 && l.group != out.group && smallest(a, a.places[l.corners[1]], l.group) == i])
+region(a::Arrangement, p) = (i = region_at(a, p); i == 0 ? nothing : a.regions[i])
+
+"""
+A place well inside region `i` of the arrangement `a`, clear of its edges and
+holes, so that SolidCraft finds the same profile from it: the centre of the
+inscribed circle of the region's triangle with the largest inscribed circle.
+"""
+inside(a::Arrangement, i::Int) = begin
+  cached = a.insides[i]
+  cached === nothing || return cached
+  r = a.regions[i]
+  best, where = -1.0, (0.0, 0.0)
+  for (p, q, s) in triangulate(a, r)
+    la = hypot(q[1] - s[1], q[2] - s[2])
+    lb = hypot(s[1] - p[1], s[2] - p[2])
+    lc = hypot(p[1] - q[1], p[2] - q[2])
+    perim = la + lb + lc
+    perim > 0 || continue
+    rad = abs(cross2(q .- p, s .- p)) / perim
+    rad > best || continue
+    c = ((la * p[1] + lb * q[1] + lc * s[1]) / perim, (la * p[2] + lb * q[2] + lc * s[2]) / perim)
+    in_region(a, r, c) && ((best, where) = (rad, c))
+  end
+  if best < 0
+    # Earcut couldn't fill the loop: pick the middle of the longest horizontal run across the region's middle
+    y = (r.low[2] + r.high[2]) / 2
+    xs = Float64[]
+    for l in vcat([r.outline], r.holes)
+      n = length(l.corners)
+      for k in 1:n
+        u, v = a.places[l.corners[k]], a.places[l.corners[mod1(k + 1, n)]]
+        ((u[2] > y) != (v[2] > y)) && push!(xs, u[1] + (y - u[2]) * (v[1] - u[1]) / (v[2] - u[2]))
+      end
+    end
+    sort!(xs)
+    span = -1.0
+    for k in 1:2:length(xs)-1
+      w = xs[k+1] - xs[k]
+      c = ((xs[k] + xs[k+1]) / 2, y)
+      w > span && in_region(a, r, c) && ((span, where) = (w, c))
+    end
+    span < 0 && (where = ((r.low[1] + r.high[1]) / 2, y))
+  end
+  a.insides[i] = where
+  where
 end
 
 # --- what's swept ----------------------------------------------------------------------
@@ -367,18 +438,38 @@ right(p, q) = (d = q .- p; l = hypot(d[1], d[2]); l == 0 ? (0.0, 0.0) : (d[2] / 
 "The number of a corner that earcut gives, from 1"
 corner(c) = Int(c.i) + 1
 
+"The triangles that fill the region `r` of the arrangement `a`, or none when earcut can't fill it"
+triangulate(a::Arrangement, r::Region) = begin
+  length(r.outline.corners) < 3 && return NTuple{3,Spot}[]
+  loops = Loop[r.outline]
+  for h in r.holes
+    length(h.corners) >= 3 && push!(loops, h)
+  end
+  rings = [Point2{Float64}[Point2{Float64}(a.places[c]...) for c in l.corners] for l in loops]
+  all_places = reduce(vcat, rings)
+  tris = try
+    earcut_triangulate(rings)
+  catch
+    return NTuple{3,Spot}[]
+  end
+  out = NTuple{3,Spot}[]
+  sizehint!(out, length(tris))
+  for t in tris
+    i, j, k = corner(t[1]), corner(t[2]), corner(t[3])
+    (1 <= i <= length(all_places) && 1 <= j <= length(all_places) && 1 <= k <= length(all_places)) || continue
+    p, q, s = all_places[i], all_places[j], all_places[k]
+    push!(out, ((Float64(p[1]), Float64(p[2])), (Float64(q[1]), Float64(q[2])), (Float64(s[1]), Float64(s[2]))))
+  end
+  out
+end
+
 "The profile of the regions `regions` of the arrangement `a`"
 profile(a::Arrangement, regions) = begin
   triangles = NTuple{3,Spot}[]
   rim = Dict{NTuple{2,Spot},Int}()
   for r in unique(r -> r.outline.corners, regions)
-    loops = vcat([r.outline], r.holes)
-    rings = [Point2{Float64}[Point2{Float64}(a.places[c]...) for c in l.corners] for l in loops]
-    all_places = reduce(vcat, rings)
-    for t in earcut_triangulate(rings)
-      push!(triangles, ntuple(k -> (Float64(all_places[corner(t[k])][1]), Float64(all_places[corner(t[k])][2])), 3))
-    end
-    for l in loops, (i, c) in enumerate(l.corners)
+    append!(triangles, triangulate(a, r))
+    for l in vcat([r.outline], r.holes), (i, c) in enumerate(l.corners)
       p, q = a.places[c], a.places[l.corners[mod1(i + 1, length(l.corners))]]
       # A side between two regions that are both swept is inside the solid
       haskey(rim, (q, p)) ? delete!(rim, (q, p)) : (rim[(p, q)] = l.curves[i])

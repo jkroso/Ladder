@@ -8,6 +8,7 @@
 @use "github.com/jkroso/JSON.jl" => JSON
 @use "../cad/scene" => Scenes
 @use "../cad/sketch" => Sketching
+@use "../cad/pieces" => Pieces
 @use "../cad/commands" => Commands
 @use "../cad/design" => Models
 @use "../cad/engine" => Engines
@@ -134,12 +135,13 @@ end
     "points" => Any[JSON.Object("id" => "p1", "at" => Any[0, 0])],
     "curves" => Any[line("l1", (0, 0), (40, 0)), line("l2", (40, 0), (40, 20)), line("l3", (40, 20), (0, 20)), line("l4", (0, 20), (0, 0)),
                     JSON.Object("id" => "c1", "type" => "circle", "center_at" => Any[10, 10], "radius" => 5, "construction" => false)])
-  r = Sketching.Regions(sketch)
-  @test r.count == 2                                         # the circle, and the box round it
-  inside, around = Sketching.region(r, (10.0, 10.0)), Sketching.region(r, (30.0, 10.0))
-  @test inside >= 2 && around >= 2 && inside != around
-  @test Sketching.region(r, (50.0, 10.0)) == 0               # outside the box
-  @test Sketching.region(r, Sketching.inside(r, around)) == around
+  a = Pieces.Arrangement(sketch)
+  @test length(a.regions) == 2                               # the circle, and the box round it
+  in_circle, around = Pieces.region_at(a, (10.0, 10.0)), Pieces.region_at(a, (30.0, 10.0))
+  @test in_circle >= 1 && around >= 1 && in_circle != around
+  @test Pieces.region_at(a, (50.0, 10.0)) == 0               # outside the box
+  @test Pieces.region_at(a, Pieces.inside(a, around)) == around
+  @test Pieces.region_at(a, Pieces.inside(a, in_circle)) == in_circle
   f = Sketching.Frame(sketch["plane"])
   @test Sketching.world(f, (3.0, 4.0)) == (3.0, 4.0, 5.0)
   @test Sketching.on_plane(f, ((3.0, 4.0, 50.0), (0.0, 0.0, -1.0))) == (3.0, 4.0)
