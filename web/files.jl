@@ -53,6 +53,7 @@
 
 @use Dates: DateTime, datetime2unix
 @use "./entities" latin LATIN_NAMES
+@use "./fetch" => Webfetch
 
 "What came from an address: the bytes, the kind of file that the site says it is, and the address that it ended up at"
 struct Got
@@ -68,7 +69,7 @@ const MOST = 256 * 1024 * 1024    # bytes: a set of files that holds more than t
 const BIGGEST = 32 * 1024 * 1024  # bytes: a file bigger than this isn't got
 const AT_ONCE = 8                 # how many files come at a time
 # Many sites give a page only to a program that says it's a browser
-const AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
+const AGENT = Webfetch.AGENT
 
 """
 Start to get what's at the web address `address` into `file`. `about` is a
@@ -83,11 +84,7 @@ with the request.
 curl(address, file, about; headers=String[]) = begin
   said = ["%{url_effective}", "%{content_type}", "%header{access-control-allow-origin}", "%{http_code}", "%header{cache-control}",
           "%header{expires}", "%header{date}", "%header{etag}", "%header{last-modified}", "%header{age}"]
-  sent = collect(Iterators.flatten(("--header", h) for h in headers))
-  ask = `curl --silent --fail --location --max-redirs 8 --proto =http,https --proto-redir =http,https --compressed
-              --connect-timeout 10 --max-time $SECONDS --max-filesize $BIGGEST --user-agent $AGENT $sent
-              --output $file --write-out $(join(said, '\n') * '\n') -- $address`
-  job = run(pipeline(ask, stdout=about, stderr=devnull), wait=false)
+  job = Webfetch.start(address, file; seconds=SECONDS, biggest=BIGGEST, headers, about, write_out=said)
   () -> process_exited(job)
 end
 

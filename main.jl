@@ -413,6 +413,7 @@ end
 @use "./web/select" => WebSelect
 @use "./web/browser" => Browsers
 @use "./web/files" => Webfiles
+@use "./web/fetch" => Webfetch
 @use "./web/source" => Sources
 @use "./remote" => Remote
 @use "./slides" => Slides
@@ -39321,7 +39322,7 @@ fetched(e, url) = begin
     isfile(file) && filesize(file) > 0 && return (fetches[url] = file)
     state = fetches[url] = try
       mkpath(dirname(file))
-      run(pipeline(`curl --silent --fail --location --max-time 30 --output $(file * ".part") $url`, stdout=devnull, stderr=devnull), wait=false)
+      Webfetch.start(url, file * ".part"; seconds=30)
     catch
       nothing
     end
@@ -39700,8 +39701,7 @@ download!(e, url) = begin
   address = replace(first(split(url, '#')), ' ' => "%20")
   state = downloads[file] = try
     mkpath(media_dir())
-    run(pipeline(`curl --silent --fail --location --connect-timeout 30 --speed-limit 1 --speed-time 60 --continue-at - --output $part $address`,
-                 stdout=devnull, stderr=devnull), wait=false)
+    Webfetch.start(address, part; connect=30, seconds=nothing, speed_limit=1, speed_time=60, resume=true, compressed=false)
   catch
     time()
   end

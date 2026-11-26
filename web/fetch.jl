@@ -10,8 +10,8 @@ const AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1
 """
 Start `curl` in the background to get what's at the web address `address` into
 `file`, and give its running process. It follows the address to where it has
-moved, asks only over HTTP or HTTPS, asks for a compressed answer, and sends
-the browser `AGENT`.
+moved, asks only over HTTP or HTTPS, asks for a compressed answer unless
+`compressed` is false, and sends the browser `AGENT`.
 
 What differs between callers is set with keywords:
 - `fail`: exit with an error and write nothing when the server answers 404 and the like.
@@ -22,20 +22,23 @@ What differs between callers is set with keywords:
 - `speed_limit`, `speed_time`: give up when fewer than `speed_limit` bytes a second come for `speed_time` seconds.
 - `headers`: extra lines to send with the request, like `Accept: text/markdown`.
 - `resume`: carry on from the end of `file` if part of it is there already.
+- `compressed`: ask for a compressed answer. A download that `resume` carries on doesn't, since the part
+  that's there already must be the server's own bytes.
 - `most`: keep no more than the first `most` bytes, by piping through `head -c`.
 - `about`, `write_out`: write these `curl` `--write-out` lines into the file `about`.
 """
 start(address::AbstractString, file::AbstractString; fail::Bool=true, redirs::Union{Int,Nothing}=8,
       connect::Union{Int,Nothing}=10, seconds::Union{Int,Nothing}=30, biggest::Union{Int,Nothing}=nothing,
       speed_limit::Union{Int,Nothing}=nothing, speed_time::Union{Int,Nothing}=nothing,
-      headers::AbstractVector{<:AbstractString}=String[], resume::Bool=false,
+      headers::AbstractVector{<:AbstractString}=String[], resume::Bool=false, compressed::Bool=true,
       most::Union{Int,Nothing}=nothing, about::Union{AbstractString,Nothing}=nothing,
       write_out::AbstractVector{<:AbstractString}=String[]) = begin
   args = String["curl", "--silent"]
   fail && push!(args, "--fail")
   push!(args, "--location")
   redirs === nothing || push!(args, "--max-redirs", string(redirs))
-  push!(args, "--proto", "=http,https", "--proto-redir", "=http,https", "--compressed")
+  push!(args, "--proto", "=http,https", "--proto-redir", "=http,https")
+  compressed && push!(args, "--compressed")
   connect === nothing || push!(args, "--connect-timeout", string(connect))
   seconds === nothing || push!(args, "--max-time", string(seconds))
   biggest === nothing || push!(args, "--max-filesize", string(biggest))

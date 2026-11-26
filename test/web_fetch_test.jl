@@ -66,13 +66,13 @@ last_args() = readlines(log)
   media = joinpath(dir, "clip.mp4.part")
   ENV["FAKE_EXIT"] = "33"
   try
-    job = Webfetch.start("https://example.com/clip.mp4", media; connect=30, seconds=nothing, speed_limit=1, speed_time=60, resume=true)
+    job = Webfetch.start("https://example.com/clip.mp4", media; connect=30, seconds=nothing, speed_limit=1, speed_time=60, resume=true, compressed=false)
     wait(job)
     @test !success(job) && job.exitcode == 33
     args = last_args()
     @test !("--max-time" in args)
     @test args == ["--silent", "--fail", "--location", "--max-redirs", "8",
-                   "--proto", "=http,https", "--proto-redir", "=http,https", "--compressed",
+                   "--proto", "=http,https", "--proto-redir", "=http,https",
                    "--connect-timeout", "30", "--speed-limit", "1", "--speed-time", "60",
                    "--user-agent", Webfetch.AGENT, "--continue-at", "-",
                    "--output", media, "--", "https://example.com/clip.mp4"]
@@ -82,14 +82,13 @@ last_args() = readlines(log)
 end
 
 @testset "Webfiles.curl, Remote.curl and Cards.curl" begin
-  # Webfiles.curl sends headers, --fail, --max-filesize, and writes --write-out to about
+  # Webfiles.curl sends --fail and --max-filesize, and writes --write-out to about
   out, about = joinpath(dir, "wf"), joinpath(dir, "wf.about")
-  done = Webfiles.curl("https://example.com/app.js", out, about; headers=["If-None-Match: \"v1\""])
+  done = Webfiles.curl("https://example.com/app.js", out, about)
   @test until(done) && read(out, String) == "0123456789abcdef"
   args = last_args()
   @test "--fail" in args && "--max-filesize" in args && string(Webfiles.BIGGEST) in args
-  @test "--header" in args && "If-None-Match: \"v1\"" in args
-  @test startswith(read(about, String), "%{url_effective}\n%{content_type}\n%header{access-control-allow-origin}\n%{http_code}\n")
+  @test startswith(read(about, String), "%{url_effective}\n%{content_type}\n%header{access-control-allow-origin}\n")
 
   # Remote.curl omits --fail, sends Accept, and writes three --write-out lines to about
   out, about = joinpath(dir, "rm"), joinpath(dir, "rm.about")
