@@ -79,9 +79,9 @@ takes. `limit` is how many seconds a script may run before it's stopped, and
 `say(level, text)` is called with each line that a script prints.
 """
 live(html::AbstractString; wide=700, zoom=1.0, load=src -> nothing, pictures=Pictures(load), css="", fit=false, widest=2000, high=nothing, base="",
-     limit=10, say=(level, text) -> nothing, go=nothing, allowed=address -> true) = begin
+     limit=10, say=(level, text) -> nothing, go=nothing, allowed=address -> true, dark=false) = begin
   doc = document(html)
-  options = (; wide, zoom, load, css=css * WITH_SCRIPTS, fit, widest, high, base, clock=Clock())
+  options = (; wide, zoom, load, css=css * WITH_SCRIPTS, fit, widest, high, base, clock=Clock(), dark)
   l = Live(doc, Scripts(doc; load, base, say, limit, go, allowed), options, pictures, nothing, IdDict{Element,Vector{NTuple{4,Float64}}}(), IdDict{Element,Box}(),
            0.0, nothing, nothing, 0.0)
   s = l.scripts
@@ -90,7 +90,7 @@ live(html::AbstractString; wide=700, zoom=1.0, load=src -> nothing, pictures=Pic
   s.place = e -> (page!(l); get(l.places, e, NTuple{4,Float64}[]))
   s.at = (x, y) -> at(l, x, y)
   s.computed = (e, name) -> computed(l, e, name)
-  s.window = () -> (Float64(l.options.wide / l.options.zoom), Float64(something(l.options.high, 800) / l.options.zoom))
+  s.window = () -> (Float64(l.options.wide / l.options.zoom), Float64(something(l.options.high, 800) / l.options.zoom), l.options.dark)
   JS.start!(s)
   l
 end
@@ -347,7 +347,15 @@ Base.resize!(l::Live, wide; high=l.options.high, zoom=l.options.zoom) = begin
   l
 end
 
+"Lay the page out for a screen in dark mode from now on, or in light mode: see `page`'s `dark`"
+dark!(l::Live, dark::Bool) = begin
+  dark == l.options.dark && return l
+  l.options = merge(l.options, (; dark))
+  l.page = nothing
+  l
+end
+
 "Run `code` in the page, and give the value of its last statement. What the script throws is thrown here, as a `ScriptError`."
 evaluate(l::Live, code::AbstractString; kw...) = JS.evaluate(l.scripts, code; kw...)
 
-export Live, ScriptError, live, page!, step!, waiting, click!, move!, press!, release!, wheel!, locked, unlock!, scroll!, focus!, input!, key!, submit!, refresh!, fire!, evaluate
+export Live, ScriptError, live, page!, step!, dark!, waiting, click!, move!, press!, release!, wheel!, locked, unlock!, scroll!, focus!, input!, key!, submit!, refresh!, fire!, evaluate

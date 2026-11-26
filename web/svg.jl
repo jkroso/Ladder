@@ -341,7 +341,7 @@ end
 
 "Draw the letters of `chars` in the font of the style `s`, with the first at `x` on the line at `y`. It gives how wide they are."
 letters(d::Drawn, e::Element, s::Style, chars, x, y) = begin
-  f = font(s.family, s.size, s.weight, s.italic)
+  f = font(s.family, s.size, s.weight, s.italic, s.stretch)
   widths = advances(f, chars)
   paint = Skia.sk_paint_new()
   Skia.sk_paint_set_antialias(paint, true)
@@ -384,7 +384,7 @@ words(e::Element) = replace(join(k isa Text ? k.text : k.tag in ("tspan", "textp
 "How wide the text in `e` is, as its styles say"
 breadth(d::Drawn, e::Element) = begin
   s = style(d, e)
-  f = font(s.family, s.size, s.weight, s.italic)
+  f = font(s.family, s.size, s.weight, s.italic, s.stretch)
   sum(k isa Text ? sum(advances(f, collect(replace(k.text, r"\s+" => " "))); init=0.0) : k.tag in ("tspan", "textpath", "a") ? breadth(d, k) : 0.0 for k in e.children; init=0.0)
 end
 

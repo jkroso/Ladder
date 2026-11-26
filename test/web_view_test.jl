@@ -13,6 +13,7 @@
 @use "../web" => Web
 @use "../web/paint" => Paint
 @use "../web/video" => Film
+@use "../web/live" => Live
 
 const HTML = """<!DOCTYPE html><body style="margin:20px;font:16px/20px Helvetica;background:#f4f4f4">
   <div style="background:white;border-radius:8px;border:1px solid #ddd;padding:16px">
@@ -88,6 +89,32 @@ end
   v.html = "<p>another</p>"
   frame(w)
   @test v.live !== live && !isopen(live)
+end
+
+@testset "a page in a window in dark mode" begin
+  html = """<meta name="color-scheme" content="light dark"><body style="margin:0"><p style="height:10px;margin:0;background:light-dark(red, blue)"></p></body>"""
+  fills(v) = [i.color for i in v.page.list.items if i isa Paint.Fill]
+  v = View(html=html, wide=300px)
+  w = Window(v, size=(300px, 100px))
+  frame(w)
+  @test fills(v) == [0xffff0000]
+  # The page is laid out again when the screen goes dark, and when it's light again
+  v.dark = true
+  frame(w)
+  @test fills(v) == [0xff1e1e1e, 0xff0000ff]
+  v.dark = false
+  frame(w)
+  @test fills(v) == [0xffff0000]
+  # A page's scripts see it too, and its scripts keep running
+  s = View(html=html * "<script>var at = 0</script>", wide=300px, scripts=true, dark=true)
+  sw = Window(s, size=(300px, 100px))
+  frame(sw)
+  live = s.live
+  dark() = Live.evaluate(s.live, "matchMedia('(prefers-color-scheme: dark)').matches")
+  @test dark() == true && fills(s) == [0xff1e1e1e, 0xff0000ff]
+  s.dark = false
+  frame(sw)
+  @test dark() == false && fills(s) == [0xffff0000] && s.live === live
 end
 
 @testset "a page that moves in a window" begin

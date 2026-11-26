@@ -121,6 +121,7 @@ Base.@kwdef mutable struct Box
   forced::Float64 = NaN                # how tall its border has to be, when the box that it's in says: a thing that's stretched in a flex box
   still::Tuple{Bool,Bool} = (false, false)   # of a box with a place of its own: it stays across, and down, where it would be in the text
   anchor::Any = nothing                # of a box with a place of its own: the box that it's placed from
+  lone::Any = nothing                  # of a box with a place of its own right in a flex box or a grid: that box, and how far across and down the room in its content the box's place in the text is, from 0 at the start to 1 at the end
   cols::Any = nothing                  # of a block in columns: where each column of it is cut from
   notch::NTuple{3,Float64} = (0.0, 0.0, 0.0)   # of a <fieldset> with a <legend>: how far down its border starts, and where the legend cuts the border, from and to
 end
@@ -676,7 +677,7 @@ add!(out, e::Element, parent::Style, env::Env, link) = begin
     if found === nothing && !isempty(strip(attr(e, "alt")))
       # A picture that there isn't is as big as the words that stand for it, with 2 px round them, as in a browser
       b.text = strip(attr(e, "alt"))
-      f = font(s.family, s.size, s.weight, s.italic)
+      f = font(s.family, s.size, s.weight, s.italic, s.stretch)
       b.natural = (4.0 + min(1024.0, ceil(width(f, b.text))), 4.0 + min(256.0, f.ascent + f.descent))
     end
     push!(out, b)

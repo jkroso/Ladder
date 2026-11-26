@@ -10,6 +10,7 @@
 @use Test: @test, @testset
 @use Skia
 @use Base64: base64decode
+using Base64: base64encode
 @use "../web/dom" => Dom
 @use "../web/css" => Css
 @use "../web/style" => Styles
@@ -402,6 +403,15 @@ end
   at(id) = place(p.root, p.box(id))
   @test at("a") == (160, 75) && at("b") == (75, 40) && (p.box("c").width, p.box("c").height) == (180, 50) && at("d") == (100, 10)
   @test p.box("s").still == (true, true)                                         # with no side given, it stays where the text has it
+  # In a flex box or a grid, it stays where it would be as the only thing there. Each place here is WebKit's.
+  spot(box, kid="") = (q = Web.page("""<!DOCTYPE html><body style="margin:0"><div style="$box;position:relative;height:40px;width:200px;padding:3px;border:2px solid">
+    <a href="https://a.test/" style="position:absolute;width:10px;height:10px;display:block;$kid"></a><span>x</span></div></body>"""; wide=400); (q.links[1].left, q.links[1].top))
+  @test spot("display:flex;align-items:center", "left:10px") == (12, 20) && spot("display:flex;align-items:center", "margin:5px") == (10, 20)   # the icon of a search field
+  @test spot("display:flex;justify-content:flex-end;align-items:flex-end") == (195, 35) && spot("display:flex;flex-direction:row-reverse") == (195, 5)
+  @test spot("display:flex;flex-direction:column;justify-content:center") == (5, 20) && spot("display:flex;flex-wrap:wrap-reverse") == (5, 35)
+  @test spot("display:flex;justify-content:space-around;align-items:end") == (100, 35) && spot("display:flex", "align-self:center") == (5, 20)
+  @test spot("display:grid") == (2, 2) && spot("display:grid;place-items:end") == (198, 38) && spot("display:grid", "justify-self:center;align-self:end") == (100, 38)   # in a grid's padding
+  @test spot("display:block") == (5, 5)
   # In a window, the page's height in percent is the window's, and a box that's fixed is placed in the window
   html = """<!DOCTYPE html><html style="height:100%"><body style="height:100%;margin:0"><div style="height:50%;background:#010203"></div>
     <div style="position:fixed;bottom:0;left:0;width:20px;height:10px;background:#040506"></div><div style="position:absolute;top:30px;width:1px;height:1px;background:#070809"></div></body></html>"""
@@ -440,6 +450,43 @@ end
   Web.page("""<!DOCTYPE html><picture><source srcset="big.webp" media="(min-width: 900px)"><img src="a.png" srcset="a.png 1x, b.png 2x"></picture>"""; wide=300,
            load=src -> (push!(asked, src); nothing), base="https://x.org/dir/page.html")
   @test asked == ["https://x.org/dir/b.png"]
+end
+
+@testset "fonts of several widths" begin
+  # How `font-stretch` and the `font` shorthand say how wide the letters are
+  doc = Dom.document("""<body><p id=a style="font-stretch:78%">x<b id=b>y</b></p><p id=c style="font-stretch:condensed"></p>
+    <p id=d style="font: condensed bold 12px Helvetica"></p><p id=e style="font-stretch:75%;font: 12px Helvetica"></p></body>""")
+  look = Styles.styles(doc, 400)
+  @test look[named(doc, "a")].stretch == 78 && look[named(doc, "b")].stretch == 78 && look[named(doc, "c")].stretch == 75
+  @test look[named(doc, "d")].stretch == 75 && look[named(doc, "e")].stretch == 100 && look[tagged(doc, "body")].stretch == 100
+  # A variable font, with all of its weights and widths in one file, is drawn at the weight and the width asked for. The Mac's
+  # own font is one, with axes of weight and width as CSS has them.
+  sf = read("/System/Library/Fonts/SFNS.ttf")
+  wide(css; face="font-weight: 100 900; font-stretch: 50% 150%") = begin
+    d = Dom.document("""<!DOCTYPE html><style>@font-face { font-family: V; src: url(v.ttf); $face } span { font: 40px V; display: inline-block }</style>
+      <body><span id=s style="$css">Handgloves</span></body>""")
+    p = Web.page(d; wide=800, base="https://t.test/", load=src -> src == "https://t.test/v.ttf" ? sf : nothing)
+    k = box(p.root, named(d, "s"))
+    (k.style.family[1], k.width, [i for i in p.list.items if i isa Paint.Glyphs])
+  end
+  family, normal, drawn = wide("")
+  @test startswith(family, "web:") && length(drawn) == 1
+  @test wide("font-stretch: 75%")[2] < normal - 20 && wide("font-stretch: 125%")[2] > normal + 20 && wide("font-weight: 800")[2] > normal + 10
+  # The letters are drawn where they're laid out, in Skia's face of that width
+  skia(g) = sum(Paint.drawn(only(g).font, c)[3] for c in "Handgloves")
+  _, narrow, glyphs = wide("font-stretch: 60%")
+  @test only(glyphs).w ≈ narrow && skia(glyphs) < skia(drawn) - 20
+  # A face whose @font-face says no width is only for the normal width, as in a browser
+  @test wide("font-stretch: 75%"; face="font-weight: 100 900")[2] ≈ normal
+  # A font of the Mac that has a face of another width uses it, like Helvetica Neue's bold condensed face. One that has none keeps its
+  # normal face. The system font has an axis of width.
+  text(css) = (d = Dom.document("""<body><span id=s style="display:inline-block;font: $css">Handgloves</span></body>"""); box(Web.page(d; wide=800).root, named(d, "s")).width)
+  @test text("bold 40px 'Helvetica Neue'; font-stretch: condensed") < text("bold 40px 'Helvetica Neue'") - 20 && text("40px Times; font-stretch: condensed") ≈ text("40px Times")
+  @test text("40px system-ui; font-stretch: 75%") < text("40px system-ui") - 20
+  # A font can be written into the page as a `data:` address
+  lycian = base64encode(read("/System/Library/Fonts/Supplemental/NotoSansLycian-Regular.ttf"))
+  d = Dom.document("""<style>@font-face { font-family: L; src: url(data:font/ttf;base64,$lycian) }</style><body><span id=s style="font-family: L">x</span></body>""")
+  @test startswith(box(Web.page(d; wide=400).root, named(d, "s")).style.family[1], "web:")
 end
 
 @testset "text of today" begin
@@ -494,6 +541,31 @@ end
     <input type="range"><input type="radio"><meter value=".5"></meter><input type="color" value="#ff0000"><video width="80" height="40"></video><audio controls></audio><input type="file"></p>"""; wide=400)
   @test count(i -> i isa Paint.Drawing, q.list.items) == 1 && count(i -> i isa Paint.Widget, q.list.items) == 6
   @test filesize(Web.save(q, joinpath(mktempdir(), "forms.png"))) > 500
+end
+
+@testset "dark mode" begin
+  # What each <div> and the page fill, on a screen in dark mode or not. Each colour here is WebKit's on a Mac.
+  fills(html; dark=false) = [i.color for i in Web.page(html; wide=200, dark).list.items if i isa Paint.Fill]
+  page(head) = """<!DOCTYPE html><html><head>$head<style>div { height: 10px } @media (prefers-color-scheme: dark) { #a { background: #102030 } }
+    #b { background: light-dark(red, blue) } #c { background: canvas } #d { background: linktext }</style></head>
+    <body style="margin:0"><div id="a"></div><div id="b"></div><div id="c"></div><div id="d"></div></body></html>"""
+  light = [0xffff0000, 0xffffffff, 0xff0000ee]
+  @test fills(page("")) == light
+  # A page that says nothing of its colour scheme stays light, but what it says for a screen in dark mode is for it
+  @test fills(page(""); dark=true) == [0xff102030; light]
+  # One that can be light or dark is dark on a dark screen: its background where it gives none, the second colour of light-dark(), links
+  either = page("""<meta name="color-scheme" content="light dark">""")
+  @test fills(either) == light
+  @test fills(either; dark=true) == [0xff1e1e1e, 0xff102030, 0xff0000ff, 0xff1e1e1e, 0xff9e9eff]
+  # One that's only dark is dark on any screen
+  @test fills(page("<style>:root { color-scheme: dark }</style>")) == [0xff1e1e1e, 0xff0000ff, 0xff1e1e1e, 0xff9e9eff]
+  # So is one element of a light page, and what's in it
+  @test fills("""<body style="margin:0"><div style="color-scheme:dark;height:10px;background:canvas"><p style="margin:0;background:light-dark(red, blue)">x</p></div></body>""") == [0xff1e1e1e, 0xff0000ff]
+  # The text is white, and form fields have their dark colours
+  doc = Dom.document("""<meta name="color-scheme" content="light dark"><body><p>x</p><input><button>go</button></body>""")
+  look = Base.ScopedValues.with(() -> Styles.styles(doc, 400), Css.DARK => true)
+  @test look[tagged(doc, "p")].color == 0xffffffff && look[tagged(doc, "input")].background == 0xff1e1e1e && look[tagged(doc, "button")].background == 0xff2f2f2f
+  @test Styles.styles(doc, 400)[tagged(doc, "p")].color == 0xff000000 && Styles.styles(doc, 400)[tagged(doc, "input")].background == 0xffffffff
 end
 
 @testset "a page of the web" begin

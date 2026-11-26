@@ -8,6 +8,7 @@
 #     r.declarations                   # each with its name, its value and whether it's !important
 #     r.media                          # what each @media round the rule asks of the page
 #     media("screen and (max-width: 600px)", 500)   # true on a page 500 px wide
+#     with(() -> media("(prefers-color-scheme: dark)", 500), DARK => true)   # true on a screen in dark mode
 #     declarations("color: red; margin: 0")         # what a style attribute says
 #
 # A selector can have tags, classes, ids, what an attribute says, the words
@@ -29,6 +30,7 @@
 # which gives the text of the sheet at an address, or nothing.
 
 @use "./dom" Element Text attr
+using Base.ScopedValues: ScopedValue, with
 
 struct Declaration
   name::String
@@ -826,8 +828,15 @@ ratio(v) = begin
   a === nothing || b === nothing || b == 0 ? nothing : a / b
 end
 
+"""
+True while a page is laid out for a screen in dark mode, as a Mac is at
+night when its appearance is Auto: a media query's `prefers-color-scheme` is
+`dark` then. Set it with `with(f, DARK => true)`.
+"""
+const DARK = ScopedValue(false)
+
 # What a page that's drawn says of each thing that a media query can ask about, when it's a word
-const WORDS = Dict("prefers-color-scheme" => "light", "prefers-reduced-motion" => "no-preference", "prefers-contrast" => "no-preference",
+const WORDS = Dict("prefers-reduced-motion" => "no-preference", "prefers-contrast" => "no-preference",
                    "prefers-reduced-transparency" => "no-preference", "prefers-reduced-data" => "no-preference", "hover" => "hover", "any-hover" => "hover",
                    "pointer" => "fine", "any-pointer" => "fine", "scripting" => "none", "display-mode" => "browser", "color-gamut" => "srgb",
                    "forced-colors" => "none", "inverted-colors" => "none", "update" => "fast", "overflow-block" => "scroll", "overflow-inline" => "scroll",
@@ -838,7 +847,8 @@ feature(name, wide, high) =
   name in ("width", "device-width", "inline-size") ? Float64(wide) : name in ("height", "device-height", "block-size") ? Float64(high) :
   name in ("aspect-ratio", "device-aspect-ratio") ? wide / max(high, 1e-9) : name == "orientation" ? (wide > high ? "landscape" : "portrait") :
   name in ("resolution", "-webkit-device-pixel-ratio", "device-pixel-ratio") ? DENSITY : name == "color" ? 8.0 :
-  name in ("monochrome", "color-index", "grid") ? 0.0 : name == "-webkit-transform-3d" ? 1.0 : get(WORDS, name, nothing)
+  name in ("monochrome", "color-index", "grid") ? 0.0 : name == "-webkit-transform-3d" ? 1.0 :
+  name == "prefers-color-scheme" ? (DARK[] ? "dark" : "light") : get(WORDS, name, nothing)
 
 "The number that a query's value `v` is, for the thing `name`"
 amount(name, v) = name in ("resolution", "-webkit-device-pixel-ratio", "device-pixel-ratio") ? density(v) :

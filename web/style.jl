@@ -23,9 +23,18 @@
 # the end of an animation that stops and stays there. With a time and a
 # `Clock`, a style that changes from one layout to the next takes the time
 # that its `transition` says.
+#
+# Dark mode: `with(() -> styles(doc, 700), DARK => true)` works out the styles
+# for a screen in dark mode, so `@media (prefers-color-scheme: dark)` is for
+# it. An element whose `color-scheme` (or the page's `<meta
+# name="color-scheme">`) says it can be dark takes the dark colours of the
+# system then: `canvas`, `canvastext`, links, form fields and the second
+# colour of `light-dark()`. A page that says `color-scheme: dark` is dark on
+# any screen. One that says nothing stays light, as in a browser.
 
 @use "./dom" Element Text Document attr walk
-@use "./css" Declaration Rule Stylesheet Selector sheet read! declarations matches media container container_name pieces closing resolve selectors
+@use "./css" Declaration Rule Stylesheet Selector sheet read! declarations matches media container container_name pieces closing resolve selectors DARK
+using Base.ScopedValues: ScopedValue, with
 @use "./text" => Fonts
 
 # --- lengths ------------------------------------------------------------------------------
@@ -304,6 +313,27 @@ const COLOURS = Dict{String,UInt32}(
   "buttonhighlight" => 0xffefefef, "buttonshadow" => 0xff767676, "captiontext" => 0xff000000, "inactivecaptiontext" => 0xff808080,
   "background" => 0xffffffff, "appworkspace" => 0xffffffff, "scrollbar" => 0xffffffff, "activecaption" => 0xffffffff, "inactivecaption" => 0xffffffff)
 
+# The colours of the system that differ in the dark scheme, as WebKit on a Mac in dark mode has them. Some are see-through.
+const NIGHT = Dict{String,UInt32}(
+  "-webkit-link" => 0xff9e9eff, "linktext" => 0xff9e9eff, "visitedtext" => 0xffd0adf0, "activetext" => 0xffff9e9e, "-webkit-activelink" => 0xffff9e9e,
+  "window" => 0xff1e1e1e, "canvas" => 0xff1e1e1e, "background" => 0xff1e1e1e, "inactiveborder" => 0xff1e1e1e, "inactivecaption" => 0xff1e1e1e,
+  "canvastext" => 0xffffffff, "highlighttext" => 0xffffffff, "infotext" => 0xffffffff, "captiontext" => 0xffffffff, "inactivecaptiontext" => 0xffffffff,
+  "windowtext" => 0xd9ffffff, "buttontext" => 0xd9ffffff, "fieldtext" => 0xd9ffffff, "menutext" => 0xd9ffffff, "activecaption" => 0xd9ffffff,
+  "buttonface" => 0x40ffffff, "field" => 0x40ffffff, "threedface" => 0x40ffffff, "graytext" => 0x40ffffff,
+  "threedlightshadow" => 0x1affffff, "buttonhighlight" => 0x1affffff, "threedhighlight" => 0xffb4b4b4, "highlight" => 0xcc3f638b,
+  "menu" => 0xff373737, "activeborder" => 0xff1aa9ff, "appworkspace" => 0xffffffff)
+
+"""
+True while the styles being worked out are for an element whose colour
+scheme is dark: the system's colours, like `canvas`, are those of `NIGHT`
+then, and `light-dark()` gives its second colour. `styles` sets it from each
+element's `color-scheme`.
+"""
+const DARK_SCHEME = ScopedValue(false)
+
+"The background of a page whose colour scheme is dark, where the page gives none"
+const DARK_CANVAS = 0xff1e1e1e
+
 argb(r, g, b, a=1.0) = UInt32(round(clamp(a, 0, 1) * 255)) << 24 | UInt32(round(clamp(r, 0, 255))) << 16 | UInt32(round(clamp(g, 0, 255))) << 8 | UInt32(round(clamp(b, 0, 255)))
 alpha(c::UInt32) = (c >> 24) / 255
 # In a style, this stands for the element's own text colour until that's known. It's a colour that draws nothing, which no page writes.
@@ -420,7 +450,7 @@ end
 functional(name, inside) = begin
   if name == "light-dark"
     parts = pieces(inside, ',')
-    return isempty(parts) ? nothing : colour(parts[1])
+    return isempty(parts) ? nothing : colour(parts[length(parts) > 1 && DARK_SCHEME[] ? 2 : 1])
   elseif name == "color-mix"
     parts = [strip(p) for p in pieces(inside, ',')]
     length(parts) == 3 || return nothing
@@ -526,6 +556,7 @@ one of these worked out from another (`rgb(from red r g b / 50%)`).
 """
 colour(v::AbstractString; loose=false) = begin
   v = lowercase(strip(v))
+  haskey(NIGHT, v) && DARK_SCHEME[] && return NIGHT[v]
   haskey(COLOURS, v) && return COLOURS[v]
   v == "currentcolor" && return :current
   startswith(v, '#') && return hex(SubString(v, 2))
@@ -712,6 +743,7 @@ Base.@kwdef mutable struct Style
   size::Float64 = 16.0
   weight::Int = 400
   italic::Bool = false
+  stretch::Float64 = 100.0                      # how wide its letters are, in percent of the font's normal width: `font-stretch`
   smallcaps::Bool = false
   lineheight::Tuple{Symbol,Float64} = (:normal, 0.0)   # :normal, :number (so many font sizes) or :px
   align::Symbol = :start                        # :start, :end, :left, :right, :center, :justify, and :wk_left, :wk_center, :wk_right, which move blocks too
@@ -748,7 +780,7 @@ Base.@kwdef mutable struct Style
   vars::Dict{String,String} = NO_VARS           # the page's variables (`--x`), and how an SVG shape is drawn (`fill`, `stroke`)
 end
 
-const INHERITED = (:visible, :color, :family, :size, :weight, :italic, :smallcaps, :lineheight, :align, :alignlast, :direction, :textcase,
+const INHERITED = (:visible, :color, :family, :size, :weight, :italic, :stretch, :smallcaps, :lineheight, :align, :alignlast, :direction, :textcase,
                    :letterspacing, :wordspacing, :whitespace, :textwrap, :tabsize, :indent, :wrap, :collapse, :cellspacing, :emptycells, :listtype,
                    :listtext, :listimage, :listinside, :captionbottom, :quotes, :textshadow, :stroke, :strokecolor, :textfill, :underoffset,
                    :rendering, :accent, :lines, :linecolor, :linestyle, :linethick, :vars)
@@ -1219,6 +1251,12 @@ prop!("font-size", :size) do v, _, c, parent
   l = size_len(v, c)
   l === nothing ? nothing : px(flat(l, parent.size), parent.size)
 end
+# The words of `font-stretch`, and the percent of a normal width that each is
+const STRETCHES = Dict("ultra-condensed" => 50.0, "extra-condensed" => 62.5, "condensed" => 75.0, "semi-condensed" => 87.5, "normal" => 100.0,
+                       "semi-expanded" => 112.5, "expanded" => 125.0, "extra-expanded" => 150.0, "ultra-expanded" => 200.0)
+"The percent of a normal width that `font-stretch: v` says, or nothing"
+stretch(v, c=PLAIN) = haskey(STRETCHES, v) ? STRETCHES[v] : endswith(v, '%') && (x = number(chop(v), c)) !== nothing && x >= 0 ? Float64(x) : nothing
+prop!((v, _, c, _) -> stretch(v, c), "font-width", :stretch)
 prop!("font-weight", :weight) do v, _, c, parent
   v == "normal" ? 400 : v == "bold" ? 700 : v == "bolder" ? (parent.weight < 400 ? 400 : parent.weight < 600 ? 700 : 900) :
   v == "lighter" ? (parent.weight < 600 ? 100 : parent.weight < 800 ? 400 : 700) :
@@ -1534,10 +1572,11 @@ expand(name, value) = begin
     end
     ws = terms(value)
     i = 1
-    style, weight, caps = "normal", "normal", "normal"
+    style, weight, caps, width = "normal", "normal", "normal", "normal"
     while i <= length(ws) && !occursin(r"^[0-9.]|^(calc|min|max|clamp|var)\(", lowercase(ws[i])) && !haskey(SIZES, lowercase(ws[i])) && !(lowercase(ws[i]) in ("smaller", "larger"))
       w = lowercase(ws[i])
-      w in ("italic", "oblique") ? (style = w) : w in ("bold", "bolder", "lighter") ? (weight = w) : w == "small-caps" ? (caps = w) : nothing
+      w in ("italic", "oblique") ? (style = w) : w in ("bold", "bolder", "lighter") ? (weight = w) : w == "small-caps" ? (caps = w) :
+      haskey(STRETCHES, w) ? (width = w) : nothing
       i += 1
     end
     # A weight like 600 looks like a size: it's a weight when a size comes after it
@@ -1550,7 +1589,7 @@ expand(name, value) = begin
     height = length(size) > 1 ? size[2] : "normal"
     # The line height can stand apart: `12px / 1.5`
     i + 2 <= length(ws) && ws[i+1] == "/" && ((height, i) = (ws[i+2], i + 2))
-    push!(out, "font-style" => style, "font-weight" => weight, "font-variant-caps" => caps, "font-size" => size[1], "line-height" => height,
+    push!(out, "font-style" => style, "font-weight" => weight, "font-variant-caps" => caps, "font-width" => width, "font-size" => size[1], "line-height" => height,
           "font-family" => join(ws[i+1:end], " "))
   elseif name == "list-style"
     for w in terms(value)
@@ -1699,7 +1738,7 @@ const UNUSED = Set(["cursor", "pointer-events", "user-select", "resize", "caret-
                     "scrollbar-color", "scrollbar-gutter", "overscroll-behavior", "overscroll-behavior-x", "overscroll-behavior-y", "contain",
                     "content-visibility", "contain-intrinsic-size", "backface-visibility", "perspective", "perspective-origin", "transform-style",
                     "transform-box", "font-kerning", "font-feature-settings", "font-variation-settings", "font-optical-sizing", "font-synthesis",
-                    "font-display", "font-width", "font-size-adjust", "font-variant-numeric", "font-variant-ligatures", "font-variant-east-asian",
+                    "font-display", "font-size-adjust", "font-variant-numeric", "font-variant-ligatures", "font-variant-east-asian",
                     "font-variant-alternates", "font-variant-position", "font-palette", "font-language-override", "text-rendering", "-webkit-font-smoothing",
                     "-moz-osx-font-smoothing", "text-size-adjust", "-webkit-tap-highlight-color", "-webkit-touch-callout", "hyphens", "hyphenate-character",
                     "orphans", "widows", "page-break-before", "page-break-after", "page-break-inside", "break-before", "break-after", "break-inside",
@@ -1898,6 +1937,7 @@ html, body, div, p, h1, h2, h3, h4, h5, h6, address, blockquote, center, dl, dt,
 fieldset, legend, article, aside, footer, header, main, nav, section, figure, figcaption, details, summary, hgroup, optgroup, search { display: block }
 head, meta, title, link, style, script, base, template, area, param, datalist, noembed, noframes, map, source, track, rp, dialog:not([open]),
 audio:not([controls]), input[type=hidden], [popover], [hidden] { display: none }
+html { color: canvastext }
 body { margin: 8px }
 p, dl { margin: 1em 0 }
 blockquote, figure { margin: 1em 40px }
@@ -1940,9 +1980,9 @@ caption { display: table-caption; text-align: center }
 col { display: table-column }
 colgroup { display: table-column-group }
 img, input, button, select, textarea, svg, video, canvas, iframe, object, embed, audio, progress, meter, marquee { display: inline-block }
-button, input[type=submit], input[type=button], input[type=reset] { padding: 2px 8px 3px; border: 0 solid #c8c8c8; border-radius: 5px; background-color: #e9e9eb;
-  color: buttontext; font: 11px system-ui; text-align: center; white-space: pre; text-indent: 0; letter-spacing: normal; text-transform: none; box-sizing: border-box }
-input { padding: 3px 6px; border: 1px solid #c8c8c8; border-radius: 5px; font: 11px system-ui; width: 141px; background-color: field; color: fieldtext; white-space: pre;
+button, input[type=submit], input[type=button], input[type=reset] { padding: 2px 8px 3px; border: 0 solid #c8c8c8; border-radius: 5px; background-color: light-dark(#e9e9eb, #2f2f2f);
+  color: light-dark(buttontext, #dfdfdf); font: 11px system-ui; text-align: center; white-space: pre; text-indent: 0; letter-spacing: normal; text-transform: none; box-sizing: border-box }
+input { padding: 3px 6px; border: 1px solid #c8c8c8; border-radius: 5px; font: 11px system-ui; width: 141px; background-color: light-dark(field, #1e1e1e); color: light-dark(fieldtext, #fff); white-space: pre;
   overflow: hidden; text-indent: 0; letter-spacing: normal; text-transform: none; text-align: start }
 input[type=submit], input[type=button], input[type=reset], input[type=image] { width: auto; overflow: visible }
 input[type=checkbox], input[type=radio] { width: 12px; height: 12px; margin: 3px 3px 3px 4px; padding: 0; border: 0; background: none; box-sizing: border-box }
@@ -1950,11 +1990,11 @@ input[type=range] { width: 129px; height: 16px; margin: 2px; padding: 0; border:
 input[type=color] { width: 44px; height: 23px; padding: 1px 2px; box-sizing: border-box }
 input[type=file] { border: 0; padding: 0; background: none; width: 238px }
 input[type=image] { border: 0; padding: 0; background: none }
-textarea { padding: 2px; border: 1px solid #c8c8c8; border-radius: 5px; font: 11px monospace; background-color: field; color: fieldtext; white-space: pre-wrap;
+textarea { padding: 2px; border: 1px solid #c8c8c8; border-radius: 5px; font: 11px monospace; background-color: light-dark(field, #1e1e1e); color: light-dark(fieldtext, #fff); white-space: pre-wrap;
   overflow-wrap: break-word; overflow: hidden; text-indent: 0; letter-spacing: normal; text-transform: none; text-align: start; vertical-align: text-bottom }
-select { padding: 3px 26px 4px 12px; border: 0 solid #c8c8c8; border-radius: 5px; font: 11px system-ui; background-color: #e9e9eb; color: fieldtext; white-space: pre;
+select { padding: 3px 26px 4px 12px; border: 0 solid #c8c8c8; border-radius: 5px; font: 11px system-ui; background-color: light-dark(#e9e9eb, #2f2f2f); color: light-dark(fieldtext, #dfdfdf); white-space: pre;
   overflow: hidden; text-indent: 0; letter-spacing: normal; text-transform: none; text-align: start; box-sizing: border-box; line-height: 13px }
-select[multiple], select[size] { padding: 2px; border-width: 1px; background-color: field; white-space: pre }
+select[multiple], select[size] { padding: 2px; border-width: 1px; background-color: light-dark(field, #1e1e1e); white-space: pre }
 fieldset { border: 2px groove gray; margin: 0 2px; padding: 0.35em 0.75em 0.625em; min-width: min-content }
 legend { padding: 0 2px; width: fit-content }
 mark { background-color: yellow; color: black }
@@ -2813,6 +2853,12 @@ weights(v) = begin
   isempty(ws) ? (400, 400) : (round(Int, minimum(ws)), round(Int, maximum(ws)))
 end
 
+"The narrowest and the widest that an @font-face's `font-stretch`, like `75% 100%` or `condensed`, says that it's for, in percent of a normal width"
+stretches(v) = begin
+  ws = Float64[x for x in (stretch(w) for w in split(lowercase(v))) if x !== nothing]
+  isempty(ws) ? (100.0, 100.0) : (minimum(ws), maximum(ws))
+end
+
 "The ranges of letters that an @font-face's `unicode-range` names"
 ranges(v) = begin
   out = UnitRange{UInt32}[]
@@ -2849,10 +2895,44 @@ web_family(sheet::Stylesheet, name, load) = begin
       end
     end
     (weights(get(f, "font-weight", "400")), occursin(r"italic|oblique", lowercase(get(f, "font-style", "normal"))), ranges(get(f, "unicode-range", "")), sources,
-     get(f, "src", ""))
+     get(f, "src", ""), stretches(get(f, "font-stretch", get(f, "font-width", "normal"))))
   end
-  key = "web:" * string(hash((lowercase(name), [(d[1], d[2], d[5]) for d in described])), base=16)
-  Fonts.web!(key, [(d[1], d[2], d[3], d[4]) for d in described]) ? key : name
+  key = "web:" * string(hash((lowercase(name), [(d[1], d[2], d[5], d[6]) for d in described])), base=16)
+  Fonts.web!(key, [(d[1], d[2], d[3], d[4], d[6]) for d in described]) ? key : name
+end
+
+"""
+What the declarations `found` of an element say its `color-scheme` is, or
+nothing when they say nothing of it: then it has its parent's. The one that
+wins is the one that would win in `apply!`.
+"""
+said_scheme(found) = begin
+  best = nothing
+  for x in found
+    x[6] == "color-scheme" || continue
+    (best === nothing || x[1:5] >= best[1:5]) && (best = x)
+  end
+  best === nothing && return nothing
+  v = lowercase(strip(best[7]))
+  v in ("inherit", "unset", "revert", "revert-layer") || occursin("var(", v) ? nothing : v == "initial" ? "normal" : String(v)
+end
+
+"""
+True when an element whose `color-scheme` is `v`, like `light dark`, has the
+dark colours, on a screen that's in dark mode when `dark`. One that can be
+light or dark follows the screen, and one that's only dark is always dark.
+"""
+dark_scheme(v, dark) = (words = split(v); "dark" in words && (dark || !("light" in words)))
+
+"What the page's `<meta name=\"color-scheme\">` says its colour scheme is, or \"normal\""
+page_scheme(doc::Document) = begin
+  for head in doc.root.children
+    (head isa Element && head.tag == "head") || continue
+    for m in head.children
+      m isa Element && m.tag == "meta" && lowercase(strip(attr(m, "name"))) == "color-scheme" && return lowercase(strip(attr(m, "content")))
+    end
+  end
+  "normal"
 end
 
 """
@@ -2981,7 +3061,9 @@ styles(doc::Document, wide; extra="", high=800, load=address -> nothing, base=""
     look.until = max(look.until, stops)
     going
   end
-  visit(e::Element, parent::Style, moving=NOT_MOVING) = begin
+  prefers = DARK[]
+  root_dark = Ref(false)   # the colour scheme of the page's <html> is dark
+  visit(e::Element, parent::Style, moving=NOT_MOVING, scheme="normal") = begin
     c = Context(wide, rootsize[], quirks, high)
     s = child(parent)
     empty!(found)
@@ -3012,38 +3094,50 @@ styles(doc::Document, wide; extra="", high=800, load=address -> nothing, base=""
       # A variable that the page gives a first value has it from the top of the page down
       s.vars = merge(css.props, s.vars)
     end
-    animated[] = false
-    top, bottom = apply!(s, found, c, parent, e)
-    settle!(s, parent, e.tag)
-    e.tag in LOOSE && (s.loose = (top, bottom))
-    isempty(css.faces) || s.family === parent.family || (s.family = String[family(name) for name in s.family])
-    timed && (moving = glide(s, parent, found, e, moving))
-    e.parent === nothing && (rootsize[] = s.size)
-    look.styles[e] = s
-    if parts !== nothing
-      for (part, declared) in parts
-        ps = child(s)
-        animated[] = false
-        apply!(ps, declared, c, s, (e, part))
-        settle!(ps, s)
-        isempty(css.faces) || ps.family === s.family || (ps.family = String[family(name) for name in ps.family])
-        timed && glide(ps, s, declared, (e, part), moving)
-        if part == :marker
-          look.marker[e] = ps
-        elseif !(lowercase(ps.content) in ("", "none", "normal")) && ps.display != :none
-          (part == :before ? look.before : look.after)[e] = ps
+    # The element's colour scheme, which what's in it has too unless it says another
+    here = something(said_scheme(found), scheme)
+    dark = dark_scheme(here, prefers)
+    e.parent === nothing && (root_dark[] = dark)
+    finish(moving) = begin
+      animated[] = false
+      top, bottom = apply!(s, found, c, parent, e)
+      settle!(s, parent, e.tag)
+      e.tag in LOOSE && (s.loose = (top, bottom))
+      isempty(css.faces) || s.family === parent.family || (s.family = String[family(name) for name in s.family])
+      timed && (moving = glide(s, parent, found, e, moving))
+      e.parent === nothing && (rootsize[] = s.size)
+      look.styles[e] = s
+      if parts !== nothing
+        for (part, declared) in parts
+          ps = child(s)
+          animated[] = false
+          apply!(ps, declared, c, s, (e, part))
+          settle!(ps, s)
+          isempty(css.faces) || ps.family === s.family || (ps.family = String[family(name) for name in ps.family])
+          timed && glide(ps, s, declared, (e, part), moving)
+          if part == :marker
+            look.marker[e] = ps
+          elseif !(lowercase(ps.content) in ("", "none", "normal")) && ps.display != :none
+            (part == :before ? look.before : look.after)[e] = ps
+          end
         end
       end
+      for k in e.children
+        k isa Element && visit(k, s, moving, here)
+      end
     end
-    for k in e.children
-      k isa Element && visit(k, s, moving)
-    end
+    dark == DARK_SCHEME[] ? finish(moving) : with(() -> finish(moving), DARK_SCHEME => dark)
   end
-  visit(doc.root, Style())
+  visit(doc.root, Style(), NOT_MOVING, page_scheme(doc))
   # What the page's <html> or <body> says of what overflows is for the window, which shows all of the page here
   top = look.styles[doc.root]
   top.overflow == :visible && haskey(look.styles, doc.body) && (look.styles[doc.body].overflow = :visible)
   top.overflow = :visible
+  # Where a page whose colour scheme is dark gives no background, it's dark, as the window is in a browser
+  if root_dark[] && alpha(top.background) == 0 && isempty(top.image)
+    body = get(look.styles, doc.body, nothing)
+    (body === nothing || (alpha(body.background) == 0 && isempty(body.image))) && (top.background = DARK_CANVAS)
+  end
   clock === nothing || !commit || commit!(clock)
   look
 end

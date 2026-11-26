@@ -65,7 +65,8 @@
 @use "./jsc" => JS
 @use "./jsc" Context Object ScriptError
 @use "./dom" Node Element Text Document document attr text VOID RAW
-@use "./css" selectors matches resolve media
+@use "./css" selectors matches resolve media DARK
+using Base.ScopedValues: with
 @use "./form" sent
 @use "./window" WINDOW
 @use "./context" => Drawing
@@ -103,7 +104,7 @@ mutable struct Scripts
   place::Function                # the rectangles of an element's box on the page: (left, top, wide, tall) each
   at::Function                   # the element at a point of the page, or nothing
   computed::Function             # what the page's CSS gives an element for a property, as CSS writes it, or nothing
-  window::Function               # how wide and how high the window that the page is seen through is
+  window::Function               # how wide and how high the window that the page is seen through is, and maybe a third value: true when the screen is in dark mode
   hooks::Dict{String,Object}     # the functions of window.jl that Julia calls
   ran::IdDict{Element,Bool}      # the <script> elements that have run
   contents::IdDict{Element,Element}   # what's in each <template>: a fragment that's kept apart from the page
@@ -446,9 +447,9 @@ natives(s::Scripts) = begin
       out
     end,
     "hit" => (x, y) -> number(s, s.at(Float64(x), Float64(y))),
-    "window" => () -> collect(s.window()),
+    "window" => () -> (w = s.window(); [w[1], w[2]]),
     "computed" => (id, name) -> (e = element(s, id); connected(s, e) ? s.computed(e, String(name)) : nothing),
-    "media" => query -> (w = s.window(); media(query, w[1], w[2])),
+    "media" => query -> (w = s.window(); with(() -> media(query, w[1], w[2]), DARK => length(w) > 2 && w[3] === true)),
     "scroll" => () -> Float64(s.scroll()),
     "scrollTo" => y -> (s.scroll(Float64(y)); nothing),
     "go" => address -> (go!(s, resolve(home(s), address)); nothing),

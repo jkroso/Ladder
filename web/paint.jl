@@ -815,7 +815,7 @@ ink!(l::List, b::Box, ox, oy) = begin
       ink!(l, q.box, x, y)
     elseif q.kind == :text && !isempty(q.chars) && !q.space
       t = q.box.style
-      glyphs!(l, font(t.family, t.size, t.weight, t.italic), q.chars, q.widths, cx + q.x, cy + q.y, 0xff000000)
+      glyphs!(l, font(t.family, t.size, t.weight, t.italic, t.stretch), q.chars, q.widths, cx + q.x, cy + q.y, 0xff000000)
     end
   end
   isempty(b.lines) && foreach(k -> k.kind in (:text, :inline, :break, :column) || placed(k) || ink!(l, k, x, y), b.children)
@@ -950,7 +950,7 @@ draw!(l::List, b::Box, ox, oy) = begin
       # A picture that there isn't shows where it would be, as a browser shows it
       push!(l.items, Edge(cx, cy, iw, ih, SQUARE, (1.0, 1.0, 1.0, 1.0), ntuple(_ -> MISSING, 4), ntuple(_ -> :solid, 4)))
       # The words that stand for the picture show in its box when they fit
-      f = font(s.family, s.size, s.weight, s.italic)
+      f = font(s.family, s.size, s.weight, s.italic, s.stretch)
       widths = [drawn(f, c)[3] for c in b.text]
       if !isempty(b.text) && sum(widths) + 4 <= iw + 0.5 && f.ascent + f.descent + 4 <= ih + 0.5
         glyphs!(l, f, collect(b.text), widths, cx + 2, cy + 2 + f.ascent, s.color)
@@ -974,7 +974,7 @@ draw!(l::List, b::Box, ox, oy) = begin
   # The bullet or the number of a list item, to the left of its first line
   if (!isempty(b.marker) || b.markerimage !== nothing) && s.visible
     ms = something(b.markerstyle, s)
-    f = font(ms.family, ms.size, ms.weight, ms.italic)
+    f = font(ms.family, ms.size, ms.weight, ms.italic, ms.stretch)
     base = y + something(first_baseline(b), b.border[1] + b.padding[1] + f.ascent)
     # The sizes and the places are the ones that Safari draws a bullet and a number with
     rise = round(Int, f.ascent)
@@ -1056,7 +1056,7 @@ inside!(l::List, b::Box, x, y, cx, cy) = begin
         emit!(l, q.box, x, y)
       elseif q.kind == :text && !isempty(q.chars)
         t = q.box.style
-        f = font(t.family, t.size, t.weight, t.italic)
+        f = font(t.family, t.size, t.weight, t.italic, t.stretch)
         px0, base = cx + q.x, cy + q.y
         top, tall = base - f.ascent, f.ascent + f.descent
         words!(l, line, q, px0, top, tall)

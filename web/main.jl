@@ -68,6 +68,8 @@
 @use "./style" styles isauto ispercent Clock commit!
 @use "./layout" layout!
 @use "./paint" => Paint
+@use "./css" DARK
+using Base.ScopedValues: with
 
 """
 The pictures of a page: each address that it names, with the picture's size
@@ -303,6 +305,10 @@ whose content still can't be that narrow is as wide as its content, up to
 `high` is how high the window that the page is seen through is, or nothing
 for a page that's as tall as its content. `base` is the address of the page.
 
+With `dark`, the page is laid out for a screen in dark mode: what it says
+for `@media (prefers-color-scheme: dark)` is for it, and a page whose
+`color-scheme` says it can be dark has the dark colours of the system.
+
 `at` is how many seconds ago the page was first shown: its animations are
 drawn as they are at that time. `moving(p)` says whether the page will look
 different a moment later, and `p.until` says when it stops changing. With no
@@ -314,7 +320,8 @@ takes the time that its `transition` says.
 page(html::AbstractString; kw...) = page(document(html); kw...)
 
 "Lay out the page of a document that's read already. live.jl lays a page out again with this after a script changes its document."
-page(doc::Document; wide=700, zoom=1.0, load=src -> nothing, pictures=Pictures(load), css="", fit=false, widest=2000, high=nothing, base="", at=nothing, clock=nothing) = begin
+page(doc::Document; dark=false, wide=700, zoom=1.0, load=src -> nothing, pictures=Pictures(load), css="", fit=false, widest=2000, high=nothing, base="", at=nothing,
+     clock=nothing) = with(DARK => dark) do
   from = isempty(doc.base) ? String(base) : resolve(base, doc.base)
   inner = wide / zoom
   window = high === nothing ? NaN : high / zoom
@@ -336,7 +343,9 @@ page(doc::Document; wide=700, zoom=1.0, load=src -> nothing, pictures=Pictures(l
   until = 0.0
   lay(across, extra) = begin
     make(containers) = begin
-      look = styles(doc, across; extra, high=seen, load=pictures.load, base=String(base), containers, at, clock, commit=false)
+      # A font or a sheet can be written into the page as a `data:` address, as a picture can
+      sheets = address -> startswith(lowercase(address), "data:") ? inline_bytes(address) : pictures.load(address)
+      look = styles(doc, across; extra, high=seen, load=sheets, base=String(base), containers, at, clock, commit=false)
       root = boxes(doc, look; pictures=find, films=src -> film(pictures, resolve(from, src)), reels, embeds=src -> embed(pictures, resolve(from, src)), at,
                    wide=across, high=seen)
       until = look.until

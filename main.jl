@@ -350,7 +350,7 @@ const BUILDING_APP = haskey(ENV, "KIP_FROZEN") && ccall(:jl_generating_output, C
 if !BUILDING_APP
   @use "github.com/jkroso/UI.jl/Interface/inspector" toggle_inspector!
 end
-@use "github.com/jkroso/UI.jl/Interface/window" hide_titlebar! place_window_buttons! fade_window_buttons! drag_window! set_dark! nswindow system_menu fills_screen fill_screen!
+@use "github.com/jkroso/UI.jl/Interface/window" hide_titlebar! place_window_buttons! fade_window_buttons! drag_window! set_dark! nswindow system_menu fills_screen fill_screen! dark_mode
 @use "github.com/jkroso/UI.jl/Interface/Semantic/Icon" Icon icon_cache load_icon
 @use "github.com/jkroso/UI.jl/Interface/Semantic/SVG" SVGPath render_svg
 @use "github.com/jkroso/UI.jl/Interface/Semantic/TextInput" TextInput
@@ -23941,6 +23941,14 @@ end
 html_part(e) = node!(() -> HTMLPage(path=e.buf.path), e, (:html, e.buf.path))
 
 """
+Whether a page of HTML that fills Ladder's page is laid out for a screen in
+dark mode: a function that gives true or false. It follows the Mac, as a
+browser does, and not Ladder's theme: with the Mac's appearance on Auto, a
+site that can be dark is dark at night. A test puts its own function here.
+"""
+const WEB_DARK = Ref{Any}(() -> dark_mode())
+
+"""
 The Browser of `v`, which gets the file and the files that it names, and shows
 the page. A page of the browser folder is from its web address: the Browser
 gets the files that it names from there, and a link of the page goes where
@@ -23966,6 +23974,7 @@ describe(v::HTMLPage) = begin
   carry_sums!(v, b)
   b.zoom = round(Float64(e.zoom), digits=2)
   b.wide, b.high = page_room(e)
+  b.dark = WEB_DARK[]()
   Box(width(grow=grow), height(grow=grow), Alignment.Start, name="Web page", b)
 end
 
@@ -24428,6 +24437,8 @@ view_content(v::ViewBlock, e) = begin
   if view_web(v)
     b = web_browser(v)
     send_sums!(v)
+    # A page in a block is dark in a dark page, as a frame in a browser takes the colour scheme of the page that it's in
+    b.dark = dark_page()
     # While the page fills the window, the window says how big it is
     zoomed_node(e, b) && return held_room(e)
     b.zoom = round(Float64(e.zoom), digits=2)

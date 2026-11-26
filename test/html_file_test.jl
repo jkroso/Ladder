@@ -71,6 +71,18 @@ spot(x, y) = (r = rect(browser()); (K.num(r.left) + x, K.num(r.top) + y - K.Brow
   shot("html-file.png")
 end
 
+@testset "the page is in dark mode when the Mac is" begin
+  # WEB_DARK says what the Mac's appearance is. The page and its scripts follow it, and the scripts keep running.
+  was, live_now = K.WEB_DARK[], browser().view.live
+  K.WEB_DARK[] = () -> true
+  frames()
+  @test browser().dark && live("matchMedia('(prefers-color-scheme: dark)').matches") == true
+  K.WEB_DARK[] = () -> false
+  frames()
+  @test !browser().dark && live("matchMedia('(prefers-color-scheme: dark)').matches") == false && browser().view.live === live_now
+  K.WEB_DARK[] = was
+end
+
 @testset "the page is yours to use" begin
   b = browser()
   # The wheel scrolls the page

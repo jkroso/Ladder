@@ -163,6 +163,7 @@ end
   clicks::Tuple{Float64,Int,Int} = (0.0, -1, 0)   # when the mouse last went down on the page's words, at which place, and how many clicks in a row that makes
   drag::Symbol = :none      # what a drag with the button down selects: the page's words (:words), the letters of the field (:field), or nothing
   dragged::Float64 = 0.0    # when a drag above or below the view last scrolled the page
+  dark::Bool = false        # lay pages out for a screen in dark mode, so a page that can be dark is: see `page`'s `dark`
 end
 
 # --- which page shows -----------------------------------------------------------------------
@@ -406,10 +407,11 @@ describe(b::Browser) = begin
   v.go === nothing && (v.go = address -> follow!(b, address))
   tick!(b)
   v.wide, v.high, v.zoom, v.scripts, v.say, v.limit = b.wide, Float64(flt(b.high)), b.zoom, b.scripts, b.say, LIMIT
+  v.dark = b.dark
   # The page's scripts run and the page is laid out, unless it's a slow page that rests. Another page, or another size
   # of the window, doesn't wait. While the page rests, the window shows it as it was last laid out, and it still scrolls.
   # A page that has the mouse to itself never rests: it's a game that you're playing, and each frame is yours.
-  want = (v.html, v.base, v.wide, v.high, v.zoom, v.scripts)
+  want = (v.html, v.base, v.wide, v.high, v.zoom, v.scripts, v.dark)
   if v.page === nothing || b.made != want || time() >= b.rest || b.locked !== nothing
     b.made = want
     began = time()
@@ -433,7 +435,18 @@ describe(b::Browser) = begin
   (loading(b) || Fetch.coming(b.files) > 0 || b.files.landed != b.landed) && redraw_in!(b, 0.05)
   # The caret blinks, so the window has to draw again while a field has the keyboard
   field(b) !== nothing && focused(b) && redraw_in!(b, 0.5)
-  Box(width(b.wide), height(b.high), background("white"))
+  Box(width(b.wide), height(b.high), background(under(b)))
+end
+
+"""
+What shows under a page that's shorter than the view: the page's own
+background, as in a browser, when it has one that hides what's under it.
+Else white.
+"""
+under(b::Browser) = begin
+  p = b.view.page
+  c = p === nothing ? 0x00000000 : p.list.background
+  c >> 24 == 0xff ? "#" * string(c & 0x00ffffff, base=16, pad=6) : "white"
 end
 
 "Fill a rectangle of the canvas with a colour, with round corners when `round` is more than 0"

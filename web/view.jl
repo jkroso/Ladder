@@ -6,9 +6,10 @@
 # and a click on a link calls `open(url)`, which opens it in the browser unless
 # you give another function. `zoom`, `fit`, `load`, `css`, `high` and `base`
 # are what `page` in main.jl takes. `v.page` is the page that's laid out, with
-# its links and its words.
+# its links and its words. With `dark=true`, the page is laid out for a
+# screen in dark mode: see `page`'s `dark`.
 #
-# The page is laid out again only when the HTML, the width or the zoom changes,
+# The page is laid out again only when the HTML, the width, the zoom or `dark` changes,
 # so a window that redraws often costs no more than the drawing.
 #
 # A page with an animation, a video that plays or a picture that moves (a
@@ -64,6 +65,7 @@
   limit::Float64 = 10.0   # how many seconds a script may run before it's stopped
   moves::Bool = true      # draw the page's animations as time passes
   showing::Any = nothing  # the page's document, its clock and when it was first shown, for a page that's laid out again as time passes
+  dark::Bool = false      # lay the page out for a screen in dark mode
 end
 
 # A page that moves is laid out again no sooner than this many seconds after the last time
@@ -71,7 +73,7 @@ const FRAME = 1 / 30
 
 "The page of `v`, laid out for its HTML, its width and its zoom as they are now"
 page!(v::View) = begin
-  want = (hash(v.html), Float64(flt(v.wide)), v.zoom, v.fit, v.css, v.high, v.base)
+  want = (hash(v.html), Float64(flt(v.wide)), v.zoom, v.fit, v.css, v.high, v.base, v.dark)
   v.scripts && return running!(v, want)
   if v.live !== nothing
     close(v.live)
@@ -79,7 +81,7 @@ page!(v::View) = begin
   end
   if !v.moves
     if v.made != want
-      v.page = Web.page(v.html; wide=want[2], zoom=v.zoom, fit=v.fit, css=v.css, load=v.load, high=v.high, base=v.base)
+      v.page = Web.page(v.html; wide=want[2], zoom=v.zoom, fit=v.fit, css=v.css, load=v.load, high=v.high, base=v.base, dark=v.dark)
       v.made = want
     end
     return v.page
@@ -91,7 +93,7 @@ page!(v::View) = begin
   at = max(0.0, began - v.showing.since)
   if v.made != want || Web.due(v.page, at)
     v.page = Web.page(v.showing.doc; wide=want[2], zoom=v.zoom, fit=v.fit, css=v.css, load=v.load, pictures=v.showing.pictures, high=v.high, base=v.base,
-                      at, v.showing.clock)
+                      at, v.showing.clock, dark=v.dark)
     v.made = want
   end
   # A window draws only when something asks. A page that takes long to lay out leaves as long again for the rest of the window,
@@ -107,10 +109,11 @@ running!(v::View, want) = begin
   if v.live === nothing || v.started != key
     v.live === nothing || close(v.live)
     v.live = Live.live(v.html; wide=want[2], zoom=v.zoom, fit=v.fit, css=v.css, load=v.load, high=v.high, base=v.base, say=v.say,
-                       go=v.go, allowed=v.allowed, limit=v.limit)
+                       go=v.go, allowed=v.allowed, limit=v.limit, dark=v.dark)
     v.started = key
   else
     resize!(v.live, want[2]; high=v.high, zoom=v.zoom)
+    Live.dark!(v.live, v.dark)
   end
   wait = Live.step!(v.live)
   # A window draws only when something asks, so the next timer asks. A script that waits for the next frame gets 60 a second.

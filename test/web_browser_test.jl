@@ -355,6 +355,22 @@ end
   end
 end
 
+@testset "a page in dark mode" begin
+  # A page that can be dark is dark when the view is, also under its end when it's shorter than the view
+  b = Browser(html="""<meta name="color-scheme" content="light dark"><body style="margin:0"><p>short</p></body>""", wide=300px, high=200px, scripts=false)
+  w = Window(b, size=(300px, 200px))
+  frame(w)
+  @test Browsers.under(b) == "white" && b.view.page.list.background == 0
+  b.dark = true
+  frame(w)
+  @test Browsers.under(b) == "#1e1e1e" && b.view.page.list.background == 0xff1e1e1e
+  # A page that gives its own background has it under its end
+  b.html = """<body style="margin:0;background:#123456"><p>short</p></body>"""
+  frame(w); frame(w)
+  @test Browsers.under(b) == "#123456"
+  close(w)
+end
+
 @testset "a video in a frame" begin
   # A script gives the frame its address, as YouTube's own script does. A click on the frame opens the video's page in a browser: the view stays where it is.
   site = Dict("https://example.com/" => ("text/html", """<!DOCTYPE html><body style="margin:0"><iframe id=v width="320" height="180" frameborder="0"></iframe>

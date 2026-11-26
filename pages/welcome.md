@@ -591,6 +591,8 @@ A `view` block shows a page of the web too. Write the page's address in it, like
 
 When a link takes the block to another page, the block's line changes to that page's address. ⌘Z takes it back, and the page with it. The button beside the block's top right corner goes to the page that shows. A page of Markdown or of HTML on a web server shows in the window, and anything else opens in your browser. An HTML file shows its page in the window.
 
+A site that has a dark look shows it when your Mac is in dark mode, as it does in a browser. With the Mac's appearance on Auto, that's at night. A page in a `view` block is dark on the Night theme, so that it matches the page that it's in.
+
 A block that starts with a tag holds the page itself, like this one:
 
 ```view

@@ -34,7 +34,7 @@ struct Pass
   fixed::Vector{Box}             # the boxes that are placed from the window
 end
 
-face(s::Style) = font(s.family, s.size, s.weight, s.italic)
+face(s::Style) = font(s.family, s.size, s.weight, s.italic, s.stretch)
 
 "How far over and under the line that its text stands on a line of the style `s` goes"
 strut(s::Style, f::Font=face(s)) = begin
@@ -63,6 +63,7 @@ chrome(b::Box) = across(b.padding) + across(b.border)
 "Put the box `k`, which has a place of its own, with the boxes that wait to be placed. `(x, y)` is where it would be in the text."
 wait!(p::Pass, k::Box, x, y) = begin
   k.x, k.y = x, y
+  k.lone = nothing
   push!(k.style.position == :fixed ? p.fixed : p.pending[end], k)
   nothing
 end
@@ -649,7 +650,41 @@ place!(k::Box, p::Pass, cbw, cbh, ox, oy) = begin
   # Where it stays in the text, its place is that of the text until paint.jl finds it
   x === nothing ? (k.x += k.margin[4]) : (k.x = ox + x)
   y === nothing ? (k.y += k.margin[1]) : (k.y = oy + y)
+  # In a flex box or a grid, that place is where it would be as the only thing there
+  if k.lone !== nothing
+    home, fx, fy = k.lone
+    inside = grids(home) ? (0.0, 0.0, 0.0, 0.0) : home.padding   # the room is the content of a flex box, and the padding of a grid
+    x === nothing && (k.x += fx * (home.width - across(home.border) - across(inside) - k.width - across(k.margin)))
+    y === nothing && (k.y += fy * (home.height - down(home.border) - down(inside) - k.height - down(k.margin)))
+  end
   k
+end
+
+"""
+Where a box with a place of its own that's right in the flex box or the grid
+`b` would be in the text: where `b` would put it if it were the only thing in
+`b`. A browser does this, so an icon with `position: absolute` and no `top`
+in a flex box with `align-items: center` is in the middle. It gives how far
+across, and down, the room that's left the box's margin starts, from 0 at
+the start to 1 at the end. The room is the content of a flex box, and the
+padding of a grid.
+"""
+lone_place(b::Box, k::Box) = begin
+  s = b.style
+  share(a) = a == :center ? 0.5 : a in (:end, :flex_end) ? 1.0 : 0.0
+  if grids(b)
+    sideways = k.style.justifyself == :auto ? s.justifyitems : k.style.justifyself
+    upright = k.style.alignself == :auto ? s.alignitems : k.style.alignself
+    return (share(sideways), share(upright))
+  end
+  # The only thing of a flex box that spaces its things out is in the middle, or at the start for `space-between`.
+  # `normal` and `stretch` place it at the start.
+  along = s.justify in (:space_around, :space_evenly) ? :center : s.justify
+  backwards = s.flexdir in (:row_reverse, :column_reverse)
+  main = along == :center ? 0.5 : along in (:start, :end) ? share(along) : along == :flex_end ? (backwards ? 0.0 : 1.0) : (backwards ? 1.0 : 0.0)
+  a = k.style.alignself == :auto ? s.alignitems : k.style.alignself
+  side = a in (:center, :start, :end) ? share(a) : a == :flex_end ? (s.flexwrap == :wrap_reverse ? 0.0 : 1.0) : (s.flexwrap == :wrap_reverse ? 1.0 : 0.0)
+  s.flexdir in (:row, :row_reverse) ? (main, side) : (side, main)
 end
 
 "Lay out and place the boxes with a place of their own that are placed from `b`, which is laid out"
@@ -1327,7 +1362,7 @@ flex!(b::Box, p::Pass, cw, sure) = begin
   row = s.flexdir in (:row, :row_reverse)
   rowgap, colgap = gaps(b, cw)
   gap, linegap = row ? (colgap, rowgap) : (rowgap, colgap)
-  foreach(k -> placed(k) && wait!(p, k, cx, cy), b.children)
+  foreach(k -> placed(k) && (wait!(p, k, cx, cy); k.lone = (b, lone_place(b, k)...)), b.children)
   kids = things(b)
   vertical = down(b.padding) + down(b.border)
   inner(l) = max(0.0, px(l, b.cbh) - (s.borderbox ? vertical : 0.0))
@@ -1762,7 +1797,8 @@ tall (NaN when its height isn't known yet). It gives how tall the content is.
 grid!(b::Box, p::Pass, cw, sure) = begin
   s = b.style
   cx, cy = b.border[4] + b.padding[4], b.border[1] + b.padding[1]
-  foreach(k -> placed(k) && wait!(p, k, cx, cy), b.children)
+  # A box with a place of its own stays in the grid's padding, as if it were the grid's only thing
+  foreach(k -> placed(k) && (wait!(p, k, b.border[4], b.border[1]); k.lone = (b, lone_place(b, k)...)), b.children)
   rowgap, colgap = gaps(b, cw)
   spots, cols, rows = arrange(b, cw, sure)
   wide = size_tracks(cols, [(sp.c, sp.cs, outer_extent(sp.box, p)...) for sp in spots], cw, colgap; fill=s.justify in (:normal, :stretch))
