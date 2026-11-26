@@ -6,8 +6,8 @@
 # keychain has one. Add `--install` to copy it into /Applications too. See bundle.jl for what the build needs and the
 # settings it takes. To make a release that other Macs open, run release.jl.
 #
-# Leave APP_TRIM at no. A sheet and a live block run Julia code that the app
-# has never seen, and a trimmed app can't compile new code.
+# Ladder isn't trimmed (JuliaC's trim_mode). A sheet and a live block run Julia
+# code that the app has never seen, and a trimmed app can't compile new code.
 #
 # icon.jl draws the app's icon, icon.png.
 

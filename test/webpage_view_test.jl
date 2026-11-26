@@ -68,7 +68,7 @@ item() = (i = findfirst(it -> it.content isa K.Live && it.content.node isa K.Sen
 "True when the page shows the email as it was sent"
 shows() = item() !== nothing && sent().shown !== nothing
 "The email's page as it's laid out, with its links and its words"
-laid() = sent().shown.shot
+laid() = sent().shown.page
 "Where the email is in the window, with the line round it"
 page() = rect(sent().parts[:page])
 "The place in the window of a point of the email, in px from the email's top left corner, which is inside the line round it"
@@ -102,7 +102,7 @@ files() = (i = findfirst(it -> it.content isa K.Live && it.content.node isa K.At
   @test !any(l -> occursin("Roof quote.pdf", l), texts()) && files().first == files().last == it.last + 1
   # It's as wide as the page's text, and as tall as its HTML is at that width: a line of words, with the room round it
   r = page()
-  @test laid().wide == wide() && K.num(r.width) == wide() + 2 && K.num(r.height) == laid().tall + 2 && 30 < laid().tall < 80
+  @test round(Int, laid().wide) == wide() && K.num(r.width) == wide() + 2 && K.num(r.height) == round(Int, laid().tall) + 2 && 30 < laid().tall < 80
   @test colour(spot(wide() - 20, 10)) == PAPER
   # Its words are text, not a picture of text
   @test [String(w.letters) for w in laid().words] == ["Hi Jake, the quote is here. Write to me."]
@@ -149,7 +149,7 @@ const PAGE = (255, 255, 255)
 @testset "the words of an email can be selected and copied" begin
   show(email("Some words", """<p>Hi Jake, the <a href="https://example.com/quote">quote</a> is here.</p><p>Write to me.</p>"""))
   area = sent().parts[:page]
-  @test shows() && [String(s.letters) for s in laid().words] == ["Hi Jake, the quote is here.", "Write to me."] && W.letter_count(laid()) == 39
+  @test shows() && [String(s.letters) for s in laid().words] == ["Hi Jake, the quote is here.", "Write to me."] && K.WebSelect.letter_count(laid().words) == 39
   # Over the words, the mouse is a bar for text. Beside them, it's an arrow.
   at(letter(1, 3))
   @test K.cursor(area) == :ibeam
@@ -312,7 +312,7 @@ end
   second = Window(other, size=(1000px, 900px))
   foreach(_ -> frame(second), 1:3)
   v = other.nodes[:sent_email]
-  @test v.pictures && v.shown !== nothing && v.shown.want[3] && v.shown.shot.tall == tall + 30
+  @test v.pictures && v.shown !== nothing && v.shown.want[3] && v.shown.page.tall == tall + 30
 end
 
 @testset "each email from a sender whose pictures you asked for gets its pictures" begin

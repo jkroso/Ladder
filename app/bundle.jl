@@ -26,9 +26,6 @@
 #                        and `ir` the code Julia would need to compile anything new while
 #                        the app runs. Ladder keeps both. The open box of a function or a
 #                        module shows its documentation, and an error says where it happened.
-#   APP_TRIM=no          JuliaC's trimming: no, safe, unsafe or unsafe-warn. Trimming leaves out
-#                        the code the app doesn't use. The app is first run with
-#                        `--record`, and opens its window for a few seconds. See record.jl.
 #   APP_PRUNE=0          1 deletes the native libraries the self-test didn't load. It's 1 for
 #                        APP_FORM=program.
 #   APP_PROJECT=path     the Julia project to build from, if not Ladder's own.
@@ -38,7 +35,7 @@
 #                        as a plug-in is: Julia compiles a cache in a second process, which must start
 #                        from the same image. `program` puts the image inside the app's program, as
 #                        the apps up to 0.5.0 had it. That app is about 260 MB smaller, and loads only
-#                        what it was built with. A trimmed app is always that form.
+#                        what it was built with.
 #   APP_KIP=path         a folder of Kip to build with, in place of the Kip that Julia's own list of
 #                        packages has.
 #
@@ -52,9 +49,7 @@ const out = joinpath(root, "build")
 option(name, default) = get(ENV, "APP_$name", default)
 const cpu = option("CPU", "apple-m1")
 const strips = split(option("STRIP", ""), ',', keepempty=false)
-const trim = option("TRIM", "no")
-# A trimmed app can't compile anything new, so it has no use for an image of its own
-const imaged = trim == "no" && option("FORM", "image") == "image"
+const imaged = option("FORM", "image") == "image"
 # An app that can compile a cache keeps every library. A package that it loads later can need one
 # that Ladder itself never loads: Poppler's needs the libiconv that the image names and doesn't use.
 const prune = option("PRUNE", imaged ? "0" : "1") == "1"
@@ -171,9 +166,8 @@ build_app(; name, program, id, entry, version="1.0", threads=nothing, icon=nothi
 
   options = threads === nothing ? Dict{String,String}() : Dict("threads" => threads)
   build_time = @elapsed begin
-    trim == "no" || (ENV["APP_CALLS"] = record_calls(entry, threads))
     image = ImageRecipe(output_type=imaged ? "--output-sysimage" : "--output-exe", file=entry, project=project, cpu_target=cpu,
-                        trim_mode=trim, julia_args=["--strip-$s" for s in strips], jl_options=imaged ? Dict{String,String}() : options)
+                        trim_mode="no", julia_args=["--strip-$s" for s in strips], jl_options=imaged ? Dict{String,String}() : options)
     # The image goes in lib, beside Julia's own libraries, and Julia's other libraries are in lib/julia
     link = LinkRecipe(image_recipe=image, outname=joinpath(bundle, imaged ? program * ".dylib" : program), rpath=imaged ? "." : "@bundle")
     compile_products(image)
@@ -227,7 +221,7 @@ build_app(; name, program, id, entry, version="1.0", threads=nothing, icon=nothi
 
   sign(app)
 
-  println("\nBuilt in ", round(build_time / 60, digits=1), " minutes with cpu=$cpu strip=$(join(strips, ',')) trim=$trim",
+  println("\nBuilt in ", round(build_time / 60, digits=1), " minutes with cpu=$cpu strip=$(join(strips, ','))",
           prune ? " pruned" : "")
   println(app, ": ", mb(disk_size(app)))
   for part in ("MacOS/$program", "lib", "share", (imaged ? ("lib/$program.dylib", "libexec") : ())...)
@@ -314,33 +308,6 @@ sign(app) = begin
   end
   run(`codesign $how $app`)
   run(`codesign --verify --deep --strict $app`)
-end
-
-"""
-Run the app with `--record`, while Julia writes down each call it makes through a
-dynamic dispatch, and return the file it wrote. A trimmed build keeps those
-calls. See record.jl. The app opens its window for a few seconds.
-"""
-record_calls(entry, threads) = begin
-  calls = joinpath(mktempdir(), "calls.jl")
-  # The menus' Show in Finder and Open run `open`. Here it does nothing.
-  bin = mktempdir()
-  write(joinpath(bin, "open"), "#!/bin/sh\n")
-  chmod(joinpath(bin, "open"), 0o755)
-  flags = threads === nothing ? `` : `--threads=$threads`
-  cmd = `$(Base.julia_cmd()) --project=$(option("PROJECT", root)) $flags --trace-dispatch=$calls $entry --libraries --record`
-  # Its output goes to a file, as a trimmed app's does, so it prints through the same methods
-  log = joinpath(dirname(calls), "output.txt")
-  env = addenv(cmd, "KIP_FROZEN" => "1", "PATH" => bin * ":" * ENV["PATH"])
-  process = run(pipeline(env, stdout=log, stderr=log), wait=false)
-  # A window that gets stuck would stop the build. A stuck Julia may not be able
-  # to act on a polite request to stop, so this one can't be refused.
-  timer = Timer(_ -> process_running(process) && kill(process, Base.SIGKILL), 600)
-  wait(process)
-  close(timer)
-  success(process) || error("The app failed while its calls were recorded:\n", read(log, String))
-  println("Recorded ", count(startswith("precompile("), eachline(calls)), " calls")
-  calls
 end
 
 "Make the .icns file `icns` from `png`, with each of the sizes macOS shows icons at"

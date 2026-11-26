@@ -409,6 +409,7 @@ end
 @use "./eml" => Eml
 @use "./webpage" => Webpages
 @use "./web" => Web
+@use "./web/select" => WebSelect
 @use "./web/browser" => Browsers
 @use "./web/files" => Webfiles
 @use "./web/source" => Sources
@@ -44332,7 +44333,7 @@ const SENT_PAGE = Ref{Any}(Web.page)
   landed::Int = 0                            # how many of them have come, or couldn't be fetched
   arrived::Int = 0                           # and how many had when the page was last asked for
   asked::Any = nothing                       # the width, the zoom and the pictures that the page needs now, and since when
-  shown::Any = nothing                       # the page that shows, its links and words, what it was laid out for, when, and how long that took
+  shown::Any = nothing                       # the page that shows, what it was laid out for, when, and how long that took
   since::Float64 = 0.0                       # when the email first showed: its pictures that move, like a GIF, started then
   failed::Any = nothing                      # what the page couldn't be laid out for
   parts::Dict{Any,Any} = Dict{Any,Any}()     # its button, and the part that shows the page
@@ -44341,7 +44342,7 @@ end
 """
 The part of an email as it was sent that draws the page, and takes the mouse
 for the email's links and its words. A place in the words is how many of
-their letters come before it, as `Webpages.place` gives it.
+their letters come before it, as `WebSelect.place` gives it.
 """
 @def mutable struct SentPage <: SemanticUI
   of::Any = nothing
@@ -44443,9 +44444,7 @@ sent_page!(e, v::SentEmail) = begin
   if page === nothing
     v.failed, v.shown = want, nothing
   else
-    # The page's links and words are kept as webpage.jl has them, so that it finds the link and the words at a point
-    shot = Webpages.Shot(round(Int, page.wide), round(Int, page.tall), Pair{String,Int}[], page.links, page.words)
-    v.failed, v.shown = nothing, (page=page, shot=shot, want=want, at=time(), took=time() - t)
+    v.failed, v.shown = nothing, (page=page, want=want, at=time(), took=time() - t)
   end
   v
 end
@@ -44534,7 +44533,7 @@ describe(a::SentPage) = begin
   v = a.of
   e = editor(v)
   wide = e.width
-  shot = v.shown.shot
+  page = v.shown.page
   # The email is as wide as the page's text, also while it waits to be laid out for a width that has just changed
   inside = wide - 2SENT_LINE
   # A picture of the email that moves, like a GIF, shows its next picture when that's due: the window is drawn again then
@@ -44542,7 +44541,7 @@ describe(a::SentPage) = begin
   next = Web.changes(v.shown.page, at)
   isfinite(next) && redraw_in!(a, max(SENT_FRAME, next - at))
   Column(fixed(wide), Alignment.Start, radius(6px), border(SENT_LINE, :solid, colours.line), background(colorant"white"),
-    Box(fixed(inside), height(px(shot.tall * num(inside) / shot.wide))))
+    Box(fixed(inside), height(px(round(Int, page.tall) * num(inside) / round(Int, page.wide)))))
 end
 
 # The email is drawn inside the line round it: its page, and over that the words that are selected, while the email
@@ -44552,10 +44551,10 @@ draw(ctx, size, ui::ConcreteRect, a::SentPage) = begin
   shown === nothing && return
   left, top, wide, tall = ui.left + SENT_LINE, ui.top + SENT_LINE, ui.width - 2SENT_LINE, ui.height - 2SENT_LINE
   (wide > 0px && tall > 0px) || return
-  shot = shown.shot
-  by = num(wide) / shot.wide
-  w, n = window_of(a), Webpages.letter_count(shot)
-  marks = w === nothing || w.focus !== a ? () : Webpages.marks(shot, clamp(a.anchor, 0, n), clamp(a.caret, 0, n))
+  page = shown.page
+  by = num(wide) / round(Int, page.wide)
+  w, n = window_of(a), WebSelect.letter_count(page.words)
+  marks = w === nothing || w.focus !== a ? () : WebSelect.marks(page.words, clamp(a.anchor, 0, n), clamp(a.caret, 0, n))
   with_round_clip(ctx, left, top, wide, tall, 5px) do
     Skia.sk_canvas_save(ctx)
     Skia.sk_canvas_translate(ctx, Float32(num(left)), Float32(num(top)))
@@ -44581,27 +44580,27 @@ sent_mouse(a::SentPage) = begin
   r.width > 2SENT_LINE || return nothing
   # The page starts inside the line round the email
   left, top = r.left + SENT_LINE, r.top + SENT_LINE
-  by = v.shown.shot.wide / num(r.width - 2SENT_LINE)
+  by = round(Int, v.shown.page.wide) / num(r.width - 2SENT_LINE)
   (x=num(w.mouse[1] - left) * by, y=num(w.mouse[2] - top) * by, left=left, top=top, by=by)
 end
 
-"The link of the email that the mouse is over, as `Webpages.link` gives it, and its rectangle in the window, or nothing"
+"The link of the email that the mouse is over, as `Web.link` gives it, and its rectangle in the window, or nothing"
 sent_link(a::SentPage) = begin
   m = sent_mouse(a)
   m === nothing && return nothing
-  l = Webpages.link(a.of.shown.shot, m.x, m.y)
+  l = Web.link(a.of.shown.page, m.x, m.y)
   by = m.by
   l === nothing ? nothing : (url=l.url, box=(m.left + px(l.left / by), m.top + px(l.top / by), px(l.wide / by), px(l.tall / by)))
 end
 
 "The place in the email's words that's nearest the mouse, or nothing"
-sent_place(a::SentPage) = (m = sent_mouse(a); m === nothing ? nothing : Webpages.place(a.of.shown.shot, m.x, m.y))
+sent_place(a::SentPage) = (m = sent_mouse(a); m === nothing ? nothing : WebSelect.place(a.of.shown.page.words, m.x, m.y))
 
 cursor(::SentEmail) = :arrow
 cursor(a::SentPage) = begin
   sent_link(a) === nothing || return :hand
   m = sent_mouse(a)
-  m !== nothing && Webpages.over_words(a.of.shown.shot, m.x, m.y) ? :ibeam : :arrow
+  m !== nothing && WebSelect.over_words(a.of.shown.page.words, m.x, m.y) ? :ibeam : :arrow
 end
 
 """
@@ -44610,9 +44609,9 @@ Select the words of the email from where the click selected them to the place
 paragraphs, as it does in a browser.
 """
 sent_select!(a::SentPage, at) = begin
-  s = a.of.shown.shot
+  s = a.of.shown.page.words
   lo, hi = a.grown
-  from, to = a.grain == 2 ? Webpages.word(s, at) : a.grain == 3 ? Webpages.paragraph(s, at) : (at, at)
+  from, to = a.grain == 2 ? WebSelect.word(s, at) : a.grain == 3 ? WebSelect.paragraph(s, at) : (at, at)
   a.anchor, a.caret = at < lo ? (hi, from) : (lo, max(hi, to))
   a
 end
@@ -44621,13 +44620,13 @@ end
 sent_copy!(a::SentPage) = begin
   v, w = a.of, window_of(a)
   (w === nothing || v.shown === nothing || a.anchor == a.caret) && return false
-  words = Webpages.words(v.shown.shot, a.anchor, a.caret)
+  words = WebSelect.copied(v.shown.page.words, a.anchor, a.caret)
   isempty(words) ? false : (clipboard!(w, words); true)
 end
 
 "Select all the words of the email"
 sent_select_all!(a::SentPage) = begin
-  a.of.shown === nothing || ((a.anchor, a.caret) = (0, Webpages.letter_count(a.of.shown.shot)))
+  a.of.shown === nothing || ((a.anchor, a.caret) = (0, WebSelect.letter_count(a.of.shown.page.words)))
   a
 end
 
@@ -44672,7 +44671,7 @@ the selection there. The page notes the click too, and leaves the keyboard
 with the email.
 """
 onkey(a::SentPage, ev::KeyPress{Keys.mouse_left}) = begin
-  s = a.of.shown === nothing ? nothing : a.of.shown.shot
+  s = a.of.shown === nothing ? nothing : a.of.shown.page.words
   at = sent_place(a)
   (s === nothing || at === nothing) && return nothing
   focus(a)
@@ -44681,7 +44680,7 @@ onkey(a::SentPage, ev::KeyPress{Keys.mouse_left}) = begin
   n = time() - t < 0.4 && before == at ? n % 3 + 1 : 1
   a.clicked = (time(), at, n)
   a.grain = n
-  a.grown = n == 2 ? Webpages.word(s, at) : n == 3 ? Webpages.paragraph(s, at) : only_held(a, Keys.shft) ? (a.anchor, a.anchor) : (at, at)
+  a.grown = n == 2 ? WebSelect.word(s, at) : n == 3 ? WebSelect.paragraph(s, at) : only_held(a, Keys.shft) ? (a.anchor, a.anchor) : (at, at)
   sent_select!(a, at)
   a.down = (w.mouse[1], w.mouse[2])
   l = sent_link(a)

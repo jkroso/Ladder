@@ -33,6 +33,32 @@ const GL = "/System/Library/Frameworks/OpenGL.framework/OpenGL"
 current() = ccall((:CGLGetCurrentContext, GL), Ptr{Cvoid}, ())
 setcurrent(c) = ccall((:CGLSetCurrentContext, GL), Int32, (Ptr{Cvoid},), c)
 
+# The OpenGL contexts of stages that Julia has freed. Julia can run a finalizer
+# in the middle of drawing the window, or on another thread, so the finalizer
+# only lists the context. `destroy_gone!` destroys it later, as web/gl.jl does.
+const GONE = Ptr{Cvoid}[]
+const GOING = Threads.SpinLock()
+
+"Destroy the contexts of the stages that Julia has freed, except one that's current"
+destroy_gone!() = begin
+  isempty(GONE) && return
+  lock(GOING)
+  gone = copy(GONE)
+  empty!(GONE)
+  unlock(GOING)
+  now = current()
+  for c in gone
+    if c == now
+      lock(GOING)
+      push!(GONE, c)
+      unlock(GOING)
+    else
+      ccall((:CGLDestroyContext, GL), Int32, (Ptr{Cvoid},), c)
+    end
+  end
+  nothing
+end
+
 const Colour = NTuple{4,Float32}
 
 "Triangles with light on them. `data` has 7 numbers for each corner: where it is, the way the surface faces there, and the number of its face."
@@ -246,6 +272,7 @@ same renderbuffers: the window can show the stage's picture with no copy
 through the CPU. See `over!`.
 """
 Stage(share::Ptr{Cvoid}=C_NULL) = begin
+  destroy_gone!()
   ctx = Ref{Ptr{Cvoid}}(C_NULL)
   if share == C_NULL
     attrs = Int32[99, 0x4100, 73, 96, 0]   # OpenGL 4.1, on the graphics card, which can be one that shows no screen
@@ -271,7 +298,13 @@ Stage(share::Ptr{Cvoid}=C_NULL) = begin
   finally
     setcurrent(was)
   end
-  finalizer(s -> (s.cgl == C_NULL || ccall((:CGLDestroyContext, GL), Int32, (Ptr{Cvoid},), s.cgl); s.cgl = C_NULL), s)
+  finalizer(s) do s
+    s.cgl == C_NULL && return
+    lock(GOING)
+    push!(GONE, s.cgl)
+    unlock(GOING)
+    s.cgl = C_NULL
+  end
 end
 
 "Give the stage a picture of `w` by `h` pixels"
@@ -662,6 +695,7 @@ picture!(s::Stage, w::Int, h::Int, e::Eye, things, background; reach=1000.0, cut
   finally
     setcurrent(was)
   end
+  destroy_gone!()
   read ? s.pixels : nothing
 end
 

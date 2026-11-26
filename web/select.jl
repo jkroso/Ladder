@@ -13,8 +13,8 @@
 #     over_words(ws, x, y)           # true over a letter
 #     letter_count(ws)               # the place at the end of the words
 #
-# browser.jl selects the words of a web page with these, and webpage.jl the
-# words of an email.
+# browser.jl selects the words of a web page with these, and Ladder's email
+# view the words of an email.
 #
 # A box that cuts what's in it, like one with `overflow: hidden`, hides the
 # words of it that are outside it. Each piece of words knows the rectangle

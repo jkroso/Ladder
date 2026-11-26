@@ -2,8 +2,7 @@
 # and the words at a point of a page.
 #
 # Ladder shows an email as it was sent with web/, which lays the email's HTML
-# out itself. The email view uses the second half of this file for that
-# page: `Shot`, `link`, `place`, `words`, `marks`, `word` and `paragraph`.
+# out itself. The email view uses only `remote` and `open_link` of this file.
 #
 # The pictures are how Ladder showed an email before it had web/. They stay
 # as a way to check web/ against a browser: the text file that comes with
@@ -20,15 +19,8 @@
 #     s.strips        # the page from the top down, as PNG files: each file, and how tall it is
 #     link(s, x, y)   # the link at a point of the page, with where it goes, or nothing
 #
-# The page's words can be selected and copied, as in a browser, though the page
-# is a picture. The program says where each letter of the words is drawn. A
-# place in the words is how many of their letters come before it: 0 is before
-# the first one.
-#
-#     a = place(s, x, y)          # the place nearest a point of the page
-#     words(s, a, b)              # the words between two places, as they're copied
-#     marks(s, a, b)              # where the page draws them: a rectangle for each line
-#     word(s, a), paragraph(s, a) # the places round the word or the paragraph at a place
+# The program says where each letter of the page's words is drawn. `s.words`
+# has them as web/select.jl has a page's words, so its functions select them.
 #
 # A page can be very tall, so its picture is in strips, which a window draws
 # one under the other. The page is drawn without JavaScript. The program asks
@@ -165,15 +157,6 @@ link(s::Shot, x, y) = begin
   i = findlast(l -> l.left <= x <= l.left + l.wide && l.top <= y <= l.top + l.tall, s.links)
   i === nothing ? nothing : s.links[i]
 end
-
-"The words between places, the place at a point and the rest are web/select.jl's, which the web view uses too"
-letter_count(s::Shot) = Select.letter_count(s.words)
-place(s::Shot, x, y) = Select.place(s.words, x, y)
-over_words(s::Shot, x, y) = Select.over_words(s.words, x, y)
-words(s::Shot, a, b) = Select.copied(s.words, a, b)
-marks(s::Shot, a, b) = Select.marks(s.words, a, b)
-word(s::Shot, a) = Select.word(s.words, a)
-paragraph(s::Shot, a) = Select.paragraph(s.words, a)
 
 """
 True when the HTML has a picture, a font or a style sheet from a web site, so

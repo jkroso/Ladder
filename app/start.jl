@@ -139,38 +139,18 @@ start_ui() = begin
   n
 end
 
-"True while a trimmed app is being built (APP_TRIM in build.jl)"
-const trimming = building && Base.JLOptions().trim != 0
-
-include("record.jl")
-
-"""
-Print the error `e` that's being handled, and where it happened. A trimmed app
-may not have the code for Julia's usual error printing, so it uses the plain
-printing in Julia's runtime instead.
-"""
-report(@nospecialize(e)) =
-  if isdefined(Base, :invokelatest_trimmed)
-    Core.println(Core.stderr, "Self-test failed:")
-    ccall(:jl_, Cvoid, (Any,), e)
-    ccall(:jlbacktrace, Cvoid, ())
-  else
-    println(stderr, "Self-test failed: ", sprint(showerror, e, catch_backtrace()))
-  end
+"Print the error `e` that's being handled, and where it happened"
+report(@nospecialize(e)) = println(stderr, "Self-test failed: ", sprint(showerror, e, catch_backtrace()))
 
 """
 Start the app and call `open_app(args)`, which shows its window. With
 `--self-test` in `args` it runs `warm_up` instead, to check that the code it
 compiled while the app was built is all still there. `--libraries` then lists
 the native libraries the app loaded, so the build can leave out the rest.
-
-With `--record` it runs the self-test, then `record`, which should open the
-app's real window with `record_window`. build.jl does this before it builds a
-trimmed app. See record.jl.
 """
-run_app(open_app, args, warm_up; record=nothing) = begin
+run_app(open_app, args, warm_up) = begin
   n = start_ui()
-  if "--self-test" in args || "--record" in args
+  if "--self-test" in args
     t = try
       @elapsed warm_up()
     catch e
@@ -178,11 +158,9 @@ run_app(open_app, args, warm_up; record=nothing) = begin
       return 1
     end
     workers = Threads.nthreads(:default)
-    # Core's printing needs no methods picked while the app runs, so a trimmed app has it
     Core.println(Core.stdout, "Self-test passed in $(round(t, digits=2)) s. It started $n of UI.jl's files, ",
                  "with $workers worker thread", workers == 1 ? "." : "s.")
     "--libraries" in args && foreach(l -> Core.println(Core.stdout, l), Libdl.dllist())
-    "--record" in args && record()
     return 0
   end
   open_app(args)

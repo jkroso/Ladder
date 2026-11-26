@@ -29,7 +29,7 @@
 
 @use "github.com/jkroso/Prospects.jl" @def
 @use Dates: Dates, Date, DateTime, Day, Hour, Minute
-@use "./kate" Element parse_xml
+@use "./xml" Element parse_xml
 @use "./news" => News
 @use "./podcasts" => Podcasts
 

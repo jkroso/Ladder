@@ -6,6 +6,7 @@
 
 @use Test: @test, @testset
 @use "../webpage" => W
+@use "../web/select" => S
 @use "../map" => Maps
 @use "./webpage_fake" => Fake
 
@@ -57,29 +58,29 @@ end
              "text\t-\t150\t20\t10,20\ttwo letters, one edge\n")
   s = W.shot(out)
   # A line that doesn't add up is left out
-  @test length(s.words) == 7 && [w.from for w in s.words] == [0, 4, 7, 9, 12, 15, 16] && W.letter_count(s) == 19
+  @test length(s.words) == 7 && [w.from for w in s.words] == [0, 4, 7, 9, 12, 15, 16] && S.letter_count(s.words) == 19
   @test s.words[1].before == "" && s.words[4].before == "\n" && s.words[5].before == "\t" && s.words[1].letters == collect("Hi J")
   # What's copied: no line ends with a space, and the space that can't break is a space
-  @test W.words(s, 0, 19) == "Hi Jak es\nOne\tTwo\n\nEnd" == W.words(s, 19, 0)
-  @test W.words(s, 1, 6) == "i Jak" && W.words(s, 10, 14) == "ne\tTw" && W.words(s, 3, 3) == ""
+  @test S.copied(s.words, 0, 19) == "Hi Jak es\nOne\tTwo\n\nEnd" == S.copied(s.words, 19, 0)
+  @test S.copied(s.words, 1, 6) == "i Jak" && S.copied(s.words, 10, 14) == "ne\tTw" && S.copied(s.words, 3, 3) == ""
   # The place nearest a point: the letter's left half is before it, and its right half after it
-  @test W.place(s, 24, 15) == 1 && W.place(s, 26, 15) == 2 && W.place(s, 0, 15) == 0 && W.place(s, 290, 15) == 4
+  @test S.place(s.words, 24, 15) == 1 && S.place(s.words, 26, 15) == 2 && S.place(s.words, 0, 15) == 0 && S.place(s.words, 290, 15) == 4
   # A word in bold that's taller than the line is still in it, and a point between the cells of a row is in the nearer cell
-  @test W.place(s, 50, 45) == 8 && W.place(s, 60, 65) == 12 && W.place(s, 90, 65) == 12 && W.place(s, 127, 65) == 15
+  @test S.place(s.words, 50, 45) == 8 && S.place(s.words, 60, 65) == 12 && S.place(s.words, 90, 65) == 12 && S.place(s.words, 127, 65) == 15
   # Between two lines, the point is in the nearer one. Over the words it's their start, and under them their end.
-  @test W.place(s, 12, 55) == 4 && W.place(s, 12, 58) == 9 && W.place(s, 50, -5) == 0 && W.place(s, 50, 500) == 19
-  @test W.over_words(s, 15, 15) && !W.over_words(s, 70, 15) && !W.over_words(s, 15, 52)
+  @test S.place(s.words, 12, 55) == 4 && S.place(s.words, 12, 58) == 9 && S.place(s.words, 50, -5) == 0 && S.place(s.words, 50, 500) == 19
+  @test S.over_words(s.words, 15, 15) && !S.over_words(s.words, 70, 15) && !S.over_words(s.words, 15, 52)
   # A rectangle for each line: the word in bold goes on the line it's in, and makes it taller. Each cell of a row has its own.
-  @test W.marks(s, 1, 9) == [(20.0, 10.0, 30.0, 20.0), (10.0, 28.0, 54.0, 24.0)]
-  @test W.marks(s, 10, 14) == [(20.0, 60.0, 20.0, 20.0), (100.0, 60.0, 20.0, 20.0)] && W.marks(s, 4, 4) == []
+  @test S.marks(s.words, 1, 9) == [(20.0, 10.0, 30.0, 20.0), (10.0, 28.0, 54.0, 24.0)]
+  @test S.marks(s.words, 10, 14) == [(20.0, 60.0, 20.0, 20.0), (100.0, 60.0, 20.0, 20.0)] && S.marks(s.words, 4, 4) == []
   # Two clicks select a word, and three a paragraph
-  @test W.word(s, 4) == (4, 6) && W.word(s, 7) == (7, 9) && W.word(s, 2) == (2, 3) && W.word(s, 19) == (16, 19) && W.word(s, 1) == (0, 2)
-  @test W.paragraph(s, 5) == (0, 9) && W.paragraph(s, 13) == (12, 15) && W.paragraph(s, 19) == (16, 19)
+  @test S.word(s.words, 4) == (4, 6) && S.word(s.words, 7) == (7, 9) && S.word(s.words, 2) == (2, 3) && S.word(s.words, 19) == (16, 19) && S.word(s.words, 1) == (0, 2)
+  @test S.paragraph(s.words, 5) == (0, 9) && S.paragraph(s.words, 13) == (12, 15) && S.paragraph(s.words, 19) == (16, 19)
   # A page with no words
   write(out, "page\t300\t200\nstrip\t200\tab-1.png\n")
   s = W.shot(out)
-  @test isempty(s.words) && W.letter_count(s) == 0 && W.place(s, 10, 10) == 0 && W.words(s, 0, 5) == "" && W.marks(s, 0, 5) == []
-  @test W.word(s, 0) == (0, 0) && W.paragraph(s, 0) == (0, 0)
+  @test isempty(s.words) && S.letter_count(s.words) == 0 && S.place(s.words, 10, 10) == 0 && S.copied(s.words, 0, 5) == "" && S.marks(s.words, 0, 5) == []
+  @test S.word(s.words, 0) == (0, 0) && S.paragraph(s.words, 0) == (0, 0)
 end
 
 @testset "what a page has from the web" begin
@@ -207,7 +208,7 @@ if Sys.isapple() && Sys.which("swiftc") !== nothing
               <div style="display:none">Hidden</div><div style="max-height:0;overflow:hidden">Cut off</div>
               <span style="opacity:0">Clear</span><pre>a\n  b</pre><p>Line<br>break</p>"""
     s = drawn(html, 1.0)
-    @test W.words(s, 0, W.letter_count(s)) == "Hi Jake, the quote\nOne\tTwo\na\n  b\nLine\nbreak"
+    @test S.copied(s.words, 0, S.letter_count(s.words)) == "Hi Jake, the quote\nOne\tTwo\na\n  b\nLine\nbreak"
     # The first line starts at the page's margin, and its letters go left to right
     line1 = s.words[1]
     @test String(line1.letters) == "Hi Jake, the quote" && isapprox(line1.edges[1], 8, atol=1) && issorted(line1.edges)
