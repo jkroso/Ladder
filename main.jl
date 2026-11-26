@@ -403,6 +403,7 @@ end
 @use "./map" => Maps
 @use "./timelog" => Timelogs
 @use "./day" => Days
+@use "./dates" => DatesRead
 @use "./centient" => Centient
 @use "./update" => Update
 @use "./mime" => Mime
@@ -25469,9 +25470,6 @@ const PAGE_HISTORY = Dict{String,Any}()
 "The lines of a page in a commit, by the repository's folder, the commit's hash and the page's place. A commit never changes, so they're kept."
 const COMMIT_LINES = Dict{Tuple{String,String,String},Vector{String}}()
 
-"The day of the time `t`, in seconds, on this Mac's clock"
-day_of(t::Real) = Date(Libc.strftime("%Y-%m-%d", t))
-
 """
 What git has of the page at `path`: the top folder of its repository, its
 place in that folder, and its commits, the newest first, each as its hash and
@@ -25487,7 +25485,7 @@ page_history(path::AbstractString) = begin
       nothing
     else
       rel = relpath(path, realpath(root))
-      commits = [(hash, day_of(at)) for (hash, at) in Git.history(root, rel)]
+      commits = [(hash, DatesRead.day(at)) for (hash, at) in Git.history(root, rel)]
       isempty(commits) ? nothing : (root=root, rel=rel, commits=commits)
     end
   catch
@@ -59059,32 +59057,6 @@ day_edge(d::Date, upto::Bool) = begin
 end
 
 """
-The day that `text` writes, like `1 Nov 2026`, `1 November`, `Nov 1`,
-`2026-11-01` or `1/11/2026`, as Australians write it, or nothing. A day with
-no year is the last one with that date, up to `today`.
-"""
-read_date(text::AbstractString, today::Date) = begin
-  words = titlecase(strip(text))
-  # Julia's reading of a date takes a year that's left out as year 1, so a day with a year needs its four digits
-  for f in (occursin(r"\d{4}", words) ? DAY_FORMATS : ())
-    d = tryparse(Date, words, f)
-    d === nothing || return d
-  end
-  for f in DATE_FORMATS
-    d = tryparse(Date, words, f)
-    d === nothing && continue
-    d = Date(Dates.year(today), Dates.month(d), Dates.day(d))
-    return d > today ? d - Dates.Year(1) : d
-  end
-  nothing
-end
-
-"The ways of writing a day that `read_date` reads, with its year"
-const DAY_FORMATS = Dates.DateFormat.(("yyyy-mm-dd", "d/m/yyyy", "d u yyyy", "d U yyyy", "u d yyyy", "U d yyyy"))
-"The ways of writing a day that `read_date` reads, with no year"
-const DATE_FORMATS = Dates.DateFormat.(("d/m", "d u", "d U", "u d", "U d"))
-
-"""
 The time that `text` says, in seconds, as the Modified column writes times:
 `just now`, `5 min ago`, `3 h ago`, `today`, `yesterday`, `4 days ago`, `2 weeks
 ago`, `6 months ago`, or a day like `1 Nov 2026`. `ago` can be left out. A day is
@@ -59095,7 +59067,7 @@ read_when(text::AbstractString, upto::Bool; now::Real=time()) = begin
   w = lowercase(strip(text))
   isempty(w) && return nothing
   w in ("now", "just now") && return Float64(now)
-  today = Date(Libc.strftime("%Y-%m-%d", now))
+  today = DatesRead.day(now)
   w == "today" && return day_edge(today, upto)
   w == "yesterday" && return day_edge(today - Day(1), upto)
   m = match(r"^(\d+(?:\.\d+)?)\s*([a-z]+)(?:\s+ago)?$", w)
@@ -59107,7 +59079,7 @@ read_when(text::AbstractString, upto::Bool; now::Real=time()) = begin
            u in ("y", "yr", "yrs", "year", "years") ? 365 * 86400 : nothing
     secs === nothing || return now - parse(Float64, m[1]) * secs
   end
-  d = read_date(w, today)
+  d = DatesRead.day(w; today, year=:past)
   d === nothing ? nothing : day_edge(d, upto)
 end
 
@@ -60062,7 +60034,7 @@ web_entries(d::WebFolder, lines) = begin
 end
 
 "The day `text`, like 2026-03-12, as a time in seconds since 1970, at noon so that it's that day in any time zone, or 0 when it isn't a day"
-web_day(text) = (day = tryparse(Date, strip(text)); day === nothing ? 0.0 : Dates.datetime2unix(Dates.DateTime(day)) + 12 * 3600)
+web_day(text) = (d = DatesRead.day(text; iso=true); d === nothing ? 0.0 : Dates.datetime2unix(Dates.DateTime(d)) + 12 * 3600)
 
 describe(v::WebListing) = (e = editor(v);
   listing_column(v, e, v.entries; up=isempty(v.up) ? nothing : v.up, go=url -> follow_remote!(e, url), sizes=false))
