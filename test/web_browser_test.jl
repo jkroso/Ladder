@@ -132,6 +132,64 @@ end
   @test Fetch.state(f, "https://example.com/") == :none && f.held == 0
 end
 
+@testset "files kept on the disk" begin
+  # A stand-in for sites that say how long each file stays fresh, and that send nothing (304) when asked with the file's ETag
+  site = Dict("https://cdn.example.com/lib.js" => ("max-age=31536000, immutable", "\"v1\"", "lib"),
+              "https://example.com/" => ("no-cache", "\"p1\"", "<p>home</p>"),
+              "https://example.com/secret" => ("no-store", "", "secret"),
+              "https://example.com/plain" => ("", "", "plain"))
+  asked, sent, down = String[], Dict{String,Vector{String}}(), Ref(false)
+  server(address, file, about; headers=String[]) = begin
+    push!(asked, address)
+    sent[address] = headers
+    down[] && return () -> true
+    control, tag, body = site[address]
+    same = !isempty(tag) && "If-None-Match: $tag" in headers
+    same || write(file, body)
+    write(about, "$address\ntext/plain\n\n$(same ? 304 : 200)\n$control\n\n\n$tag\n\n\n")
+    () -> true
+  end
+  settled(f) = while Fetch.coming(f) > 0 end
+  bytes(f, address) = String(copy(Fetch.file(f, address).bytes))
+  mktempdir() do dir
+    f = Fetch.Files(getter=server, cache=dir)
+    foreach(a -> Fetch.ask!(f, a), keys(site))
+    settled(f)
+    @test length(asked) == 4 && all(isempty, values(sent))
+    # A kept file that's fresh is read from the disk, with no request
+    g = Fetch.Files(getter=server, cache=dir)
+    empty!(asked)
+    Fetch.ask!(g, "https://cdn.example.com/lib.js")
+    @test isempty(asked) && Fetch.state(g, "https://cdn.example.com/lib.js") == :there && bytes(g, "https://cdn.example.com/lib.js") == "lib"
+    # One that the site says to check each time is asked for with its ETag, and the site's "not changed" gives the kept copy
+    Fetch.ask!(g, "https://example.com/")
+    settled(g)
+    @test asked == ["https://example.com/"] && sent["https://example.com/"] == ["If-None-Match: \"p1\""] && bytes(g, "https://example.com/") == "<p>home</p>"
+    # What the site says not to keep isn't kept, nor is what's stale at once with nothing to check it with
+    @test Fetch.kept(dir, "https://example.com/secret") === nothing && Fetch.kept(dir, "https://example.com/plain") === nothing
+    # A reload checks even a fresh file with its site
+    empty!(asked)
+    Fetch.forget!(g; again=true)
+    Fetch.ask!(g, "https://cdn.example.com/lib.js")
+    settled(g)
+    @test asked == ["https://cdn.example.com/lib.js"] && sent["https://cdn.example.com/lib.js"] == ["If-None-Match: \"v1\""] && bytes(g, "https://cdn.example.com/lib.js") == "lib"
+    # A site that doesn't answer gives the kept copy
+    down[] = true
+    h = Fetch.Files(getter=server, cache=dir)
+    Fetch.ask!(h, "https://example.com/")
+    settled(h)
+    @test bytes(h, "https://example.com/") == "<p>home</p>"
+  end
+  # Only curl keeps files: a test's own getter keeps none
+  @test Fetch.Files(getter=server).cache == "" && Fetch.Files().cache == Fetch.CACHE[]
+  # How long a file stays fresh, by what its site says
+  @test Fetch.freshness("max-age=600", "", "", "", "100", 1000.0) == 1500.0 && Fetch.freshness("no-store", "", "", "", "", 1000.0) === nothing
+  @test Fetch.freshness("", "Thu, 01 Jan 1970 01:00:00 GMT", "Thu, 01 Jan 1970 00:00:00 GMT", "", "", 1000.0) == 4600.0
+  @test Fetch.freshness("", "0", "", "", "", 1000.0) == 1000.0 && Fetch.freshness("private, no-cache", "", "", "", "", 1000.0) == 1000.0
+  # A tenth of the time since the file last changed, when the site says nothing more
+  @test Fetch.freshness("", "", "Thu, 11 Jan 1970 00:00:00 GMT", "Thu, 01 Jan 1970 00:00:00 GMT", "", 1000.0) == 1000.0 + 86400
+end
+
 @testset "a page that scrolls, goes somewhere and waits for files" begin
   went, files = String[], Dict{String,Any}("https://example.com/dir/late.js" => :waiting, "https://example.com/dir/data.json" => :waiting,
                                            "https://other.org/secret.json" => "{\"secret\":1}")

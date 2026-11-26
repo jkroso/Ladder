@@ -809,8 +809,10 @@ night when its appearance is Auto: a media query's `prefers-color-scheme` is
 """
 const DARK = ScopedValue(false)
 
-# What a page that's drawn says of each thing that a media query can ask about, when it's a word
-const WORDS = Dict("prefers-reduced-motion" => "no-preference", "prefers-contrast" => "no-preference",
+# What a page that's drawn says of each thing that a media query can ask about, when it's a word.
+# The reader prefers less motion: the engine lays out all of a page for each frame that moves, so a page whose scripts move
+# its parts in on arrival (github.com hides its words until they have) shows them at once in place of a slow animation.
+const WORDS = Dict("prefers-reduced-motion" => "reduce", "prefers-contrast" => "no-preference",
                    "prefers-reduced-transparency" => "no-preference", "prefers-reduced-data" => "no-preference", "hover" => "hover", "any-hover" => "hover",
                    "pointer" => "fine", "any-pointer" => "fine", "scripting" => "none", "display-mode" => "browser", "color-gamut" => "srgb",
                    "forced-colors" => "none", "inverted-colors" => "none", "update" => "fast", "overflow-block" => "scroll", "overflow-inline" => "scroll",

@@ -23770,6 +23770,14 @@ const WEB_GETTER = Ref{Function}(Webfiles.curl)
 web_online(e) = !Eml.isemail(e.buf.path) && (WEB_GETTER[] !== Webfiles.curl || on_screen(e))
 
 """
+What gets the files of a page that `e` shows. With `curl`, a file that its
+site says may be kept is kept on the disk for the next page that names it. A
+test's own getter keeps nothing there.
+"""
+web_files(e) = Webfiles.Files(getter=(a...; k...) -> WEB_GETTER[](a...; k...), online=() -> web_online(e),
+                              cache=WEB_GETTER[] === Webfiles.curl ? Webfiles.CACHE[] : "")
+
+"""
 What the lines of a `view` block of a page ask for: its address, or the HTML
 of one with the address that the addresses in it are from. The name of a
 file beside the document is that file.
@@ -23949,7 +23957,7 @@ Ladder goes, so ⌘⌥← comes back.
 html_browser(v::HTMLPage) = begin
   v.browser === nothing || return v.browser
   e = editor(v)
-  files = Webfiles.Files(getter=(a...) -> WEB_GETTER[](a...), online=() -> web_online(e))
+  files = web_files(e)
   v.read = mtime(v.path)
   in_browser(v.path) && return v.browser = own!(v, Browsers.Browser(html=read(v.path, String), base=web_address(v.path), files=files,
                                                                     open=url -> BROWSER[](url), leads=url -> follow_remote!(e, url)))
@@ -24351,7 +24359,7 @@ page_takes(v::ViewBlock, ev) = zoomed_node(editor(v), v.browser) ? true :
 web_browser(v::ViewBlock) = begin
   v.browser === nothing || return v.browser
   e = editor(v)
-  files = Webfiles.Files(getter=(a...) -> WEB_GETTER[](a...), online=() -> web_online(e))
+  files = web_files(e)
   v.browser = own!(v, Browsers.Browser(files=files, open=url -> BROWSER[](url), takes=ev -> page_takes(v, ev)))
 end
 

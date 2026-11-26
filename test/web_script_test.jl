@@ -308,6 +308,53 @@ end
   close(l)
 end
 
+@testset "elements that a page defines" begin
+  l = running("<body><x-count id=a start=2>old</x-count><p id=p>para</p></body>")
+  js(l, """var heard = []
+    class Count extends HTMLElement {
+      static observedAttributes = ['start']
+      constructor() { super(); heard.push('made ' + this.id) }
+      connectedCallback() { heard.push('in ' + this.id); this.textContent = 'count ' + this.getAttribute('start') }
+      disconnectedCallback() { heard.push('out ' + this.id) }
+      attributeChangedCallback(name, old, value) { heard.push(name + ' ' + old + '>' + value) }
+      bump() { return 'bumped' }
+    }
+    var waited = ''; customElements.whenDefined('x-count').then(C => { waited = C.name })
+    customElements.define('x-count', Count)""")
+  # The element in the page becomes one of the class: it's made, told of its attributes, and told that it's in the page
+  @test js(l, "heard.join('|')") == "made a|start null>2|in a"
+  @test js(l, "(document.getElementById('a') instanceof Count) + document.getElementById('a').bump()") == "truebumped"
+  @test js(l, "waited + (customElements.get('x-count') === Count) + customElements.getName(Count)") == "Counttruex-count"
+  @test occursin("count 2", join(w.before * String(w.letters) for w in Live.page!(l).words))
+  # Only an attribute that it watches is told of
+  @test js(l, "heard = []; document.getElementById('a').setAttribute('start', '5'); document.getElementById('a').setAttribute('other', '1'); heard.join('|')") == "start 2>5"
+  # One made by createElement, by `new` and by innerHTML, one taken out, and one moved
+  @test js(l, """heard = []; var b = document.createElement('x-count'); b.id = 'b'; document.body.appendChild(b)
+    var c = new Count(); c.id = 'c'; document.body.appendChild(c)
+    document.getElementById('p').innerHTML = '<x-count id=d start=1></x-count>'
+    b.remove(); document.body.appendChild(document.getElementById('a')); heard.join('|')""") == "made |in b|made |in c|made d|start null>1|in d|out b|out a|in a"
+  @test js(l, "try { customElements.define('bad', class extends HTMLElement {}) } catch (e) { e.name }") == "SyntaxError"
+  @test js(l, "try { new (class extends HTMLElement {})() } catch (e) { e.name + ': ' + e.message }") == "TypeError: Illegal constructor"
+  # A shadow tree holds what a script puts in it, and isn't drawn
+  @test js(l, "var s = document.body.attachShadow({mode: 'open'}); s.innerHTML = '<i>hidden</i>'; '' + (s.host === document.body) + (document.body.shadowRoot === s) + s.querySelector('i').textContent + document.querySelectorAll('i').length") == "truetruehidden0"
+  @test !occursin("hidden", join(w.before * String(w.letters) for w in Live.page!(l).words))
+  close(l)
+end
+
+@testset "sheets that a script makes" begin
+  l = running("<body><p id=p>para <b id=b>bold</b></p></body>")
+  colour(id) = js(l, "getComputedStyle(document.getElementById('$id')).color")
+  js(l, "var sheet = new CSSStyleSheet(); sheet.replaceSync('p { color: rgb(255, 0, 0) } /* a note */ @media (width > 1px) { b { color: rgb(0, 0, 255) } } @import url(x.css);'); document.adoptedStyleSheets = [sheet]")
+  @test js(l, "sheet.cssRules.length + ' ' + sheet.cssRules[0].selectorText") == "2 p" && colour("p") == "rgb(255, 0, 0)" && colour("b") == "rgb(0, 0, 255)"
+  # A sheet that's added to the list, and a rule that's taken out
+  js(l, "var two = new CSSStyleSheet(); two.replaceSync('p { color: rgb(0, 128, 0) }'); document.adoptedStyleSheets.push(two)")
+  @test colour("p") == "rgb(0, 128, 0)"
+  js(l, "sheet.insertRule('i { color: green }', 1); sheet.deleteRule(0); two.replaceSync('')")
+  @test js(l, "sheet.cssRules.map(r => r.cssText).join(' ; ')") == "i { color: green } ; @media (width > 1px) { b { color: rgb(0, 0, 255) } }" && colour("p") == "rgb(0, 0, 0)"
+  @test js(l, "try { sheet.insertRule('not a rule') } catch (e) { e.name }") == "SyntaxError"
+  close(l)
+end
+
 @testset "nodes that no script holds" begin
   l = running("<body><div id=keep></div></body>")
   s = l.scripts
@@ -333,6 +380,11 @@ end
 @testset "what else a browser has" begin
   l = running("<body><form id=f><input name=q value=hi><select id=sel><option value=a>A<option value=b selected>B</select><textarea id=ta>text</textarea></form><template id=t><p>in a template</p></template></body>")
   @test js(l, "atob(btoa('héllo'.normalize('NFC').replace('é', 'e'))) + btoa('ab')") == "helloYWI="
+  # Text as UTF-8 bytes and back. A byte that can't be read is U+FFFD, and a letter cut in two waits for its other bytes.
+  @test js(l, "var bytes = new TextEncoder().encode('héllo 😀'); bytes.length + ' ' + new TextDecoder().decode(bytes) + ' ' + new TextDecoder().decode(new Uint8Array([0xff, 0x61]))") == "11 héllo 😀 �a"
+  @test js(l, "var d = new TextDecoder(); d.decode(new Uint8Array([0xe2, 0x82]), {stream: true}) + d.decode(new Uint8Array([0xac])) + new TextDecoder('windows-1252').decode(new Uint8Array([0x80, 0x41])) + new TextDecoder().decode(new Uint8Array([0xef, 0xbb, 0xbf, 0x42]))") == "€€AB"
+  @test js(l, "JSON.stringify(new TextEncoder().encodeInto('aé€', new Uint8Array(3))) + Array.from(new TextEncoder().encode('\\ud800x')).join(',')") == "{\"read\":2,\"written\":3}239,191,189,120"
+  @test js(l, "new Request('https://a.org/x', {method: 'post'}).method + ' ' + new Request(new Request('https://a.org/y')).url") == "POST https://a.org/y"
   @test js(l, "localStorage.setItem('k', 5); localStorage.getItem('k') + localStorage.length + sessionStorage.getItem('k')") == "51null"
   @test js(l, "var u = new Uint8Array(8); crypto.getRandomValues(u); crypto.randomUUID().length + (u.some(x => x > 0) ? ' filled' : '')") == "36 filled"
   @test js(l, "var q = document.querySelector('input'); q.value + q.form.id + q.type + document.getElementById('sel').value + document.getElementById('sel').selectedIndex + document.getElementById('ta').value") == "hiftextb1text"

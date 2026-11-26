@@ -29,6 +29,10 @@ const global = globalThis
 const wrappers = new Map()      // the object of each node that a script has met, by the node's number
 const classes = Object.create(null)   // the class of the objects of each tag
 const observers = new Set()     // the MutationObservers that watch something
+// The elements that the page defines with customElements.define: each name's class and the attributes that it watches
+const defined = new Map(), NAMES = new Map()
+const MADE = Symbol('made'), INSIDE = Symbol('inside'), SHADOW = Symbol('shadow')
+let upgrading = null            // the element that a defined class is being made for, while it's made
 let document = null
 
 const microtask = typeof global.queueMicrotask === 'function' ? global.queueMicrotask.bind(global) : f => { Promise.resolve().then(f) }
@@ -248,8 +252,11 @@ function wrap(id) {
   let w = ref && ref.deref()
   if (w) return w
   const kind = native.kind(id)
-  const C = kind === 1 ? classes[native.tag(id)] || HTMLElement : kind === 3 ? Text : kind === 8 ? Comment : DocumentFragment
-  return adopt(Object.create(C.prototype), id)
+  const tag = kind === 1 ? native.tag(id) : ''
+  const C = kind === 1 ? classes[tag] || HTMLElement : kind === 3 ? Text : kind === 8 ? Comment : DocumentFragment
+  w = adopt(Object.create(C.prototype), id)
+  if (defined.has(tag)) upgrade(w)
+  return w
 }
 
 class NodeList extends Array {
@@ -282,6 +289,7 @@ function place(parent, child, before) {
   native.insert(parent[ID], child[ID], before ? before[ID] : 0)
   hold(parent, child)
   if (observers.size) record(parent, 'childList', {addedNodes: [child], previousSibling: child.previousSibling, nextSibling: child.nextSibling})
+  if (defined.size && child.nodeType === 1 && native.connected(child[ID])) arrived(child)
   // A <script> that a script adds to the page runs
   if (child instanceof HTMLScriptElement && native.connected(child[ID])) native.run(child[ID])
   return child
@@ -291,17 +299,24 @@ function unplace(child) {
   const parent = child.parentNode
   if (!parent || parent === document) return child
   if (observers.size) record(parent, 'childList', {removedNodes: [child], previousSibling: child.previousSibling, nextSibling: child.nextSibling})
+  const was = defined.size && child.nodeType === 1 && native.connected(child[ID])
   native.remove(child[ID])
   if (parent[KIDS]) parent[KIDS].delete(child)
+  if (was) left(child)
   return child
 }
 
 // Put new things in `parent` in place of all that's in it, as `change` does
 function refill(parent, change) {
   const removed = observers.size ? [...parent.childNodes] : null
+  const gone = defined.size && native.connected(parent[ID]) ? sorts(parent) : null
   change()
   if (parent[KIDS]) parent[KIDS].clear()
   if (removed) record(parent, 'childList', {removedNodes: removed, addedNodes: [...parent.childNodes]})
+  if (gone) {
+    for (const e of gone) if (!e.isConnected) disconnect(e)
+    arrived(parent, false)
+  }
 }
 
 class Node extends EventTarget {
@@ -590,10 +605,11 @@ class Element extends Node {
   getAttribute(name) { return native.attr(this[ID], String(name).toLowerCase()) }
   setAttribute(name, value) {
     name = String(name).toLowerCase()
-    const old = observers.size ? native.attr(this[ID], name) : null
+    const old = observers.size || this[MADE] ? native.attr(this[ID], name) : null
     native.setAttr(this[ID], name, String(value))
     if (name.startsWith('on') && this[HANDLERS]) delete this[HANDLERS][name.slice(2)]
     if (observers.size) record(this, 'attributes', {attributeName: name, oldValue: old})
+    if (this[MADE]) changed(this, name, old, String(value))
   }
   removeAttribute(name) {
     name = String(name).toLowerCase()
@@ -602,6 +618,7 @@ class Element extends Node {
     native.removeAttr(this[ID], name)
     if (name.startsWith('on') && this[HANDLERS]) delete this[HANDLERS][name.slice(2)]
     if (observers.size) record(this, 'attributes', {attributeName: name, oldValue: old})
+    if (this[MADE]) changed(this, name, old, null)
   }
   hasAttribute(name) { return native.attr(this[ID], String(name).toLowerCase()) != null }
   toggleAttribute(name, force) {
@@ -737,6 +754,16 @@ function reflect(C, names, kind = 'text') {
 }
 
 class HTMLElement extends Element {
+  // Only a class that the page defined is made with `new`: `super()` in its constructor gives the element that it's
+  // made for, an element of the page when one is upgraded, or else a new element of its name
+  constructor() {
+    if (upgrading) { const e = upgrading; upgrading = null; return e }
+    const name = NAMES.get(new.target)
+    if (name === undefined) throw new TypeError('Illegal constructor')
+    const e = adopt(Object.create(new.target.prototype), native.create(name))
+    e[MADE] = true
+    return e
+  }
   get style() { return this[STYLE] || (this[STYLE] = style(this)) }
   set style(v) { this.setAttribute('style', String(v)) }
   get dataset() { return this[DATA] || (this[DATA] = dataset(this)) }
@@ -769,7 +796,20 @@ class HTMLElement extends Element {
     dispatch(this, new FocusEvent('focusout', {bubbles: true}))
   }
   click() { click(this, 0, 0) }
-  attachShadow() { throw wrong('NotSupportedError', 'A shadow tree is not supported here.') }
+  // A shadow tree is kept, and the scripts can fill it and read it, but it isn't drawn: the element shows what's in its tag
+  attachShadow(init = {}) {
+    if (this[SHADOW]) throw wrong('NotSupportedError', 'The element already has a shadow tree.')
+    const root = new DocumentFragment()
+    Object.defineProperties(root, {
+      host: {value: this}, mode: {value: init.mode === 'closed' ? 'closed' : 'open'}, delegatesFocus: {value: !!init.delegatesFocus},
+      innerHTML: {get() { return native.html(root[ID]) }, set(v) { refill(root, () => native.setHTML(root[ID], v == null ? '' : String(v))) }},
+      adoptedStyleSheets: {value: [], writable: true},
+      activeElement: {get: () => null},
+    })
+    this[SHADOW] = root
+    return root
+  }
+  get shadowRoot() { const root = this[SHADOW]; return root && root.mode === 'open' ? root : null }
 }
 reflect(HTMLElement, ['title', 'lang', 'dir', 'role', ['accessKey', 'accesskey']])
 reflect(HTMLElement, ['hidden', 'draggable', 'inert'], 'flag')
@@ -1055,6 +1095,8 @@ class Document extends Node {
   get designMode() { return 'off' }
   get dir() { return this.documentElement.dir }
   get styleSheets() { return [] }
+  get adoptedStyleSheets() { return adoptions }
+  set adoptedStyleSheets(v) { adoptions = taking([...v]); adopted() }
   get fonts() { return fonts }
   get implementation() { return {hasFeature: () => true, createHTMLDocument: title => spare(title)} }
   get forms() { return this.querySelectorAll('form') }
@@ -1400,6 +1442,22 @@ class Response {
   blob() { return this.arrayBuffer() }
 }
 
+// What `fetch` is asked for: the address, as a whole address, and how
+class Request {
+  constructor(input, init = {}) {
+    const from = input instanceof Request ? input : null
+    this.url = from ? from.url : native.resolve(String(input))
+    this.method = String(init.method ?? from?.method ?? 'GET').toUpperCase()
+    this.headers = new Headers(init.headers ?? from?.headers ?? {})
+    for (const [k, d] of [['credentials', 'same-origin'], ['mode', 'cors'], ['cache', 'default'], ['redirect', 'follow'], ['referrer', 'about:client'],
+                          ['referrerPolicy', ''], ['integrity', ''], ['keepalive', false], ['priority', 'auto']]) this[k] = init[k] ?? from?.[k] ?? d
+    this.signal = init.signal ?? from?.signal ?? new AbortController().signal
+    this.destination = ''
+    this.bodyUsed = false
+  }
+  clone() { return new Request(this) }
+}
+
 // The page's `load` gives a file's text. Nothing can be sent.
 function fetch(input, init = {}) {
   return new Promise((resolve, reject) => {
@@ -1529,6 +1587,192 @@ function atob(text) {
   return out
 }
 
+// --- sheets that a script makes ------------------------------------------------------------
+//
+// `new CSSStyleSheet()` holds rules. The sheets in `document.adoptedStyleSheets` are drawn: their rules are the text of a
+// <style> at the end of the <head>, which this file keeps up to date. A shadow tree's sheets aren't drawn, as its tree isn't.
+
+const RULES = Symbol('rules')
+
+// The rules of a sheet's text, each with its braces: `a{color:red} @media x{b{c:d}}` is two
+function rules_of(text) {
+  const out = []
+  const push = rule => { rule = rule.replace(/^(?:\s*\/\*[^]*?\*\/)+/, '').trim(); if (rule) out.push(rule) }
+  let depth = 0, start = 0, quote = ''
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i]
+    if (quote) { if (c === '\\') i++; else if (c === quote) quote = ''; continue }
+    if (c === '"' || c === "'") quote = c
+    else if (c === '/' && text[i + 1] === '*') { const end = text.indexOf('*/', i + 2); i = end < 0 ? text.length : end + 1 }
+    else if (c === '{') depth++
+    else if (c === '}' && depth > 0 && --depth === 0) { push(text.slice(start, i + 1)); start = i + 1 }
+    else if (c === ';' && depth === 0) { const rule = text.slice(start, i + 1); if (/^(?:\s*\/\*[^]*?\*\/)*\s*@/.test(rule)) push(rule); start = i + 1 }
+  }
+  return out
+}
+
+class CSSStyleSheet {
+  constructor(options = {}) {
+    this[RULES] = []
+    this.disabled = !!options.disabled
+    this.href = null
+    this.ownerNode = null
+    this.ownerRule = null
+    this.parentStyleSheet = null
+    this.title = null
+    this.type = 'text/css'
+    const media = [].concat(options.media ?? []).join(', ')
+    this.media = {mediaText: media, length: media ? 1 : 0, item: i => i === 0 && media ? media : null, toString: () => media}
+  }
+  get cssRules() {
+    return this[RULES].map(text => ({cssText: text, selectorText: text.startsWith('@') ? undefined : text.slice(0, text.indexOf('{')).trim(), parentStyleSheet: this}))
+  }
+  get rules() { return this.cssRules }
+  insertRule(rule, index = 0) {
+    rule = String(rule).trim()
+    const one = rules_of(rule)
+    if (one.length !== 1) throw wrong('SyntaxError', `Failed to parse the rule '${rule}'.`)
+    if (index < 0 || index > this[RULES].length) throw wrong('IndexSizeError', 'The index is out of range.')
+    this[RULES].splice(index, 0, one[0])
+    adopted(this)
+    return index
+  }
+  deleteRule(index) {
+    if (index < 0 || index >= this[RULES].length) throw wrong('IndexSizeError', 'The index is out of range.')
+    this[RULES].splice(index, 1)
+    adopted(this)
+  }
+  addRule(selector = 'undefined', style = 'undefined', index = this[RULES].length) { this.insertRule(`${selector}{${style}}`, index); return -1 }
+  removeRule(index = 0) { this.deleteRule(index) }
+  replaceSync(text) { this[RULES] = rules_of(String(text)).filter(r => !/^@import\b/i.test(r)); adopted(this) }
+  replace(text) { try { this.replaceSync(text); return Promise.resolve(this) } catch (e) { return Promise.reject(e) } }
+}
+
+let adoptions = []       // the document's adopted sheets
+let adoptedStyle = null  // the <style> that draws them
+
+// A list that draws the sheets again when a script changes what's in it: `document.adoptedStyleSheets.push(sheet)`
+function taking(list) {
+  return new Proxy(list, {set(target, key, value) { target[key] = value; adopted(); return true }, deleteProperty(target, key) { delete target[key]; adopted(); return true }})
+}
+
+// Draw the adopted sheets as they are now, or only when `changed` is one of them
+function adopted(changed) {
+  if (changed && !adoptions.includes(changed)) return
+  const text = adoptions.filter(s => s instanceof CSSStyleSheet && !s.disabled).map(s => {
+    const all = s[RULES].join('\n')
+    return s.media.mediaText ? `@media ${s.media.mediaText} {\n${all}\n}` : all
+  }).join('\n')
+  if (!adoptedStyle) {
+    if (!text) return
+    adoptedStyle = document.createElement('style')
+    adoptedStyle.setAttribute('data-adopted', '')
+  }
+  const head = document.head ?? document.documentElement
+  if (adoptedStyle.parentNode !== head || adoptedStyle.nextSibling) head.appendChild(adoptedStyle)
+  adoptedStyle.textContent = text
+}
+
+// Text as the bytes of UTF-8, and back. A half of a pair of UTF-16 units alone is written as U+FFFD.
+class TextEncoder {
+  get encoding() { return 'utf-8' }
+  encode(text = '') {
+    text = String(text)
+    const out = new Uint8Array(text.length * 3)
+    return out.slice(0, this.encodeInto(text, out).written)
+  }
+  encodeInto(text, into) {
+    text = String(text)
+    let read = 0, written = 0
+    for (let i = 0; i < text.length; i++) {
+      let c = text.charCodeAt(i), units = 1
+      if (c >= 0xd800 && c <= 0xdbff && i + 1 < text.length) {
+        const d = text.charCodeAt(i + 1)
+        if (d >= 0xdc00 && d <= 0xdfff) { c = 0x10000 + ((c - 0xd800) << 10) + (d - 0xdc00); units = 2 }
+      }
+      if (c >= 0xd800 && c <= 0xdfff) c = 0xfffd
+      const size = c < 0x80 ? 1 : c < 0x800 ? 2 : c < 0x10000 ? 3 : 4
+      if (written + size > into.length) break
+      if (size === 1) into[written++] = c
+      else if (size === 2) { into[written++] = 0xc0 | (c >> 6); into[written++] = 0x80 | (c & 63) }
+      else if (size === 3) { into[written++] = 0xe0 | (c >> 12); into[written++] = 0x80 | ((c >> 6) & 63); into[written++] = 0x80 | (c & 63) }
+      else { into[written++] = 0xf0 | (c >> 18); into[written++] = 0x80 | ((c >> 12) & 63); into[written++] = 0x80 | ((c >> 6) & 63); into[written++] = 0x80 | (c & 63) }
+      read += units
+      i += units - 1
+    }
+    return {read, written}
+  }
+}
+
+// What Windows-1252 has at 0x80 to 0x9f, where Latin-1 has codes that don't show
+const WINDOWS_1252 = [0x20ac, 0x81, 0x201a, 0x192, 0x201e, 0x2026, 0x2020, 0x2021, 0x2c6, 0x2030, 0x160, 0x2039, 0x152, 0x8d, 0x17d, 0x8f,
+                      0x90, 0x2018, 0x2019, 0x201c, 0x201d, 0x2022, 0x2013, 0x2014, 0x2dc, 0x2122, 0x161, 0x203a, 0x153, 0x9d, 0x17e, 0x178]
+const ENCODINGS = {'utf-8': 'utf-8', 'utf8': 'utf-8', 'unicode-1-1-utf-8': 'utf-8', 'utf-16le': 'utf-16le', 'utf-16': 'utf-16le', 'utf-16be': 'utf-16be',
+                   'windows-1252': 'windows-1252', 'latin1': 'windows-1252', 'iso-8859-1': 'windows-1252', 'ascii': 'windows-1252', 'us-ascii': 'windows-1252',
+                   'cp1252': 'windows-1252', 'x-user-defined': 'windows-1252'}
+
+// Bytes as text: UTF-8, UTF-16 or Windows-1252. With `stream`, the bytes of a letter that's cut in two wait for the next call.
+class TextDecoder {
+  #left = []; #started = false
+  constructor(label = 'utf-8', options = {}) {
+    const encoding = ENCODINGS[String(label).trim().toLowerCase()]
+    if (!encoding) throw new RangeError(`The encoding label provided ('${label}') is invalid.`)
+    this.encoding = encoding
+    this.fatal = !!options.fatal
+    this.ignoreBOM = !!options.ignoreBOM
+  }
+  decode(input, options = {}) {
+    let bytes = input === undefined ? new Uint8Array(0) : ArrayBuffer.isView(input) ? new Uint8Array(input.buffer, input.byteOffset, input.byteLength) : new Uint8Array(input)
+    if (this.#left.length) { const joined = new Uint8Array(this.#left.length + bytes.length); joined.set(this.#left); joined.set(bytes, this.#left.length); bytes = joined }
+    this.#left = []
+    const stream = !!options.stream
+    let out = '', i = 0
+    const bad = () => { if (this.fatal) throw new TypeError('The encoded data was not valid.'); out += '�' }
+    if (this.encoding === 'windows-1252') {
+      for (; i < bytes.length; i++) out += String.fromCharCode(bytes[i] >= 0x80 && bytes[i] < 0xa0 ? WINDOWS_1252[bytes[i] - 0x80] : bytes[i])
+    } else if (this.encoding !== 'utf-8') {
+      const little = this.encoding === 'utf-16le'
+      const end = bytes.length - (bytes.length % 2)
+      const units = []
+      for (; i < end; i += 2) units.push(little ? bytes[i] | (bytes[i + 1] << 8) : (bytes[i] << 8) | bytes[i + 1])
+      if (stream && units.length && units[units.length - 1] >= 0xd800 && units[units.length - 1] <= 0xdbff) { units.pop(); i -= 2 }
+      for (let k = 0; k < units.length; k += 4096) out += String.fromCharCode(...units.slice(k, k + 4096))
+      if (i < bytes.length) stream ? (this.#left = [...bytes.slice(i)]) : bad()
+      i = bytes.length
+    } else {
+      const codes = []
+      while (i < bytes.length) {
+        const b = bytes[i]
+        if (b < 0x80) { codes.push(b); i++; continue }
+        const size = b >= 0xc2 && b <= 0xdf ? 2 : b >= 0xe0 && b <= 0xef ? 3 : b >= 0xf0 && b <= 0xf4 ? 4 : 0
+        if (!size) { flush(); bad(); i++; continue }
+        if (i + size > bytes.length) {
+          // A letter cut off at the end: it waits for the next call, or it's one that can't be read
+          let ok = true
+          for (let k = i + 1; k < bytes.length; k++) if ((bytes[k] & 0xc0) !== 0x80) ok = false
+          if (ok && stream) { this.#left = [...bytes.slice(i)]; break }
+          if (ok) { flush(); bad(); break }
+        }
+        let c = b & (size === 2 ? 0x1f : size === 3 ? 0x0f : 0x07), k = 1
+        for (; k < size; k++) {
+          const next = bytes[i + k]
+          if (next === undefined || (next & 0xc0) !== 0x80) break
+          c = (c << 6) | (next & 63)
+        }
+        if (k < size || (size === 3 && (c < 0x800 || (c >= 0xd800 && c <= 0xdfff))) || (size === 4 && (c < 0x10000 || c > 0x10ffff))) { flush(); bad(); i += Math.max(1, k); continue }
+        if (c >= 0x10000) { c -= 0x10000; codes.push(0xd800 + (c >> 10), 0xdc00 + (c & 1023)) } else codes.push(c)
+        i += size
+        if (codes.length >= 4096) flush()
+      }
+      flush()
+      function flush() { if (codes.length) { out += String.fromCharCode(...codes); codes.length = 0 } }
+    }
+    if (!this.#started && !this.ignoreBOM && out.charCodeAt(0) === 0xfeff) out = out.slice(1)
+    this.#started = stream
+    return out
+  }
+}
+
 const CSS = {
   escape(text) { return String(text).replace(/[^a-zA-Z0-9_ -￿-]/g, c => '\\' + c).replace(/^(-?)(\d)/, (_, dash, d) => dash + '\\3' + d + ' ') },
   supports() { return false },
@@ -1565,11 +1809,88 @@ const performance = {timeOrigin: Date.now() - native.now(), now: () => native.no
 
 const history = {length: 1, state: null, scrollRestoration: 'auto', pushState(state) { this.state = state }, replaceState(state) { this.state = state }, back() {}, forward() {}, go() {}}
 
+// --- elements that the page defines -------------------------------------------------------
+//
+// customElements.define gives a name its class. Each element of that name, in the page and made later, becomes an object of
+// the class: its constructor runs, and its connectedCallback, disconnectedCallback and attributeChangedCallback are called
+// as it goes into the page, comes out, and an attribute that it watches changes.
+
+const promised = new Map()      // the names that a script waits for (whenDefined), with what ends each wait
+
+// The elements of the defined names in `root`, with `root` itself when it's one and `self`, in the order of the page
+function sorts(root, self = true) {
+  if (!defined.size) return []
+  const found = [...root.querySelectorAll([...defined.keys()].map(n => CSS.escape(n)).join(','))]
+  return self && root.nodeType === 1 && defined.has(root.localName) ? [root, ...found] : found
+}
+
+// Make `e` an object of the class of its name: its constructor runs on it, and it's told of its attributes and that it's in the page
+function upgrade(e) {
+  const d = defined.get(e.localName)
+  if (!d || e[MADE]) return
+  e[MADE] = true
+  Object.setPrototypeOf(e, d.C.prototype)
+  upgrading = e
+  try { new d.C() } catch (err) { report(err) } finally { upgrading = null }
+  for (const name of d.watched) { const v = native.attr(e[ID], name); if (v != null) changed(e, name, null, v) }
+  if (e.isConnected) connect(e)
+}
+
+function changed(e, name, old, value) {
+  const d = defined.get(e.localName)
+  if (d && d.watched.includes(name) && typeof e.attributeChangedCallback === 'function') {
+    try { e.attributeChangedCallback(name, old, value, null) } catch (err) { report(err) }
+  }
+}
+
+function connect(e) {
+  if (e[INSIDE]) return
+  e[INSIDE] = true
+  if (typeof e.connectedCallback === 'function') try { e.connectedCallback() } catch (err) { report(err) }
+}
+
+function disconnect(e) {
+  if (!e[INSIDE]) return
+  e[INSIDE] = false
+  if (typeof e.disconnectedCallback === 'function') try { e.disconnectedCallback() } catch (err) { report(err) }
+}
+
+// `root` went into the page: each defined element in it is made, or told that it's in the page again
+function arrived(root, self = true) { for (const e of sorts(root, self)) e[MADE] ? connect(e) : upgrade(e) }
+// `root` came out of the page
+function left(root) { for (const e of sorts(root)) disconnect(e) }
+
 const customElements = {
-  define(name) { native.log('warn', `The page defined the element <${name}>, which this engine doesn't do: the element stays as its tag wrote it`) },
-  get() { return undefined },
-  whenDefined() { return new Promise(() => {}) },
-  upgrade() {},
+  define(name, C, options = {}) {
+    name = String(name)
+    if (!/^[a-z][^A-Z\s]*-[^A-Z\s]*$/.test(name)) throw wrong('SyntaxError', `"${name}" is not a valid custom element name`)
+    if (defined.has(name)) throw wrong('NotSupportedError', `"${name}" has already been used with this registry`)
+    if (typeof C !== 'function') throw new TypeError('The constructor of a custom element must be a function')
+    if (NAMES.has(C)) throw wrong('NotSupportedError', 'This constructor has already been used with this registry')
+    if (options && options.extends) {
+      native.log('warn', `The page defined <${options.extends} is="${name}">, which this engine doesn't do, as Safari doesn't`)
+      return
+    }
+    defined.set(name, {C, watched: [].concat(C.observedAttributes ?? []).map(n => String(n).toLowerCase())})
+    NAMES.set(C, name)
+    for (const e of document.querySelectorAll(CSS.escape(name))) upgrade(e)
+    const wait = promised.get(name)
+    if (wait) { promised.delete(name); wait.resolve(C) }
+  },
+  get(name) { const d = defined.get(String(name)); return d ? d.C : undefined },
+  getName(C) { return NAMES.get(C) ?? null },
+  whenDefined(name) {
+    name = String(name)
+    if (defined.has(name)) return Promise.resolve(defined.get(name).C)
+    let wait = promised.get(name)
+    if (!wait) {
+      let resolve
+      const promise = new Promise(r => { resolve = r })
+      promised.set(name, wait = {promise, resolve})
+    }
+    return wait.promise
+  },
+  upgrade(root) { for (const e of sorts(root)) upgrade(e) },
 }
 
 // --- a click ------------------------------------------------------------------------------
@@ -1653,8 +1974,8 @@ Object.assign(global, {
   },
   Event, CustomEvent, UIEvent, MouseEvent, PointerEvent, WheelEvent, KeyboardEvent, FocusEvent, InputEvent, ErrorEvent, EventTarget, DOMException,
   Node, CharacterData, Text, Comment, DocumentFragment, Element, HTMLElement, SVGElement, Document, HTMLDocument: Document, NodeList, HTMLCollection,
-  DOMTokenList, NodeFilter, TreeWalker, Range, MutationObserver, IntersectionObserver, ResizeObserver, URL, URLSearchParams, Headers, Response,
-  XMLHttpRequest, AbortController, AbortSignal, Storage,
+  DOMTokenList, NodeFilter, TreeWalker, Range, MutationObserver, IntersectionObserver, ResizeObserver, URL, URLSearchParams, Headers, Request, Response,
+  XMLHttpRequest, AbortController, AbortSignal, Storage, TextEncoder, TextDecoder, CSSStyleSheet,
 })
 handlers(global)
 

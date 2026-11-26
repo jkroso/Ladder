@@ -312,7 +312,9 @@ copied(p) = join(w.before * String(w.letters) for w in p.words)
   # What a rule asks of the window, in each way to write it
   @test Css.media("(width >= 500px)", 600) && !Css.media("(width > 600px)", 600) && Css.media("(400px <= width < 700px)", 600) && Css.media("(width < calc(30rem + 200px))", 600)
   @test Css.media("(min-width: 500px) and (max-height: 900px)", 600, 800) && !Css.media("(orientation: portrait)", 600, 400) && Css.media("not (hover: none)", 600) &&
-        Css.media("(prefers-reduced-motion: no-preference) or (width < 100px)", 600)
+        Css.media("(prefers-reduced-motion: reduce) or (width < 100px)", 600)
+  # The engine asks for less motion: a page that moves its parts in on arrival shows them at once
+  @test !Css.media("(prefers-reduced-motion: no-preference)", 600)
   @test Css.container("side (min-width: 300px)", 320, 100) && !Css.container("(min-width: 300px)", 200, 100) && Css.container_name("side (min-width: 300px)") == "side"
   @test Css.resolve("https://x.org/a/b.html", "../c/d.png?x=1") == "https://x.org/c/d.png?x=1" && Css.resolve("https://x.org/a/b.html", "//y.org/z") == "https://y.org/z" &&
         Css.resolve("https://x.org/a/b.html", "e.css") == "https://x.org/a/e.css" && Css.resolve("", "e.css") == "e.css" && Css.resolve("https://x.org/a/", "data:x") == "data:x" &&

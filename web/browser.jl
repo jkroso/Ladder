@@ -240,9 +240,9 @@ asked!(b::Browser) = (b.asked = (b.address, b.html, b.base); b)
 back!(b::Browser) = can_back(b) ? go!(b, b.trail[b.at -= 1]; note=false) : b
 forward!(b::Browser) = can_forward(b) ? go!(b, b.trail[b.at += 1]; note=false) : b
 
-"Get the page that shows again, with all of its files"
+"Get the page that shows again, with all of its files: a file kept on the disk is checked with its site"
 reload!(b::Browser) = begin
-  Fetch.forget!(b.files)
+  Fetch.forget!(b.files; again=true)
   b.at > 0 ? go!(b, b.trail[b.at]; note=false) : (b.asked = nothing; b)
 end
 
