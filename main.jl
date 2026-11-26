@@ -53851,13 +53851,10 @@ What shows the SolidCraft design at `path` in the window of `e`. Its fields are
 Ladder's editor of text, and its parameters are a sheet: see "the fields of a
 SolidCraft design" and "the sheet of a SolidCraft design's parameters".
 """
-design_part(e, path) = begin
-  Designs.CODE_LOOK[] = design_code_look
-  Designs.FIELD[] = design_field
-  Designs.SHEET[] = design_sheet
-  node!(() -> Designs.DesignView(path=path), e, (:design, path))
-end
-design_code_look() = (colours, codefont())
+design_part(e, path) = node!(() -> Designs.DesignView(path=path), e, (:design, path))
+
+"How code looks in a field of a SolidCraft design: the colours of the page's code blocks, and its font of code"
+Designs.code_look(v::Designs.DesignView) = (colours, codefont())
 
 # --- the fields of a SolidCraft design --------------------------------------------------
 #
@@ -53902,8 +53899,8 @@ A field of the design `v` that holds `text`, with `placeholder` while it's
 empty, and that holds Julia code when `code`. Its editor's keys that the
 field has no use for go to the design.
 """
-design_field(v, text, placeholder, code) = begin
-  f = DesignField(code=code, placeholder=placeholder)
+Designs.new_field(v::Designs.DesignView, text, placeholder, code::Bool) = begin
+  f = DesignField(code=code, placeholder=String(placeholder))
   sub = Editor()
   lines = String.(split(text, '\n'))
   sub.buf = code ? Buffer(lines=lines, view=:code, lang="julia") : Buffer(lines=lines)
@@ -54140,7 +54137,7 @@ end
 const SHEET_OPEN = "```" * SHEET   # the line that opens the block of the sheet
 
 "The sheet of the parameters of the design `v`, with one empty row"
-design_sheet(v) = begin
+Designs.new_sheet(v::Designs.DesignView) = begin
   s = DesignSheet()
   sub = Editor()
   sub.buf = Buffer(lines=[SHEET_OPEN, " = ", "```"])

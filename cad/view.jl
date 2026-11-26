@@ -45,7 +45,7 @@
 # In Ladder, each field to type in is Ladder's own editor of text, as a page
 # is: its selection, its caret and its keys are a page's, and what ⌘Return
 # shows is the box that a Julia file shows, after the code. Ladder gives the
-# fields through `FIELD`. Without it, a field is a TextInput, and what
+# fields with its method of `new_field`. Without it, a field is a TextInput, and what
 # ⌘Return shows is under the field. The panel at the right is wider while
 # the text of one of its fields needs the room, up to half the design. A
 # longer text goes on to another line in the field.
@@ -329,15 +329,6 @@ end
 
 card!(look, v::DesignView, key) = (c = part!(Card, v, key); c.look = look; c)
 
-"""
-What makes a field to type in, when Ladder gives one: `FIELD[](v, text,
-placeholder, code)` gives a node whose text Ladder edits as it does a page's,
-and with `code`, as a file of Julia code. It has methods of `text_of`,
-`set_text!`, `select_all!`, `iscode`, `run_field!`, `wants` and `room!`.
-Without one, a field is a TextInput.
-"""
-const FIELD = Ref{Any}(nothing)
-
 "How big the text of a field is, before the theme makes it bigger or smaller"
 const FIELD_TEXT = 12px
 
@@ -353,8 +344,15 @@ sheet_size(box) = SHEET_TEXT * scale(theme(box))
 "A field to type in, kept under `key`. `text` is what it holds when it's first shown."
 input!(v::DesignView, key; text="", placeholder="") = part!(() -> new_field(v, text, placeholder, false), v, key)
 
+"""
+A field to type in for the design `v`, that holds `text`, with `placeholder`
+while it's empty, and that holds Julia code when `code`. Here it's a
+TextInput. Ladder adds a method for a DesignView that gives a node whose text
+Ladder edits as it does a page's, and with `code`, as a file of Julia code.
+Such a node has methods of `text_of`, `set_text!`, `select_all!`, `iscode`,
+`run_field!`, `wants` and `room!`.
+"""
 new_field(v, text, placeholder, code) =
-  FIELD[] !== nothing ? FIELD[](v, String(text), String(placeholder), code) :
   TextInput(text=String(text), cursor=length(text), anchor=length(text), placeholder=placeholder, font_size=FIELD_TEXT)
 
 "The text that the field `box` holds"
@@ -397,12 +395,6 @@ forget!(v::DesignView, kind) = filter!(p -> !(p.first isa Tuple && !isempty(p.fi
 
 # --- fields of Julia code -------------------------------------------------------------
 
-"""
-How code looks in a field: the colours of a code block, and the font of code,
-as `(colours, family)`. Ladder sets this to a function that gives the page's.
-Without one, a field has the colours here and the page's font.
-"""
-const CODE_LOOK = Ref{Any}(nothing)
 const LIGHT_CODE = (comment=colorant"rgb(140,140,140)", string=colorant"rgb(30,120,60)", number=colorant"rgb(180,95,0)",
                     keyword=colorant"rgb(170,40,130)", call=colorant"rgb(30,90,180)", type=colorant"rgb(0,120,130)")
 const DARK_CODE = (comment=colorant"rgb(112,112,118)", string=colorant"rgb(160,200,120)", number=colorant"rgb(230,170,100)",
@@ -410,7 +402,12 @@ const DARK_CODE = (comment=colorant"rgb(112,112,118)", string=colorant"rgb(160,2
 const WRONG = colorant"rgb(226,96,84)"
 "How solid a body shows that a piece of the open form is cut from, so that the piece shows in it"
 const GHOST = 0.28
-code_look(v) = CODE_LOOK[] !== nothing ? CODE_LOOK[]() : (dark(theme(v)) ? DARK_CODE : LIGHT_CODE, theme(v).family)
+"""
+How code looks in a field of the design `v`: the colours of a code block, and
+the font of code, as `(colours, family)`. Here it's the colours above and the
+page's font. Ladder adds a method for a DesignView that gives the page's.
+"""
+code_look(v) = (dark(theme(v)) ? DARK_CODE : LIGHT_CODE, theme(v).family)
 
 "A field of Julia code, kept under `key`, in the colours of code. `text` is what it holds when it's first shown."
 code!(v::DesignView, key; text="", placeholder="") = begin
@@ -2812,7 +2809,7 @@ end
 #
 # The panel of parameters is a sheet, the same one as a `sheet` block of a
 # page: a row for each parameter, with its name at the left, its code in the
-# middle, and what that comes to at the right. Ladder gives it (see `SHEET`),
+# middle, and what that comes to at the right. Ladder gives it (see `new_sheet`),
 # so the names of other rows are chips, and each row works itself out while
 # it's typed. It has the design's units, and every parameter of the design,
 # so a row can use one that's under it. The user's parameters come first,
@@ -2835,13 +2832,13 @@ end
 # was, the design's last change, which the sheet then shows.
 
 """
-What makes the sheet of parameters, when Ladder gives one: `SHEET[](v)` gives
-a node that Ladder edits as a `sheet` block of a page. It has methods of
-`text_of`, `sheet_rows`, `set_rows!`, `caret_row`, `sent!`, `before_caret`,
-`complete!`, `names_place`, `wants` and `room!`. Without one, the panel only
-lists the parameters.
+The sheet of parameters of the design `v`, or nothing. Here there's none, so
+the panel only lists the parameters. Ladder adds a method for a DesignView
+that gives a node that Ladder edits as a `sheet` block of a page. Such a node
+has methods of `text_of`, `sheet_rows`, `set_rows!`, `caret_row`, `sent!`,
+`before_caret`, `complete!`, `names_place`, `wants` and `room!`.
 """
-const SHEET = Ref{Any}(nothing)
+new_sheet(v) = nothing
 
 "Each row of the sheet `s`, as its name and its code"
 function sheet_rows end
@@ -2872,16 +2869,19 @@ param_code(v::DesignView, p) =
 "The rows of the sheet for the parameters of `v`, each as its name and its code"
 param_rows(v::DesignView) = Tuple{String,String}[(String(p["name"]), param_code(v, p)) for p in panel_params(v)]
 
-"The sheet of parameters of `v`"
-param_sheet(v::DesignView) = part!(() -> SHEET[](v), v, :param_sheet)
+"The sheet of parameters of `v`, kept from frame to frame, or nothing when there's none: see `new_sheet`"
+param_sheet(v::DesignView) = get(v.parts, :param_sheet) do
+  s = new_sheet(v)
+  s === nothing ? nothing : part!(() -> s, v, :param_sheet)
+end
 
 "The parameters of the design, in a sheet: see \"the sheet of parameters\""
 params_card(v::DesignView) = begin
   t = theme(v)
   close(e) = (v.panel = :none)
-  SHEET[] === nothing && return side_card(v, :params, "params", "Parameters", close,
-    (Row(width(grow=grow), child_gap=8px, words(n, 12px), Box(width(grow=grow)), words(c, 12px, color=t.dim)) for (n, c) in param_rows(v))...)
   s = param_sheet(v)
+  s === nothing && return side_card(v, :params, "params", "Parameters", close,
+    (Row(width(grow=grow), child_gap=8px, words(n, 12px), Box(width(grow=grow)), words(c, 12px, color=t.dim)) for (n, c) in param_rows(v))...)
   follow_sheet!(v, s)
   wide = side_width!(v, Pair{Any,Any}[s => SIDE_PAD])
   side_card(v, :params, "params", "Parameters", close, s; wide)
