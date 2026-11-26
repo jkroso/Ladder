@@ -12,7 +12,7 @@
 # `video` gives nothing for any other address. This file asks the web for
 # nothing: main.jl asks the page's `load` for the JSON and for the picture.
 
-@use "../json" => JSON
+@use "github.com/jkroso/JSON.jl" parse_json
 
 "`s` as it's written in an address: each character that means something there is written as % and its number"
 escape(s::AbstractString) = join(c in 'a':'z' || c in 'A':'Z' || c in '0':'9' || c in "-._~" ? string(c) : join("%" * uppercase(string(x, base=16, pad=2)) for x in codeunits(string(c))) for c in s)
@@ -41,7 +41,7 @@ end
 facts(bytes) = begin
   data = Vector{UInt8}(bytes)
   isvalid(String(copy(data))) || return ("", "")
-  said = try JSON.parse(data) catch; nothing end
+  said = try parse_json(data) catch; nothing end
   said isa AbstractDict || return ("", "")
   text(key) = (x = get(said, key, ""); x isa AbstractString ? x : "")
   picture = text("thumbnail_url")

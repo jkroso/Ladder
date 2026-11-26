@@ -17,7 +17,7 @@
 #
 # `available()` says whether this Mac has SolidCraft.app.
 
-@use "../json" => JSON
+@use "github.com/jkroso/JSON.jl" => JSON
 
 const NAME = "solidcraft-cli"
 
@@ -76,7 +76,7 @@ listen(e::Engine) = begin
     while !eof(e.process)
       line = readline(e.process)
       isempty(line) && continue
-      m = try JSON.parse(line) catch; continue end
+      m = try JSON.parse_json(line, JSON.Object) catch; continue end
       m isa JSON.Object && haskey(m, "id") || continue
       f = pop!(e.waiting, Int(m["id"]), nothing)
       f === nothing || push!(e.ready, (f, m))
@@ -91,10 +91,25 @@ listen(e::Engine) = begin
   empty!(e.waiting)
 end
 
+"""
+`m` as one line of JSON for SolidCraft's program. A whole number goes as a
+whole number, 3 and not 3.0, as Ladder has always sent it: an answer gives
+every number as a Float64, and a count that's sent back as 3.0 might be
+refused.
+"""
+line_of(m) = JSON.json(wholes(m))
+
+"`x` with each whole Float64 in it as an Int"
+wholes(x::AbstractFloat) = isfinite(x) && x == round(x) && abs(x) < 1e15 ? Int64(x) : x
+wholes(x::AbstractDict) = Dict{String,Any}(string(k) => wholes(v) for (k, v) in x)
+wholes(x::NamedTuple) = map(wholes, x)
+wholes(x::Union{AbstractVector,Tuple}) = Any[wholes(v) for v in x]
+wholes(x) = x
+
 write_line(e::Engine, m) = begin
   isempty(e.stopped) || return false
   try
-    write(e.process, JSON.json(m), '\n')
+    write(e.process, line_of(m), '\n')
     flush(e.process)
     true
   catch
@@ -119,7 +134,7 @@ told(result) = begin
   texts = [String(c["text"]) for c in get(result, "content", Any[]) if c isa JSON.Object && get(c, "type", "") == "text"]
   text = join(texts, "\n")
   failed = get(result, "isError", false) === true
-  value = try JSON.parse(text) catch; text end
+  value = try JSON.parse_json(text, JSON.Object) catch; text end
   failed ? (nothing, value isa String ? value : text) : (value, nothing)
 end
 

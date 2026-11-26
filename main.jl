@@ -406,7 +406,7 @@ end
 @use "./centient" => Centient
 @use "./update" => Update
 @use "./mime" => Mime
-@use "./json" JSONObject JSONNumber json_value write_json
+@use "github.com/jkroso/JSON.jl" JSONObject JSONNumber json_value write_json
 @use "./eml" => Eml
 @use "./webpage" => Webpages
 @use "./web" => Web

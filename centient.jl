@@ -22,8 +22,8 @@
 #
 # The server speaks JSON, which json.jl reads and writes.
 
-@use "./json" => JSON
-@use "./json" json
+@use "github.com/jkroso/JSON.jl" json parse_json
+@use "github.com/jkroso/JSON.jl/read" Object
 
 # --- where Centient is -----------------------------------------------------------
 
@@ -199,7 +199,7 @@ end
 
 "Take one line of the program's answers"
 answer!(s::Server, line::AbstractString) = begin
-  msg = try JSON.parse(line) catch; return end
+  msg = try parse_json(line, Object) catch; return end
   msg isa Dict || return
   id = get(msg, "id", nothing)
   id isa Real || return
@@ -258,4 +258,4 @@ check!(s::Server=server) = begin
   !isempty(s.waiting)
 end
 
-export available, ask, check!, finished, failed, stop!, running, Request, server, json
+export available, ask, check!, finished, failed, stop!, running, Request, server, json, parse_json

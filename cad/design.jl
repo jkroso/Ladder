@@ -26,7 +26,7 @@
 # it. Until it's undone, everything else that's asked for waits.
 
 @use "./engine" => Engines
-@use "../json" => JSON
+@use "github.com/jkroso/JSON.jl" => JSON
 @use "./scene" Shape read_glb Vec3
 @use "./scene" => Scenes
 @use "../zip" => Zips
@@ -101,7 +101,7 @@ end
 file_document(path::AbstractString) = try
   z = Zips.contents(path)
   i = findfirst(en -> en.name == "document.json", z.entries)
-  i === nothing ? nothing : JSON.parse(String(Zips.bytes(path, z.entries[i])))
+  i === nothing ? nothing : JSON.parse_json(String(Zips.bytes(path, z.entries[i])), JSON.Object)
 catch
   nothing
 end
@@ -522,7 +522,7 @@ hidden!(m::Model) = begin
   rm(file, force=true)
   Engines.call!(m.engine, "execute", JSON.Object("command" => "file.export", "params" => JSON.Object("path" => file, "format" => "json"))) do answer, problem
     isfile(file) || return
-    hidden = try origin_hidden(JSON.parse(read(file, String))) catch; return end
+    hidden = try origin_hidden(JSON.parse_json(read(file, String), JSON.Object)) catch; return end
     hidden == m.origin_hidden || (m.origin_hidden = hidden; m.version += 1)
   end
 end

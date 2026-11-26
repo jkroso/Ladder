@@ -25,7 +25,7 @@
 #     at(eye, (800, 600), (30.0, 0.0, 13.0))   # where that point of the design shows, in px
 #     hit(shapes, ray(eye, (800, 600), (400, 300)))   # what shows at a place of the view
 
-@use "../json" => JSON
+@use "github.com/jkroso/JSON.jl" => JSON
 
 const Vec3 = NTuple{3,Float64}
 
@@ -148,7 +148,7 @@ read_glb(data::Vector{UInt8}) = begin
   (length(data) >= 28 && data[1:4] == b"glTF") || return none
   text = word(13)
   length(data) >= 28 + text || return none
-  doc = try JSON.parse(String(data[21:20+text])) catch; return none end
+  doc = try JSON.parse_json(String(data[21:20+text]), JSON.Object) catch; return none end
   first_byte = 20 + text + 9   # of the numbers, after the text and the 8 bytes that say how long they are
   list(key) = (l = doc isa JSON.Object ? get(doc, key, nothing) : nothing; l isa Vector ? l : Any[])
   views, accessors, materials, meshes = list("bufferViews"), list("accessors"), list("materials"), list("meshes")

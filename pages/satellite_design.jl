@@ -37,7 +37,7 @@
 # and the radiator reaches along +y. A model has y up and metres.
 @use "./satellite" sizes satellite glb sky VIEW_SKY Shape CELL noise tinted dot cross unit FIRST LIMITS page_numbers
 @use "../cad/engine" => Engines
-@use "../json" => JSON
+@use "github.com/jkroso/JSON.jl" => JSON
 
 const Vec = NTuple{3,Float64}
 const UV = NTuple{2,Float64}
@@ -64,18 +64,18 @@ program(path; empty=false) = begin
   design = empty ? `` : `--in $(abspath(path))`
   p = Program(open(pipeline(`$cli mcp --headless $design --allow-path $(dirname(abspath(path)))`, stderr=devnull), "r+"), 0)
   request(p, "initialize", (protocolVersion="2024-11-05", capabilities=(;), clientInfo=(name="Ladder", version="1")))
-  write(p.process, JSON.json((jsonrpc="2.0", method="notifications/initialized")), '\n')
+  write(p.process, Engines.line_of((jsonrpc="2.0", method="notifications/initialized")), '\n')
   p
 end
 
 "Send a request and wait for its answer"
 request(p::Program, method, params) = begin
   id = (p.asked += 1)
-  write(p.process, JSON.json((jsonrpc="2.0", id=id, method=method, params=params)), '\n')
+  write(p.process, Engines.line_of((jsonrpc="2.0", id=id, method=method, params=params)), '\n')
   flush(p.process)
   while true
     eof(p.process) && error("SolidCraft's program stopped.")
-    m = try JSON.parse(readline(p.process)) catch; continue end
+    m = try JSON.parse_json(readline(p.process), JSON.Object) catch; continue end
     m isa JSON.Object && get(m, "id", nothing) == id || continue
     haskey(m, "error") && error(String(get(m["error"], "message", "SolidCraft's program refused the request.")))
     return m["result"]
@@ -87,7 +87,7 @@ tool(p::Program, name, args=(;)) = begin
   result = request(p, "tools/call", (name=name, arguments=args))
   text = join((String(c["text"]) for c in get(result, "content", Any[]) if get(c, "type", "") == "text"), "\n")
   get(result, "isError", false) === true && error(text)
-  try JSON.parse(text) catch; text end
+  try JSON.parse_json(text, JSON.Object) catch; text end
 end
 
 "Run one of SolidCraft's commands, like `solid.box`"

@@ -7,7 +7,7 @@
 
 @use Test: @test, @testset, @test_throws
 @use "../main" => K
-@use "../json" => JSON
+@use "github.com/jkroso/JSON.jl" => JSON
 @use "../cad/scene" => Scenes
 @use "../cad/sketch" => Sketching
 @use "../cad/commands" => Commands
@@ -26,11 +26,11 @@ const V = K.Designs
 K.RUN_WAIT[] = Inf   # what ⌘Return runs in a field has come back when the key's handler ends
 
 @testset "JSON" begin
-  @test JSON.parse("""{"a": [1, 2.5, null, true], "b": "x\\n\\u00e9"}""") == JSON.Object("a" => Any[1.0, 2.5, nothing, true], "b" => "x\né")
-  @test JSON.parse(JSON.json(JSON.Object("edges" => [[30, 22.5, 6]], "radius" => "2 mm", "on" => true))) ==
+  @test JSON.parse_json("""{"a": [1, 2.5, null, true], "b": "x\\n\\u00e9"}""", JSON.Object) == JSON.Object("a" => Any[1.0, 2.5, nothing, true], "b" => "x\né")
+  @test JSON.parse_json(JSON.json(JSON.Object("edges" => [[30, 22.5, 6]], "radius" => "2 mm", "on" => true)), JSON.Object) ==
         JSON.Object("edges" => Any[Any[30.0, 22.5, 6.0]], "radius" => "2 mm", "on" => true)
   @test JSON.json("a\"b\\c\n") == "\"a\\\"b\\\\c\\n\""
-  @test_throws JSON.NotJSON JSON.parse("{\"a\": }")
+  @test_throws JSON.NotJSON JSON.parse_json("{\"a\": }", JSON.Object)
 end
 
 """

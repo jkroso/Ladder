@@ -16,8 +16,8 @@
 # other command, `spec(command)` makes a form from what SolidCraft says of its
 # parameters, so every command can be run from the editor.
 
-@use "../json" => JSON
-@use "../json" Object
+@use "github.com/jkroso/JSON.jl" => JSON
+@use "github.com/jkroso/JSON.jl" Object
 
 "One thing that a form asks for"
 struct Field
@@ -363,7 +363,7 @@ params(s::Spec, values::AbstractDict; read=nothing) = begin
     if f.kind == :json
       text = strip(v isa AbstractString ? v : "")
       isempty(text) && continue
-      parsed = try JSON.parse(startswith(text, "{") ? text : "{" * text * "}") catch; return "The parameters aren't JSON. Write them like \"radius\": 2" end
+      parsed = try JSON.parse_json(startswith(text, "{") ? text : "{" * text * "}", JSON.Object) catch; return "The parameters aren't JSON. Write them like \"radius\": 2" end
       parsed isa AbstractDict || return "The parameters aren't JSON."
       isempty(f.key) ? merge!(out, parsed) : (out[f.key] = parsed)
     elseif picks(f)
