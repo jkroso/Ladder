@@ -9,6 +9,7 @@
 @use "github.com/jkroso/UI.jl/Interface/draw" frame rect popups
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
 @use GeometryBasics: Vec2
+@use "./drive" drive middle
 const px = K.px
 
 const dir = mktempdir()
@@ -44,25 +45,17 @@ The end.
 
 const e = K.build_editor(page)
 const w = Window(e, size=(1000px, 1100px))
-frames(n=2) = foreach(_ -> frame(w), 1:n)
+const (; frames, at, press, release, click, typed, key, shot) = drive(w)
 frames()
 list(n) = e.nodes[(:block, K.FIND, page, n)]
-shot(name) = haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], name), w)
 
-at((x, y)) = (w.mouse = typeof(w.mouse)(px(x), px(y)); onmouse(w, MouseMove(Vec2{px}(px(x), px(y)), w)); frames(1))
-press(place) = (at(place); w.keys |= Keys.mouse_left; onkey(w, KeyPress{Keys.mouse_left}(0, w)))
-release() = (w.keys ⊻= Keys.mouse_left; onkey(w, KeyRelease{Keys.mouse_left}(0, w)); frames())
-click(place) = (press(place); release())
-middle(r) = (K.num(r.left + r.width / 2), K.num(r.top + r.height / 2))
 found(n) = [(relpath(m.path, dir), m.text, m.kind) for m in K.found!(list(n)).matches]
 row(n, i) = list(n).parts[(:row, i)]
-typed(s) = (foreach(c -> ontype(w, Typed(c, w)), s); frames())
 block(n) = (s = K.block_lines(e.buf, K.FIND, n); e.buf.lines[s[1]+1:s[2]-1])
 choice(n, key) = list(n).parts[key]   # the button that opens the list of kinds, or the one of folders
 "The list that floats under a button, or nothing when none shows"
 menu() = (i = findfirst(p -> p.key == K.FIND_MENU, popups(w)); i === nothing ? nothing : popups(w)[i])
 names(v) = [r.name for r in v.rows]   # the rows of the list that floats under a button of `v`
-key(k) = (onkey(w, KeyPress{k}(0, w)); frames())
 "Click the button `c`, type `name` in the field of the list that it opens, and click the row with that name"
 choose(c, name) = begin
   click(middle(rect(c)))

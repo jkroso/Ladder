@@ -12,6 +12,7 @@
 @use "github.com/jkroso/UI.jl/Interface/draw" frame rect popups
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
 @use GeometryBasics: Vec2
+@use "./drive" drive middle
 const px = K.px
 
 K.Webpages.HELPER[] = Fake.helper   # no program draws an email, and the web isn't asked
@@ -42,18 +43,11 @@ write(sent, "---\nfrom: Jake Rosoman <jake@example.com>\nto: Sam Lee <sam@exampl
 
 const e = K.build_editor(email)
 const w = Window(e, size=(1000px, 900px))
-frames(n=2) = foreach(_ -> frame(w), 1:n)
+const (; frames, at, press, release, click, key, shot) = drive(w)
 e.plain && K.level!(e)   # the page starts at the high level, whatever a test before this one left
 frames(3)
 K.focus(e)
-shot(name) = haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], name), w)
 
-at((x, y)) = (w.mouse = typeof(w.mouse)(px(x), px(y)); onmouse(w, MouseMove(Vec2{px}(px(x), px(y)), w)); frames(1))
-press(place) = (at(place); w.keys |= Keys.mouse_left; onkey(w, KeyPress{Keys.mouse_left}(0, w)))
-release() = (w.keys ⊻= Keys.mouse_left; onkey(w, KeyRelease{Keys.mouse_left}(0, w)); frames())
-click(place) = (press(place); release())
-middle(r) = (K.num(r.left + r.width / 2), K.num(r.top + r.height / 2))
-key(k) = (onkey(w, KeyPress{k}(0, w)); frames())
 "Press ⌘E"
 cmd_e() = (w.keys |= Keys.cmd; onkey(w, KeyPress{Keys.e}(0, w)); w.keys ⊻= Keys.cmd; frames())
 "The slider, or nothing while it's closed"

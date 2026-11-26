@@ -10,6 +10,7 @@
 @use "github.com/jkroso/UI.jl/Interface/draw" frame rect popups
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
 @use GeometryBasics: Vec2
+@use "./drive" drive middle
 const px = K.px
 
 const dir = mktempdir()
@@ -86,17 +87,9 @@ The end.
 
 const e = K.build_editor(page)
 const w = Window(e, size=(1000px, 1100px))
-frames(n=2) = foreach(_ -> frame(w), 1:n)
+const (; frames, at, press, release, click, typed, key, shot) = drive(w)
 frames()
-shot(name) = haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], name), w)
 
-at((x, y)) = (w.mouse = typeof(w.mouse)(px(x), px(y)); onmouse(w, MouseMove(Vec2{px}(px(x), px(y)), w)); frames(1))
-press(place) = (at(place); w.keys |= Keys.mouse_left; onkey(w, KeyPress{Keys.mouse_left}(0, w)))
-release() = (w.keys ⊻= Keys.mouse_left; onkey(w, KeyRelease{Keys.mouse_left}(0, w)); frames())
-click(place) = (press(place); release())
-middle(r) = (K.num(r.left + r.width / 2), K.num(r.top + r.height / 2))
-typed(s) = (foreach(c -> ontype(w, Typed(c, w)), s); frames())
-key(k) = (onkey(w, KeyPress{k}(0, w)); frames())
 block(n) = (s = K.block_lines(e.buf, K.FILTER, n); e.buf.lines[s[1]+1:s[2]-1])
 view(n) = e.nodes[(:block, K.FILTER, page, n)]
 "Scroll the page until the top of the `n`th filter is near the top of the window, and it has been laid out and drawn"

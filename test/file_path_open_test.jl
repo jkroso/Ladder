@@ -8,6 +8,7 @@
 @use "github.com/jkroso/MiniFB.jl" Window KeyPress KeyRelease MouseMove Keys onkey onmouse
 @use "github.com/jkroso/UI.jl/Interface/draw" frame rect
 @use GeometryBasics: Vec2
+@use "./drive" drive middle
 const px = K.px
 
 const dir = realpath(mktempdir())
@@ -38,16 +39,11 @@ The end.
 
 const e = K.build_editor(page)
 const w = Window(e, size=(1000px, 1400px))
-frames(n=2) = foreach(_ -> frame(w), 1:n)
+const (; frames, at, press, release, click) = drive(w, moved=2)
 frames()
 
-at((x, y)) = (w.mouse = typeof(w.mouse)(px(x), px(y)); onmouse(w, MouseMove(Vec2{px}(px(x), px(y)), w)); frames())
-press(place) = (at(place); w.keys |= Keys.mouse_left; onkey(w, KeyPress{Keys.mouse_left}(0, w)))
-release() = (w.keys ⊻= Keys.mouse_left; onkey(w, KeyRelease{Keys.mouse_left}(0, w)); frames())
-click(place) = (press(place); release())
 "A click with ⌘ held"
 cmd_click(place) = (w.keys |= Keys.cmd; click(place); w.keys ⊻= Keys.cmd; frames())
-middle(r) = (K.num(r.left) + K.num(r.width) / 2, K.num(r.top) + K.num(r.height) / 2)
 right(r) = K.num(r.left) + K.num(r.width)
 
 "The breadcrumb of the path `at` on the page that shows"

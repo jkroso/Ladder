@@ -12,6 +12,7 @@
 @use "github.com/jkroso/UI.jl/Interface/draw" frame rect
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
 @use GeometryBasics: Vec2
+@use "./drive" drive middle
 const px = K.px
 
 # Wednesday 18 November 2026 counts as today
@@ -44,17 +45,11 @@ The end.
 
 const e = K.build_editor(page)
 const w = Window(e, size=(1000px, 1200px))
-frames(n=2) = foreach(_ -> frame(w), 1:n)
+const (; frames, at, press, release, click, shot) = drive(w)
 frames()
 const v = e.nodes[(:block, K.CALENDAR, page, 1)]
-shot(name) = haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], name), w)
 
-at((x, y)) = (w.mouse = typeof(w.mouse)(px(x), px(y)); onmouse(w, MouseMove(Vec2{px}(px(x), px(y)), w)); frames(1))
-press(place) = (at(place); w.keys |= Keys.mouse_left; onkey(w, KeyPress{Keys.mouse_left}(0, w)))
-release() = (w.keys ⊻= Keys.mouse_left; onkey(w, KeyRelease{Keys.mouse_left}(0, w)); frames())
-click(place) = (press(place); release())
 drag(from, to) = (press(from); at(((from[1] + to[1]) / 2, (from[2] + to[2]) / 2)); at(to); release())
-middle(r) = (K.num(r.left + r.width / 2), K.num(r.top + r.height / 2))
 block() = (s = K.block_lines(e.buf, K.CALENDAR, 1); e.buf.lines[s[1]+1:s[2]-1])
 cells() = [v.parts[(:day, i)] for i in 1:7v.weeks]
 cell(d) = only(c for c in cells() if c.day == d)

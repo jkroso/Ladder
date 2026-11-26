@@ -8,6 +8,7 @@
 @use "github.com/jkroso/MiniFB.jl" Window KeyPress MouseMove Keys onkey onmouse Typed ontype
 @use "github.com/jkroso/UI.jl/Interface/draw" frame rect popups
 @use GeometryBasics: Vec2
+@use "./drive" drive middle
 
 const px = K.px
 
@@ -28,15 +29,11 @@ mkpath(joinpath(dir, "v1.2"))
 
 const e = K.build_editor(page)
 const w = Window(e, size=(1000px, 800px))
-frames(n=2) = foreach(_ -> frame(w), 1:n)
+const (; frames, at, typed, key) = drive(w, moved=2)
 e.panel || K.toggle_panel!(e)
 frames(3)
 
-at((x, y)) = (w.mouse = typeof(w.mouse)(px(x), px(y)); onmouse(w, MouseMove(Vec2{px}(px(x), px(y)), w)); frames())
-middle(r) = (K.num(r.left) + K.num(r.width) / 2, K.num(r.top) + K.num(r.height) / 2)
 right_click(place) = (at(place); onkey(w, KeyPress{Keys.mouse_right}(0, w)); frames())
-key(k) = (onkey(w, KeyPress{k}(0, w)); frames())
-typed(s) = (foreach(c -> ontype(w, Typed(c, w)), s); frames())
 
 "The names that the sidebar's tree lists, from the top"
 listed() = [basename(i.firstchild.path) for i in K.file_tree(e).children]

@@ -13,6 +13,7 @@
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
 @use GeometryBasics: Vec2
 @use Sockets
+@use "./drive" drive
 const px = K.px
 
 const dir = mktempdir()
@@ -108,14 +109,9 @@ The end.
 
 const e = K.build_editor(page)
 const w = Window(e, size=(1000px, 1100px))
-frames(n=2) = foreach(_ -> frame(w), 1:n)
+const (; frames, at, press, release, click, shot) = drive(w)
 frames()
-shot(name) = haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], name), w)
 
-at((x, y)) = (w.mouse = typeof(w.mouse)(px(x), px(y)); onmouse(w, MouseMove(Vec2{px}(px(x), px(y)), w)); frames(1))
-press(place) = (at(place); w.keys |= Keys.mouse_left; onkey(w, KeyPress{Keys.mouse_left}(0, w)))
-release() = (w.keys ⊻= Keys.mouse_left; onkey(w, KeyRelease{Keys.mouse_left}(0, w)); frames())
-click(place) = (press(place); release())
 middle(r) = (K.num(r[1] + r[3] / 2), K.num(r[2] + r[4] / 2))
 view(n) = e.nodes[(:block, K.SAVE, page, n)]
 "Scroll the page until the top of the `n`th save block is near the top of the window, and it has been laid out and drawn"

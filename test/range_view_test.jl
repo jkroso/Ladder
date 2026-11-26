@@ -11,6 +11,7 @@
 @use "github.com/jkroso/UI.jl/Interface/draw" frame
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
 @use GeometryBasics: Vec2
+@use "./drive" drive
 const px = K.px
 
 const dir = mktempdir()
@@ -37,15 +38,13 @@ show: Litres
 
 const e = K.build_editor(page)
 const w = Window(e, size=(1000px, 900px))
-frames(n=2) = foreach(_ -> frame(w), 1:n)
+const (; frames, at, shot) = drive(w, moved=2)
 frames()
 const chart = e.nodes[(:block, K.CHART, page, 1)]
-at((x, y)) = (w.mouse = typeof(w.mouse)(px(x), px(y)); onmouse(w, MouseMove(Vec2{px}(px(x), px(y)), w)); frames())
 sheet() = K.item(e, findfirst(==("```sheet"), e.buf.lines) + 1).content
 results() = [r.text for r in sheet().results]
 spot(m) = (chart.box[1] + m.at[1] + m.at[3] / 2, chart.box[2] + m.at[2] + m.at[4] / 2)
 bar(label) = spot(only(m for m in chart.marks if m.kind == :bar && m.label == label))
-shot(name) = haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], name), w)
 
 @testset "the sheet shows both ends of its range" begin
   @test results() == ["2.4m", "8m to 20m", "19.2m² to 48m²", "2.4litre to 6litre"]

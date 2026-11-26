@@ -10,6 +10,7 @@
 @use "github.com/jkroso/UI.jl/Interface/draw" frame rect
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
 @use GeometryBasics: Vec2
+@use "./drive" drive middle
 
 @use "../main" => K
 const px = K.px
@@ -72,17 +73,9 @@ write(page, "# Kinds of diagram\n\n" * join(("## $name\n\n```mermaid\n$good\n```
 const e = K.build_editor(page)
 e.remember = false
 const w = Window(e, size=(900px, 3200px))
-frames(n=2) = foreach(_ -> frame(w), 1:n)
+const (; frames, at, press, release, click, key, shot) = drive(w, moved=2)
 frames()
 
-shot(name) = haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], name), w)
-
-at((x, y)) = (w.mouse = typeof(w.mouse)(px(x), px(y)); onmouse(w, MouseMove(Vec2{px}(px(x), px(y)), w)); frames())
-press(place) = (at(place); w.keys |= Keys.mouse_left; onkey(w, KeyPress{Keys.mouse_left}(0, w)))
-release() = (w.keys ⊻= Keys.mouse_left; onkey(w, KeyRelease{Keys.mouse_left}(0, w)); frames())
-click(place) = (press(place); release())
-key(k) = (onkey(w, KeyPress{k}(0, w)); frames())
-middle(r) = (K.num(r.left) + K.num(r.width) / 2, K.num(r.top) + K.num(r.height) / 2)
 "The diagrams that the page of `e` shows, by their code"
 diagrams(e) = Dict(n.value.code => n for n in values(e.nodes) if n isa K.Shown && n.value isa K.Mermaid && rect(n.value) !== nothing)
 

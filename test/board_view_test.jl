@@ -9,6 +9,7 @@
 @use "github.com/jkroso/UI.jl/Interface/draw" frame rect
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
 @use GeometryBasics: Vec2
+@use "./drive" drive middle
 const px = K.px
 
 const dir = mktempdir()
@@ -30,18 +31,12 @@ The end.
 
 const e = K.build_editor(page)
 const w = Window(e, size=(1000px, 900px))
-frames(n=2) = foreach(_ -> frame(w), 1:n)
+const (; frames, at, press, release, click, shot) = drive(w)
 frames()
 const v = e.nodes[(:block, K.BOARD, page, 1)]
-shot(name) = haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], name), w)
 
-at((x, y)) = (w.mouse = typeof(w.mouse)(px(x), px(y)); onmouse(w, MouseMove(Vec2{px}(px(x), px(y)), w)); frames(1))
-press(place) = (at(place); w.keys |= Keys.mouse_left; onkey(w, KeyPress{Keys.mouse_left}(0, w)))
-release() = (w.keys ⊻= Keys.mouse_left; onkey(w, KeyRelease{Keys.mouse_left}(0, w)); frames())
-click(place) = (press(place); release())
 "Press the mouse at one place, move it to another by way of the place between, and let go"
 drag(from, to) = (press(from); at(((from[1] + to[1]) / 2, (from[2] + to[2]) / 2)); at(to); release())
-middle(r) = (K.num(r.left + r.width / 2), K.num(r.top + r.height / 2))
 block() = (s = K.block_lines(e.buf, K.BOARD, 1); e.buf.lines[s[1]+1:s[2]-1])
 card(name) = middle(rect(v.parts[(:card, name)]))
 column(c) = (r = rect(v.parts[(:column, c)]); (K.num(r.left + r.width / 2), K.num(r.top + r.height - 12)))
