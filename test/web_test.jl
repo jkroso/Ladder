@@ -489,6 +489,20 @@ end
   @test startswith(box(Web.page(d; wide=400).root, named(d, "s")).style.family[1], "web:")
 end
 
+@testset "the size of monospace text" begin
+  # A browser draws `monospace` smaller, 13 px where other text is 16, unless the page gave the size as a length. Each size here is WebKit's.
+  size(parent, inner) = (d = Dom.document("""<!DOCTYPE html><body><div style="$parent">$inner</div></body>"""); Styles.styles(d, 400)[named(d, "m")].size)
+  @test size("", "<code id=m>x</code>") == 13 && size("", "<pre id=m>x</pre>") == 13 && size("", "<code><code id=m>x</code></code>") == 13
+  @test size("font-size:16px", "<code id=m>x</code>") == 16 && size("font:16px/20px Helvetica", "<code id=m>x</code>") == 16 && size("font-size:20px", "<pre id=m>x</pre>") == 20
+  @test size("font-size:2em", "<code id=m>x</code>") == 26 && size("", "<code id=m style='font-size:1.2em'>x</code>") ≈ 15.6 && size("font-size:larger", "<code id=m>x</code>") ≈ 15.6
+  # A size from a word is that word's size for monospace
+  @test size("font-size:large", "<code id=m>x</code>") == 16 && size("", "<code id=m style='font-size:x-large'>x</code>") == 20 && size("font-size:small", "<code id=m>x</code>") == 12
+  # A size in px or rem stays, and so does a size made with a length
+  @test size("", "<code id=m style='font-size:14px'>x</code>") == 14 && size("", "<code id=m style='font-size:1rem'>x</code>") == 16 && size("font-size:calc(1em + 2px)", "<code id=m>x</code>") == 18
+  # Other text in monospace is back to its size, and a font list with more than `monospace` isn't drawn smaller
+  @test size("", "<code><span id=m style='font-family:Courier'>x</span></code>") == 16 && size("", "<span id=m style='font-family:monospace, serif'>x</span>") == 16
+end
+
 @testset "lines picked for the whole paragraph" begin
   # `text-wrap: pretty` picks the lines of a paragraph together, as WebKit does, so that the last line isn't left short. Each
   # paragraph here ends its lines where WebKit ends them, given as the last word of each line, and ordinary lines end elsewhere.

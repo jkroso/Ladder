@@ -741,6 +741,8 @@ Base.@kwdef mutable struct Style
   color::UInt32 = 0xff000000
   family::Vector{String} = NO_STRINGS
   size::Float64 = 16.0
+  sizeword::Int = 4                             # which word the size comes from, 1 for xx-small to 8 for xxx-large, or 0 for none
+  sizefixed::Bool = false                       # the size comes from a length like 16px or 1rem, given here or in a parent
   weight::Int = 400
   italic::Bool = false
   stretch::Float64 = 100.0                      # how wide its letters are, in percent of the font's normal width: `font-stretch`
@@ -780,7 +782,7 @@ Base.@kwdef mutable struct Style
   vars::Dict{String,String} = NO_VARS           # the page's variables (`--x`), and how an SVG shape is drawn (`fill`, `stroke`)
 end
 
-const INHERITED = (:visible, :color, :family, :size, :weight, :italic, :stretch, :smallcaps, :lineheight, :align, :alignlast, :direction, :textcase,
+const INHERITED = (:visible, :color, :family, :size, :sizeword, :sizefixed, :weight, :italic, :stretch, :smallcaps, :lineheight, :align, :alignlast, :direction, :textcase,
                    :letterspacing, :wordspacing, :whitespace, :textwrap, :tabsize, :indent, :wrap, :collapse, :cellspacing, :emptycells, :listtype,
                    :listtext, :listimage, :listinside, :captionbottom, :quotes, :textshadow, :stroke, :strokecolor, :textfill, :underoffset,
                    :rendering, :accent, :lines, :linecolor, :linestyle, :linethick, :vars)
@@ -1243,6 +1245,28 @@ prop!("font-family", :family) do v, raw, _, _
 end
 const SIZES = Dict("xx-small" => 9.0, "x-small" => 10.0, "small" => 13.0, "medium" => 16.0, "large" => 18.0, "x-large" => 24.0, "xx-large" => 32.0,
                    "xxx-large" => 48.0, "-webkit-xxx-large" => 48.0)
+const SIZE_WORDS = ("xx-small", "x-small", "small", "medium", "large", "x-large", "xx-large", "xxx-large")
+# What each of those words is in px, as WebKit has them: for most fonts, and for `monospace`, which is drawn smaller
+const WORD_SIZES = (9.0, 10.0, 13.0, 16.0, 18.0, 24.0, 32.0, 48.0)
+const MONO_SIZES = (9.0, 10.0, 12.0, 13.0, 16.0, 20.0, 26.0, 39.0)
+
+"""
+How the font size `v` of an element whose parent has the style `parent` is
+given: which word it comes from (0 for none), and whether it comes from a
+length like 16px. A size in em or percent, or `larger`, is as fixed as its
+parent's. That's what decides whether `monospace` is drawn smaller.
+"""
+size_kind(v, parent) = begin
+  v in ("inherit", "unset", "math") && return (parent.sizeword, parent.sizefixed)
+  v in ("initial", "revert", "revert-layer") && return (4, false)
+  v == "-webkit-xxx-large" && return (8, false)
+  i = findfirst(==(v), SIZE_WORDS)
+  i === nothing || return (i, false)
+  v in ("larger", "smaller") || occursin(r"^[0-9.]+(em|ex|ch|%)$", v) ? (0, parent.sizefixed) : (0, true)
+end
+
+"True for text whose only font is `monospace`"
+monospaced(s) = length(s.family) == 1 && s.family[1] == "monospace"
 prop!("font-size", :size) do v, _, c, parent
   haskey(SIZES, v) && return SIZES[v]
   v == "smaller" && return parent.size / 1.2
@@ -1873,6 +1897,7 @@ set!(s::Style, name::AbstractString, value::AbstractString, c::Context, parent::
   got = wide && v == "inherit" ? get_side(parent, p) :
         wide && v in ("initial", "unset", "revert", "revert-layer") ? get_side(p.field in INHERITED && v != "initial" ? parent : DEFAULT, p) : p.read(v, value, c, parent)
   got === nothing || set_side!(s, p, got)
+  name == "font-size" && got !== nothing && ((s.sizeword, s.sizefixed) = size_kind(v, parent))
   nothing
 end
 
@@ -1892,6 +1917,13 @@ const BLOCKS = Dict(:inline => :block, :inline_block => :block, :table_cell => :
 settle!(s::Style, parent::Style, tag="") = begin
   # A table takes no centring from a tag's `align` round it: what's in it starts at the left again
   tag == "table" && s.align in (:wk_left, :wk_center, :wk_right) && (s.align = :start)
+  # A browser draws `monospace` smaller, 13 px where other text is 16, unless the page gave the size as a length. A size that
+  # comes from a word is that word's size for the font. Another is made smaller, or bigger again, when the font changes.
+  if !s.sizefixed
+    mono = monospaced(s)
+    s.sizeword > 0 ? (s.size = (mono ? MONO_SIZES : WORD_SIZES)[s.sizeword]) :
+    mono != monospaced(parent) && (s.size = mono ? s.size * 13 / 16 : s.size * 16 / 13)
+  end
   size = s.size
   f(l::Len) = flat(l, size)
   flatten!(s, size)
@@ -1965,8 +1997,8 @@ big { font-size: larger }
 small { font-size: smaller }
 sub { vertical-align: sub; font-size: smaller }
 sup { vertical-align: super; font-size: smaller }
-pre, listing, xmp, plaintext { white-space: pre; margin: 1em 0; font-family: monospace; font-size: 13px }
-code, kbd, samp, tt { font-family: monospace; font-size: 0.8125em }
+pre, listing, xmp, plaintext { white-space: pre; margin: 1em 0; font-family: monospace }
+code, kbd, samp, tt { font-family: monospace }
 pre code, pre kbd, pre samp, pre tt { font-size: 1em }
 center { text-align: -webkit-center }
 hr { border: 1px inset gray; margin: 0.5em auto; overflow: hidden }

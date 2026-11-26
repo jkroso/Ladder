@@ -1210,12 +1210,13 @@ prettify(marks, most, ideal, indent) = begin
   rag(w) = 100 * abs((w - ideal) / PRETTY_STEP)^3
   # A line that ends before the last few places where a line can break has to be near the width that the lines aim at
   price(w, m) = m < n - PRETTY_LAST && abs(w - ideal) > PRETTY_STEP * PRETTY_STEPS ? Inf : rag(w)
-  line(a, m) = marks[m][2] - marks[a+1][1] + (a == 0 ? indent : 0.0)
+  # WebKit measures a line in 64ths of a px, rounded up after a 64th is added
+  line(a, m) = ceil((marks[m][2] - marks[a+1][1] + (a == 0 ? indent : 0.0) + 1 / 64) * 64) / 64
   keep!(m, c, a, w) = (cost[m] = c; from[m] = a; width[m] = w - (a == 0 ? indent : 0.0))
   # Where WebKit finds no line that fits from the last place that has lines, it takes as many words as fit, and leaves a few for the next line
   greedy(v) = begin
     g = v + 1
-    while g < n && line(v, g + 1) <= most + 0.01
+    while g < n && line(v, g + 1) <= most
       g += 1
     end
     g < n && n - g < 4 && n - v > 3 && (g = max(v + 1, n - 3))
@@ -1224,7 +1225,7 @@ prettify(marks, most, ideal, indent) = begin
   done = 0
   for m in 1:n
     w = line(0, m)
-    w > most + 0.01 && break
+    w > most && break
     c = price(w, m)
     c < cost[m] && (keep!(m, c, 0, w); done = m)
   end
@@ -1235,7 +1236,7 @@ prettify(marks, most, ideal, indent) = begin
   end
   lo = 1
   for m in 2:n
-    while lo < m && line(lo, m) > most + 0.01
+    while lo < m && line(lo, m) > most
       lo += 1
     end
     if lo > done && done < n
