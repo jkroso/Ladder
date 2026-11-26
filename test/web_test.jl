@@ -489,6 +489,28 @@ end
   @test startswith(box(Web.page(d; wide=400).root, named(d, "s")).style.family[1], "web:")
 end
 
+@testset "lines picked for the whole paragraph" begin
+  # `text-wrap: pretty` picks the lines of a paragraph together, as WebKit does, so that the last line isn't left short. Each
+  # paragraph here ends its lines where WebKit ends them, given as the last word of each line, and ordinary lines end elsewhere.
+  rba = "On 3 November the RBA <a href='https://x.test/'>raised the cash rate to 4.85%</a>, its fifth hike this year and the highest since 2008. Trimmed mean inflation is 3.6% and unemployment is 4.9%, and both are going up."
+  short = "A short paragraph that wraps onto just two lines here."
+  ends(text, wide; css="", wrap="pretty") = begin
+    p = Web.page("""<!DOCTYPE html><body style="margin:0"><p style="margin:0;width:$(wide)px;font:16px/20px Helvetica;$(css)text-wrap:$wrap">$text</p></body>"""; wide=700)
+    tops = Dict{Float64,String}()
+    for w in p.words
+      tops[round(w.top, digits=1)] = get(tops, round(w.top, digits=1), "") * String(w.letters)
+    end
+    join([split(tops[k])[end] for k in sort(collect(keys(tops)))], " ")
+  end
+  @test ends(rba, 340) == "cash and mean unemployment up." && ends(rba, 340; wrap="wrap") == "to highest 3.6% going up."
+  @test ends(short, 340) == "just here." && ends(short, 340; wrap="wrap") == "lines here."
+  # The shorthand `text-wrap: wrap` puts the ordinary lines back
+  @test ends(short, 340; css="text-wrap-style:pretty;", wrap="wrap") == "lines here." && ends(short, 340; css="text-wrap:pretty;", wrap="wrap") == "lines here."
+  # The first line's indent counts, and the text on each side of a <br> is picked apart
+  @test ends(rba, 260; css="text-indent:2em;") == "RBA its highest inflation is up."
+  @test ends(rba * "<br>" * short, 300) == "cash and mean unemployment up. onto here."
+end
+
 @testset "text of today" begin
   p = laid("""<!DOCTYPE html><body style="margin:0;font:16px/20px Helvetica"><p id="j" style="margin:0;width:200px;text-align:justify">one two three four five six seven eight nine ten</p>
     <p id="e" style="margin:0;width:80px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">a line that is far too long</p>

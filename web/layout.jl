@@ -732,12 +732,14 @@ mutable struct Liner
   beside::Float64               # how wide the floats in the text are together, when only measuring
   squeeze::Float64              # how much sooner than its room a line ends, for lines of about one length
   count::Int                    # how many lines there are, when only counting
+  limits::Vector{Float64}       # how wide each line may be, for lines that are picked for the whole paragraph (`text-wrap: pretty`), or none
+  marks::Any                    # while finding those: for each run of text between forced breaks, where each word starts and ends on one long line
 end
 
 style_now(L::Liner) = isempty(L.open) ? L.b.style : L.open[end].style
 wraps(s::Style) = s.whitespace in (:normal, :pre_wrap, :pre_line)
 "How wide a line can be before it breaks"
-fit(L::Liner) = L.avail - L.squeeze
+fit(L::Liner) = isempty(L.limits) ? L.avail - L.squeeze : min(L.avail, L.limits[min(end, L.count + 1)])
 
 "Work out where the line at `L.y` starts and how wide it can be"
 room!(L::Liner) = begin
@@ -763,6 +765,7 @@ line. If it doesn't fit, it starts the next line.
 """
 commit!(L::Liner) = begin
   isempty(L.word) && return
+  L.marks === nothing || push!(L.marks[end], (L.curw, L.curw + L.wordw))
   if L.measure != :max
     L.content && L.curw + L.wordw > fit(L) + 0.01 && newline!(L)
     if L.wordw > fit(L) + 0.01
@@ -825,6 +828,7 @@ end
 
 "End the line. A line with nothing in it is no line, unless a <br> ends it."
 newline!(L::Liner; forced=false) = begin
+  L.marks === nothing || push!(L.marks, NTuple{2,Float64}[])
   ps = L.cur
   used = L.curw
   # The spaces that a line ends with take no room
@@ -1128,7 +1132,8 @@ read!(L::Liner, k::Box) = begin
 end
 
 liner(b, p, flow, fx, fy, cw, measure) =
-  Liner(b, p, flow, fx, fy, cw, measure, Line{Box}[], Piece{Box}[], 0.0, Piece{Box}[], 0.0, 0.0, 0.0, 0.0, Box[], Box[], true, false, true, 0.0, 0.0, 0.0, 0)
+  Liner(b, p, flow, fx, fy, cw, measure, Line{Box}[], Piece{Box}[], 0.0, Piece{Box}[], 0.0, 0.0, 0.0, 0.0, Box[], Box[], true, false, true, 0.0, 0.0, 0.0, 0,
+        Float64[], nothing)
 
 "How many lines the text of `b` makes in `cw` px, when each line ends `squeeze` px sooner than it has to"
 count_lines(b::Box, p::Pass, cw, squeeze) = begin
@@ -1154,6 +1159,106 @@ balance(b::Box, p::Pass, cw) = begin
     count_lines(b, p, cw, mid) == n ? (lo = mid) : (hi = mid)
   end
   lo
+end
+
+# How WebKit picks the lines of a paragraph with `text-wrap: pretty` (InlineContentConstrainer.cpp): each line but the last few
+# words is up to 3 steps of 15 px either side of a width 45 px narrower than the block, and costs 100 × (its distance from that ÷ 15)³.
+# The last line costs as much, so a short last line costs a lot.
+const PRETTY_STEP = 15.0
+const PRETTY_STEPS = 3
+# A line that ends in the last 2 words may be any width. WebKit counts 5 places where a line can break, but it counts one each side of a space.
+const PRETTY_LAST = 2
+
+"""
+How wide each line of `b`'s text may be, for the lines that `text-wrap: pretty`
+picks: the cheapest set of lines for the whole paragraph, as WebKit picks them.
+Nothing when the text makes one line, when its widest word is wider than the
+width that the lines aim at, or when no set of lines fits.
+"""
+pretty(b::Box, p::Pass, cw) = begin
+  L = liner(b, p, nothing, 0.0, 0.0, cw, :max)
+  L.marks = [NTuple{2,Float64}[]]
+  room!(L)
+  foreach(k -> read!(L, k), b.children)
+  commit!(L)
+  newline!(L)
+  chunks = filter(!isempty, L.marks)
+  isempty(chunks) && return nothing
+  indent = px(b.style.indent, cw)
+  # A run that fits on one line is left as it is
+  all(c -> (c === chunks[1] ? indent : 0.0) + c[end][2] - c[1][1] <= cw + 0.01, chunks) && return nothing
+  ideal = cw - PRETTY_STEP * PRETTY_STEPS
+  ideal >= maximum(e - s for c in chunks for (s, e) in c) + max(indent, 0.0) || return nothing
+  limits = Float64[]
+  for (k, marks) in enumerate(chunks)
+    widths = prettify(marks, cw, ideal, k == 1 ? indent : 0.0)
+    widths === nothing && return nothing
+    append!(limits, widths)
+  end
+  limits
+end
+
+"""
+The widths of the cheapest lines for the words of one run of text: `marks[m]`
+is where the `m`th word starts and ends on one long line, and a line can end
+after any word. A line is at most `most` px wide, and the first starts
+`indent` px in. Nothing when no set of lines fits.
+"""
+prettify(marks, most, ideal, indent) = begin
+  n = length(marks)
+  cost, from, width = fill(Inf, n), zeros(Int, n), zeros(n)
+  rag(w) = 100 * abs((w - ideal) / PRETTY_STEP)^3
+  # A line that ends before the last few places where a line can break has to be near the width that the lines aim at
+  price(w, m) = m < n - PRETTY_LAST && abs(w - ideal) > PRETTY_STEP * PRETTY_STEPS ? Inf : rag(w)
+  line(a, m) = marks[m][2] - marks[a+1][1] + (a == 0 ? indent : 0.0)
+  keep!(m, c, a, w) = (cost[m] = c; from[m] = a; width[m] = w - (a == 0 ? indent : 0.0))
+  # Where WebKit finds no line that fits from the last place that has lines, it takes as many words as fit, and leaves a few for the next line
+  greedy(v) = begin
+    g = v + 1
+    while g < n && line(v, g + 1) <= most + 0.01
+      g += 1
+    end
+    g < n && n - g < 4 && n - v > 3 && (g = max(v + 1, n - 3))
+    g
+  end
+  done = 0
+  for m in 1:n
+    w = line(0, m)
+    w > most + 0.01 && break
+    c = price(w, m)
+    c < cost[m] && (keep!(m, c, 0, w); done = m)
+  end
+  if done == 0
+    g = greedy(0)
+    keep!(g, 0.0, 0, line(0, g))
+    done = g
+  end
+  lo = 1
+  for m in 2:n
+    while lo < m && line(lo, m) > most + 0.01
+      lo += 1
+    end
+    if lo > done && done < n
+      g = greedy(done)
+      g > done || return nothing
+      keep!(g, cost[done], done, line(done, g))
+      done = g
+    end
+    for a in lo:m-1
+      isinf(cost[a]) && continue
+      w = line(a, m)
+      c = cost[a] + price(w, m)
+      c < cost[m] && (keep!(m, c, a, w); done = max(done, m))
+    end
+  end
+  isinf(cost[n]) && return nothing
+  out = Float64[]
+  m = n
+  while m > 0
+    push!(out, width[m])
+    m = from[m]
+  end
+  reverse!(out)
 end
 
 "Cut the line off at `limit` px from the left of the block's content, with … where it's cut. With `always`, a line that fits has the dots after it."
@@ -1241,8 +1346,8 @@ it can be, `:max` with no line broken.
 lines!(b::Box, p::Pass, flow, fx, fy, cw; measure=:none) = begin
   s = b.style
   L = liner(b, p, flow, fx, fy, cw, measure)
-  if measure == :none && s.textwrap == :balance && isfinite(cw) && (flow === nothing || (isempty(flow.lefts) && isempty(flow.rights)))
-    L.squeeze = balance(b, p, cw)
+  if measure == :none && s.textwrap in (:balance, :pretty) && isfinite(cw) && (flow === nothing || (isempty(flow.lefts) && isempty(flow.rights)))
+    s.textwrap == :balance ? (L.squeeze = balance(b, p, cw)) : (L.limits = something(pretty(b, p, cw), Float64[]))
   end
   room!(L)
   for k in b.children

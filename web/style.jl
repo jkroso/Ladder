@@ -753,7 +753,7 @@ Base.@kwdef mutable struct Style
   letterspacing::Len = ZERO
   wordspacing::Len = ZERO
   whitespace::Symbol = :normal                  # :normal, :nowrap, :pre, :pre_wrap or :pre_line
-  textwrap::Symbol = :auto                      # :auto, or :balance for lines of about one length
+  textwrap::Symbol = :auto                      # :auto, :balance for lines of about one length, or :pretty for lines that WebKit picks for the whole paragraph
   tabsize::Float64 = 8.0
   indent::Len = ZERO
   wrap::Symbol = :normal                        # :normal, :break_word (a long word breaks to fit), :anywhere (and its box can be that narrow) or :all (any word breaks)
@@ -860,7 +860,7 @@ words!("text-transform", :textcase, "none", "uppercase", "lowercase", "capitaliz
 words!("white-space", :whitespace, "normal", "nowrap", "pre", "pre-wrap", "pre-line", "break-spaces" => :pre_wrap, "-webkit-nowrap" => :nowrap)
 words!("white-space-collapse", :whitespace, "collapse" => :normal, "preserve" => :pre_wrap, "preserve-breaks" => :pre_line, "break-spaces" => :pre_wrap,
        "preserve-spaces" => :pre_wrap)
-words!("text-wrap-style", :textwrap, "auto", "balance", "pretty" => :auto, "stable" => :auto)
+words!("text-wrap-style", :textwrap, "auto", "balance", "pretty", "stable" => :auto)
 words!("border-collapse", :collapse, "collapse" => true, "separate" => false)
 words!("empty-cells", :emptycells, "show" => true, "hide" => false)
 words!("list-style-position", :listinside, "inside" => true, "outside" => false)
@@ -1701,8 +1701,16 @@ expand(name, value) = begin
       push!(out, (colour(lowercase(w)) !== nothing ? "-webkit-text-stroke-color" : "-webkit-text-stroke-width") => w)
     end
   elseif name == "text-wrap"
-    for w in terms(lowercase(value))
-      push!(out, (w in ("wrap", "nowrap") ? "text-wrap-mode" : "text-wrap-style") => w)
+    # What the shorthand leaves out goes back to its first value, so `text-wrap: wrap` ends `pretty`
+    v = lowercase(strip(value))
+    if v in ("inherit", "initial", "unset", "revert", "revert-layer")
+      push!(out, "text-wrap-mode" => v, "text-wrap-style" => v)
+    else
+      mode, how = "wrap", "auto"
+      for w in terms(v)
+        w in ("wrap", "nowrap") ? (mode = w) : (how = w)
+      end
+      push!(out, "text-wrap-mode" => mode, "text-wrap-style" => how)
     end
   elseif name == "-webkit-box-orient"
     push!(out, "flex-direction" => (lowercase(strip(value)) == "vertical" ? "column" : "row"))
