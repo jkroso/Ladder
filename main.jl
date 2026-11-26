@@ -30735,9 +30735,9 @@ toggle_panel!(e) = agent_shows(e) ? e.panel : (e.slid_from = opened(e); e.slid =
 
 sliding(e) = time() - e.slid < SLIDE_TIME
 
-"How far a slide from `from` to `to` that started at the time `at` has gone. It takes `SLIDE_TIME`."
-eased(from, to, at) = begin
-  t = (time() - at) / SLIDE_TIME
+"How far a slide from `from` to `to` that started at the time `at` has gone. It takes `take` seconds."
+eased(from, to, at; take=SLIDE_TIME) = begin
+  t = (time() - at) / take
   t < 1 || return to
   t = t < 0.5 ? 4t^3 : 1 - (2 - 2t)^3 / 2   # slow at the start and the end
   from + (to - from) * t
@@ -50100,7 +50100,6 @@ pane_talk(p::AgentPane, e, room) = begin
                            Box(fixed(16px), height(16px), Alignment.Center, justify=Alignment.Center, Spinner(size=12px)),
                            Box(label("Thinking", 13px * talk_zoom(e), color=colours.dim))))
   isempty(p.error) || push!(rows, words_block(e, p.error, PICK_FAILED, room))
-  isempty(rows) && on_page(p) && return talk_greeting(p, e, room)
   isempty(rows) && return Column(width(grow=grow), Alignment.Start, padding(40px, PANE_X, 20px, PANE_LEFT), child_gap=6px, name="Talk",
     words_block(e, "Ask about this page, or say what to change in it.", colours.dim, room),
     words_block(e, "What the agent says shows here as a page: tables, diagrams and charts, not a terminal's text.", colours.faint, room))
@@ -50172,20 +50171,35 @@ pane_foot(p::AgentPane, e, room) = begin
   s = p.session
   sub = p.field
   pane_style!(sub, e)
-  inside = pane_wide(p, e) - 2PANE_X - 4px - SEND_ROOM
-  pane_layout!(sub, inside)
   line = REPLY_SIZE * talk_zoom(e) * 1.5
+  slot = on_page(p)
+  # The round ends of a session's file's slot take a little more room from the words than the pane's corners do
+  pane_layout!(sub, pane_wide(p, e) - 2PANE_X - 4px - SEND_ROOM - (slot ? max(0px, line - 18px) : 0px))
   tall = min(isempty(sub.layout) ? line : lowest(sub, sub.layout), 9line)
+  # A session's file has a slot: with one line of words its ends are half circles, and more lines keep ends as round.
+  # Its button has the same middle as the round end at the foot, which is the middle of the last line.
+  one = slot ? one_line(sub, line) : line
+  ends = slot ? (max(one + 8px, 28px) + 14px) / 2 : 14px   # one line of words, the room over and under it, and the border
+  right, left = slot ? (max(6px, ends - 15px), max(14px, ends - 5px)) : (6px, 14px)
+  drop = slot ? max(0px, ends - 21px) : 0px   # 21px: the button's half, the room under the words, and the border
   doc = Box(width(grow=grow), height(tall), Alignment.Start, clip=true, node!(Document, sub, :document))
   who = pane_agent(p, e)
   empty = sub.buf.lines == [""]
   text = empty ? Stack(width(grow=grow), height(tall), Alignment.Start,
-                       Row(width(grow=grow), height(tall), Alignment.Center, label(on_page(p) ? "Ask $who, or say what to do" : "Ask $who, or say what to change", REPLY_SIZE * talk_zoom(e), color=colours.faint)), doc) : doc
-  Box(width(grow=grow), padding(4px, PANE_X - 4px, on_page(p) ? 18px : PANE_X - 4px, PANE_X - 4px), name="Agent foot",
-    Row(width(grow=grow), Alignment.End, padding(6px, 6px, 6px, 14px), radius(14px), child_gap=SEND_ROOM - 28px,   # top, right, bottom, left
+                       Row(width(grow=grow), height(tall), Alignment.Center, label(slot ? "Ask $who, or say what to do" : "Ask $who, or say what to change", REPLY_SIZE * talk_zoom(e), color=colours.faint)), doc) : doc
+  Box(width(grow=grow), padding(4px, PANE_X - 4px, slot ? 18px : PANE_X - 4px, PANE_X - 4px), name="Agent foot",
+    Row(width(grow=grow), Alignment.End, padding(6px, right, 6px, left), radius(ends), child_gap=SEND_ROOM - 28px,   # top, right, bottom, left
         background(on_glass(0.07)), border(1px, :solid, on_glass(0.1)),
-      Box(width(grow=grow), padding(0px, 4px), text),   # one line of words is as tall as the button
-      pane_button(p, s !== nothing && s.busy && empty ? :stop : :send)))
+      Box(width(grow=grow), padding(0px, 4px), text),   # one line of words is as tall as the button, or taller
+      Box(padding(0px, 0px, drop, 0px), pane_button(p, s !== nothing && s.busy && empty ? :stop : :send))))
+end
+
+"How tall one line of the words in `sub` is, as it lays them out: as tall as its first line. Before it lays them out, `line`."
+one_line(sub, line) = begin
+  isempty(sub.layout) && return line
+  it = sub.layout[1]
+  f = it.content
+  f isa Flow && length(f.lines) > 1 ? it.top + f.above + f.lines[1].high + f.below : it.top + it.tall
 end
 
 describe(b::PaneButton) = begin
@@ -50544,8 +50558,7 @@ end
 #
 # New Agent Session, in a folder's menu and in the command palette, makes
 # such a file for the agent that Settings chose, and shows it. The agent
-# works in the top folder of the folder's repository, or in the folder
-# itself when it's in none. Its program starts with your first words. It
+# works in the folder that the file is in. Its program starts with your first words. It
 # works on while the window shows other files, as a terminal's shell does.
 # It ends when the window closes, and when the agent has done and its file
 # has no tab.
@@ -50655,19 +50668,15 @@ end
 """
 Read the file of the pane `p`, a session's file, into its session: what was
 said, and the name that the agent goes on with. A file with no agent in it
-gets the agent that Settings chose. The agent's folder is the one that the
-file names. Without one, it's the top folder of the file's repository, or
-the file's own folder.
+gets the agent that Settings chose. The agent works in the folder that the
+file is in, also when the file names another one: the file was moved there.
 """
 load_talk!(p::AgentPane, e) = begin
   kept = read_talk(try read(p.file, String) catch; "" end)
   s = p.session
   if s === nothing
     agent = !isempty(kept.agent) ? kept.agent : SESSION_COMMAND[] === nothing ? agent_kind(e.ai).name : e.ai
-    here = dirname(abspath(p.file))
-    top = git_top(here)
-    dir = !isempty(kept.folder) && isdir(kept.folder) ? kept.folder : !isempty(top) ? top : here
-    s = p.session = AgentSession(agent=agent, dir=dir, file=p.file, turns=agent_kind(agent).name != "Claude")
+    s = p.session = AgentSession(agent=agent, dir=dirname(abspath(p.file)), file=p.file, turns=agent_kind(agent).name != "Claude")
   end
   s.id, s.items = kept.id, kept.items
   s.version += 1
@@ -50720,7 +50729,21 @@ chat_part(e) = begin
   p
 end
 
-"A session's file in the page: what you and the agent said in a column in the middle, and under it the field that you type in"
+const TALK_SLIDE = 0.4   # seconds for the field of a session's file to slide from the middle of the page to its foot
+
+"The room under the field of a session's file while nothing is said yet. It's as tall as the room over the field, so the field is in the middle."
+@def mutable struct TalkRoom <: SemanticUI end
+describe(::TalkRoom) = Box(width(grow=grow), height(grow=grow))
+
+"True when nothing is said yet in the session of the pane `p`: the page shows the greeting, with the field under it in the middle of the page"
+said_nothing(p::AgentPane) = (s = p.session; isempty(p.error) && (s === nothing || (isempty(s.items) && !s.busy)))
+
+"""
+A session's file in the page: what you and the agent said in a column in
+the middle, and under it the field that you type in. Before anything is
+said, the field is in the middle of the page, under the greeting. Your
+first words make it slide down to the foot of the page, where it stays.
+"""
 talk_page(p::AgentPane) = begin
   was = talk_on_page[]
   talk_on_page[] = true
@@ -50730,9 +50753,30 @@ talk_page(p::AgentPane) = begin
     follow!(p)
     wide = pane_wide(p, e)
     room = wide - PANE_LEFT - PANE_X
+    middle(x) = Row(width(grow=grow), Alignment.Start, justify=Alignment.Center, Box(fixed(wide), Alignment.Start, x))
+    under = get!(() -> own!(p, TalkRoom()), p.parts, :room)
+    if said_nothing(p)
+      p.parts[:middle] = true
+      # The greeting is at the foot of the room over the field. That room and the one under the field share what's left, so the field is in the middle.
+      # The foot has 14px more room under its slot than over it, which the gap over the foot evens out.
+      return Column(width(grow=grow), height(grow=grow), Alignment.Start, name="Agent",
+        Column(width(grow=grow), height(grow=grow), Alignment.Start, justify=Alignment.End, middle(talk_greeting(p, e, room))),
+        Box(width(grow=grow), height(14px)),
+        middle(pane_foot(p, e, room)),
+        under)
+    end
+    # On the first frame after your first words, the field starts to slide down from where it was in the middle
+    if pop!(p.parts, :middle, false)
+      r = rect(under)
+      r === nothing || (p.parts[:slid] = (r.height, time()))
+    end
+    from, at = get(p.parts, :slid, (0px, 0.0))
+    time() - at < TALK_SLIDE && redraw_in!(e, 0)
+    lift = px(round(num(eased(from, 0px, at; take=TALK_SLIDE))))
     Column(width(grow=grow), height(grow=grow), Alignment.Start, name="Agent",
-      reuse!(p.scroll, Row(width(grow=grow), Alignment.Start, justify=Alignment.Center, Box(fixed(wide), Alignment.Start, pane_talk(p, e, room)))),
-      Row(width(grow=grow), Alignment.Start, justify=Alignment.Center, Box(fixed(wide), Alignment.Start, pane_foot(p, e, room))))
+      reuse!(p.scroll, middle(pane_talk(p, e, room))),
+      middle(pane_foot(p, e, room)),
+      Box(width(grow=grow), height(lift)))
   finally
     talk_on_page[] = was
   end
@@ -50746,7 +50790,7 @@ talk_greeting(p::AgentPane, e, room) = begin
   z = talk_zoom(e)
   line(words, size, colour; weight="") = Row(width(grow=grow), height(size * 1.5), Alignment.Center, justify=Alignment.Center, Box(label(words, size, color=colour, weight=weight)))
   face = pane_face(e, colours.dim; size=13px)
-  Column(width(grow=grow), Alignment.Start, padding(max(40px, page_room(e)[2] * 0.2), PANE_X, 20px, PANE_LEFT), child_gap=4px, name="Talk",
+  Column(width(grow=grow), Alignment.Start, padding(20px, PANE_X, 14px, PANE_LEFT), child_gap=4px, name="Talk",
     Row(width(grow=grow), height(48px), Alignment.Center, justify=Alignment.Center,
       Box(fixed(40px), height(40px), Alignment.Center, justify=Alignment.Center,
           logo === nothing ? Icon("robot", size=40px, color=colours.dim) : Icon(logo[1], size=40px, color=logo[2]))),

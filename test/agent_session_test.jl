@@ -145,6 +145,14 @@ try
     @test abs((talk.left + talk.width / 2) - w.size[1] / 2) <= 1px && foot.top + foot.height <= w.size[2] && foot.height < 90px
     @test !K.pane_dark[] && p.field.theme == e.theme
     @test any(r -> r.from isa K.Icon && r.from.name == "agent-claude", (x.from for x in flat(talk) if hasproperty(x.from, :from)))
+    # Before anything is said, the field is in the middle of the page, under the greeting. It's a slot: its ends are half circles.
+    whole, slot = named("Agent"), foot.children[1]
+    @test abs((slot.top + slot.height / 2) - (whole.top + whole.height / 2)) <= 1px && talk.top + talk.height <= foot.top
+    @test K.num(slot.from.radius.tl) ≈ K.num(slot.from.radius.br) ≈ K.num(slot.height) / 2
+    # The send button has the same middle as the slot's round end
+    send = named("Send")
+    @test abs(K.num(send.top + send.height / 2 - (slot.top + slot.height / 2))) < 0.5
+    @test abs(K.num(slot.left + slot.width - (send.left + send.width / 2) - slot.height / 2)) < 0.5
   end
 
   @testset "Return gives your words to the agent, its answer shows as a page, and the file keeps both" begin
@@ -154,6 +162,13 @@ try
     press(Keys.enter)
     s = p.session
     @test s.busy && p.field.buf.lines == [""] && w.focus === p.field
+    # The field slides down from the middle of the page to its foot, and stays there
+    whole, foot = named("Agent"), named("Agent foot")
+    @test p.parts[:slid][1] > 100px && foot.top + foot.height < whole.top + whole.height - 100px
+    sleep(K.TALK_SLIDE)
+    frames(w, 2)
+    whole, foot = named("Agent"), named("Agent foot")
+    @test foot.top + foot.height == whole.top + whole.height && named("Talk").top < whole.top + 40px
     ok = until(() -> !s.busy)
     @test ok && K.running(s) && s.id == "test-session"
     # No page is beside the session, so nothing goes with the words
@@ -301,6 +316,19 @@ try
     press(Keys.a, Keys.cmd, Keys.shft)
     frames(w, 4)
     @test e.buf.path != first_one && endswith(e.buf.path, ".chat") && K.chat_shown(e) && isfile(first_one)
+  end
+
+  @testset "The agent works in the folder that the file is in: in a repository's folder too, and when the file names another folder" begin
+    repo = joinpath(dir, "repo")
+    inner = joinpath(repo, "pages")
+    mkpath(inner)
+    run(`git init -q $repo`)
+    moved = joinpath(inner, "Moved.chat")
+    write(moved, K.talk_mark("session", Dict("agent" => "Claude", "folder" => dir, "id" => "")) * "\n")
+    K.open!(e, moved)
+    frames(w, 3)
+    p = e.nodes[(:chat, moved)]
+    @test K.chat_shown(e) && p.session.dir == inner && e.buf.about == "Claude in pages"
   end
 finally
   K.SESSION_COMMAND[] = nothing
