@@ -50232,15 +50232,17 @@ pane_foot(p::AgentPane, e, room) = begin
   pane_style!(sub, e)
   line = REPLY_SIZE * talk_zoom(e) * 1.5
   slot = on_page(p)
-  # The round ends of a session's file's slot take a little more room from the words than the pane's corners do
-  pane_layout!(sub, pane_wide(p, e) - 2PANE_X - 4px - SEND_ROOM - (slot ? max(0px, line - 18px) : 0px))
+  # The slot's round ends take a little more room from the words than square corners would
+  pane_layout!(sub, pane_wide(p, e) - 2PANE_X - 4px - SEND_ROOM - max(0px, line - 18px))
   tall = min(isempty(sub.layout) ? line : lowest(sub, sub.layout), 9line)
-  # A session's file has a slot: with one line of words its ends are half circles, and more lines keep ends as round.
+  # The field is a slot: with one line of words its ends are half circles, and more lines keep ends as round.
   # Its button has the same middle as the round end at the foot, which is the middle of the last line.
-  one = slot ? one_line(sub, line) : line
-  ends = slot ? (max(one + 8px, 28px) + 14px) / 2 : 14px   # one line of words, the room over and under it, and the border
-  right, left = slot ? (max(6px, ends - 15px), max(14px, ends - 5px)) : (6px, 14px)
-  drop = slot ? max(0px, ends - 21px) : 0px   # 21px: the button's half, the room under the words, and the border
+  one = one_line(sub, line)
+  ends = (max(one + 8px, 28px) + 14px) / 2   # one line of words, the room over and under it, and the border
+  right, left = max(6px, ends - 15px), max(14px, ends - 5px)
+  drop = max(0px, ends - 21px)   # 21px: the button's half, the room under the words, and the border
+  # The button's box is as tall as the words' box. A Row leaves a child where it is when the alignment would move it 1.5px or less.
+  over = max(tall + 8px, 28px + drop) - 28px - drop
   doc = Box(width(grow=grow), height(tall), Alignment.Start, clip=true, node!(Document, sub, :document))
   who = pane_agent(p, e)
   empty = sub.buf.lines == [""]
@@ -50250,7 +50252,7 @@ pane_foot(p::AgentPane, e, room) = begin
     Row(width(grow=grow), Alignment.End, padding(6px, right, 6px, left), radius(ends), child_gap=SEND_ROOM - 28px,   # top, right, bottom, left
         background(on_glass(0.07)), border(1px, :solid, on_glass(0.1)),
       Box(width(grow=grow), padding(0px, 4px), text),   # one line of words is as tall as the button, or taller
-      Box(padding(0px, 0px, drop, 0px), pane_button(p, s !== nothing && s.busy && empty ? :stop : :send))))
+      Box(padding(over, 0px, drop, 0px), pane_button(p, s !== nothing && s.busy && empty ? :stop : :send))))
 end
 
 "How tall one line of the words in `sub` is, as it lays them out: as tall as its first line. Before it lays them out, `line`."

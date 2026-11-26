@@ -311,6 +311,11 @@ try
     # The field is one line tall, with the round send button at its right
     foot, send = named("Agent foot"), named("Send")
     @test foot.height < 70px && send.width == 28px && named("About") === nothing
+    # It's a slot, as in a session's file: its ends are half circles, and the button has the same middle as its round end
+    slot = foot.children[1]
+    @test K.num(slot.from.radius.tl) ≈ K.num(slot.from.radius.br) ≈ K.num(slot.height) / 2
+    @test abs(K.num(send.top + send.height / 2 - (slot.top + slot.height / 2))) < 0.5
+    @test abs(K.num(slot.left + slot.width - (send.left + send.width / 2) - slot.height / 2)) < 0.5
     typed("Make a table")
     @test pane.field.buf.lines == ["Make a table"]
     sleep(2K.SEND_GROWS); frames()
