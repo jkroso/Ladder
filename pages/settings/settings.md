@@ -2,10 +2,11 @@
 
 Ladder keeps these choices, and uses them the next time it opens. Each one changes every window as you choose it. Press ⌘W to close this window.
 
-Three more pages have the rest of the settings. Hold ⌘ and click a link to go there. To come back, press ⌘⌥←.
+Four more pages have the rest of the settings. Hold ⌘ and click a link to go there. To come back, press ⌘⌥←.
 
 - [Code editor](code-editor.md) has how code shows.
 - [Key bindings](key-bindings.md) has the keys of each command.
+- [Ignored files](ignored-files.md) lists the files and folders that Ladder leaves out.
 - [Startup](startup.md) is the page that Ladder opens the first time, and the code that it runs when it starts. After that, Ladder opens where you were when you quit.
 
 These pages show what a page can do:
@@ -177,15 +178,9 @@ The default app is the one that opens a Markdown file when you double-click it i
 
 ## Ignored files
 
-```ui
-say(text) = Text(text, size=page_text_size() * 1px)
-paths = ignored_files()
-isempty(paths) ? say("You don't ignore any files or folders.") :
-  Column(Alignment.Start, child_gap=8px,
-         [Row(Alignment.Center, child_gap=12px, say(Base.Filesystem.contractuser(p)), Button(label="Stop Ignoring", onclick=button -> stop_ignoring!(p))) for p in paths]...)
-```
-
 To ignore a file or a folder that you never look at, right-click it in the sidebar and choose Ignore. Ladder then leaves it out, as it leaves out the files whose names start with a dot. The sidebar, the folder pages and the searches don't show it. Ladder doesn't change the file, so the Finder still shows it. To see the files that you ignore, press ⌘⇧. as you do for hidden files.
+
+The page [Ignored files](ignored-files.md) lists them. To show a file again, delete its line on that page and save the page.
 
 ## Updates
 

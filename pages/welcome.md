@@ -1234,7 +1234,7 @@ For more room for the page, choose Always or In full screen only for Hide the to
 
 The list leaves out hidden files and folders, the ones whose names start with a dot, like `.media`. To list them too, click the eye beside the button at the top left, or press ⌘⇧. as you do in the Finder. Click the eye again to leave them out.
 
-To leave out a file or a folder that you never look at, like `~/Movies`, right-click it and choose Ignore. Ladder remembers it, and treats it as a hidden file from then on: the lists of a folder leave it out, and the searches don't look in it. The eye shows the files that you ignore too, fainter than the others. Right-click one and choose Stop Ignoring to show it again. [Settings](settings/settings.md#ignored-files) lists all of them.
+To leave out a file or a folder that you never look at, like `~/Movies`, right-click it and choose Ignore. Ladder remembers it, and treats it as a hidden file from then on: the lists of a folder leave it out, and the searches don't look in it. The eye shows the files that you ignore too, fainter than the others. Right-click one and choose Stop Ignoring to show it again. The page [Ignored files](settings/ignored-files.md) lists all of them, a path on each line. Delete a line there and save the page, and Ladder shows that file again.
 
 Click a file in the list that isn't Markdown to see it in the page. Ladder shows such a file and never changes it, so the top bar has a lock. Hold the mouse over the lock and it says "Read only". A file of code shows its text, which you can select, copy and search. A picture, a model, a sound, a video, a PDF and a CSV file each show as what they are.
 

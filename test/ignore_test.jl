@@ -3,7 +3,7 @@
 # folders.jl, and `ignore!` in main.jl. Run them with
 # `julia -O0 --project=. test/ignore_test.jl`. They right-click and press keys
 # in a window that isn't on the screen, so the menu is the one that Ladder
-# draws. What they ignore goes to a file of their own, never to Ladder's.
+# draws. What they ignore goes to a page of their own, never to Ladder's.
 
 @use Test: @test, @testset
 @use "../main" => K
@@ -17,6 +17,8 @@ const H = K.Folders
 const dir = mktempdir()
 @eval K settings_file() = $(joinpath(dir, "settings"))
 H.FILE[] = joinpath(dir, "home-list")
+const named = H.page()   # the page that Ladder names, before the tests name their own
+H.PAGE[] = joinpath(dir, "settings-pages", "ignored-files.md")
 
 # A folder with a page, two folders that Sam never looks at, a file and a hidden folder
 const top = mkpath(joinpath(dir, "sam"))
@@ -51,23 +53,63 @@ choose(name) = (foreach(_ -> key(Keys.down), 1:findfirst(==(name), menu().items)
 "Right-click `name` in the sidebar and choose `item` from its menu"
 row_menu(name, item) = (right_click(middle(rect(row(name)))); choose(item))
 
-@testset "the list of what you ignore is kept in its file, beside the favourites" begin
+"The lines of the page that lists what you ignore"
+page_lines() = readlines(H.page())
+
+@testset "the list of what you ignore is a page of the settings" begin
+  @test named == K.settings_page("ignored-files.md")
   @test isempty(H.ignored()) && !H.isignored(movies)
+  @test !isfile(H.page())   # reading the list writes no page
   H.favourite!(dirname(music))
   H.ignore!(movies * "/"); H.ignore!(movies)
   @test H.ignored() == Set([movies]) && H.isignored(movies) && H.isignored(movies * "/")
   @test H.favourites() == [dirname(music)] && !H.isignored(dirname(music))
-  @test read(H.file(), String) == "favourite\t$(dirname(music))\nignored\t$movies\n"
-  # Another window of Ladder reads the same file
-  H.READ[] = (-1.0, H.Kept())
-  @test H.isignored(movies) && H.favourites() == [dirname(music)]
-  # Another window writes it
-  before = H.changed()
-  sleep(0.01)
-  write(H.file(), "favourite\t$(dirname(music))\nignored\t$junk\n")
-  @test H.ignored() == Set([junk]) && H.changed() > before
+  # The page says what it's for, then has a line for each path
+  @test page_lines()[1] == "# Ignored files"
+  @test page_lines()[end-1:end] == ["", "- $movies"]
+  @test read(H.file(), String) == "favourite\t$(dirname(music))\n"
+  # A path in the home folder is written from ~
+  @test H.item(joinpath(homedir(), "Movies")) == "- ~/Movies"
+  @test H.listed("- ~/Movies") == joinpath(homedir(), "Movies") && H.listed("* `~/Movies`") == joinpath(homedir(), "Movies")
+  @test H.listed("Ladder leaves out the files") === nothing && H.listed("- [Settings](settings.md)") === nothing
+  # Another window of Ladder reads the same page
+  H.LISTED[] = ("", -1.0, Set{String}())
+  @test H.isignored(movies)
+  # The new line goes under the last one, and the others stay as they were
+  H.ignore!(junk)
+  @test page_lines()[end-2:end] == ["", "- $movies", "- $junk"]
+  H.unignore!(movies)
+  @test page_lines()[end-1:end] == ["", "- $junk"] && page_lines()[1] == "# Ignored files"
   H.unignore!(junk); H.unfavourite!(dirname(music))
   @test isempty(H.ignored()) && read(H.file(), String) == ""
+end
+
+@testset "you change the list as you change any page" begin
+  before = H.changed()
+  sleep(0.01)
+  open(io -> println(io, "- ", movies, "\n- `", junk, "`\nA line of words isn't a path."), H.page(), "a")
+  @test H.ignored() == Set([movies, junk]) && H.changed() > before
+  H.relist!(filter(l -> H.listed(l) === nothing, page_lines()))
+  @test isempty(H.ignored()) && "A line of words isn't a path." in page_lines()
+  H.relist!(filter(!=("A line of words isn't a path."), page_lines()))
+end
+
+@testset "the first page has what the file of the favourites kept before" begin
+  was = H.PAGE[]
+  H.PAGE[] = joinpath(dir, "first", "ignored-files.md")
+  write(H.file(), "ignored\t$music\nignored\t$junk\nfavourite\t$top\n")
+  H.READ[] = (-1.0, H.Kept())
+  @test H.ignored() == Set([junk, music])
+  @test page_lines()[1] == "# Ignored files" && page_lines()[end-1:end] == ["- $junk", "- $music"]
+  # The file keeps them, so another copy of Ladder can start its own page from them
+  @test occursin("ignored\t$junk", read(H.file(), String))
+  # With no page and nothing kept, Ladder writes a page only when it starts
+  H.PAGE[] = joinpath(dir, "empty", "ignored-files.md")
+  write(H.file(), "")
+  @test isempty(H.ignored()) && !isfile(H.page())
+  @test H.page!() == H.PAGE[] && page_lines()[1] == "# Ignored files" && isempty(H.ignored())
+  H.PAGE[] = was
+  H.READ[] = (-1.0, H.Kept())
 end
 
 @testset "Ignore in the menu of a folder leaves it out of the sidebar" begin
@@ -122,50 +164,30 @@ end
   @test K.pages_under(top)[1] == [page, plan, music]
 end
 
-@testset "the code of the settings page reads what you ignore, and shows it again" begin
-  m = K.sandbox(e)
-  @test Base.invokelatest(m.ignored_files) == [junk]
-  H.ignore!(movies)
-  @test Base.invokelatest(m.ignored_files) == [junk, movies]   # in the order of their names
-  Base.invokelatest(m.stop_ignoring!, junk)
+@testset "a line deleted from the page shows its file again in every window" begin
+  @test H.ignored() == Set([junk]) && !("junk.txt" in listed())
+  # The page is open in a window, where you delete the line and save the page
+  s = K.build_editor(H.page())
+  sw = Window(s, size=(720px, 600px))
+  frame(sw)
+  i = findfirst(==("- $junk"), s.buf.lines)
+  s.buf.lines = [s.buf.lines[1:i-1]; s.buf.lines[i+1:end]]
+  K.save!(s.buf)
+  frame(sw)
+  @test isempty(H.ignored())
   frames()
-  @test !H.isignored(junk) && "junk.txt" in listed()
+  @test "junk.txt" in listed()
+  close(sw)
 end
 
-"The first node of type `T` in `node`, or in the nodes it holds"
-find(T, node, seen=IdDict()) = begin
-  node isa T && return node
-  (isbits(node) || node isa Union{AbstractString,Module,Function,Type} || haskey(seen, node)) && return nothing
-  seen[node] = true
-  if node isa Union{AbstractArray,Tuple,AbstractDict}
-    for x in values(node)
-      (f = find(T, x, seen)) === nothing || return f
-    end
-    return nothing
-  end
-  for name in fieldnames(typeof(node))
-    isdefined(node, name) || continue
-    (f = find(T, getfield(node, name), seen)) === nothing || return f
-  end
-  nothing
-end
-
-@testset "the part of the settings page that lists what you ignore" begin
-  page = K.settings_page()
-  code = String(only(m[1] for m in eachmatch(r"## Ignored files\n\n```ui\n(.*?)```"s, read(page, String))))
-  s = K.build_editor(page)
+@testset "the Settings page links to the list" begin
+  text = read(K.settings_page(), String)
+  section = only(m[1] for m in eachmatch(r"## Ignored files\n\n(.*?)\n## "s, text))
+  @test !occursin("```", section) && occursin("[Ignored files](ignored-files.md)", section)
+  @test occursin("- [Ignored files](ignored-files.md)", text)
+  s = K.build_editor(K.settings_page())
   sw = Window(s, size=(720px, 2600px))
   empty!(K.problems)
-  foreach(_ -> frame(sw), 1:3)
-  @test isempty(K.problems)
-  @test H.ignored() == Set([movies])
-  node = K.evaluate(s, code)
-  @test find(K.Text, node).content == Base.Filesystem.contractuser(movies)
-  b = find(include_string(K.sandbox(s), "Button"), node)
-  @test b.label == "Stop Ignoring"
-  b.onclick(b)
-  @test !H.isignored(movies)
-  @test find(K.Text, K.evaluate(s, code)).content == "You don't ignore any files or folders."
   foreach(_ -> frame(sw), 1:3)
   @test isempty(K.problems)
   close(sw)

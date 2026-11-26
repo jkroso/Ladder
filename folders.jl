@@ -13,11 +13,12 @@
 #     newest(homedir(), folders)         # when anything in each folder last changed, at any depth
 #     sizes(homedir())                   # how many bytes each of those folders holds, at any depth
 #
-# Ladder keeps the favourites and the ignored paths in a file of its own, in
-# its folder in ~/Library/Application Support, one on each line. The Finder's
-# own favourites are in a file that only the Finder writes, so Ladder's list is
-# apart from them. Ladder never changes an ignored file or folder, so the
-# Finder and the other apps still show it.
+# Ladder keeps the favourites in a file of its own, in its folder in
+# ~/Library/Application Support, one on each line. The Finder's own favourites
+# are in a file that only the Finder writes, so Ladder's list is apart from
+# them. The paths that you ignore are on a page of the settings, which you can
+# change as you change any page. Ladder never changes an ignored file or
+# folder, so the Finder and the other apps still show it.
 
 @use "github.com/jkroso/Prospects.jl" @def
 @use FileWatching
@@ -33,7 +34,12 @@ home folder's page showed the favourites when the file was first written.
 """
 file() = isempty(FILE[]) ? joinpath(homedir(), "Library", "Application Support", "Ladder", "home") : FILE[]
 
-"What the file keeps: the favourite folders in their order, and the files and folders that you chose to ignore"
+"""
+What the file keeps: the favourite folders in their order, and the files and
+folders that you chose to ignore before that list was a page. Those are only
+read to start the page (see `ignored`), and written back as they were, so
+another copy of Ladder can start its own page from them.
+"""
 @def struct Kept
   favourites::Vector{String} = String[]
   ignored::Set{String} = Set{String}()
@@ -61,7 +67,6 @@ kept() = begin
     end
   catch
   end
-  READ[][2].ignored == k.ignored || (CHANGED[] = time())
   READ[] = (at, k)
   k
 end
@@ -71,7 +76,6 @@ keep!(k::Kept) = begin
   path = file()
   mkpath(dirname(path))
   write(path, join(("favourite\t$p\n" for p in k.favourites)) * join(("ignored\t$p\n" for p in sort!(collect(k.ignored)))))
-  READ[][2].ignored == k.ignored || (CHANGED[] = time())
   READ[] = (mtime(path), k)
   k
 end
@@ -106,32 +110,141 @@ end
 # show it, unless they show the hidden files, and its searches don't look in
 # it. It's kept by its path, so a file or a folder of the same name in another
 # folder still shows.
+#
+# The list is a page, `ignored-files.md` in the folder of the settings, with a
+# line for each path:
+#
+#     - ~/Library
+#     - ~/Movies
+#
+# Ignore in the menu of a file adds a line under the last one, and Stop
+# Ignoring deletes its line. You can type a line or delete one, as on any
+# page, and the list changes when the page is saved. Ladder leaves the page's
+# other lines as they are, so they can say what the page is for.
 
 "When the list of what you ignore last changed, in this window or in another. A list of a folder that was read before then is read again."
 const CHANGED = Ref(0.0)
 
-"The paths of the files and folders that you chose to ignore"
-ignored() = kept().ignored
+"The page that lists what you ignore, or a function that gives its path. main.jl names a page of the settings. A test names one of its own."
+const PAGE = Ref{Any}("")
+
+"""
+The path of the page that lists what you ignore. With none named, it's the
+page in the folder of the settings beside this file, as main.jl names it when
+it runs from its source. A hot reload of this file forgets the name, and that
+page is the one it means.
+"""
+page() = begin
+  p = PAGE[] isa AbstractString ? PAGE[] : PAGE[]()
+  isempty(p) ? joinpath(@__DIR__, "pages", "settings", "ignored-files.md") : String(p)
+end
+
+"What Ladder writes on the page above the list, when there's no page yet"
+const PAGE_TEXT = """
+  # Ignored files
+
+  Ladder leaves out the files and folders on this list, as it leaves out the files whose names start with a dot. The sidebar, the folder pages and the searches don't show them. Ladder doesn't change them, so the Finder still shows them.
+
+  To ignore a file or a folder, right-click it in the sidebar and choose Ignore. Ladder adds its path to the list. You can also type a path on a line of the list. To show a file again, delete its line and save the page. To see the files that you ignore, press ⌘⇧. as you do for hidden files.
+
+  The other settings are on the [Settings](settings.md) page."""
+
+"The path on a line of the list, like `- ~/Movies`, as the list keeps it. A line of another kind gives nothing."
+listed(line::AbstractString) = begin
+  m = match(r"^\s*[-*+]\s+`?([~/][^`]*?)`?\s*$", line)
+  m === nothing ? nothing : clean(m[1])
+end
+
+"The line of the list for `path`"
+item(path::AbstractString) = "- " * Base.Filesystem.contractuser(path)
+
+"When the file at `path` last changed, or 0 when there's no file"
+changed_at(path) = try isfile(path) ? mtime(path) : 0.0 catch; 0.0 end
+
+"Write `lines` to the page at `path`"
+write_page(path, lines) = (mkpath(dirname(path)); write(path, join(lines, '\n') * '\n'))
+
+"What was read from the page: its path, when it had changed then, and the paths that it lists"
+const LISTED = Ref(("", -1.0, Set{String}()))
+
+"""
+The paths of the files and folders that you chose to ignore, as the page lists
+them. The page is read again when it has changed. With no page yet, Ladder
+writes one with the paths that the file of the favourites kept before the
+list was a page. With none of those either, it writes no page.
+"""
+ignored() = begin
+  path = page()
+  at = changed_at(path)
+  LISTED[][1] == path && LISTED[][2] == at && return LISTED[][3]
+  if at == 0.0
+    before = kept().ignored
+    if !isempty(before)
+      write_page(path, [String.(split(PAGE_TEXT, '\n')); ""; [item(p) for p in sort!(collect(before), by=lowercase)]])
+      at = changed_at(path)
+    end
+  end
+  paths = Set{String}()
+  try
+    at > 0 && for line in eachline(path)
+      p = listed(line)
+      p === nothing || push!(paths, p)
+    end
+  catch
+  end
+  paths == LISTED[][3] || (CHANGED[] = time())
+  LISTED[] = (path, at, paths)
+  paths
+end
 
 "True when you chose to ignore the file or the folder at `path`. `among` is what's ignored, for a caller that asks of many paths."
 isignored(path::AbstractString, among=ignored()) = !isempty(among) && clean(path) in among
 
-"Leave the file or the folder at `path` out of Ladder's lists from now on"
+"Write `lines` to the page of the list, and read the list from it again"
+relist!(lines) = begin
+  write_page(page(), lines)
+  LISTED[] = ("", -1.0, LISTED[][3])   # read it, even if the disk gives it the time it had
+  ignored()
+end
+
+"Leave the file or the folder at `path` out of Ladder's lists from now on. Its line goes under the last line of the list."
 ignore!(path::AbstractString) = begin
-  p, k = clean(path), kept()
-  p in k.ignored || keep!(Kept(k.favourites, union(k.ignored, [p])))
+  p = clean(path)
+  p in ignored() && return nothing
+  lines = isfile(page()) ? readlines(page()) : String.(split(PAGE_TEXT, '\n'))
+  last = findlast(l -> listed(l) !== nothing, lines)
+  if last === nothing
+    while !isempty(lines) && isempty(strip(lines[end])) pop!(lines) end
+    isempty(lines) || push!(lines, "")
+    push!(lines, item(p))
+  else
+    insert!(lines, last + 1, item(p))
+  end
+  relist!(lines)
   nothing
 end
 
-"Show the file or the folder at `path` in Ladder's lists again"
+"Show the file or the folder at `path` in Ladder's lists again: its line goes from the list"
 unignore!(path::AbstractString) = begin
-  p, k = clean(path), kept()
-  p in k.ignored && keep!(Kept(k.favourites, setdiff(k.ignored, [p])))
+  p = clean(path)
+  p in ignored() || return nothing
+  relist!(filter(l -> listed(l) != p, readlines(page())))
   nothing
 end
 
 "When the list of what you ignore last changed"
-changed() = (kept(); CHANGED[])
+changed() = (ignored(); CHANGED[])
+
+"""
+Write the page of the list, if there's none, so that the link to it on the
+Settings page leads to it. Ladder does this when it starts. It gives the
+page's path.
+"""
+page!() = begin
+  ignored()   # writes the page with the paths that the file of the favourites kept, if it kept some
+  isfile(page()) || write_page(page(), String.(split(PAGE_TEXT, '\n')))
+  page()
+end
 
 # --- the projects -------------------------------------------------------------------------
 #
@@ -603,6 +716,7 @@ times_read(root::AbstractString) = (t = get(TIMES, root, nothing); t === nothing
 # the app, so the app starts with nothing read, and reads its file again.
 __init__() = begin
   READ[] = (-1.0, Kept())
+  LISTED[] = ("", -1.0, Set{String}())
   # What was read, and what heard of changes, when the app was made, are gone
   empty!(TIMES)
   nothing

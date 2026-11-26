@@ -9,6 +9,7 @@
 /test/.hot
 /pages/.media
 /pages/settings/startup.md
+/pages/settings/ignored-files.md
 /pages/settings/.media
 *.bak
 /.playwright-mcp

@@ -2108,14 +2108,34 @@ its folder again at once.
 """
 ignore!(e, path, on::Bool=true) = begin
   on ? Folders.ignore!(path) : Folders.unignore!(path)
+  ignored_changed!(e)
+end
+
+"List the folder of every window again, after the list of what you ignore changed"
+ignored_changed!(e) = begin
   for o in unique([editors; e])
     list_files!(o)
-    rerun!(o, :ignored)   # the list on the settings page
+    o.nodes[:ignored_at] = Folders.changed()
     w = window_of(o)
     w === nothing || stale!(w)
   end
   nothing
 end
+
+"""
+Notice a change to the list of what you ignore that came from its page: you
+deleted a line and saved the page, or another app changed it. Every window
+lists its folder again.
+"""
+ignored_tick!(e) = begin
+  at = Folders.changed()
+  get!(e.nodes, :ignored_at, at) < at && ignored_changed!(e)
+  nothing
+end
+
+# The page that lists what you ignore is a page of the settings. Its path is
+# asked for each time, since the built app moves the pages when it starts.
+__init__() = (Folders.PAGE[] = () -> settings_page("ignored-files.md"); nothing)
 
 "What a click on `o` in the sidebar does: a folder shows in the sidebar, and a file shows in the page"
 open!(e, d::AbstractDirectory; record=true) = go_folder!(e, string(d.path))
@@ -4412,9 +4432,6 @@ sandbox(e) = get!(e.nodes, :sandbox) do
   Core.eval(m, :(const update_news = $(() -> update_news(e))))
   Core.eval(m, :(const update_offer = $(() -> (reads!(e, :updates); reads!(e, :update); Update.label(Update.own())))))
   Core.eval(m, :(const update! = $(() -> update_act!(e))))
-  # ... and the files and folders that you ignore: `ignored_files()` gives their paths, and `stop_ignoring!(path)` shows one again
-  Core.eval(m, :(const ignored_files = $(() -> (reads!(e, :ignored); sort!(collect(Folders.ignored()), by=lowercase)))))
-  Core.eval(m, :(const stop_ignoring! = $(path -> ignore!(e, String(path), false))))
   # ... and the news: `news_days()` is how many days Ladder keeps an article, 0 for ever, and `news_agents()` is
   # when Ladder's own agents get the news: "daily", "asked" or "off". See "a folder of news".
   Core.eval(m, :(const news_days = $(() -> (reads!(e, :news); News.keep_days()))))
@@ -44723,6 +44740,7 @@ describe_window(e::Editor) = begin
   job_tick!(e)
   update_tick!(e)
   folder_pages_tick!(e)
+  ignored_tick!(e)
   startup_tick!(e)
   foreach(f -> f(e), values(EACH_FRAME))   # what code from the startup page does in each frame, like a look for new email
   zoom_tick!(e)
@@ -60479,6 +60497,7 @@ open_editor(args) = begin
   paths = filter(a -> !startswith(a, "-"), args)
   Agent.announce()   # an agent's script knows from now on that this Ladder can send it a page
   home = startup_page!()
+  Folders.page!()   # the page that lists what you ignore, which the Settings page links to
   run_startup!(home)
   was = isempty(paths) ? take_place!() : nothing
   # The code of the startup page can have made methods since this function started, like those of a kind of folder
