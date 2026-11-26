@@ -461,6 +461,15 @@ converting(ex::Expr) = begin
 end
 
 """
+What runs the code of a row of a sheet in the sheet's module: `Core.eval`, or
+the sandbox of a page from the web, which Ladder puts here around the work.
+"""
+const RUN_ROW = Base.ScopedValues.ScopedValue{Any}(Core.eval)
+
+"Run the code `ex` of a row in the module `mod` of the sheet: see `RUN_ROW`"
+run_row(mod::Module, ex) = RUN_ROW[](mod, ex)
+
+"""
 Work out every row of a sheet, from the top. `rows` holds the name and the
 expression of each one. A row that goes wrong says so, and the rows after it
 carry on. It gives what each row comes to, and the value of each row that has
@@ -513,7 +522,7 @@ work(rows; at::Real=0, over::Int=ranged(rows), prior=nothing, each=nothing) = be
     try
       start = unknown(expr)
       if start !== nothing
-        first = isempty(start) ? 1 : Core.eval(mod, read(start, names))
+        first = isempty(start) ? 1 : run_row(mod, read(start, names))
         wanted = get(pairs, i, 0)
         if wanted == 0
           keep!(name, first)
@@ -527,11 +536,11 @@ work(rows; at::Real=0, over::Int=ranged(rows), prior=nothing, each=nothing) = be
           isempty(ident(name)) || (assign!(mod, [id => unit * s]); push!(known, String(strip(name))))
           for (row, x) in rows[i+1:wanted-1]
             (isempty(strip(x)) || unknown(x) !== nothing) && continue
-            v = Core.eval(mod, read(x, known))
+            v = run_row(mod, read(x, known))
             isempty(ident(row)) || (assign!(mod, [Symbol(ident(row)) => v]); push!(known, String(strip(row))))
           end
           left, right = goal(read(rows[wanted][2], known), ids(known))
-          Base.invokelatest(apart, Core.eval(mod, left), Core.eval(mod, right))
+          Base.invokelatest(apart, run_row(mod, left), run_row(mod, right))
         end
         s = solve(trial)
         s === nothing && return Result("No value here gives the answer below", true)
@@ -541,7 +550,7 @@ work(rows; at::Real=0, over::Int=ranged(rows), prior=nothing, each=nothing) = be
       end
       if i == over
         # The row is somewhere between its two values
-        lo, hi = (Core.eval(mod, converting(Meta.parse(side))) for side in ends(expr, names))
+        lo, hi = (run_row(mod, converting(Meta.parse(side))) for side in ends(expr, names))
         gap = hi - lo
         far = gap isa Real ? Float64(gap) : Float64(getfield(gap, :value))
         value = at == 0 ? lo : at == 1 ? hi : round(lo + gap * at, sigdigits=12)
@@ -551,7 +560,7 @@ work(rows; at::Real=0, over::Int=ranged(rows), prior=nothing, each=nothing) = be
       ex = read(expr, names)
       ex isa Expr && ex.head in (:incomplete, :error) && return Result("This isn't finished", true)
       i in answers && (ex = goal(ex, ids(names))[1])   # the row shows what its own side of the = comes to
-      value = Core.eval(mod, ex)
+      value = run_row(mod, ex)
       keep!(name, value)
       Result(brief(Base.invokelatest(shown, value)), false)
     catch err

@@ -146,23 +146,22 @@ end
   @test e.buf.path == at("example.com/docs/page.html") && K.html_shown(e)
 end
 
-@testset "a page of the browser folder runs no code" begin
+@testset "a page of the browser folder runs its code in the sandbox" begin
   K.navigate!(e, "example.com/docs/"); frames()
   b = e.buf
-  @test K.foreign(b.path) && !ispath(ran)
-  @test K.kinds(b)[findfirst(==("```ui"), b.lines)].lang == "julia"
-  @test !any(it -> it.content isa K.Live && it.content.node isa K.Shown, e.layout)
+  @test K.sandboxed(b.path) && !ispath(ran)
+  @test K.kinds(b)[findfirst(==("```ui"), b.lines)].lang == K.LIVE
   out = K.run_code(e, "touch($(repr(ran)))")
-  @test out[3] && occursin("runs no code", out[1].msg) && !ispath(ran)
-  # A change that you save keeps the marks, so the page still runs no code, and Ladder knows that you changed it
+  @test out[3] && out[1] isa K.Guard.Stopped && !ispath(ran)
+  # A change that you save keeps the marks, so the page's code still runs in the sandbox, and Ladder knows that you changed it
   K.edit!(b, (length(b.lines), 0), (length(b.lines), 0), "More words.")
   K.save_page!(e); frames()
   empty!(K.COPY_ADDRESSES)
-  @test occursin("More words.", read(b.path, String)) && K.foreign(b.path) && !ispath(ran) && K.changed_here(b.path)
+  @test occursin("More words.", read(b.path, String)) && K.sandboxed(b.path) && !ispath(ran) && K.changed_here(b.path)
   # A page of your own runs its code, as it did
   mine = joinpath(dir, "mine.md")
   write(mine, "# Mine\n")
-  @test !K.foreign(mine)
+  @test !K.foreign(mine) && !K.sandboxed(mine)
 end
 
 @testset "a file of the browser folder that you open is its page" begin

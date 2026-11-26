@@ -358,25 +358,26 @@ end
   @test length(asked) == n && occursin("isn't a file, a folder or a web address", said())
 end
 
-@testset "the page runs no code and shows no file of the Mac" begin
+@testset "the page runs its code in the sandbox and shows no file of the Mac" begin
   errors = length(K.problems)
   K.navigate!(e, "example.com/code.md")
   K.fetches["https://example.com/pictures/plan.png"] = nothing   # the picture couldn't be had, so `curl` isn't run for it
   frames(5)
   b = e.buf
   @test address(b.path) == "https://example.com/code.md"
-  @test !ispath(ran) && length(K.problems) == errors
+  # The site isn't trusted, so its code runs in the sandbox: the `ui` block ran and was stopped, as was the sum
+  @test K.sandboxed(b.path) && !ispath(ran)
+  @test length(K.problems) > errors && all(p -> occursin("The sandbox stopped this code", p), K.problems[errors+1:end])
   ks = K.kinds(b)
   lang(open) = ks[findfirst(==(open), b.lines)].lang
-  # Julia code keeps its colours, and a block that Ladder would do more with shows as plain code
-  @test lang("```ui") == "julia" && lang("```check") == "julia"
-  @test all(l -> lang(l) == "", ("```sheet", "```web", "```load", "```find"))
+  # A block whose code the sandbox runs, and a sheet, are as they are on your own page. A block that
+  # Ladder would read a file for, show a browser for or search the Mac for shows as plain code.
+  @test lang("```ui") == K.LIVE && lang("```sheet") == "sheet" && lang("```check") == "julia"
+  @test all(l -> lang(l) == "", ("```web", "```load", "```find"))
   @test lang("```python") == "python" && lang("```mermaid") == K.DIAGRAM
-  # Each of them shows as lines of code: nothing that the page shows is made by code, a browser, or a file of the Mac
   made = [b.lines[it.first] for it in e.layout if it.content isa K.Live]
-  @test made == ["```mermaid"]   # the diagram is the one block that shows as more than its code
-  @test !any(it -> it.content isa K.Sheet, e.layout)
-  @test !any(k -> k isa Tuple && !isempty(k) && k[1] in (:live, :inline, :block), keys(e.nodes))
+  @test made == ["```ui", "```mermaid"]
+  @test count(it -> it.content isa K.Sheet, e.layout) == 1
   # A line that would show a part of another page shows as its text, and a block that names a file of code is only code
   i = findfirst(==("![[Ideas#Plans]]"), b.lines)
   @test !K.transcludes(b, i) && K.item(e, i).content isa K.Flow
@@ -385,12 +386,14 @@ end
   @test K.remote_src(e, "pictures/plan.png") == "https://example.com/pictures/plan.png"
   @test K.remote_src(e, "file:///etc/hosts.png") === nothing
   @test haskey(K.fetches, "https://example.com/pictures/plan.png") && !any(startswith("file:"), keys(K.fetches))
-  # Code that's run by hand doesn't run either
+  # Code that's run by hand runs in the sandbox too
   out = K.run_code(e, "touch($(repr(ran)))")
-  @test out[3] && out[1] isa ErrorException && occursin("runs no code", out[1].msg)
-  @test K.made(e, "1 + 1", 1) == ("1 + 1", false)
+  @test out[3] && out[1] isa K.Guard.Stopped
+  @test K.made(e, "1 + 1", 1) == ("2", false)
   @test !ispath(ran)
   shot("remote_code.png")
+  # The errors of the code that the sandbox stopped go, for the tests that share this process
+  resize!(K.problems, errors)
 end
 
 @testset "a picture of the page" begin
@@ -587,7 +590,8 @@ end
   cache = K.Eml.CACHE[]
   K.Eml.CACHE[] = joinpath(dir, "email")
   try
-    @test K.foreign(eml) && K.foreign("https://example.com/a.md") && !K.foreign(joinpath(dir, "mine.md"))
+    @test K.foreign(eml) && !K.foreign("https://example.com/a.md") && !K.foreign(joinpath(dir, "mine.md"))
+    @test K.sandboxed("https://example.com/a.md") && !K.sandboxed(eml)
     K.open!(e, eml); frames(4)
     b = e.buf
     @test b.path == eml && b.fixed && "```ui" in b.lines
@@ -601,8 +605,8 @@ end
   end
 end
 
-# A site that you let run code runs the code of its pages, as a page of the Mac does: see `foreign` in main.jl
-@testset "a site that you let run code runs its pages' code" begin
+# A site that you trust runs the code of its pages with no sandbox, as a page of the Mac does: see `sandboxed` in main.jl
+@testset "a site that you trust runs its pages' code with no sandbox" begin
   site = "https://sums.example.com"
   page!("$site/page.md", """
     # Sums
@@ -616,35 +620,32 @@ end
     """)
   asks = String[]
   was_asker = K.SITE_ASKER[]
-  K.SITE_ASKER[] = s -> (push!(asks, s); false)
+  K.SITE_ASKER[] = s -> (push!(asks, s); true)
   sheets() = count(it -> it.content isa K.Sheet, e.layout)
   try
-    # You haven't said whether the site may run code, so the page shows its code, and Ladder asks you once
+    # You don't trust the site, so the page's code runs in the sandbox, and Ladder asks you nothing
     K.navigate!(e, "sums.example.com/page.md"); frames(5)
     b = e.buf
     @test address(b.path) == "$site/page.md"
-    @test asks == [site] && K.site_runs(site) === false
-    @test K.foreign(b.path) && sheets() == 0 && K.made(e, "twice", 3) == ("twice", false)
-    out = K.run_code(e, "1 + 1")
-    @test out[3] && occursin("until you let its site run code", out[1].msg)
-    shot("remote_site_code_no.png")
-    # Run Site Code: the sums run and the sheet shows
-    K.run_site_code!(e); frames(5)
-    @test K.site_runs(site) === true && !K.foreign(b.path) && length(asks) == 1
+    @test isempty(asks) && K.site_runs(site) === nothing && K.sandboxed(b.path)
+    @test sheets() == 1 && K.made(e, "twice", 3) == ("12", false)
+    # Trust Site asks first, and then the sums run with no sandbox
+    K.trust_site!(e); frames(5)
+    @test K.site_runs(site) === true && !K.sandboxed(b.path) && asks == [site]
     @test K.kinds(b)[findfirst(==("```sheet"), b.lines)].lang == "sheet" && sheets() == 1
     @test any(k -> k isa Tuple && k[1] == :inline && k[2] == b.path, keys(e.nodes))
     @test K.made(e, "twice", 3) == ("12", false)
     shot("remote_site_code_yes.png")
-    # Stop Site Code: the page shows its code again
-    K.stop_site_code!(e); frames(5)
-    @test K.foreign(b.path) && sheets() == 0
+    # Stop Trusting Site: the page's code runs in the sandbox again
+    K.stop_trusting_site!(e); frames(5)
+    @test K.sandboxed(b.path) && sheets() == 1
     # A copy of a page follows the answer for the site that it came from. Other sites and emails don't.
     copy = joinpath(dir, "copy.md")
     write(copy, "Say !`1 + 1`.\n")
     K.mark_copy!(copy, "$site/page.md")
-    @test K.page_site(copy) == site && K.foreign(copy)
+    @test K.page_site(copy) == site && K.sandboxed(copy)
     K.site_runs!(site, true)
-    @test !K.foreign(copy) && !K.foreign("$site/other.md") && K.foreign("https://example.com/a.md")
+    @test !K.sandboxed(copy) && !K.sandboxed("$site/other.md") && K.sandboxed("https://example.com/a.md")
     @test K.foreign(joinpath(dir, "note.eml")) && K.page_site(joinpath(dir, "mine.md")) == ""
   finally
     K.SITE_ASKER[] = was_asker
@@ -652,9 +653,9 @@ end
   end
 end
 
-# A `view` block of a page from a site that runs code names a file beside the page's address. Ladder gets the file,
+# A `view` block of a page from a site that you trust names a file beside the page's address. Ladder gets the file,
 # and the block shows a copy of it on the Mac: see `view_copy` in main.jl
-@testset "a view of a page from a site that runs code shows the file beside the page" begin
+@testset "a view of a page from a site that you trust shows the file beside the page" begin
   site = "https://views.example.com"
   page!("$site/a/page.md", """
     # Views
@@ -701,8 +702,8 @@ end
     # A path of the Mac names nothing, and a page of HTML or a folder shows as a page of the web
     @test K.view_copy(e, "file:///etc/hosts") == ""
     @test K.view_copy(e, "other.html") == "$site/a/other.html" && K.view_copy(e, "b/") == "$site/a/b/"
-    # A page whose site may not run code shows the block as its code, and asks for no file
-    K.stop_site_code!(e); frames(4)
+    # A page whose site you don't trust shows the block as its code, and asks for no file
+    K.stop_trusting_site!(e); frames(4)
     @test isempty(views()) && K.view_copy(e, "model.jl") == ""
   finally
     K.site_runs!(site, false)

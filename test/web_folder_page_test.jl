@@ -23,7 +23,7 @@ const SITE = Dict{String,Any}()
 const asked = String[]   # each address that was asked for, in order
 page!(address, text; type="text/markdown; charset=utf-8", status=200) = SITE[address] = (; type, status, text)
 
-const asks = String[]    # each site that the panel asked about
+const asks = String[]    # each site that the panel asked whether you trust
 const answer = Ref(false)
 
 # The tests put these back when they end, for the tests that share their process
@@ -91,32 +91,32 @@ ladders() = filter(endswith("/.ladder"), asked)
   @test Remote.folders("notes.md") == String[]
 end
 
-@testset "a site that you haven't answered for shows plain, and asks once" begin
+@testset "a site that you don't trust shows plain, and asks nothing" begin
   K.navigate!(e, "https://blog.test/essays/post.md")
   frames()
   @test K.web_address(e.buf.path) == "https://blog.test/essays/post.md"
   # The page of each folder that the page is in was asked for, from the top down
   @test ladders() == ["https://blog.test/.ladder", "https://blog.test/essays/.ladder"]
-  # The panel asked about the site, once, and you said no
-  @test asks == ["https://blog.test"]
+  # The sandbox can't run a .ladder page, which adds to Ladder's own functions, so it waits until you trust the site
+  @test isempty(asks)
   @test runs() == 0 && e.look == :own
-  @test K.site_runs("https://blog.test") === false
-  @test occursin("no\thttps://blog.test", read(K.sites_file(), String))
-  # Another page of the same folder asks for no folder again, and the panel doesn't ask again
+  @test K.site_runs("https://blog.test") === nothing
+  # Another page of the same folder asks for no folder again
   K.navigate!(e, "https://blog.test/essays/other.md")
   frames()
   @test K.web_address(e.buf.path) == "https://blog.test/essays/other.md"
-  @test length(ladders()) == 2 && length(asks) == 1 && runs() == 0 && e.look == :own
+  @test length(ladders()) == 2 && isempty(asks) && runs() == 0 && e.look == :own
   o = K.text_object(e)
   @test o isa K.WebPage && o.parent isa K.WebFolder{K.FS.Directory} && o.parent.address == "https://blog.test/essays/"
   @test o.parent.parent isa K.WebFolder{K.FS.Directory} && o.parent.parent.parent === nothing
 end
 
-@testset "Run Site Code runs the page, and the blog looks as its site does" begin
-  @test K.works_here(e, Val(:run_site_code)) && !K.works_here(e, Val(:stop_site_code))
-  K.run_site_code!(e)
+@testset "Trust Site runs the page, and the blog looks as its site does" begin
+  @test K.works_here(e, Val(:trust_site)) && !K.works_here(e, Val(:stop_trusting_site))
+  answer[] = true
+  K.trust_site!(e)
   frames()
-  @test K.site_runs("https://blog.test") === true
+  @test asks == ["https://blog.test"] && K.site_runs("https://blog.test") === true
   @test runs() == 1 && e.look == :site
   o = K.text_object(e)
   # The top of the site is the blog, and a folder in it is a section of it, as on the Mac
@@ -152,13 +152,13 @@ end
   @test runs() == 3 && e.look == :site
 end
 
-@testset "Stop Site Code makes the site's folders plain" begin
-  @test K.works_here(e, Val(:stop_site_code)) && !K.works_here(e, Val(:run_site_code))
-  K.stop_site_code!(e)
+@testset "Stop Trusting Site makes the site's folders plain" begin
+  @test K.works_here(e, Val(:stop_trusting_site)) && !K.works_here(e, Val(:trust_site))
+  K.stop_trusting_site!(e)
   frames()
   @test K.site_runs("https://blog.test") === false && e.look == :own
   @test K.text_object(e).parent isa K.WebFolder{K.FS.Directory}
-  K.run_site_code!(e)
+  K.trust_site!(e)
   frames()
   @test e.look == :site && runs() == 3   # the code that ran is still loaded
 end
@@ -241,12 +241,14 @@ end
   K.navigate!(e, "https://plain.test/a/b.md")
   frames()
   @test K.web_address(e.buf.path) == "https://plain.test/a/b.md" && "https://plain.test/a/.ladder" in asked
-  @test length(asks) == n && !K.works_here(e, Val(:stop_site_code)) && K.works_here(e, Val(:run_site_code))
+  @test length(asks) == n && !K.works_here(e, Val(:stop_trusting_site)) && K.works_here(e, Val(:trust_site))
 end
 
-@testset "a site that you allow runs its page, and a page that fails says so" begin
+@testset "a site that you trust runs its page, and a page that fails says so" begin
   answer[] = true
   K.navigate!(e, "https://broken.test/a.md")
+  frames()
+  K.trust_site!(e)
   frames()
   @test asks[end] == "https://broken.test" && K.site_runs("https://broken.test") === true
   @test occursin("The .ladder page of broken.test stopped", K.FOLDER_PAGE_STOPPED[][1]) && occursin("no such kind", K.FOLDER_PAGE_STOPPED[][1])

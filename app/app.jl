@@ -12,7 +12,7 @@
 include("start.jl")
 
 @use "./facts" => Facts
-@use ".." build_editor open_editor move_old_folders! run_startup! startup_page STARTUP_FOLDER STARTUP WELCOME restyle! problems pages_dir SIDEBAR_ICONS FILE_ICONS todo_at inbox Agent INSERTS PLAN_ICONS SCHEDULE_ICONS BLOCK_ICONS window! editors settings_editor theme! Update open! level! SOURCE_FILES kinds LAST_RUN Terms
+@use ".." build_editor open_editor move_old_folders! run_startup! startup_page STARTUP_FOLDER STARTUP WELCOME restyle! problems pages_dir SIDEBAR_ICONS FILE_ICONS todo_at inbox Agent INSERTS PLAN_ICONS SCHEDULE_ICONS BLOCK_ICONS window! editors settings_editor theme! Update open! level! SOURCE_FILES kinds LAST_RUN Terms BROWSER_FOLDER sandboxed SANDBOX_ASKS made=>sum_shown
 @use "github.com/jkroso/MiniFB.jl" Window KeyPress KeyRelease MouseMove Keys onkey onmouse Typed ontype
 @use "github.com/jkroso/Font.jl/units" px
 @use "github.com/jkroso/UI.jl/Interface/abstract" focus window_of
@@ -398,6 +398,19 @@ warm_up() = begin
     press(Keys.equal, Keys.cmd); press(Keys.var"0", Keys.cmd)
     level!(e); frame(w); level!(e); frame(w)
   end
+  # A page from the web, of a site that you don't trust: its sums, its sheet and its live block run in the sandbox,
+  # which stops the live block's harmful call. The page is a file of a browser folder of the warm-up's own.
+  BROWSER_FOLDER[] = joinpath(dir, "Browser")
+  web = joinpath(mkpath(joinpath(BROWSER_FOLDER[], "warm.example.com")), "sums.md")
+  victim = joinpath(dir, "keep.txt")
+  write(victim, "keep")
+  write(web, "# Sums\n\nSay !`n = 6` and so !`twice = 2n`.\n\n```sheet\nA = 1 to 3\nB = A * n\n```\n\n```ui\nrm($(repr(victim)))\n```\n")
+  open!(e, web)
+  frame(w); frame(w)
+  (sandboxed(web) && sum_shown(e, "twice", 3) == ("12", false)) || error("A page from the web didn't run its sums in the sandbox")
+  isfile(victim) || error("The sandbox let a page from the web delete a file")
+  BROWSER_FOLDER[] = ""
+  empty!(SANDBOX_ASKS)
   # The app is built with the list of windows as the warm-up leaves it, so it must leave none
   close(w)
   isempty(editors) || error("A window that closed is still in the list of the windows that are open")
