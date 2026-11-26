@@ -53,6 +53,9 @@ done
 """, "HEARD" => heard, "LOST" => lost))
 chmod(agent, 0o755)
 K.SESSION_COMMAND[] = Cmd([agent])
+# Claude Code's models, so no real agent is asked for them
+K.AGENT_MODELS["Claude"] = K.model_list([K.AgentModel("opus", "Opus 5.5", "", "claude-opus-5-5"), K.AgentModel("sonnet", "Sonnet 5.5", "", "claude-sonnet-5-5"),
+                                         K.AgentModel("haiku", "Haiku 5.5", "", "claude-haiku-5-5")], K.AgentModel[], "claude-opus-5-5")   # `every` is only for older models
 
 # Grok's stand-in is started for each thing that you say, with the agent's name, the session's name and your words
 const turns = joinpath(dir, "turns.txt")
@@ -121,6 +124,9 @@ try
     @test reply.text == "## Title\n\n<!-- ladder:you -->\n\\<!-- ladder:agent -->\nlast" && reply.whole
     @test (note.words, note.bad) == ("Claude stopped.", true)
     @test K.read_talk("").items == [] && K.read_talk("plain words").before == "plain words"
+    # The model that the session works with goes on with it
+    s.model = "sonnet"
+    @test kept.model == "" && K.read_talk(K.talk_text(s)).model == "sonnet"
   end
 
   @testset "New Agent Session makes a file for your agent, and shows the session over the page" begin
@@ -296,6 +302,28 @@ try
     @test ok && readlines(turns) == ["Grok||Read the plan", "Grok|sess-Grok|And more"]
     e.ai = "Claude"
     K.TURN_COMMAND[] = nothing
+  end
+
+  @testset "A session's file keeps its model, and the model's button is beside the send button" begin
+    empty!(K.MODELS_CHOSEN[])
+    file = joinpath(dir, "Haiku.chat")
+    write(file, K.talk_mark("session", Dict("agent" => "Claude", "folder" => dir, "id" => "", "model" => "haiku")) * "\n")
+    e3 = K.build_editor(file)
+    w3 = Window(e3, size=(900px, 700px))
+    frames(w3, 4)
+    p3 = e3.nodes[(:chat, file)]
+    s3 = p3.session
+    @test K.chat_shown(e3) && s3.model == "haiku" && K.model_words(p3, e3) == "Haiku 5.5"
+    button, send = named("Model", e3), named("Send", e3)
+    @test button !== nothing && button.left + button.width <= send.left && button.top == send.top
+    # Another model goes into the file, and the next program starts with it
+    K.pane_model!(p3, "sonnet")
+    ok = until(() -> K.read_talk(read(file, String)).model == "sonnet", w3)
+    @test ok && s3.model == "sonnet" && isempty(s3.items) && K.chosen_model("Claude") == "sonnet"
+    options = K.session_options(s3)
+    @test options[findfirst(==("--model"), options) + 1] == "sonnet"
+    K.onclose(e3, w3)
+    empty!(K.MODELS_CHOSEN[])
   end
 
   @testset "A session whose file has no tab ends its program, and one whose file has gone ends" begin

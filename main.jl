@@ -45104,7 +45104,7 @@ save_settings!(e) = begin
     mkpath(dirname(settings_file()))
     # After the bundle of key bindings comes a line for each command that has other keys than the bundle's, like key.save=ctrl+s
     changed = join(["key.$name=$(e.rebound[name])\n" for name in sort!(collect(keys(e.rebound)))])
-    write(settings_file(), "theme=$(e.theme)\nfont=$(e.font)\nweight=$(e.weight)\nzoom=$(e.zoom)\nwidth=$(e.widest.value)\nplain=$(e.plain)\nspelling=$(e.spelling)\nupdates=$(e.updates)\nautosave=$(e.autosave)\npeeks=$(e.peeks)\nagent=$(e.ai)\nglide=$(e.glide)\nwrap=$(e.wrap)\nnumbers=$(e.numbers)\nshade=$(e.shade)\nbeside=$(e.beside)\nindent=$(e.indent)\ncode=$(e.code_scale)\ncodefont=$(e.code_font)\ncodeweight=$(e.code_weight)\nguide=$(e.guide)\nsidebar=$(e.side.value)\nhidden=$(e.hidden)\nright=$(e.right)\nownmessage=$(e.own)\npinned=$(e.pinned)\nhidebar=$(e.hide_bar)\npagecard=$(page_card_setting())\nagentshidden=$(join(sort!(collect(AGENTS_HIDDEN[])), ','))\n$(term_settings_text())keys=$(e.bundle)\n$changed")
+    write(settings_file(), "theme=$(e.theme)\nfont=$(e.font)\nweight=$(e.weight)\nzoom=$(e.zoom)\nwidth=$(e.widest.value)\nplain=$(e.plain)\nspelling=$(e.spelling)\nupdates=$(e.updates)\nautosave=$(e.autosave)\npeeks=$(e.peeks)\nagent=$(e.ai)\nglide=$(e.glide)\nwrap=$(e.wrap)\nnumbers=$(e.numbers)\nshade=$(e.shade)\nbeside=$(e.beside)\nindent=$(e.indent)\ncode=$(e.code_scale)\ncodefont=$(e.code_font)\ncodeweight=$(e.code_weight)\nguide=$(e.guide)\nsidebar=$(e.side.value)\nhidden=$(e.hidden)\nright=$(e.right)\nownmessage=$(e.own)\npinned=$(e.pinned)\nhidebar=$(e.hide_bar)\npagecard=$(page_card_setting())\nagentshidden=$(join(sort!(collect(AGENTS_HIDDEN[])), ','))\nmodels=$(models_setting())\n$(term_settings_text())keys=$(e.bundle)\n$changed")
   catch
     # A file that can't be written only means the settings last as long as the window
   end
@@ -45301,6 +45301,9 @@ load_settings!(e) = begin
     elseif name == "agentshidden"
       # The agents that you took out of the lists, with commas between their names
       AGENTS_HIDDEN[] = Set(String(n) for n in split(value, ',') if any(k -> k.name == n, AGENT_KINDS))
+    elseif name == "models"
+      # The model of each agent that you chose last, like Claude:sonnet, with commas between them
+      MODELS_CHOSEN[] = Dict(String(a) => String(m) for (a, m) in (split(pair, ':', limit=2) for pair in split(value, ',') if occursin(':', pair)) if !isempty(m))
     elseif name == "pagecard"
       # How wide you made the page's card of agent mode. Nothing after the = means it has a page's shape.
       w = tryparse(Float64, value)
@@ -48117,6 +48120,201 @@ kind_command(k::AgentKind, options) = begin
   addenv(Cmd([found; options]), "PATH" => path)
 end
 
+# --- the models of the agents ---
+#
+# Each agent can work with more than one model. The agent's pane shows the
+# model of its session beside the send button, and a click there chooses
+# another. Ladder asks Claude Code and Grok for their lists of models once,
+# while the app runs, and reads the list that Codex keeps. Gemini's names
+# stay the same from one version to the next, so Ladder knows them already.
+
+"""
+A model that an agent can work with. `id` is the name that the agent's
+command is given, `name` is the one that Ladder shows, `about` is a few
+words on what it's for, and `is` is the model's full name, which the agent
+gives when it says which model it works with.
+"""
+struct AgentModel
+  id::String
+  name::String
+  about::String
+  is::String
+end
+AgentModel(id, name, about="") = AgentModel(id, name, about, id)
+
+"""
+The models of an agent: `listed` are the ones to choose from, `every` also
+has older ones that only name a model, and `default` is the full name of the
+model that the agent works with when it's given none, or "".
+"""
+const ModelList = NamedTuple{(:listed, :every, :default),Tuple{Vector{AgentModel},Vector{AgentModel},String}}
+model_list(listed, every=listed, default="") = ModelList((listed, every, default))
+
+"""
+The models that Ladder knows of before it asks. Claude Code's names, like
+opus, are for the newest model of their kind, as are Gemini's.
+"""
+const KNOWN_MODELS = Dict(
+  "Claude" => model_list([AgentModel("opus", "Opus"), AgentModel("fable", "Fable"), AgentModel("sonnet", "Sonnet"), AgentModel("haiku", "Haiku")]),
+  "Gemini" => model_list([AgentModel("auto", "Auto", "Gemini chooses the model for each request"), AgentModel("pro", "Pro", "For complex work"),
+                          AgentModel("flash", "Flash", "Fast, for everyday work"), AgentModel("flash-lite", "Flash Lite", "Fastest, for simple work")]))
+
+"The models of each agent, by the agent's name, as the agent gave them. A test puts lists of its own here."
+const AGENT_MODELS = Dict{String,ModelList}()
+
+"The agents whose models Ladder asks for now"
+const MODELS_ASKING = Set{String}()
+
+"The agents whose models Ladder asked for since the app started"
+const MODELS_ASKED = Set{String}()
+
+"""
+The models of the agent called `name`. The first time, Ladder asks the agent
+for them, and meanwhile it gives the ones it knows already: see
+`ask_models!`.
+"""
+agent_models(name::AbstractString) = begin
+  haskey(AGENT_MODELS, name) && return AGENT_MODELS[name]
+  ask_models!(name)
+  get(() -> model_list(AgentModel[]), KNOWN_MODELS, name)
+end
+
+"""
+Ask the agent called `name` for its models, once while the app runs. A task
+asks, and the list is there when it's done: a window that's waiting for it
+gives the task its turns (see `pane_tick!`). An agent that isn't on this Mac
+gives no list, and Ladder keeps the names that it knows.
+"""
+ask_models!(name::AbstractString) = begin
+  (name in MODELS_ASKED || !(name in ("Claude", "Grok", "Codex"))) && return nothing
+  name = String(name)
+  push!(MODELS_ASKED, name)
+  push!(MODELS_ASKING, name)
+  @async try
+    list = name == "Claude" ? claude_models() : name == "Grok" ? grok_models() : codex_models()
+    list === nothing || (AGENT_MODELS[name] = list)
+  catch
+  finally
+    delete!(MODELS_ASKING, name)
+    redraw_windows!()
+  end
+  nothing
+end
+
+"""
+Claude Code's models, as its program gives them when it starts: the names
+like opus to choose from, and the older models that it names in full, which
+only name a model. Its first answer is its list. It ends when it has no more
+to read.
+"""
+claude_models() = begin
+  k = agent_kind("Claude")
+  command = kind_command(k, ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--safe-mode", "--no-session-persistence"])
+  ask = """{"type":"control_request","request_id":"ladder-models","request":{"subtype":"initialize"}}\n"""
+  claude_list(read(pipeline(Cmd(command; dir=homedir()), stdin=IOBuffer(ask), stderr=devnull), String))
+end
+
+"The models in `said`, what Claude Code printed when it was asked for them, or nothing"
+claude_list(said::AbstractString) = begin
+  for line in split(said, '\n')
+    o = agent_json(line)
+    json_field(o, "type") == "control_response" || continue
+    found = json_field(json_field(json_field(o, "response"), "response"), "models")
+    found isa AbstractVector || return nothing
+    listed, every, default = AgentModel[], AgentModel[], ""
+    for m in found
+      id, name, about, is = (json_field(m, key) for key in ("value", "displayName", "description", "resolvedModel"))
+      (id isa String && name isa String) || continue
+      is = is isa String ? is : id
+      id == "default" && (default = is; continue)
+      model = AgentModel(id, name, about isa String ? about : "", is)
+      push!(every, model)
+      startswith(id, "claude-") || push!(listed, model)
+    end
+    return isempty(listed) ? nothing : model_list(listed, every, default)
+  end
+  nothing
+end
+
+"Grok's models, as `grok models` lists them: one to a line, with a * before the one that it uses when it's given none"
+grok_models() = grok_list(read(pipeline(kind_command(agent_kind("Grok"), ["models"]), stderr=devnull), String))
+
+"The models in `said`, what `grok models` printed, or nothing"
+grok_list(said::AbstractString) = begin
+  listed, default = AgentModel[], ""
+  for line in split(said, '\n')
+    m = match(r"^\s*([*-])\s+(\S+)", line)
+    m === nothing && continue
+    push!(listed, AgentModel(m[2], pretty_model(m[2])))
+    m[1] == "*" && (default = String(m[2]))
+  end
+  isempty(listed) ? nothing : model_list(listed, listed, default)
+end
+
+"Codex's models, from the list that it keeps of the models that it shows, and the one that its settings choose"
+codex_models() = begin
+  file = joinpath(homedir(), ".codex", "models_cache.json")
+  found = json_field(json_value(read(file)), "models")
+  found isa AbstractVector || return nothing
+  listed = AgentModel[]
+  for m in found
+    json_field(m, "visibility") == "list" || continue
+    id, name, about = (json_field(m, key) for key in ("slug", "display_name", "description"))
+    id isa String || continue
+    push!(listed, AgentModel(id, name isa String ? name : pretty_model(id), about isa String ? about : ""))
+  end
+  settings = joinpath(homedir(), ".codex", "config.toml")
+  m = isfile(settings) ? match(r"^model\s*=\s*\"([^\"]+)\""m, read(settings, String)) : nothing
+  isempty(listed) ? nothing : model_list(listed, listed, m === nothing ? "" : String(m[1]))
+end
+
+"""
+The name to show for the model `x` of a program, like claude-opus-5-5, when
+the agent's list doesn't name it: Opus 5.5. A date at the end is left out.
+"""
+pretty_model(x::AbstractString) = begin
+  words = String[]
+  for w in split(replace(String(x), r"^claude-" => "", r"-\d{8}$" => ""), '-')
+    isempty(w) && continue
+    if !isempty(words) && occursin(r"^\d+$", w) && occursin(r"\d$", words[end])
+      words[end] *= "." * w   # 5-5 is 5.5
+    else
+      push!(words, w == "gpt" ? "GPT" : uppercasefirst(w))
+    end
+  end
+  join(words, ' ')
+end
+
+"The model of the agent called `agent` that `x` names, by the name that its command is given or by its full name, or nothing"
+model_of(agent::AbstractString, x::AbstractString) = begin
+  list = agent_models(agent)
+  for models in (list.listed, list.every)
+    k = findfirst(m -> m.id == x || m.is == x, models)
+    k === nothing || return models[k]
+  end
+  nothing
+end
+
+"The name that Ladder shows for the model `x` of the agent called `agent`"
+model_name(agent::AbstractString, x::AbstractString) = (m = model_of(agent, x); m === nothing ? pretty_model(x) : m.name)
+
+"The model of each agent that you chose last, by the name that its command is given. An agent that's not in it uses its own choice. The settings file keeps it."
+const MODELS_CHOSEN = Ref(Dict{String,String}())
+
+"The model of the agent called `agent` that a new session starts with, or \"\" for the agent's own choice"
+chosen_model(agent::AbstractString) = get(MODELS_CHOSEN[], agent, "")
+
+"Make the model `id` the one that new sessions of the agent called `agent` start with. The settings keep it."
+model_chosen!(e, agent::AbstractString, id::AbstractString) = begin
+  chosen_model(agent) == id && return e
+  MODELS_CHOSEN[][String(agent)] = String(id)
+  save_settings!(e)
+  e
+end
+
+"The line of the settings file that keeps the model of each agent: each agent's name, a colon and the model, with commas between them"
+models_setting() = join(("$agent:$id" for (agent, id) in sort!(collect(MODELS_CHOSEN[])) if !isempty(id)), ',')
+
 # --- the script of an agent's session in a terminal ---
 #
 # A reading companion of a folder of news is an agent that runs in a
@@ -48865,6 +49063,10 @@ program has stopped. `busy` is true while the agent works on what you said.
   queue::Vector{String} = String[]   # what you said while a turn was under way, for the turns after it
   file::String = ""            # the file that keeps the session, or "" for the session of agent mode: see "a session's file"
   sent::String = ""            # the last thing that Ladder gave the program from you
+  model::String = ""           # the model that you chose, by the name that the agent's command is given, or "" for the agent's own choice
+  running::String = ""         # the model that the agent says it works with now, by its full name, or "" before it says
+  was_model::String = ""       # the model before the change that Ladder asked Claude Code for, which comes back if Claude Code says no
+  later::Any = nothing         # a note on a new model, with whether it's bad, to show when the agent has done: see `model_note!`
 end
 
 "A command that a test puts in the place of the agent's: a program that reads and prints the same lines of JSON. Nothing means the agent that Settings chose."
@@ -48895,15 +49097,19 @@ settings make it ask for, and it changes the session's page without asking.
 When the session has a name, it goes on with the session of that name.
 """
 session_command(s::AgentSession) = begin
-  SESSION_COMMAND[] === nothing || return SESSION_COMMAND[]
-  k = agent_kind(s.agent)
+  SESSION_COMMAND[] === nothing || return `$(SESSION_COMMAND[]) $(session_options(s))`
+  kind_command(agent_kind(s.agent), session_options(s))
+end
+
+"The options of the command that starts the program of the session `s`: see `session_command`"
+session_options(s::AgentSession) = begin
   page, id = s.page, s.id
   # A rule with // names a file from the top of the disk. A rule can't hold some characters, so such a file has none, and the agent asks.
   rule = !isempty(page) && occursin(r"^[\w \-./@+~]+$", page) ? ["--allowedTools", "Edit(/$page)"] : String[]
   # --allowedTools takes all that comes after it as its list, so it's last
-  kind_command(k, ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--include-partial-messages",
-                   "--permission-prompt-tool", "stdio", "--append-system-prompt", session_brief(s),
-                   (isempty(id) ? String[] : ["--resume", id])..., rule...])
+  ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--include-partial-messages",
+   "--permission-prompt-tool", "stdio", "--append-system-prompt", session_brief(s),
+   (isempty(s.model) ? String[] : ["--model", s.model])..., (isempty(id) ? String[] : ["--resume", id])..., rule...]
 end
 
 "True while the program of the session `s` runs"
@@ -48978,6 +49184,7 @@ settle!(s::AgentSession) = begin
     it isa AgentStep && it.state == :going && (it.state = :done)
     it isa AgentWants && it.answer == :none && (it.answer = :gone)
   end
+  s.later === nothing || (note!(s, s.later...); s.later = nothing)
   s
 end
 
@@ -49073,6 +49280,36 @@ answer!(s::AgentSession, it::AgentWants, allow::Bool) = begin
   s
 end
 
+"""
+Make the model `id` the one that the agent of the session `s` works with.
+Claude Code's program changes its model while it runs, and says when it
+has: see `take_line!`. Any other agent, and a program that has stopped,
+gets the model when it starts again, with your next words.
+"""
+model!(s::AgentSession, id::AbstractString) = begin
+  id = String(id)
+  if !s.turns && running(s)
+    s.was_model = s.model
+    s.model = id
+    request = Dict{String,Any}("subtype" => "set_model")
+    isempty(id) || (request["model"] = id)   # with no model, Claude Code goes back to its own choice
+    tell!(s, Dict("type" => "control_request", "request_id" => "ladder-model-$(s.asked += 1)", "request" => request))
+  else
+    s.model == id && return s
+    s.model, s.running = id, ""
+    isempty(s.items) || model_note!(s, "The model is now $(isempty(id) ? "$(s.agent)'s own choice" : model_name(s.agent, id)).")
+  end
+  s.version += 1
+  s
+end
+
+"""
+Show the note `words` on the model of the session `s`. While the agent
+works, it waits for the agent to finish, so it doesn't split what the
+agent says.
+"""
+model_note!(s::AgentSession, words, bad=false) = s.busy ? (s.later = (String(words), bad); s) : note!(s, words, bad)
+
 "End the program of the session `s`"
 close!(s::AgentSession) = begin
   s.closing = true
@@ -49106,8 +49343,12 @@ take_line!(s::AgentSession, line::AbstractString) = begin
   # What an agent that this one started says to it is theirs. This session shows only the step that started it.
   json_field(o, "parent_tool_use_id") === nothing || return s
   if kind == "system"
-    id = json_field(o, "session_id")
+    id, model = json_field(o, "session_id"), json_field(o, "model")
     json_field(o, "subtype") == "init" && id isa String && (s.id = id)
+    # Each turn starts with this, and it names the model that works on it
+    json_field(o, "subtype") == "init" && model isa String && (s.running = model)
+  elseif kind == "control_response"
+    model_answer!(s, json_field(o, "response"))
   elseif kind == "stream_event"
     stream_event!(s, json_field(o, "event"))
   elseif kind == "assistant"
@@ -49153,6 +49394,30 @@ take_line!(s::AgentSession, line::AbstractString) = begin
     json_field(o, "subtype") == "error_during_execution" && note!(s, "You stopped $(s.agent).")
   end
   s.version += 1
+  s
+end
+
+"""
+Take Claude Code's answer `r` to a change of model that Ladder asked for: the
+model that it works with now. When it says no, the model before stays, and
+the session says why.
+"""
+model_answer!(s::AgentSession, r) = begin
+  asked = json_field(r, "request_id")
+  (asked isa String && startswith(asked, "ladder-model-")) || return s
+  if json_field(r, "subtype") == "success"
+    model = json_field(json_field(r, "response"), "model")
+    model isa String && (s.running = model)
+    isempty(s.items) || model_note!(s, "The model is now $(model_name(s.agent, s.running)).")
+  else
+    model = json_field(r, "model")
+    model isa String && (s.running = model)
+    # A new session would start with the model that failed, so it starts with the one before
+    chosen_model(s.agent) == s.model && (MODELS_CHOSEN[][s.agent] = s.was_model)
+    s.model = s.was_model
+    why = json_field(r, "error")
+    model_note!(s, "$(s.agent) didn't change its model" * (why isa String && !isempty(why) ? ": $why" : "."), true)
+  end
   s
 end
 
@@ -49243,12 +49508,17 @@ start of the first words: see `turn!`.
 """
 turn_command(s::AgentSession, words::AbstractString) = begin
   TURN_COMMAND[] === nothing || return `$(TURN_COMMAND[]) $(s.agent) $(s.id) $words`
-  k = agent_kind(s.agent)
+  kind_command(agent_kind(s.agent), [turn_options(s); words])
+end
+
+"The options of the command for a turn of the session `s`, which your words go after: see `turn_command`"
+turn_options(s::AgentSession) = begin
+  name = agent_kind(s.agent).name
   again = !isempty(s.id)
-  options = k.name == "Grok" ? ["--output-format", "streaming-json", "--rules", session_brief(s), (again ? ["-r", s.id] : String[])..., "--permission-mode", "acceptEdits", "-p"] :
-            k.name == "Gemini" ? ["-o", "stream-json", (again ? ["--resume", s.id] : String[])..., "--approval-mode", "auto_edit", "-p"] :
-            ["exec", "--json", "--sandbox", "workspace-write", "--skip-git-repo-check", (again ? ["resume", s.id] : String[])...]
-  kind_command(k, [options; words])
+  model = isempty(s.model) ? String[] : ["-m", s.model]   # each of them takes -m for the model
+  name == "Grok" ? ["--output-format", "streaming-json", "--rules", session_brief(s), model..., (again ? ["-r", s.id] : String[])..., "--permission-mode", "acceptEdits", "-p"] :
+  name == "Gemini" ? ["-o", "stream-json", model..., (again ? ["--resume", s.id] : String[])..., "--approval-mode", "auto_edit", "-p"] :
+  ["exec", "--json", "--sandbox", "workspace-write", "--skip-git-repo-check", model..., (again ? ["resume", s.id] : String[])...]
 end
 
 """
@@ -49401,8 +49671,9 @@ end
 # Gemini prints `init` with the session's name, `message` for each piece of its words, `tool_use` and `tool_result` for a step, and `result`
 gemini_line!(s::AgentSession, o, kind) = begin
   if kind == "init"
-    id = json_field(o, "session_id")
+    id, model = json_field(o, "session_id"), json_field(o, "model")
     id isa String && (s.id = id)
+    model isa String && (s.running = model)
   elseif kind == "message"
     words = json_field(o, "content")
     json_field(o, "role") == "assistant" && words isa String && more_words!(s, words)
@@ -49851,7 +50122,8 @@ session!(p::AgentPane, e) = begin
     onmac = !isempty(b.path) && !isremote(b.path)
     top = repo_of(e)
     dir = !isempty(top) ? top : onmac ? (isdir(b.path) ? b.path : dirname(b.path)) : isempty(e.folder) ? homedir() : e.folder
-    s = AgentSession(agent=pane_agent(p, e), dir=dir, page=writes(b) ? truepath(b.path) : "", turns=agent_kind(e.ai).name != "Claude")
+    agent = pane_agent(p, e)
+    s = AgentSession(agent=agent, dir=dir, page=writes(b) ? truepath(b.path) : "", turns=agent_kind(e.ai).name != "Claude", model=chosen_model(agent))
   end
   # An agent that works by turns has no program between turns: `say!` starts one
   s.turns || running(s) || start!(s, session_command(s))
@@ -49944,6 +50216,113 @@ onkey(m::AgentMenu, ev::KeyPress{Keys.enter}) = begin
   m.over in eachindex(names) || return handled
   close_popup!(ev.window, AGENT_MENU)
   pane_agent!(m.of, names[m.over])
+  handled
+end
+
+"""
+Make the model `id` the one of the agent of the pane `p`: of its session, and
+of the sessions with that agent that you start after it. A session that
+already works with that model goes on as it is.
+"""
+pane_model!(p::AgentPane, id::AbstractString) = begin
+  e = editor(p)
+  agent = pane_agent(p, e)
+  model_chosen!(e, agent, id)
+  s = p.session
+  if s !== nothing
+    m, x = model_of(agent, id), pane_model(p, e)
+    x == id || (m !== nothing && x == m.is) ? (s.model = String(id)) : model!(s, id)
+  end
+  redraw_in!(e, SOON)
+  nothing
+end
+
+const MODEL_MENU = :model_menu
+const MODEL_MENU_W = 280px
+
+"The menu of the models of the pane's agent, over the model's button. `over` is the row that the mouse or an arrow key is on, or 0."
+@def mutable struct ModelMenu <: SemanticUI
+  of::Any = nothing
+  over::Int = 0
+end
+
+"A row of the menu of the models: the model `model`, an `AgentModel`, with a few words on what it's for"
+@def mutable struct ModelMenuRow <: SemanticUI
+  menu::Any = nothing
+  model::Any = nothing
+  index::Int = 0
+end
+
+"""
+Show the models of the agent of the pane `p` in a menu over `under`, the
+model's button, with its right edge in line with the button's. The model
+that the agent works with has a tick. A click on one makes it the model of
+the agent: see `pane_model!`.
+"""
+choose_model!(p::AgentPane, under, w) = begin
+  any(q -> q.key == MODEL_MENU, popups(w)) && return (close_popup!(w, MODEL_MENU); nothing)
+  r = rect(under)
+  r === nothing && return nothing
+  e = editor(p)
+  menu = node!(() -> ModelMenu(of=p), e, :model_menu)
+  menu.over = 0
+  popup!(w, menu, anchor=(r.left + r.width - MODEL_MENU_W, r.top, MODEL_MENU_W, r.height), placement=:top, gap=6px,
+         width=MODEL_MENU_W, key=MODEL_MENU, theme=component_theme(e.zoom))
+  nothing
+end
+
+"The models that the menu of the pane `p` lists"
+menu_models(p::AgentPane) = agent_models(pane_agent(p, editor(p))).listed
+
+# Agent mode's panes are dark, and a session's file has the page's colours
+describe(m::ModelMenu) = with_pane_colours(!on_page(m.of)) do
+  p = m.of
+  e = editor(p)
+  agent = pane_agent(p, e)
+  models = menu_models(p)
+  rows = Any[]
+  for model in models
+    row = node!(() -> ModelMenuRow(menu=m), e, (:model_row, agent, model.id))
+    row.model = model
+    push!(rows, row)
+  end
+  isempty(rows) && push!(rows, Row(height(32px), Alignment.Center, padding(10px, 0px), name="No models",
+    Box(label(agent in MODELS_ASKING ? "Asking $agent for its models…" : "$agent didn't give a list of its models.", 12px, color=colours.dim))))
+  Column(width(grow=grow), Alignment.Start, padding(4px), child_gap=1px, radius(8px), name="Model menu",
+         background(colours.float), border(1px, :solid, colours.line), shadow(0px, 6px, 20px, RGBA(0, 0, 0, 0.35)),
+    rows...)
+end
+
+describe(r::ModelMenuRow) = begin
+  p = r.menu.of
+  e = editor(p)
+  model = r.model
+  r.index = something(findfirst(x -> x.id == model.id, menu_models(p)), 0)
+  x = pane_model(p, e)
+  face = Face(SANS, "", 11.5px, colours.dim, false)
+  # A label is as tall as its capitals, so each line has a row as tall as a line of its words
+  about = isempty(model.about) ? () :
+    (Row(height(face.size * 1.4), Alignment.Center, label(l, face.size, color=colours.dim)) for l in wrapped(face, model.about, num(MODEL_MENU_W - 50px)))
+  Row(width(grow=grow), Alignment.Center, padding(10px, 6px), child_gap=8px, radius(5px), name="Model row",
+      background(ishovered(r) || r.menu.over == r.index ? on_glass(0.1) : clear),
+    Column(width(grow=grow), Alignment.Start,
+      Row(height(19px), Alignment.Center, label(model.name, 13px, color=colours.ink)),
+      about...),
+    Box(fixed(12px), height(12px), Alignment.Center, justify=Alignment.Center,
+      (x == model.id || x == model.is ? (Icon("check", size=12px, color=colours.dim),) : ())...))
+end
+
+cursor(::ModelMenuRow) = :hand
+onmouse(r::ModelMenuRow, ::MouseMove) = (r.menu.over = r.index; nothing)
+onkey(r::ModelMenuRow, ev::KeyPress{Keys.mouse_left}) = (close_popup!(ev.window, MODEL_MENU); pane_model!(r.menu.of, r.model.id); handled)
+# The arrows move over the rows, and Return chooses the row that they're on
+onkey(m::ModelMenu, ::KeyPress{Keys.down}) = (n = length(menu_models(m.of)); m.over = n == 0 ? 0 : mod1(m.over + 1, n); redraw_in!(editor(m.of), SOON); handled)
+onkey(m::ModelMenu, ::KeyPress{Keys.up}) = (n = length(menu_models(m.of)); m.over = n == 0 ? 0 : mod1(m.over - 1, n); redraw_in!(editor(m.of), SOON); handled)
+onkey(m::ModelMenu, ev::KeyPress{Keys.enter}) = begin
+  models = menu_models(m.of)
+  m.over in eachindex(models) || return handled
+  close_popup!(ev.window, MODEL_MENU)
+  pane_model!(m.of, models[m.over].id)
   handled
 end
 
@@ -50303,6 +50682,8 @@ end
 
 "Give the task that reads what the agent of the pane `p` prints its turn, and draw the window of `e` again when its session has something new"
 pane_tick!(p::AgentPane, e) = begin
+  # The task that asks an agent for its models gets its turns too, till it's done
+  isempty(MODELS_ASKING) || (yield(); redraw_in!(e, 0.1))
   s = p.session
   s === nothing && return nothing
   if s.busy
@@ -50473,8 +50854,9 @@ pane_foot(p::AgentPane, e, room) = begin
   pane_style!(sub, e)
   line = REPLY_SIZE * talk_zoom(e) * 1.5
   slot = on_page(p)
-  # The slot's round ends take a little more room from the words than square corners would
-  pane_layout!(sub, pane_wide(p, e) - 2PANE_X - 4px - SEND_ROOM - max(0px, line - 18px))
+  # The slot's round ends take a little more room from the words than square corners would. The model's button is beside the send button.
+  inside = max(40px, pane_wide(p, e) - 2PANE_X - 4px - SEND_ROOM - max(0px, line - 18px) - model_wide(p, e) - (SEND_ROOM - 28px))
+  pane_layout!(sub, inside)
   tall = min(isempty(sub.layout) ? line : lowest(sub, sub.layout), 9line)
   # The field is a slot: with one line of words its ends are half circles, and more lines keep ends as round.
   # Its button has the same middle as the round end at the foot, which is the middle of the last line.
@@ -50489,15 +50871,43 @@ pane_foot(p::AgentPane, e, room) = begin
   over = max(above + tall + 8px, 28px + drop) - 28px - drop
   doc = Box(width(grow=grow), height(tall), Alignment.Start, clip=true, node!(Document, sub, :document))
   who = pane_agent(p, e)
+  # What the slot leaves for its words: less its ends, the two buttons and the gaps before them, and the room at each side of the words
+  words_room = pane_wide(p, e) - 2(PANE_X - 4px) - left - right - 2(SEND_ROOM - 28px) - model_wide(p, e) - 28px - 8px
   empty = sub.buf.lines == [""]
   text = empty ? Stack(width(grow=grow), height(tall), Alignment.Start,
-                       Row(width(grow=grow), height(tall), Alignment.Center, label(slot ? "Ask $who, or say what to do" : "Ask $who, or say what to change", REPLY_SIZE * talk_zoom(e), color=colours.faint)), doc) : doc
+                       Row(width(grow=grow), height(tall), Alignment.Center,
+                           label(shortened(pane_face(e, colours.faint), slot ? "Ask $who, or say what to do" : "Ask $who, or say what to change", words_room - 2px), REPLY_SIZE * talk_zoom(e), color=colours.faint)), doc) : doc
   Box(width(grow=grow), padding(4px, PANE_X - 4px, slot ? 18px : PANE_X - 4px, PANE_X - 4px), name="Agent foot",
     Row(width(grow=grow), Alignment.End, padding(6px, right, 6px, left), radius(ends), child_gap=SEND_ROOM - 28px,   # top, right, bottom, left
         background(on_glass(0.07)), border(1px, :solid, on_glass(0.1)),
       Column(width(grow=grow), Alignment.Start, pictures..., Box(width(grow=grow), padding(0px, 4px), text)),   # one line of words is as tall as the button, or taller
+      Box(padding(over, 0px, drop, 0px), pane_button(p, :model)),
       Box(padding(over, 0px, drop, 0px), pane_button(p, s !== nothing && s.busy && empty ? :stop : :send))))
 end
+
+"""
+The model of the agent of the pane `p`, as Ladder knows it: the one that the
+agent says it works with, else the one that you chose, else the agent's own
+choice. It's a name that the agent's command is given or the model's full
+name, or "" when Ladder doesn't know the agent's own choice.
+"""
+pane_model(p::AgentPane, e) = begin
+  s, agent = p.session, pane_agent(p, e)
+  s !== nothing && !isempty(s.running) && return s.running
+  chosen = s === nothing ? chosen_model(agent) : s.model
+  isempty(chosen) ? agent_models(agent).default : chosen
+end
+
+"The words on the model's button of the pane `p`: the model's name, or Default when Ladder doesn't know which model the agent chooses"
+model_words(p::AgentPane, e) = (x = pane_model(p, e); isempty(x) ? "Default" : model_name(pane_agent(p, e), x))
+
+"The face of the words on the model's button"
+model_face(e, colour=colours.dim) = pane_face(e, colour; size=12.5px)
+
+"How wide the model's button of the pane `p` is: its words, the chevron and the room round them"
+model_wide(p::AgentPane, e) = px(ceil(num(measure(model_face(e), model_words(p, e)) + MODEL_BUTTON_ROOM)))
+
+const MODEL_BUTTON_ROOM = 33px   # the room on the model's button that's not its words: 10px at each end, the chevron and the gap before it
 
 "How tall one line of the words in `sub` is, as it lays them out: as tall as its first line. Before it lays them out, `line`."
 one_line(sub, line) = begin
@@ -50525,6 +50935,14 @@ describe(b::PaneButton) = begin
   elseif b.action == :new
     Box(fixed(28px), height(28px), radius(6px), Alignment.Center, justify=Alignment.Center, name="New session", background(over ? on_glass(0.1) : clear),
       Icon("plus-lg", size=14px, color=colours.dim))
+  elseif b.action == :model
+    w = window_of(e)
+    open = w !== nothing && any(q -> q.key == MODEL_MENU, popups(w))
+    ink = over || open ? colours.ink : colours.dim
+    Row(fixed(model_wide(p, e)), height(28px), Alignment.Center, padding(10px, 0px), child_gap=5px, radius(14px), name="Model",
+        background(over || open ? on_glass(0.1) : clear),
+      Box(label(model_words(p, e), model_face(e).size, color=ink)),
+      Icon("chevron-down", size=8px, color=ink))
   elseif b.action == :unattach
     Box(fixed(20px), height(20px), radius(10px), Alignment.Center, justify=Alignment.Center, name="Take away",
         background(over ? RGBA(0, 0, 0, 0.85) : RGBA(0, 0, 0, 0.6)),
@@ -50589,6 +51007,7 @@ end
 onkey(b::PaneButton, ev::KeyPress{Keys.mouse_left}) = begin
   p, s = b.of, b.of.session
   b.action == :agent && return (hide_tooltip!(ev.window); choose_agent!(p, b, ev.window); handled)
+  b.action == :model && return (hide_tooltip!(ev.window); choose_model!(p, b, ev.window); handled)
   b.action == :send && send_words!(p)
   b.action == :stop && s !== nothing && stop!(s)
   b.action == :new && new_session!(p)
@@ -50606,6 +51025,7 @@ onmouse(b::PaneButton, ev::MouseMove) = begin
   tip = b.action == :send ? (isempty(first(pane_context(b.of, editor(b.of)))) ? "Send  ⏎" : "Send with context  ⏎") :
         b.action == :stop ? "Stop the agent. What it changed so far stays." :
         b.action == :new ? "End this session, and start a new one" : b.action == :agent ? "Choose the agent" :
+        b.action == :model ? "Choose the model" :
         b.action == :unattach ? "Don't send this picture" : ""
   r = isempty(tip) ? nothing : rect(b)
   r === nothing || show_tooltip!(ev.window, tip_label(tip), r.left, r.top, r.width, r.height; placement=:bottom, gap=6px)
@@ -50951,7 +51371,9 @@ said, in order. `before` is what the file had over that line, which stays.
 talk_text(s::AgentSession, before="") = begin
   io = IOBuffer()
   isempty(before) || print(io, before, "\n")
-  println(io, talk_mark("session", Dict("agent" => s.agent, "folder" => s.dir, "id" => s.id)))
+  head = Dict("agent" => s.agent, "folder" => s.dir, "id" => s.id)
+  isempty(s.model) || (head["model"] = s.model)
+  println(io, talk_mark("session", head))
   for it in s.items
     mark, words = talk_part(it)
     print(io, "\n", mark, "\n", talk_body(words), "\n")
@@ -50966,14 +51388,14 @@ folder, the session's name, and what you and the agent said, in order.
 A step that was under way when the file was written is done now.
 """
 read_talk(text::AbstractString) = begin
-  agent, folder, id, before, items = "", "", "", String[], Any[]
+  agent, folder, id, model, before, items = "", "", "", "", String[], Any[]
   kind, about, body = "", nothing, String[]
   said(key) = (v = json_field(about, key); v isa String ? v : "")
   part!() = begin
     words = String(strip(join(body, "\n"), '\n'))
     empty!(body)
     if kind == "session"
-      agent, folder, id = said("agent"), said("folder"), said("id")
+      agent, folder, id, model = said("agent"), said("folder"), said("id"), said("model")
     elseif kind == "you"
       pictures = json_field(about, "pictures")
       push!(items, YouSaid(words=words, about=said("about"), pictures=pictures isa AbstractVector ? String[p for p in pictures if p isa AbstractString] : String[]))
@@ -51000,7 +51422,7 @@ read_talk(text::AbstractString) = begin
     end
   end
   part!()
-  (agent=agent, folder=folder, id=id, items=items, before=String(rstrip(join(before, "\n"))))
+  (agent=agent, folder=folder, id=id, model=model, items=items, before=String(rstrip(join(before, "\n"))))
 end
 
 """
@@ -51014,9 +51436,11 @@ load_talk!(p::AgentPane, e) = begin
   s = p.session
   if s === nothing
     agent = !isempty(kept.agent) ? kept.agent : SESSION_COMMAND[] === nothing ? agent_kind(e.ai).name : e.ai
-    s = p.session = AgentSession(agent=agent, dir=dirname(abspath(p.file)), file=p.file, turns=agent_kind(agent).name != "Claude")
+    s = p.session = AgentSession(agent=agent, dir=dirname(abspath(p.file)), file=p.file, turns=agent_kind(agent).name != "Claude", model=chosen_model(agent))
   end
   s.id, s.items = kept.id, kept.items
+  # The model that the session worked with goes on with it. A file with none has the model that you chose last.
+  isempty(kept.model) || (s.model = kept.model)
   s.version += 1
   p.kept, p.stamp = s.version, mtime(p.file)
   p.parts[:before] = kept.before

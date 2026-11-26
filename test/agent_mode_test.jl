@@ -45,12 +45,25 @@ write(agent, replace(raw"""
 #!/bin/sh
 say() { printf '%s\n' "$1"; }
 done_() { say '{"type":"result","subtype":"success","is_error":false,"result":""}'; }
-say '{"type":"system","subtype":"init","session_id":"test-session"}'
+# It's given Claude Code's options. A model like sonnet is claude-sonnet-5-5, and with none it's Opus.
+model=opus
+while [ $# -gt 0 ]; do [ "$1" = "--model" ] && model="$2"; shift; done
+say '{"type":"system","subtype":"init","session_id":"test-session","model":"claude-'"$model"'-5-5"}'
 while IFS= read -r line; do
   printf '%s\n' "$line" >> "HEARD"
   case "$line" in
   *'"interrupt"'*)
     say '{"type":"result","subtype":"error_during_execution","is_error":true}' ;;
+  *'"set_model"'*)
+    asked=$(printf '%s' "$line" | sed 's/.*"request_id":"\([^"]*\)".*/\1/')
+    wants=$(printf '%s' "$line" | sed -n 's/.*"model":"\([^"]*\)".*/\1/p')
+    case "$wants" in
+    bad-model)
+      say '{"type":"control_response","response":{"subtype":"error","request_id":"'"$asked"'","error":"Model '"'"'bad-model'"'"' not found","model":"claude-'"$model"'-5-5"}}' ;;
+    *)
+      model=${wants:-opus}
+      say '{"type":"control_response","response":{"subtype":"success","request_id":"'"$asked"'","response":{"model":"claude-'"$model"'-5-5"}}}' ;;
+    esac ;;
   *'"control_response"'*)
     case "$line" in
     *'"allow"'*)
@@ -88,6 +101,17 @@ done
 """, "HEARD" => heard))
 chmod(agent, 0o755)
 K.SESSION_COMMAND[] = Cmd([agent])
+
+# The models of the agents, as Ladder would get them from Claude Code, Grok and Codex. No agent is asked for them.
+const said_models = """{"type":"control_response","response":{"subtype":"success","request_id":"ladder-models","response":{"models":[
+  {"value":"default","resolvedModel":"claude-opus-5-5","displayName":"Default (recommended)","description":"Opus 5.5 · Best for everyday, complex tasks"},
+  {"value":"opus","resolvedModel":"claude-opus-5-5","displayName":"Opus 5.5","description":"For complex work and everyday tasks"},
+  {"value":"sonnet","resolvedModel":"claude-sonnet-5-5","displayName":"Sonnet 5.5","description":"Most efficient for simpler tasks"},
+  {"value":"haiku","resolvedModel":"claude-haiku-5-5","displayName":"Haiku 5.5","description":"Fastest for quick answers"},
+  {"value":"claude-opus-4-8","resolvedModel":"claude-opus-4-8","displayName":"Opus 4.8","description":"Best for everyday, complex tasks"}]}}}"""
+K.AGENT_MODELS["Claude"] = K.claude_list(replace(said_models, '\n' => ""))
+K.AGENT_MODELS["Grok"] = K.grok_list("You are not authenticated.\n\nDefault model: grok-4.7\n\nAvailable models:\n  * grok-4.7 (default)\n  - grok-4.6\n")
+K.AGENT_MODELS["Codex"] = K.model_list([K.AgentModel("gpt-5.5", "GPT-5.5"), K.AgentModel("gpt-5.4-mini", "GPT-5.4-Mini")])
 
 # An agent that works by turns: it's started for each thing that you say, with the agent's name, the session's name and your words.
 # It prints the lines that Grok, Gemini and Codex print, as their real programs printed them on 26 November 2026 (Codex: as its source says).
@@ -677,6 +701,103 @@ try
     frames()
     @test e.ai == "Claude" && pane.session === nothing
     K.TURN_COMMAND[] = nothing
+  end
+
+  @testset "The model's button shows the agent's model, and its menu changes it, also while the agent's program runs" begin
+    K.agent_mode(e) || (K.agent_mode!(e); frames(w, 3))
+    K.new_session!(pane)
+    empty!(K.MODELS_CHOSEN[])
+    frames()
+    # The lists that the agents gave
+    @test [m.id for m in K.agent_models("Claude").listed] == ["opus", "sonnet", "haiku"] && K.agent_models("Claude").default == "claude-opus-5-5"
+    @test K.model_name("Claude", "claude-opus-4-8") == "Opus 4.8" && K.model_name("Claude", "claude-fable-5-2") == "Fable 5.2"
+    @test [m.id for m in K.agent_models("Grok").listed] == ["grok-4.7", "grok-4.6"] && K.agent_models("Grok").default == "grok-4.7"
+    @test K.pretty_model("claude-haiku-4-5-20251001") == "Haiku 4.5" && K.pretty_model("gemini-2.5-pro") == "Gemini 2.5 Pro" && K.pretty_model("grok-4.7-build-fast") == "Grok 4.7 Build Fast"
+    # Before a session, the button shows the model that Claude Code chooses by itself. It's beside the send button, in line with it.
+    button, send = named("Model"), named("Send")
+    @test button !== nothing && K.model_words(pane, e) == "Opus 5.5"
+    @test button.left + button.width <= send.left && button.top == send.top && button.height == send.height
+    # Its menu is over it, with the models that Claude Code lists and a tick on the one that it uses
+    click(button.left + 10px, button.top + 10px)
+    frames()
+    rows() = [r for r in flat(only(p for p in K.popups(w) if p.key == K.MODEL_MENU).scene) if hasproperty(r.from, :name) && r.from.name == "Model row"]
+    icons(r) = [x.from.from.name for x in flat(r) if hasproperty(x.from, :from) && x.from.from isa K.Icon]
+    @test [r.from.from.model.name for r in rows()] == ["Opus 5.5", "Sonnet 5.5", "Haiku 5.5"]
+    @test icons(rows()[1]) == ["check"] && isempty(icons(rows()[2]))
+    @test all(r -> r.top + r.height <= button.top, rows()) && last(rows()).left + last(rows()).width <= button.left + button.width
+    # Before a session, a click chooses the model that the session starts with, and the settings keep it
+    sonnet = rows()[2]
+    click(sonnet.left + 20px, sonnet.top + 10px)
+    @test !any(p -> p.key == K.MODEL_MENU, K.popups(w))
+    @test K.chosen_model("Claude") == "sonnet" && K.model_words(pane, e) == "Sonnet 5.5"
+    pane.field.buf.lines = ["Hello"]
+    K.send_words!(pane)
+    s = pane.session
+    ok = until(() -> !s.busy)
+    options = K.session_options(s)
+    @test ok && s.model == "sonnet" && options[findfirst(==("--model"), options) + 1] == "sonnet"
+    @test s.running == "claude-sonnet-5-5" && K.model_words(pane, e) == "Sonnet 5.5"
+    # While the program runs, a click on another model asks Claude Code to change, and the session says when it has
+    n = length(items())
+    click(named("Model").left + 10px, named("Model").top + 10px)
+    frames()
+    haiku = rows()[3]
+    click(haiku.left + 20px, haiku.top + 10px)
+    ok = until(() -> s.running == "claude-haiku-5-5")
+    @test ok && K.running(s) && s.model == "haiku" && K.chosen_model("Claude") == "haiku" && K.model_words(pane, e) == "Haiku 5.5"
+    @test occursin(r"\"subtype\":\"set_model\"", last(heard_lines())) && occursin("\"model\":\"haiku\"", last(heard_lines()))
+    @test length(items()) == n + 1 && last(items()) isa K.SessionNote && last(items()).words == "The model is now Haiku 5.5." && !last(items()).bad
+    # A model that Claude Code doesn't have leaves the model as it was, and the session says why
+    K.pane_model!(pane, "bad-model")
+    ok = until(() -> length(items()) == n + 2)
+    @test ok && last(items()).bad && last(items()).words == "Claude didn't change its model: Model 'bad-model' not found"
+    @test s.model == "haiku" && s.running == "claude-haiku-5-5" && K.chosen_model("Claude") == "haiku"
+    # The same model again changes nothing
+    K.pane_model!(pane, "haiku")
+    frames()
+    @test length(items()) == n + 2
+    # While the agent works, the note waits for it to finish, so it doesn't split what the agent says
+    pane.field.buf.lines = ["go slow"]
+    K.send_words!(pane)
+    ok = until(() -> any(it -> it isa K.AgentStep, items()[n+3:end]))
+    K.pane_model!(pane, "opus")
+    ok = ok && until(() -> s.running == "claude-opus-5-5")
+    @test ok && s.busy && !(last(items()) isa K.SessionNote)
+    K.stop!(s)
+    ok = until(() -> !s.busy)
+    @test ok && [it.words for it in items()[end-1:end]] == ["The model is now Opus 5.5.", "You stopped Claude."]
+    # An agent that works by turns gets the model with its next turn
+    K.TURN_COMMAND[] = Cmd([turner])
+    K.pane_agent!(pane, "Gemini")
+    frames()
+    @test K.model_words(pane, e) == "Default"
+    pane.field.buf.lines = ["Read the plan"]
+    K.send_words!(pane)
+    g = pane.session
+    ok = until(() -> !g.busy && !K.running(g))
+    @test ok && g.running == "auto" && K.model_words(pane, e) == "Auto"
+    @test !("-m" in K.turn_options(g))
+    K.pane_model!(pane, "flash")
+    @test g.model == "flash" && K.model_words(pane, e) == "Flash" && last(g.items).words == "The model is now Flash."
+    options = K.turn_options(g)
+    @test options[findfirst(==("-m"), options) + 1] == "flash" && findfirst(==("-m"), options) < findfirst(==("--resume"), options)
+    for (agent, model) in (("Grok", "grok-4.6"), ("Codex", "gpt-5.4-mini"))
+      t = K.AgentSession(agent=agent, model=model, id="sess", turns=true)
+      options = K.turn_options(t)
+      @test options[findfirst(==("-m"), options) + 1] == model
+    end
+    # The settings file keeps the model of each agent
+    e.remember = true
+    K.model_chosen!(e, "Gemini", "pro")
+    @test occursin("\nmodels=Claude:opus,Gemini:pro\n", read(K.settings_file(), String))
+    empty!(K.MODELS_CHOSEN[])
+    K.load_settings!(e)
+    @test K.MODELS_CHOSEN[] == Dict("Claude" => "opus", "Gemini" => "pro")
+    e.remember = false
+    K.TURN_COMMAND[] = nothing
+    K.pane_agent!(pane, "Claude")
+    empty!(K.MODELS_CHOSEN[])
+    frames()
   end
 
   @testset "A pasted picture goes with your words, and its button takes it away" begin
