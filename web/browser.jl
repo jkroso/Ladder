@@ -94,7 +94,7 @@
 @use "./view" View page! refresh! restart!
 @use "./select" => Select
 @use "./dom" Element document attr text
-@use "./css" resolve
+@use "./url" resolve
 
 const PATIENCE = 6.0   # seconds that a page waits for its sheets and its scripts before it shows without the ones that haven't come
 const SLACK = 4.0      # px that the mouse can move between going down and coming up, and still click

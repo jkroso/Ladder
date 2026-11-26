@@ -39,6 +39,8 @@
 # again when the same `Files` has kept more than `MOST` bytes: `forget!` is
 # then called before the next page.
 
+@use "./entities" latin LATIN_NAMES
+
 "What came from an address: the bytes, the kind of file that the site says it is, and the address that it ended up at"
 struct Got
   bytes::Vector{UInt8}
@@ -225,9 +227,6 @@ readable(f::Files, address::AbstractString, page::AbstractString) = begin
   got !== nothing && (got.shared == "*" || (!isempty(from) && lowercase(got.shared) == from))
 end
 
-# What Windows-1252 has where Latin-1 has nothing that shows: the quote marks and dashes of a page that's written in it
-const WINDOWS = Dict(0x80 => '€', 0x85 => '…', 0x91 => '‘', 0x92 => '’', 0x93 => '“', 0x94 => '”', 0x95 => '•', 0x96 => '–', 0x97 => '—', 0x99 => '™')
-
 """
 The bytes of a file as text. Most files are in UTF-8. One that says it's in
 Latin-1 or Windows-1252, where the site says the kind of file or near the top
@@ -243,7 +242,7 @@ text(bytes::Vector{UInt8}, charset::AbstractString="") = begin
     m = match(r"charset\s*=\s*[\"']?\s*([\w-]+)"i, top)
     set = m === nothing ? "" : lowercase(m[1])
   end
-  set in ("iso-8859-1", "latin1", "windows-1252", "cp1252") && return String([get(WINDOWS, b, Char(b)) for b in bytes])
+  set in LATIN_NAMES && return latin(bytes)
   filter(isvalid, String(copy(bytes)))
 end
 text(got::Got) = text(got.bytes, got.charset)

@@ -32,6 +32,7 @@
 @use "./xml" Element parse_xml
 @use "./news" => News
 @use "./podcasts" => Podcasts
+@use "./web/entities" entities
 
 "The page of a folder of news that lists its feeds"
 const FILE = "Feeds.md"
@@ -249,24 +250,8 @@ end
 
 # --- the words of HTML ---------------------------------------------------------------------------
 
-"The names of the characters that HTML writes as &name;, which a post is most likely to have"
-const HTML_NAMED = Dict("amp" => "&", "lt" => "<", "gt" => ">", "quot" => "\"", "apos" => "'", "nbsp" => " ",
-  "rsquo" => "’", "lsquo" => "‘", "rdquo" => "”", "ldquo" => "“", "mdash" => "—", "ndash" => "–", "hellip" => "…",
-  "copy" => "©", "reg" => "®", "trade" => "™", "times" => "×", "middot" => "·", "bull" => "•", "laquo" => "«",
-  "raquo" => "»", "deg" => "°", "euro" => "€", "pound" => "£", "eacute" => "é", "egrave" => "è", "aacute" => "á",
-  "uuml" => "ü", "ouml" => "ö", "auml" => "ä", "szlig" => "ß", "ccedil" => "ç", "minus" => "−", "thinsp" => " ",
-  "ensp" => " ", "emsp" => " ", "zwj" => "", "zwnj" => "", "shy" => "")
-
 "`s` with each &name;, &#38; and &#x26; as the character that it names"
-unentity(s::AbstractString) = replace(s, r"&(?:#\d+|#[xX][0-9a-fA-F]+|[a-zA-Z]+);" => function (m)
-  name = m[2:end-1]
-  try
-    startswith(name, "#x") || startswith(name, "#X") ? string(Char(parse(UInt32, name[3:end], base=16))) :
-    startswith(name, "#") ? string(Char(parse(UInt32, name[2:end]))) : get(HTML_NAMED, name, m)
-  catch
-    m
-  end
-end)
+unentity(s::AbstractString) = entities(s)
 
 """
 The words of the HTML `html` as paragraphs of Markdown: a link keeps its

@@ -11,7 +11,7 @@
 # sends nothing itself.
 
 @use "./dom" Node Element Text attr text
-@use "./css" resolve
+@use "./url" resolve
 
 "The kinds of <input> that take text from the keyboard"
 const TYPED = ("text", "search", "email", "url", "tel", "password", "number", "")

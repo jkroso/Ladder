@@ -30,6 +30,7 @@
 # which gives the text of the sheet at an address, or nothing.
 
 @use "./dom" Element Text attr
+@use "./url" resolve
 using Base.ScopedValues: ScopedValue, with
 
 struct Declaration
@@ -90,33 +91,6 @@ struct Scope
 end
 
 # --- addresses ----------------------------------------------------------------------------
-
-"The path `p` with each `.` and `..` of it worked out"
-normal(p) = begin
-  cut = something(findfirst(in("?#"), p), lastindex(p) + 1)
-  path, rest = p[1:prevind(p, cut)], p[cut:end]
-  out = String[]
-  parts = split(path, '/')
-  for (i, part) in enumerate(parts)
-    part == "." ? (i == length(parts) && push!(out, "")) : part == ".." ? (length(out) > 1 && pop!(out); i == length(parts) && push!(out, "")) : push!(out, part)
-  end
-  join(out, '/') * rest
-end
-
-"The whole address that `url` means in a page or a sheet at the address `base`"
-resolve(base::AbstractString, url::AbstractString) = begin
-  url = String(strip(url))
-  (isempty(base) || isempty(url) || occursin(r"^[a-zA-Z][a-zA-Z0-9+.-]*:", url)) && return url
-  m = match(r"^([a-zA-Z][a-zA-Z0-9+.-]*:)(//[^/?#]*)?([^?#]*)(\?[^#]*)?", base)
-  m === nothing && return url
-  scheme, host, path, query = m[1], something(m[2], ""), m[3], something(m[4], "")
-  startswith(url, "//") && return scheme * url
-  startswith(url, '#') && return scheme * host * path * query * url
-  startswith(url, '?') && return scheme * host * path * url
-  startswith(url, '/') && return scheme * host * normal(url)
-  dir = (i = findlast('/', path)) === nothing ? "/" : path[1:i]
-  scheme * host * normal(dir * url)
-end
 
 const URL = r"url\(\s*(?:\"([^\"]*)\"|'([^']*)'|([^)\"']*?))\s*\)"i
 

@@ -23,6 +23,10 @@ end
   @test C.absolute("/img/a.png", SITE) == "https://www.bunnings.com.au/img/a.png"
   @test C.absolute("a.png", SITE) == "https://www.bunnings.com.au/paint/a.png"
   @test C.absolute("a.png", "https://example.com") == "https://example.com/a.png"
+  @test C.absolute("../a.png", SITE) == "https://www.bunnings.com.au/a.png"
+  @test C.absolute("./a.png", SITE) == "https://www.bunnings.com.au/paint/a.png"
+  @test C.absolute("?page=2", SITE) == "https://www.bunnings.com.au/paint/white-4l?page=2"
+  @test C.absolute("#bottom", SITE) == "https://www.bunnings.com.au/paint/white-4l?colour=white#bottom"
   # An address that isn't on the web names no picture
   @test C.absolute("data:image/png;base64,AAAA", SITE) == "" && C.absolute("javascript:alert(1)", SITE) == ""
   @test C.absolute("file:///etc/passwd", SITE) == "" && C.absolute("", SITE) == "" && C.absolute("a b.png", SITE) == ""
@@ -30,9 +34,9 @@ end
 
 @testset "entities" begin
   @test C.entities("Fish &amp; chips &lt;now&gt; &quot;hot&quot; &#39;n&#x27; &apos;cold&apos;") == "Fish & chips <now> \"hot\" 'n' 'cold'"
-  @test C.entities("caf&eacute; &ndash; 5&nbsp;km &hellip; &#8217;&#x2014;&#X2014;") == "café – 5 km … ’——"
-  # One that it doesn't know, and one that names no character, stay as they're written
-  @test C.entities("&bogus; &#0; &#xD800; &#99999999; & alone &amp") == "&bogus; &#0; &#xD800; &#99999999; & alone &amp"
+  @test C.entities("caf&eacute; &ndash; 5&nbsp;km &hellip; &#8217;&#x2014;&#X2014; &#146; &sup2;") == "café – 5\u00a0km … ’—— ’ ²"
+  # A name that isn't known stays; a number that names no character becomes \ufffd
+  @test C.entities("&bogus; &#0; &#xD800; &#99999999; & alone &amp") == "&bogus; \ufffd \ufffd \ufffd & alone &amp"
   @test C.tidy("  Two\n  lines&nbsp;and\ta tab ") == "Two lines and a tab"
   @test C.tidy("abcdefgh", 5) == "abcde…"
 end
@@ -62,7 +66,7 @@ const PAGE = """
 @testset "reading a page" begin
   c = C.card(PAGE, SITE)
   @test c.url == SITE && c.title == "White paint & primer, 4 L"
-  @test c.description == "Covers 16 m&sup2; a litre. Dries in two hours – \"touch dry\" in one."
+  @test c.description == "Covers 16 m² a litre. Dries in two hours – \"touch dry\" in one."
   @test c.image == "https://www.bunnings.com.au/images/paint.jpg?w=600&h=400"
   @test c.site == "Bunnings" && c.icon == "https://www.bunnings.com.au/static/icon.png"
   @test C.heading(c) == "White paint & primer, 4 L" && C.source(c) == "Bunnings · bunnings.com.au"
@@ -102,6 +106,10 @@ end
   @test C.card(latin, SITE).title == "Café"
   windows = UInt8[Vector{UInt8}("<meta http-equiv=Content-Type content=\"text/html; charset=windows-1252\"><title>It")..., 0x92, Vector{UInt8}("s</title>")...]
   @test C.card(windows, SITE).title == "It’s"
+  # Every Windows-1252 character in 0x80 to 0x9f, including the 17 outside the common quotes and dashes
+  extra = UInt8[0x82, 0x83, 0x84, 0x86, 0x87, 0x88, 0x89, 0x8a, 0x8b, 0x8c, 0x8e, 0x98, 0x9a, 0x9b, 0x9c, 0x9e, 0x9f]
+  full = UInt8[Vector{UInt8}("<meta charset=windows-1252><title>")..., extra..., Vector{UInt8}("</title>")...]
+  @test C.card(full, SITE).title == "‚ƒ„†‡ˆ‰Š‹ŒŽ˜š›œžŸ"
   # A page in UTF-8 with a wrong byte, and a page in letters that this file can't read
   @test C.card(UInt8[Vector{UInt8}("<title>A")..., 0xff, Vector{UInt8}("B</title>")...], SITE).title == "AB"
   @test C.card(UInt8[Vector{UInt8}("<meta charset=shift_jis><title>")..., 0x93, 0xfa, Vector{UInt8}("</title>")...], SITE).title == ""

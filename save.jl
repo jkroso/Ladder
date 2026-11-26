@@ -27,6 +27,8 @@
 # as `Authorization: Bearer` and the key. The page holds only the name, so the
 # key stays out of the file. Ladder sends a key only over https, or to this Mac.
 
+@use "./web/url" isurl host
+
 const SAVE = "save"
 
 "What a save block says: where the rows go, and how"
@@ -70,12 +72,6 @@ with_line(lines, field::Symbol, value) = begin
   line = "$field: $value"
   k === nothing ? [line; lines] : [lines[1:k-1]; line; lines[k+1:end]]
 end
-
-"True when `to` is a web address"
-isurl(to) = occursin(r"^https?://"i, strip(to))
-
-"The name of the server in the web address `url`, like example.com"
-host(url) = (m = match(r"^https?://(?:[^@/?#]*@)?([^/?#:]+|\[[^\]]*\])"i, strip(url)); m === nothing ? String(strip(url)) : String(m[1]))
 
 "True when the web address `url` is this Mac"
 islocal(url) = lowercase(host(url)) in ("localhost", "127.0.0.1", "[::1]")

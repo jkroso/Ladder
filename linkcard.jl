@@ -16,6 +16,9 @@
 # nothing from the page, and it keeps only those texts and two addresses: the
 # picture's and the icon's. It draws nothing.
 
+@use "./web/entities" entities latin LATIN_NAMES
+@use "./web/url" resolve
+
 """
 What a web page says of itself. A text that the page doesn't give is empty.
 `page` is false when what's at the address turned out to be something other
@@ -56,46 +59,17 @@ the page. It's empty for an address that isn't on the web, like `data:`.
 absolute(href::AbstractString, base::AbstractString) = begin
   href = String(strip(href))
   (isempty(href) || any(c -> isspace(c) || iscntrl(c), href)) && return ""
-  occursin(r"^https?://"i, href) && return isempty(host(href)) ? "" : href
-  occursin(r"^[a-z][a-z0-9+.-]*:"i, href) && return ""
-  startswith(href, "//") && return String(first(split(base, "//"))) * href
-  startswith(href, '/') && return origin(base) * href
-  folder = path(base)
-  origin(base) * (occursin('/', folder) ? folder[1:findlast('/', folder)] : "/") * href
+  full = resolve(base, href)
+  occursin(r"^https?://"i, full) && !isempty(host(full)) ? full : ""
 end
 
 # --- reading the HTML of a page ---------------------------------------------------------
-
-"The characters that HTML has names for, for the names that pages use most"
-const NAMES = Dict("amp" => "&", "lt" => "<", "gt" => ">", "quot" => "\"", "apos" => "'", "nbsp" => " ", "ndash" => "–", "mdash" => "—",
-                   "hellip" => "…", "lsquo" => "‘", "rsquo" => "’", "ldquo" => "“", "rdquo" => "”", "laquo" => "«", "raquo" => "»",
-                   "copy" => "©", "reg" => "®", "trade" => "™", "middot" => "·", "bull" => "•", "deg" => "°", "times" => "×",
-                   "euro" => "€", "pound" => "£", "cent" => "¢", "yen" => "¥", "frac12" => "½", "eacute" => "é", "egrave" => "è",
-                   "aacute" => "á", "agrave" => "à", "uuml" => "ü", "ouml" => "ö", "auml" => "ä", "ccedil" => "ç", "ntilde" => "ñ",
-                   "iacute" => "í", "oacute" => "ó", "uacute" => "ú", "szlig" => "ß", "rarr" => "→", "larr" => "←")
-
-"The character that the number `n` names in HTML, or nothing if it names none"
-character(n) = n !== nothing && 0 < n <= 0x10ffff && isvalid(Char, n) ? string(Char(n)) : nothing
-
-"`text` with each HTML entity, like `&amp;` and `&#8217;`, as the character that it names. One that it doesn't know stays as it's written."
-entities(text::AbstractString) = begin
-  occursin('&', text) || return String(text)
-  replace(text, r"&(#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|[a-zA-Z][a-zA-Z0-9]{1,10});" => s -> begin
-    name = s[2:end-1]
-    made = startswith(name, "#x") || startswith(name, "#X") ? character(tryparse(UInt32, name[3:end], base=16)) :
-           startswith(name, '#') ? character(tryparse(UInt32, name[2:end])) : get(NAMES, name, nothing)
-    something(made, s)
-  end)
-end
 
 "`text` as a card shows it: its entities as characters, each run of spaces and new lines as one space, and no more than `most` characters"
 tidy(text::AbstractString, most::Int=400) = begin
   words = join(split(replace(entities(text), r"[\x00-\x1f\x7f ​  ]" => " ")), " ")
   length(words) > most ? String(rstrip(first(words, most))) * "…" : words
 end
-
-# What Windows-1252 has where Latin-1 has nothing that shows: the quote marks and dashes of a page that's written in it
-const WINDOWS = Dict(0x80 => '€', 0x85 => '…', 0x91 => '‘', 0x92 => '’', 0x93 => '“', 0x94 => '”', 0x95 => '•', 0x96 => '–', 0x97 => '—', 0x99 => '™')
 
 """
 The text of the bytes of a page. Most pages are in UTF-8. A page that says it's
@@ -111,7 +85,7 @@ text(bytes::Vector{UInt8}) = begin
   top = String([b < 0x80 ? b : UInt8('?') for b in view(bytes, 1:min(length(bytes), 4096))])
   m = match(r"charset\s*=\s*[\"']?\s*([\w-]+)"i, top)
   set = m === nothing ? "utf-8" : lowercase(m[1])
-  set in ("iso-8859-1", "latin1", "windows-1252", "cp1252", "us-ascii", "ascii") && return String([get(WINDOWS, b, Char(b)) for b in bytes])
+  (set in LATIN_NAMES || set in ("us-ascii", "ascii")) && return latin(bytes)
   # A page in UTF-8 with a wrong byte or two is read without them
   set in ("utf-8", "utf8") ? filter(isvalid, String(copy(bytes))) : nothing
 end

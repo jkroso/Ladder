@@ -24,7 +24,7 @@
 
 @use Skia
 @use "./dom" Element attr
-@use "./css" resolve
+@use "./url" resolve
 @use "./style" Style Len Turn Shade Effect px isauto ispercent border colour alpha argb terms len flat PLAIN CURRENT NO_Z
 @use "./text" Font font drawn normal
 @use "./box" Box Piece Span Line floats placed flexes grids

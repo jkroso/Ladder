@@ -98,6 +98,9 @@ end
   # Text that isn't in UTF-8
   load("https://example.com/latin")
   @test Fetch.text(Fetch.file(f, "https://example.com/latin")) == "café"
+  # All 17 Windows-1252 characters outside the common quotes and dashes
+  extra = UInt8[0x82, 0x83, 0x84, 0x86, 0x87, 0x88, 0x89, 0x8a, 0x8b, 0x8c, 0x8e, 0x98, 0x9a, 0x9b, 0x9c, 0x9e, 0x9f]
+  @test Fetch.text(extra, "windows-1252") == "‚ƒ„†‡ˆ‰Š‹ŒŽ˜š›œžŸ" && Fetch.text(extra, "iso-8859-1") == "‚ƒ„†‡ˆ‰Š‹ŒŽ˜š›œžŸ"
   # A page from the web gets no file of this computer. A page that's such a file does.
   mktempdir() do dir
     write(joinpath(dir, "note.txt"), "private")

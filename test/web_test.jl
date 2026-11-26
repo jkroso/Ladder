@@ -315,7 +315,10 @@ copied(p) = join(w.before * String(w.letters) for w in p.words)
         Css.media("(prefers-reduced-motion: no-preference) or (width < 100px)", 600)
   @test Css.container("side (min-width: 300px)", 320, 100) && !Css.container("(min-width: 300px)", 200, 100) && Css.container_name("side (min-width: 300px)") == "side"
   @test Css.resolve("https://x.org/a/b.html", "../c/d.png?x=1") == "https://x.org/c/d.png?x=1" && Css.resolve("https://x.org/a/b.html", "//y.org/z") == "https://y.org/z" &&
-        Css.resolve("https://x.org/a/b.html", "e.css") == "https://x.org/a/e.css" && Css.resolve("", "e.css") == "e.css" && Css.resolve("https://x.org/a/", "data:x") == "data:x"
+        Css.resolve("https://x.org/a/b.html", "e.css") == "https://x.org/a/e.css" && Css.resolve("", "e.css") == "e.css" && Css.resolve("https://x.org/a/", "data:x") == "data:x" &&
+        Css.resolve("https://x.org/a/b.html?k=1", "?page=2") == "https://x.org/a/b.html?page=2" &&
+        Css.resolve("https://x.org/a/b.html?k=1", "#top") == "https://x.org/a/b.html?k=1#top" &&
+        Css.resolve("https://x.org/a/b.html", "//cdn.example.com/a.png") == "https://cdn.example.com/a.png"
 end
 
 @testset "variables, sums and colours" begin
