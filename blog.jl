@@ -47,6 +47,7 @@
 
 @use Dates: Dates, Date
 @use "./macfile" made
+@use "./markdown" matter_keys after_matter
 
 "The folder in a blog's folder that Ladder writes the site into"
 const SITE = "docs"
@@ -82,33 +83,6 @@ day(text::AbstractString) = begin
   nothing
 end
 
-"""
-What the front matter at the top of `lines` sets each of its keys to, by the
-key in lower case. Front matter is between lines of `---`, with a colon after
-each key, or between lines of `+++`, with `=` after each key. Lines with no
-front matter have none.
-"""
-matter(lines) = begin
-  out = Dict{String,String}()
-  isempty(lines) && return out
-  fence = rstrip(lines[1])
-  fence in ("---", "+++") || return out
-  pattern = fence == "---" ? r"^([^:#\s-][^:#]*):\s*(.*?)\s*$" : r"^([A-Za-z0-9_-]+)\s*=\s*(.*?)\s*$"
-  for line in @view lines[2:end]
-    rstrip(line) == fence && break
-    m = match(pattern, line)
-    m === nothing || (out[lowercase(strip(m[1]))] = String(strip(m[2], ['"', '\''])))
-  end
-  out
-end
-
-"`lines` after their front matter, if they have some"
-body(lines) = begin
-  (!isempty(lines) && rstrip(lines[1]) in ("---", "+++")) || return lines
-  k = findnext(l -> rstrip(l) == rstrip(lines[1]), lines, 2)
-  k === nothing ? lines : lines[k+1:end]
-end
-
 "The ending of the file called `name` that makes it a post, or nothing. With `others`, a book review and the code of a page are posts too."
 ending(name::AbstractString, others::Bool=false) = begin
   low = lowercase(name)
@@ -126,7 +100,7 @@ isindex(name::AbstractString) = occursin(r"^index\.(md|markdown)$"i, name)
 
 "The post in the file at `path`, whose lines are `lines`. `section` is the folder that it's in, from the blog's folder."
 post(path::AbstractString, lines=readlines(path); section::AbstractString="") = begin
-  said = matter(lines)
+  said = matter_keys(lines)
   file = basename(path)
   e = something(ending(file, true), splitext(file)[2])
   name = file[1:end-length(e)]
@@ -201,7 +175,7 @@ end
 said_address(folder::AbstractString) = begin
   top = front(folder)
   isempty(top) && return ""
-  said = try open(io -> matter(collect(Iterators.take(eachline(io), 40))), top) catch; Dict{String,String}() end
+  said = try open(io -> matter_keys(collect(Iterators.take(eachline(io), 40))), top) catch; Dict{String,String}() end
   get(said, "site", "")
 end
 
@@ -277,7 +251,7 @@ list of the posts that are no drafts. The posts of each section are under a
 heading with the section's name.
 """
 index(top, list) = begin
-  out = String[String(l) for l in body(top)]
+  out = String[String(l) for l in after_matter(top)]
   shown = filter(p -> !p.draft, list)
   for section in sections(shown)
     isempty(out) || isempty(strip(out[end])) || push!(out, "")
@@ -373,7 +347,7 @@ about(path::AbstractString) = begin
   end
   ending(basename(path), true) in (MARKDOWN..., ".review") || return ""
   lines = try open(io -> collect(Iterators.take(eachline(io), 40)), path) catch; String[] end
-  plain(get(matter(lines), "description", ""))
+  plain(get(matter_keys(lines), "description", ""))
 end
 
 "`text` with its Markdown taken out: a link shows its words, and the marks of bold, italic and code go"
@@ -387,7 +361,7 @@ entry(path::AbstractString; review::Bool=false) = begin
   icon = folder ? :folder : e == ".review" || (review && e in MARKDOWN) ? :review : e in MARKDOWN ? :markdown : endswith(lowercase(name), ".jl") ? :julia : :file
   if icon == :markdown
     lines = try open(io -> collect(Iterators.take(eachline(io), 40)), path) catch; String[] end
-    said = matter(lines)
+    said = matter_keys(lines)
     (lowercase(get(said, "draft", "")) in ("true", "yes") || lowercase(get(said, "complete", "")) in ("false", "no")) && (icon = :draft)
   end
   Entry(String(path), name, folder, icon, about(path), folder ? bytes(path) : (try filesize(path) catch; 0 end), made(path), mtime(path))

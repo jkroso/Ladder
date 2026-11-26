@@ -63,6 +63,8 @@
 
 @use "github.com/jkroso/Prospects.jl" @def
 @use Dates: Dates, Date, DateTime, Day, Hour, Minute
+@use "./markdown" front_matter matter_keys
+@use "./csv" cells records
 
 # --- the settings, and when the news of each section was last asked for ------------------
 
@@ -245,21 +247,11 @@ liked_word(s::AbstractString) = (w = lowercase(strip(s)); w in ("yes", "true", "
   articles::Vector{Article} = Article[]
 end
 
-"`s` without the quotes round it that YAML can have"
-unquote(s::AbstractString) = (t = strip(s); length(t) >= 2 && t[1] == t[end] && t[1] in ('"', '\'') ? String(t[2:end-1]) : String(t))
-
 "What the front matter of `text` says, by its keys in small letters, and the text after it. Text with no front matter says nothing."
 matter(text::AbstractString) = begin
   lines = split(text, '\n')
-  (length(lines) >= 2 && rstrip(lines[1]) == "---") || return (Dict{String,String}(), String(text))
-  said = Dict{String,String}()
-  for i in 2:length(lines)
-    l = rstrip(lines[i])
-    l in ("---", "...") && return (said, join(lines[i+1:end], '\n'))
-    m = match(r"^(\w[\w .-]*):\s*(.*)$", l)
-    m === nothing || (said[lowercase(m[1])] = unquote(m[2]))
-  end
-  (Dict{String,String}(), String(text))
+  stop = front_matter(lines)
+  stop == 0 ? (Dict{String,String}(), String(text)) : (matter_keys(lines), join(lines[stop+1:end], '\n'))
 end
 
 "The day that a folder of a day's articles is named by, like 2026-11-25, or nothing for a folder of another name"
@@ -370,9 +362,8 @@ stays as it is.
 """
 with_key(text::AbstractString, key::AbstractString, value::Union{AbstractString,Nothing}) = begin
   lines = split(text, '\n')
-  (length(lines) >= 2 && rstrip(lines[1]) == "---") || return String(text)
-  stop = findnext(l -> rstrip(l) in ("---", "..."), lines, 2)
-  stop === nothing && return String(text)
+  stop = front_matter(lines)
+  (stop > 0 && rstrip(lines[1]) == "---") || return String(text)
   keys = [l for l in lines[2:stop-1] if !occursin(Regex("^" * key * "\\s*:", "i"), l)]
   value === nothing || push!(keys, "$key: $value")
   join([lines[1]; keys; lines[stop:end]], '\n')
@@ -408,37 +399,6 @@ const MARK_COLUMNS = ["day", "by", "section", "liked", "read", "title", "summary
 "`s` as a cell of a CSV file: in quotes, with a quote in it written twice, on one line"
 csv_cell(s) = "\"" * replace(replace(string(s), r"\s*\n\s*" => " "), "\"" => "\"\"") * "\""
 
-"The rows of the CSV text `s`, each a list of its cells. A cell in quotes can hold a comma, a quote written twice, or a line break."
-csv_rows(s::AbstractString) = begin
-  rows, row, cell = Vector{String}[], String[], IOBuffer()
-  quoted, i, n = false, firstindex(s), lastindex(s)
-  while i <= n
-    c = s[i]
-    if quoted
-      if c == '"'
-        j = nextind(s, i)
-        j <= n && s[j] == '"' ? (print(cell, '"'); i = j) : (quoted = false)
-      else
-        print(cell, c)
-      end
-    elseif c == '"'
-      quoted = true
-    elseif c == ','
-      push!(row, String(take!(cell)))
-    elseif c == '\n'
-      push!(row, String(take!(cell)))
-      all(isempty, row) || push!(rows, row)
-      row = String[]
-    elseif c != '\r'
-      print(cell, c)
-    end
-    i = nextind(s, i)
-  end
-  push!(row, String(take!(cell)))
-  all(isempty, row) || push!(rows, row)
-  rows
-end
-
 "The text of `feedback.csv` with the marks `ms`"
 marks_text(ms) = join(MARK_COLUMNS, ",") * "\n" *
   join(join(csv_cell.([Dates.format(m.day, "yyyy-mm-dd"), m.by, m.section, m.liked === nothing ? "" : m.liked ? "yes" : "no",
@@ -447,7 +407,7 @@ marks_text(ms) = join(MARK_COLUMNS, ",") * "\n" *
 "Each row that `feedback.csv` of the folder of news `folder` keeps, the newest first"
 marks(folder::AbstractString) = begin
   text = try read(joinpath(folder, FEEDBACK), String) catch; return Mark[] end
-  rows = csv_rows(text)
+  rows = [cells(r, ',') for r in records(replace(text, "\r\n" => "\n", '\r' => '\n'))]
   isempty(rows) && return Mark[]
   col = Dict(lowercase(strip(n)) => i for (i, n) in enumerate(rows[1]))
   cell(r, name) = (i = get(col, name, 0); 0 < i <= length(r) ? r[i] : "")

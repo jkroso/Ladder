@@ -26,6 +26,8 @@
 # This file reads and writes those lines, lists the files, and works out the
 # grid. It draws nothing.
 
+@use "./numbers" sortkey
+
 "The language of a code block that is a gallery"
 const GALLERY = "gallery"
 
@@ -110,9 +112,6 @@ folder(g::Gallery, dir) = g.folder === nothing ? (isempty(g.listed) ? String(dir
 "What the gallery calls its folder: the name that the block gives it, or “this folder” for the page's own"
 folder_name(g::Gallery) = g.folder === nothing || isempty(g.folder) ? "this folder" : g.folder
 
-"`name` written so that names sort as a person reads them: photo 2 comes before photo 10"
-order(name) = replace(lowercase(name), r"\d+" => n -> lpad(n, 20, '0'))
-
 "True when the name of the file at `path` ends as one of `kinds` does, like .png"
 ispicture(path, kinds) = lowercase(splitext(path)[2]) in kinds
 
@@ -143,7 +142,7 @@ items(g::Gallery, dir; pictures, skip=()) = begin
   there = from !== nothing && isdir(from)
   if there
     names = try readdir(from) catch; String[] end
-    for name in sort!(names, by=n -> (order(n), n))
+    for name in sort!(names, by=n -> (sortkey(n), n))
       path = joinpath(from, name)
       # A link that leads nowhere isn't there
       startswith(name, '.') || path in skip || !ispath(path) || push!(out, Item(path; pictures))
@@ -157,7 +156,7 @@ items(g::Gallery, dir; pictures, skip=()) = begin
       push!(out, Item(path; pictures, listed=true))
     end
   end
-  g.sort == :newest && sort!(out, by=p -> (-p.at, order(p.name)))
+  g.sort == :newest && sort!(out, by=p -> (-p.at, sortkey(p.name)))
   problem = !isempty(out) ? "" :
             from !== nothing && !there ? "There's no folder called “$(g.folder)” beside this page." :
             from === nothing ? "Nothing to show" : "Nothing in $(folder_name(g))"

@@ -23,7 +23,7 @@
 # It changes only the cells that it's asked to: the rest of the row stays as the
 # file has it, quotes and all. It draws nothing.
 
-@use "./numbers" isnumber
+@use "./numbers" isnumber sortkey
 @use Dates: Dates, Date, DateTime
 
 const MOST_COLUMNS = 40
@@ -277,9 +277,6 @@ kinds(rows) = begin
     2count(x -> when(x, dayfirst=first) !== nothing, full) > length(full) ? :day : :text
   end
 end
-
-"The text of a cell as it goes in order: in small letters, with each run of digits as long as the others, so that item 2 comes before item 10"
-sortkey(text::AbstractString) = replace(lowercase(text), r"\d+" => d -> lpad(d, 20, '0'))
 
 # --- changing the file ------------------------------------------------------------------
 

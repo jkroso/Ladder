@@ -369,7 +369,7 @@ end
 @use "./spelling" misspelt guesses learn!
 @use "./transcribe" Transcription check! finished phrases words_between
 @use "./html" html footnotes NOTE escape
-@use "./markdown" Kind Line Span Cell classify spans tablecells isdivider words isdone front_matter MATTER TOML_MATTER MATH CALLOUTS callout opens_callout wikitarget block_id only_id
+@use "./markdown" Kind Line Span Cell classify spans tablecells isdivider words isdone front_matter after_matter MATTER TOML_MATTER MATH CALLOUTS callout opens_callout wikitarget block_id only_id
 @use "./markdown" COMMENT
 @use "./highlight" tokens left_open
 @use "./sheet" SHEET Result Given sheetcells parts uses tally known units shown number_at nudged name_values ident cases folded
@@ -59501,7 +59501,7 @@ publish_step!(job::Publishing) = begin
     top = Blogs.front(folder)
     # A Readme with no title of its own has the blog's name over it
     lines = isempty(top) ? String[] : text(top)
-    any(l -> startswith(l, "# "), Blogs.body(lines)) || (lines = ["# " * blog_name(folder), "", Blogs.body(lines)...])
+    any(l -> startswith(l, "# "), after_matter(lines)) || (lines = ["# " * blog_name(folder), "", after_matter(lines)...])
     made = Blogs.linked(html(Blogs.index(lines, job.every), title=blog_name(folder)))
     mkpath(site)
     write(joinpath(site, "index.html"), made)
@@ -61109,9 +61109,8 @@ feedback.csv have the mark at once.
 news_mark!(e, liked::Union{Bool,Nothing}) = begin
   b = e.buf
   lines = b.lines
-  (length(lines) >= 2 && rstrip(lines[1]) == "---") || return nothing
-  stop = findnext(l -> rstrip(l) in ("---", "..."), lines, 2)
-  stop === nothing && return nothing
+  stop = front_matter(lines)
+  (stop > 0 && rstrip(lines[1]) == "---") || return nothing
   was = join(lines[1:stop], '\n')
   new = News.marked(was, liked)
   new == was && return nothing

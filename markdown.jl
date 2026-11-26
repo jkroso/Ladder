@@ -123,6 +123,32 @@ front_matter(lines) = begin
   0
 end
 
+"`s` without the quotes round it that YAML and TOML can have"
+unquote(s::AbstractString) = (t = strip(s); length(t) >= 2 && t[1] == t[end] && t[1] in ('"', '\'') ? String(t[2:end-1]) : String(t))
+
+"""
+What the front matter of `lines` sets each of its keys to, by the key in small
+letters, with no quotes round a value: `title: Notes` in YAML, or
+`title = "Notes"` in TOML. A line that sets no key, like an item of a list,
+says nothing. Lines with no front matter say nothing.
+
+    matter_keys(["---", "title: Notes", "---", "Hello"])   # Dict("title" => "Notes")
+"""
+matter_keys(lines) = begin
+  said = Dict{String,String}()
+  stop = front_matter(lines)
+  stop == 0 && return said
+  pattern = rstrip(lines[1]) == "+++" ? r"^\s*([\w.-]+)\s*=\s*(.*?)\s*$" : r"^(\w[\w .-]*):\s*(.*?)\s*$"
+  for line in @view lines[2:stop-1]
+    m = match(pattern, line)
+    m === nothing || (said[lowercase(strip(m[1]))] = unquote(m[2]))
+  end
+  said
+end
+
+"`lines` after their front matter, or all of them when they have none"
+after_matter(lines) = @view lines[front_matter(lines)+1:end]
+
 "The line of +++ that closes TOML front matter, or 0. A line of TOML can be anything, like the `]` that ends a list."
 toml_matter(lines) = begin
   keys = 0
@@ -520,5 +546,5 @@ end
 "How many words are in a document"
 words(lines) = sum(text -> count(_ -> true, eachmatch(r"[\p{L}\p{N}][\p{L}\p{N}'’-]*", text)), lines, init=0)
 
-export Kind, Line, Span, Cell, classify, spans, tablecells, isdivider, words, isdone, front_matter, MATTER, TOML_MATTER, MATH, CALLOUTS, callout, opens_callout, wikilink, wikitarget, block_id, only_id
+export Kind, Line, Span, Cell, classify, spans, tablecells, isdivider, words, isdone, front_matter, matter_keys, after_matter, MATTER, TOML_MATTER, MATH, CALLOUTS, callout, opens_callout, wikilink, wikitarget, block_id, only_id
 export COMMENT, opens_comment, closes_comment

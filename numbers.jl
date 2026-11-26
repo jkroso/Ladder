@@ -1,7 +1,8 @@
 # Reads numbers from the text of table cells, with any mark before them or
 # unit after them, like `$1,200`, `45%`, `2.4 m`, `1%/yr` or `22.4 billion USD`.
 # chart.jl, csv.jl, filter.jl and forms.jl use it to tell which cells hold
-# numbers and what those numbers are.
+# numbers and what those numbers are. csv.jl and gallery.jl put names in order
+# with `sortkey`, so that item 2 comes before item 10.
 #
 #     number("\$1,200")           # (1200.0, "\$", "")
 #     number("22.4 billion USD")  # (2.24e10, "", " USD")
@@ -45,3 +46,6 @@ end
 
 "True when the cell `text` is a number, like 12, -4.5, \$4,200, 15% or 12 L"
 isnumber(text::AbstractString) = number(text) !== nothing
+
+"The text `text` as it goes in order: in small letters, with each run of digits as long as the others, so that item 2 comes before item 10"
+sortkey(text::AbstractString) = replace(lowercase(text), r"\d+" => d -> lpad(d, 20, '0'))

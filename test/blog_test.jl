@@ -18,7 +18,7 @@ page!(name, text) = (path = joinpath(dir, name); write(path, text); path)
   # With neither, the title is the file's name, and the day is the day that the file was saved
   p = B.post(page!("plain.md", "Just words.\n"))
   @test p.title == "plain" && p.day == Date(Libc.strftime("%Y-%m-%d", time()))
-  @test B.matter(["# No front matter", "title: x"]) == Dict{String,String}()
+  @test B.matter_keys(["# No front matter", "title: x"]) == Dict{String,String}()
   @test B.day("on 2026-13-40 and 2026-02-28") == Date(2026, 2, 28) && B.day("no day") === nothing
   @test B.long(Date(2026, 11, 3)) == "3 November 2026"
 end
@@ -74,8 +74,8 @@ at!(rel, text) = (path = joinpath(canon, rel); mkpath(dirname(path)); write(path
 @testset "front matter between lines of +++" begin
   p = B.post(at!("Humans/Dating.md", "+++\ndescription = \"How to, roughly\"\ncomplete = false\ndate = 2025-12-12\n+++\n\nWords.\n"))
   @test p.title == "Dating" && p.day == Date(2025, 12, 12) && p.draft && p.section == ""
-  @test B.matter(readlines(p.path))["description"] == "How to, roughly"
-  @test B.body(readlines(p.path)) == ["", "Words."] && B.body(["# x"]) == ["# x"]
+  @test B.matter_keys(readlines(p.path))["description"] == "How to, roughly"
+  @test B.after_matter(readlines(p.path)) == ["", "Words."] && B.after_matter(["# x"]) == ["# x"]
   p = B.post(at!("Book Reviews/The Selfish Gene.review", "+++\ntitle = \"The Selfish Gene\"\nrating = 5\n+++\n\nGenes.\n"), section="Book Reviews")
   @test p.name == "The Selfish Gene" && p.title == "The Selfish Gene" && p.section == "Book Reviews" && !p.draft
   # The code of a page has its title in an :h1, and its comments aren't headings
