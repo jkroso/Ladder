@@ -13,7 +13,7 @@ export drop!, dragging, click_twice!, settle!, answer!, commit!, stop_asking!, f
        chip_words, choice_input, choose!, choosing_tick!, chosen, draw_drag, hush!, key_given!, locate, marks,
        more_words, name_row!, own_button, stop_choosing!, theme!, turn!, works_here, step!, locked, asks,
        add_to_favourites!, page_covers, remove_from_favourites!, choices_for, put_back!, runs_at_once,
-       sidenote, worded, matter_view, on_own_page, table_view, web_kind, table_item, page_side, side_name,
+       sidenote, worded, matter_view, on_own_page, table_view, web_kind, table_item, page_side, page_outline, side_name,
        page_back!, wide_words, chip_click, chip_kind, chip_start, look!, look_of, put_look!, shown_at, drag!,
        hint, head_in_charge, compact_width, chip_wider
 
@@ -247,6 +247,14 @@ function table_item end
 
 "What shows in a panel at the right of the window, beside what `page_view` gives for `o`"
 function page_side end
+
+"""
+The outline of `o`, what the page of `e` shows: its headings and its parts, as
+`Entry`s, or nothing when a thing of its kind has no outline. A kind of file or
+folder that can list its parts has a method of this. An outline can be empty,
+like that of a page with no headings yet.
+"""
+function page_outline end
 
 "What the button that hides the panel at the right calls the panel of `o`"
 function side_name end

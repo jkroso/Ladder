@@ -49,7 +49,7 @@ export pane_field!, reply_editor, talk_on_page, talk_zoom, page_symbols, pane_st
        AgentMenu, AgentMenuRow, choose_agent!, pane_model!, MODEL_MENU, MODEL_MENU_W, ModelMenu, ModelMenuRow,
        EffortButton, EFFORTS, model_effort, model_rows, menu_rows, menu_efforts, effort_wide, model_menu_wide,
        row_choice, choose_model!, effort_slot, effort_button, text_between, MOST_PICKED, page_context,
-       MOST_PARAGRAPH, html_picked, html_letters, page_letters, html_told, page_outline, html_outline,
+       MOST_PARAGRAPH, html_picked, html_letters, page_letters, html_told, html_outline,
        send_words!, SLASH_MENU, SLASH_MOST, SLASH_ROW, SLASH_CROWN, SLASH_INSET, SlashMenu, SlashRow,
        SlashLens, slash_menu, slash_wide, slash_parts, slash_rows, field!, slash_tick!, look_for_sessions!,
        slash_key!, slash_pick!, run_own!, resume_session!, row_of, attached, AGENT_PICTURES, agent_pictures,
@@ -628,17 +628,37 @@ html_told(e, v, b) = begin
   end
 end
 
-"The headings and the components of the page that the window of `e` shows, the places of a file of code, or the headings of the page that an HTML file makes. They're kept until the text changes."
-page_outline(e) = begin
-  html_shown(e) && return html_outline(e)[1]
-  b = e.buf
+"""
+The outline of what the page of `e` shows, or nothing when what it shows has
+none: see `page_outline(e, o)`. The page asks the object of its file or
+folder while it shows one, and else its text. Agent mode shows the outline at
+the right only for a page that has one.
+"""
+page_outline(e) = (o = page_object(e); page_outline(e, o === nothing ? e.buf : o))
+
+"A file or a folder has no outline, unless its kind has a method of `page_outline` that gives one"
+page_outline(e, o) = nothing
+
+"""
+The outline of the page's text: its headings and its components, or the
+places of a file of code. Text at a lower level, like its bytes, has none.
+It's kept until the text changes.
+"""
+page_outline(e, b::Buffer) = begin
+  b.view in (:markdown, :code) || return nothing
   kept = get(e.nodes, :pane_outline, nothing)
   kept !== nothing && kept[1] === b && kept[2] == b.version && return kept[3]::Vector{Entry}
   found = b.view == :markdown ? outline(b) :
-          b.view == :code ? [Entry(h.line, h.what == "section" ? 1 : 2, h.words, h.what == "section" ? "text-left" : "braces", h.line) for h in code_places(e)] : Entry[]
+          [Entry(h.line, h.what == "section" ? 1 : 2, h.words, h.what == "section" ? "text-left" : "braces", h.line) for h in code_places(e)]
   e.nodes[:pane_outline] = (b, b.version, found)
   found
 end
+
+"An HTML file, as the page that its HTML makes"
+const HTMLFile = Union{FS.File{:html},FS.File{:htm},FS.File{:HTML},FS.File{:HTM}}
+
+"The outline of an HTML file at its highest level: the headings of the page that its HTML makes"
+page_outline(e, ::HTMLFile) = html_shown(e) ? html_outline(e)[1] : nothing
 
 """
 The headings of the page that the HTML file of the window of `e` makes, as
@@ -1796,7 +1816,7 @@ end
 
 "The heading of the section that's at the top of the window of `e`, which the outline marks, or nothing"
 section_in_view(e) = begin
-  entries = page_outline(e)
+  entries = something(page_outline(e), Entry[])
   now = section_now(e, entries)
   k = findfirst(x -> x.line == now && x.level <= 6, entries)
   k === nothing ? nothing : entries[k]
@@ -1805,7 +1825,7 @@ end
 describe(o::OutlinePane) = with_pane_colours() do
   e = editor(o)
   b = e.buf
-  entries = page_outline(e)
+  entries = something(page_outline(e), Entry[])
   heads = filter(x -> x.level <= 6, entries)
   top = isempty(heads) ? 1 : minimum(x -> x.level, heads)
   # A page that starts with its one biggest heading has that for its title, and its sections are the headings a level down
@@ -1893,7 +1913,7 @@ widen_for_agent!(e, w, p::AgentPane, side_was) = begin
   wide, tall = w.size
   x, y = w.position
   screen = w.screen
-  outline = e.right && right_view(e) !== nothing ? OUTLINE_W : 0px   # a page with no outline has none
+  outline = e.right && right_view(e) !== nothing ? OUTLINE_W : 0px   # a page of a kind that has no outline has none
   card = something(PAGE_CARD_CHOSEN[], page_shape_wide(tall))
   want = AGENT_W + card + outline + 2PAGE_CARD_GAP
   new = px(round(num(min(max(want, wide), max(screen.size[1], wide)))))
@@ -1920,7 +1940,7 @@ end
 """
 Show an agent's session at the left of the page and the page's outline at
 its right, in a wider window, with the page between them on a card. A page
-with no outline, like a design, has nothing at its right. Run it
+of a kind that has no outline, like a design, has nothing at its right. Run it
 again to put the window back as it was. The session stays, for the next time.
 """
 agent_mode!(e) = begin

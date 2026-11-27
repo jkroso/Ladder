@@ -9320,13 +9320,14 @@ end
 
 """
 What the panel at the right shows for the page, or nothing when the page has
-no panel: see `page_side`. In agent mode it's the page's outline, while the
-page has one. A page with no headings, places or components, like a design,
-has no outline, so the card has the room.
+no panel: see `page_side`. In agent mode it's the page's outline, for a page
+that shows a thing that has an outline, even an empty one: see
+`page_outline`. A page of another kind, like a design, has none, so the card
+has the room.
 """
 right_view(e) = begin
   (filled(e) || as_app(e) || nofile(e)) && return nothing
-  agent_shows(e) && return isempty(page_outline(e)) ? nothing : node!(OutlinePane, e, :outline_pane)
+  agent_shows(e) && return page_outline(e) === nothing ? nothing : node!(OutlinePane, e, :outline_pane)
   o = page_object(e)
   o === nothing ? nothing : page_side(e, o)
 end
