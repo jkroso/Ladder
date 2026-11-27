@@ -7,13 +7,13 @@ about: Does a data centre in orbit cost less than one on the ground? Drag the nu
 
 Say we launch a fleet with !`compute = 1GW` of computers. Let's see how much profit that would generate before reverting to inanimate matter.
 
-The computers cost the same price in orbit and on the ground. Say that price is !`chip_price = 25USD/W` for each watt of computers, near the rack price further down. On each side that is !`chip_bill = chip_price * compute`. The sums also count what the computers need: power, a way to get rid of their heat, and a building or a spacecraft to hold them.
+The computers cost the same price in orbit and on the ground. Say that price is !`chip_price = 25USD/W` for each watt of computers, near the rack price further down.[^25] On each side that is !`chip_bill = chip_price * compute`. The sums also count what the computers need: power, a way to get rid of their heat, and a building or a spacecraft to hold them.
 
 ## Sunlight that doesn't set
 
-Above the air, the sun brings !`sunlight = 1361W/m^2`. A satellite that circles over the line between day and night is in the sun !`sun = 98Percent` of the time. This is a dawn–dusk orbit.
+Above the air, the sun brings !`sunlight = 1361W/m^2`. The fleet circles over the line between day and night, a dawn–dusk orbit, at !`alt = 1380km`. At that height it is in the sun !`sun = let Re = 6378.137, r = Re + max(0.0, alt / 1km), cosi = clamp(-2 * (2pi / (365.2422 * 86400)) * r^3.5 / (3 * 1.08262668e-3 * Re^2 * sqrt(3.986004418e5)), -1.0, 1.0), α = acos(cosi) - pi / 2, sin_b = Re / r, cos_b = sqrt(max(0.0, 1 - sin_b^2)), b_crit = asin(sin_b), eps = 23.439 * pi / 180; ecl = sum(let δ = asin(sin(eps) * sin(2pi * (d - 0.5) / 365)), β = pi / 2 - abs(δ + α); abs(β) < b_crit ? acos(clamp(cos_b / cos(β), -1.0, 1.0)) / pi : 0.0 end for d in 1:365) / 365; 100Percent * round(1 - ecl, digits=3) end` of the time.
 
-It isn't 100% because the Earth's axis is tilted. For a few months of each year the orbit dips into shadow on each pass, for a small part of each orbit.[^3] The Moon hardly counts: it's in the way only during a solar eclipse.
+It isn't 100% below about 1,400 km because the Earth's axis is tilted. For a few months of each year the orbit dips into shadow on each pass, for a small part of each orbit.[^3] The Moon hardly counts: it's in the way only during a solar eclipse.
 
 Two things wear the fleet down, and nobody can go up to fix either of them.
 
@@ -164,7 +164,7 @@ The fleet's weight comes from five parts. The panels cover !`array_area` square 
 - **Computers.** A rack of 72 Nvidia GPUs weighs about 1,470 kg and uses about 132 kilowatts. That's 11 kg for each kilowatt, with its steel cabinet, fans and power supplies. A satellite needs no cabinet or fans, so say !`computers = 6` kg for each kilowatt.
 - **The body.** This holds the computers. It is the frame, the converters, the pumps, the thrusters, the attitude control, and the radios. The shadow is a small part of the year, so the sums add no battery. The JPL study puts the body at 7 to 30 kg for each kilowatt, and that range includes a battery.[^5] On one satellite that is !`round(Int, 7 * one / 1kW)` to !`round(Int, 30 * one / 1kW)` kg.
 
-The fleet flies at !`alt = 1000km`. At the end, the thrusters push against the flight for months, and each satellite spirals down to !`spiral_to = 400km`. A slow spiral needs more speed than one short burn would. It takes !`deorbit = let μ = 3.986e14, r1 = (6378 + alt / 1km) * 1000, r2 = (6378 + spiral_to / 1km) * 1000; round(sqrt(μ / r2) - sqrt(μ / r1), digits=1) end` metres a second. The thrusters give !`isp = 2000` seconds of push from each second of their fuel.
+The fleet flies at !`alt`. At the end, the thrusters push against the flight for months, and each satellite spirals down to !`spiral_to = 400km`. A slow spiral needs more speed than one short burn would. It takes !`deorbit = let μ = 3.986e14, r1 = (6378 + alt / 1km) * 1000, r2 = (6378 + spiral_to / 1km) * 1000; round(sqrt(μ / r2) - sqrt(μ / r1), digits=1) end` metres a second. The thrusters give !`isp = 2000` seconds of push from each second of their fuel.
 
 On one satellite, say:
 
@@ -230,7 +230,7 @@ This comes to !`round(convert(USD/W, build / panels), digits=2)` a watt. Philip 
 
 ## Keeping the height
 
-The 98% sun above is what a dawn–dusk orbit gets near 1,000 km. The fleet flies at !`alt`.
+The !`sun` sun above is what a dawn–dusk orbit gets at !`alt`.
 
 The panels face the sun. The flight is nearly along their edge, so over a year they show the air !`ram = 17Percent` of their area.[^7] The radiators can sit edge-on to the sun and to the flight, so the sums leave their faces out.
 
@@ -240,7 +240,7 @@ About 1% of the chips are left after !`life = let a = float(fail * 1yr), g = flo
 
 At the end, the thrusters lower the fleet to !`spiral_to`, as the part on the satellite says. The air there takes about !`sink_rate = let h = spiral_to / 1km; xs = [400.0, 500.0, 600.0, 800.0, 1000.0, 1200.0, 1400.0]; ys = [-11.6, -12.3, -13.0, -14.0, -14.7, -15.4, -16.0]; h2 = min(xs[end], max(xs[1], h)); i = findfirst(x -> x >= h2, xs); y = i == 1 ? ys[1] : ys[i - 1] + (ys[i] - ys[i - 1]) * (h2 - xs[i - 1]) / (xs[i] - xs[i - 1]); ρ = thick * 10.0^y; A = array_area * float(ram); mass = fleet * 1000; a_m = (6378 + h) * 1000; v = sqrt(3.986e14 / a_m); acc = 0.5 * 2.2 * ρ * v^2 * A / mass; round(2 * a_m / v * acc * 86400 / 1000, digits=2) end` km a day off the height, and more as the fleet falls. The fuel for that spiral weighs !`fuel_kg` kg on each satellite. For the fleet that's !`propellant = round(fuel_kg * nsat / 1000, digits=1)` tonnes.
 
-A lower orbit can fall on its own. Near 830 km the sun is about 97.5%, a little under the 98% above, and in an average year the fleet would reach the air in about 90 years. By then, !`at_90 = let a = float(fail * 1yr), g = float(ageing); round(Int, 100 * (g == 0 ? exp(-a * 90) : exp(-a / log(1 + g) * ((1 + g)^90 - 1)))) end`% of the chips still work. If the busy year above is 10 times as thick, that same orbit falls in about 9 years, while the chips are still working. One height cannot both last the full life of the chips and come down on its own in a reasonable amount of time, so the fleet needs a deorbit burn.
+A lower orbit can fall on its own. Near 830 km the sun is about 97.5%, against !`sun` at !`alt`, and in an average year the fleet would reach the air in about 90 years. By then, !`at_90 = let a = float(fail * 1yr), g = float(ageing); round(Int, 100 * (g == 0 ? exp(-a * 90) : exp(-a / log(1 + g) * ((1 + g)^90 - 1)))) end`% of the chips still work. If the busy year above is 10 times as thick, that same orbit falls in about 9 years, while the chips are still working. One height cannot both last the full life of the chips and come down on its own in a reasonable amount of time, so the fleet needs a deorbit burn.
 
 ## What orbit costs
 
@@ -275,8 +275,6 @@ kind: pie
 
 ## The same computers on the ground
 
-McCalip compares it with a data centre that has its own gas power station beside it, as some new AI data centres do.
-
 A data centre uses more power than its computers do, for cooling and for losses in its wiring. The ratio is its PUE, its power usage effectiveness. Here it's !`pue = 1.2`, so the power station must make !`station = compute * pue`. That's !`turbines = ceil(Int, station / 430MW)` big gas turbines of 430 megawatts each.
 
 A gas turbine is ready to run about !`ready = 90Percent` of the time. It stops the rest of the time for upkeep and repairs.[^21] So a data centre that makes its own power has spare turbines. Say this station has !`spares = 2` of them: one for upkeep and one for a failure. The computers then lose power only when more than !`spares` turbines are down at once. They have power !`uptime = let n = turbines + round(Int, spares), p = float(ready); 100Percent * round(sum(binomial(n, k) * p^k * (1 - p)^(n - k) for k in turbines:n), digits=3) end` of the time.
@@ -284,78 +282,92 @@ A gas turbine is ready to run about !`ready = 90Percent` of the time. It stops t
 - **The power station** costs !`per_kw = 1000USD/kW`. With the spares, that's !`plant = per_kw * (station + spares * 430MW)`.
 - **The building.** For each watt of computers, the electrical gear costs !`elec = 5.00USD/W`, the cooling !`cool = 3.00USD/W`, the land and the shell !`shell = 2.50USD/W`, and the network and the fit-out !`fitout = 1.75USD/W`. That's !`building = (elec + cool + shell + fitout) * compute`.
 - **The computers.** They cost !`chip_bill` here too.
-- **Gas.** The turbines burn !`heat_rate = 6200` BTU of gas for each kilowatt-hour. A BTU is a British thermal unit. Gas costs $!`gas = 4.30` for a million BTU, so each megawatt-hour takes $!`fuel_mwh = round(heat_rate * gas / 1000, digits=2)` of gas. The station lasts !`ground_life = 20yr`. It runs the computers !`uptime` of that time, so its gas costs !`fuel = fuel_mwh * 1USD/MWh * station * ground_life * uptime`.
+- **The revamp.** The first power station lasts !`ground_life = 20yr`. By then, !`still = let a = float(fail * 1yr), g = float(ageing), t = float(ground_life / 1yr); round(Int, 100 * (g == 0 ? exp(-a * t) : exp(-a / log(1 + g) * ((1 + g)^t - 1)))) end`% of the chips still work, so it pays to fit a smaller replacement station of !`station2 = round(station * still / 100, digits=2)` for another !`ground_life`. Scaled to the surviving chips, that station costs !`plant2 = plant * still / 100`.
+- **Gas.** The turbines burn !`heat_rate = 6200` BTU of gas for each kilowatt-hour. A BTU is a British thermal unit. Gas costs $!`gas = 4.30` for a million BTU, so each megawatt-hour takes $!`fuel_mwh = round(heat_rate * gas / 1000, digits=2)` of gas. Counting only the chips still working across those !`2 * round(Int, ground_life / 1yr)` years, while they have power (!`uptime` of the time), the centre does !`full_ground = let a = float(fail * 1yr), g = float(ageing), L = 2 * float(ground_life / 1yr); n = max(1, round(Int, L / 0.05)); dt = L / n; round(float(uptime) * dt * sum(let t = (i - 0.5) * dt; g == 0 ? exp(-a * t) : exp(-a / log(1 + g) * ((1 + g)^t - 1)) end for i in 1:n), digits=1) end` years of work at full size, so its gas costs !`fuel = fuel_mwh * 1USD/MWh * station * full_ground * yr`.
 
-In all, the data centre on the ground costs !`ground = plant + building + fuel + chip_bill`.
+In all, the data centre on the ground costs !`ground = plant + plant2 + building + fuel + chip_bill`.
 
 ## What SpaceX pays
 
-The sums above follow McCalip. He prices a data centre with its own combined-cycle gas plant, and he leaves out the chips. The building and the plant come to !`ground_capex = round(convert(USD/W, (plant + building) / compute), digits=2)` a watt of computers. The gas is on top of that.
+In the sums above, the building and power plant come to !`ground_capex = round(convert(USD/W, (plant + building) / compute), digits=2)` a watt, before chips and gas. That matches 2026 US surveys, which put the building, cooling and power gear at $12 to $18 a watt.[^14] With chips at !`chip_price` a watt, the site above is !`round(ground_capex + chip_price, digits=2)` a watt before gas.
 
-SpaceX is the centre people compare against, and SpaceX has said what it pays. On 17 November 2026 Bret Johnsen, its finance chief, said the first couple of gigawatts cost in the low to mid $30s a watt. He put everyone else at $50 to $60 a watt.[^11]
+SpaceX's finance chief, Bret Johnsen, says its first couple of gigawatts cost in the low to mid $30s a watt, chips included, against $50 to $60 for everyone else.[^11] Epoch AI puts SpaceX's Memphis sites near $38 a watt,[^12] and bank estimates for a gigawatt run $35 to $60 billion.[^15] A GB200 rack alone costs near $25 a watt, and a GB300 near $35.[^13] Johnsen's gap of about $23 a watt is wider than the whole building in the surveys. He credits doing the building and power in-house, including casting turbine blades to skip an 18-to-24-month wait.[^11] Even so, part of the gap may be a lower price on chips, which would cut both sides here by the same amount.
 
-His figure includes the chips. This page adds the computers at !`chip_price` a watt, on both sides. !`ground_capex` is still only the building and the plant, so it can sit next to the surveys that leave the chips out.
+One real difference is the power plant. The sums above assume a combined-cycle plant at !`heat_rate` BTU a kilowatt-hour and about $1,000 a kilowatt.[^16] Colossus's Southaven plant runs 41 simple-cycle turbines, about 1,240 megawatts, which burn closer to !`sx_heat_rate = 9400` BTU a kilowatt-hour.[^17] With gas at $!`sx_gas = 3.20` a million BTU (near the November 2026 spot price),[^18] across those !`2 * round(Int, ground_life / 1yr)` years its gas comes to !`spacex_fuel = (sx_heat_rate * sx_gas / 1000) * 1USD/MWh * station * full_ground * yr`. Taking Johnsen's figure at !`spacex_w = 33USD/W` for the site and chips, plus !`plant2` for the smaller replacement power station at year !`round(Int, ground_life / 1yr)`, puts SpaceX's total on the ground at !`spacex_ground = spacex_w * compute + plant2 + spacex_fuel`, which is !`round(Int, abs(float(spacex_ground / ground) - 1) / float(1Percent))`% !`spacex_ground >= ground ? "more" : "less"` than the McCalip sum above. That is the ground price used below.
 
-Epoch AI estimates a site's cost from permits and from photographs. Colossus 2, SpaceX's centre in Memphis, is $35.8 billion for 946 megawatts of computers. That is $38 a watt. Colossus 1, the first centre, comes out at about the same price a watt.[^12] Johnsen's range sits a little under those estimates.
+## How many tokens does !`compute` of compute make
 
-A published price for one GB200 rack is about $3 million, at about 130 kilowatts. That is already near $25 a watt. Reports put a GB300 rack near $5 million, about $35 a watt for the rack alone.[^13] The chips can use up most of the $30 to $35. Johnsen has not published how he splits the chips from the building.
+Earlier, this page used a single guess of !`joules` for each token. In practice, a watt of computer does not make a fixed number of tokens a second. The rate changes by more than ten times with the model, the precision, the context length, and how many users share a chip at once.
 
-With the chips left out, the 2026 surveys land next to !`ground_capex`.
+Writing one token from a model with $P$ active parameters at $b$ bytes a weight takes two things: reading all of those active weights from memory ($P \cdot b$ bytes) and doing one multiply-add on each weight ($2P$ floating-point operations). That gives every chip two ceilings:
 
-- Turner & Townsend puts an ordinary US data centre at $12.08 a watt to build. The most advanced AI halls cost $14 to $16 a watt.[^14]
-- A guide that adds the land and the power gear, and still leaves out the chips, averages $17.60 a watt. Its range is $8.90 to $23.30.[^14]
-- With the chips put back in, Bernstein and Morgan Stanley say about $35 billion for one gigawatt of GB200 racks. Epoch's own model says $38 billion. Barclays and Nvidia quote $50 billion to $60 billion.[^15]
+- **When few users run at once**, memory bandwidth is the limit. Each user gets at most $\text{bandwidth} / (P \cdot b)$ tokens a second, and total throughput grows linearly as more users share the same weight reads.
+- **When many tokens run in one batch**, the chip's arithmetic saturates and total throughput flattens out at $\text{FLOP/s} / (2P)$ tokens a second.
 
-So !`ground_capex` a watt is a fair price for the building, the cooling and the electrical gear. SpaceX has not published a building price on its own.
+Take a B200 with !`bw_tbs = 8` TB/s of memory bandwidth and !`flops_p = 4.5` PFLOP/s of dense FP8 compute, running a model with !`params_b = 32` billion active parameters at !`weight_bytes = 1` byte a weight and !`util = 80Percent` real-world utilisation. One user gets about !`user_tps = round(Int, float(util) * bw_tbs * 1e12 / (params_b * 1e9 * weight_bytes))` tokens a second. Throughput climbs with batch size until about !`ridge = round(Int, flops_p * 1e15 * weight_bytes / (2 * bw_tbs * 1e12))` concurrent tokens, then hits the compute roof at !`max_tps = round(Int, float(util) * flops_p * 1e15 / (2 * params_b * 1e9))` tokens a second.
 
-The plant in the sums is not the plant that feeds Colossus.
-
-The sums burn !`heat_rate` BTU of gas for each kilowatt-hour, in turbines of 430 megawatts. A BTU is a British thermal unit. That heat rate belongs to a combined-cycle plant. A combined-cycle plant puts a steam turbine behind the gas turbine and uses the exhaust heat. The US Energy Information Administration's 2026 figure for one is about $1,000 to $1,100 a kilowatt, at 6,226 BTU. A simple-cycle turbine has no steam turbine. In the same tables it burns about 9,100 to 9,500 BTU.[^16]
-
-Southaven, across the state line from Memphis, feeds Colossus. Its permit is 41 simple-cycle turbines: 17 Solar Titan 130s, 16 Solar Titan 350s, and 8 rebuilt jet engines of 50 megawatts. Together they are about 1,240 megawatts. The temporary turbines are to be gone by July 2027. The 41 stay.[^17]
-
-Gas at !`gas` dollars for a million BTU is McCalip's 2025 forecast. Henry Hub is the US spot price for gas. It was $3.03 on 13 November 2026.[^18]
-
-Price that plant at $1,800 a kilowatt, with gas at $3.20 and 9,400 BTU for each kilowatt-hour. It costs !`alt_ground = 1800USD/kW * (station + spares * 430MW) + building + chip_bill + (9400 * 3.20 / 1000) * 1USD/MWh * station * ground_life * uptime`. That is !`round((float(alt_ground / ground) - 1) / float(1Percent), digits=0)`% !`alt_ground > ground ? "more" : "less"` than the plant in the sums. Gas at $3.20 in those turbines costs $!`round(9400 * 3.20 / 1000, digits=2)` a megawatt-hour, against $!`fuel_mwh` in the sums. The building is the large part of the cost, and the surveys support it.
-
-Johnsen said SpaceX is cheaper because it does the engineering, the building and the power itself. A supplier had quoted 18 to 24 months for turbine blades, so SpaceX is casting its own.[^11] The sums have no line for that wait.
-
-One reading of his gap does not fit the surveys. From about $55 a watt down to about $32 is roughly $23 a watt. The surveys only have $12 to $18 a watt of building, once the chips are out. So either SpaceX's building is far cheaper than the surveys, or part of the gap is a lower price on the chips. A cheaper chip costs the same number of dollars on both sides. Each megawatt-hour still changes, because the two sides do different amounts of work.
-
-## Side by side
-
-The two don't do the same work. The fleet does !`energy` of work before it's gone. On the ground, the computers stop !`100Percent - uptime` of the time, when more turbines are down than the spares can cover. Over its !`round(Int, ground_life / 1yr)` years the station gives them !`energy_ground = convert(TWh, compute * ground_life * uptime)`. It's interesting to convert that to $/token. Here we use the !`joules` for each token from the first section.
-
-| | What it costs | The work it does | Each billion tokens |
-|---|---|---|---|
-| In orbit | !`orbit` | !`energy` | $!`per_orbit = round(float(orbit / energy / (1USD/MWh)) * float(joules / 1J) / 3.6e9 * 1e9, sigdigits=3)` |
-| On the ground | !`ground` | !`energy_ground` | $!`per_ground = round(float(ground / energy_ground / (1USD/MWh)) * float(joules / 1J) / 3.6e9 * 1e9, sigdigits=3)` |
-
-```columns
-2
+```sheet
+Batch = 0 to 500
+Throughput = min(batch * user_tps, max_tps)
 ```
 
 ```chart
-from: Side by side
-kind: bars
-title: The work that each one does
-show: The work it does
+kind: lines
+title: B200 throughput by batch size
+x: Concurrent tokens (batch size)
+y: Tokens a second
+show: Throughput
 ```
 
-Before it's gone, the fleet produces !`orbit_tokens = round(convert(J, energy) / joules / 1e18, digits=2)` million trillion tokens. 
-In its !`round(Int, ground_life / 1yr)` years, the data centre on the ground produces !`ground_tokens = round(convert(J, energy_ground) / joules / 1e18, digits=2)` million trillion. 
-So the fleet produces !`round(orbit_tokens / ground_tokens, digits=1)` times as many tokens.
-## Why the same chips do more work
+At that flat top, a 1,000-watt B200 spends only !`max_tps == 0 ? 0.0 : round(1000 / max_tps, digits=3)` joules a token. Across !`compute` of chips at full batch, that would be !`round(float(compute / 1000W) * max_tps / 1e9, sigdigits=3)` billion tokens a second, against !`round(float(compute / 1W) / float(joules / 1J) / 1e9, sigdigits=3)` billion a second at the !`joules` used on this page. Real clusters land much closer to the lower figure because users want fast replies (pushing servers left down the slope into smaller batches), long contexts add KV-cache memory reads, mixture-of-experts models spend time moving data between GPUs, and the rack and building draw power on top of the chips.[^20] That is why there is no single conversion from watts to tokens, and why buyers measure a curve of tokens a second per megawatt against speed per user.
 
-Both sides buy the chips once, at the same price. The station on the ground lasts !`ground_life`, and it gives the computers power for !`uptime` of that time. While they have power, the ground sum keeps the chips at full power. That is !`full_ground = round(float(ground_life / 1yr) * float(uptime), digits=1)` years at full size.
+## Side by side
 
-In orbit a dead chip stays dead, and the cells fade. Each year the fleet does only as much as the weaker of the cells and the chips. That still adds up to !`years` years at full size, which is !`work_ratio = round(years / full_ground, digits=1)` times the work on the ground.
+The two don't do the same work. The fleet does !`energy` of work before it's gone. On the ground, the computers stop !`100Percent - uptime` of the time, when more turbines are down than the spares can cover. Over its !`2 * round(Int, ground_life / 1yr)` years the revamped site gives them !`energy_ground = convert(TWh, compute * full_ground * yr)`.
 
-The computers on the ground stop because their power station stops. The price includes one station, and that station lasts !`ground_life`. When it stops, the computers stop with it. After those years, !`still = let a = float(fail * 1yr), g = float(ageing), t = float(ground_life / 1yr); round(Int, 100 * (g == 0 ? exp(-a * t) : exp(-a / log(1 + g) * ((1 + g)^t - 1)))) end`% of the chips are still working.
+| | What it costs | The work it does |
+|---|---|---|
+| In orbit | !`orbit` | !`energy` |
+| On the ground | !`spacex_ground` | !`energy_ground` |
 
-The panels are already big enough to run every computer on the first day. The extra work comes from counting the fleet past this station.
+Both sides buy the chips once, and dead chips stay dead on both sides. On the ground, the first station lasts !`ground_life`, when !`still`% of the chips still work, and the smaller replacement station runs them for a second !`ground_life` (!`2 * round(Int, ground_life / 1yr)` years in all). Counting only the working chips, while they have power (!`uptime` of the time), that adds up to !`full_ground` years at full size. 
+
+In orbit the cells also fade, so each year the fleet does only as much as the weaker of the cells and the chips. Even so, it keeps running past year !`2 * round(Int, ground_life / 1yr)`, when !`still_end = let a = float(fail * 1yr), g = float(ageing), t = 2 * float(ground_life / 1yr); round(Int, 100 * (g == 0 ? exp(-a * t) : exp(-a / log(1 + g) * ((1 + g)^t - 1)))) end`% of the chips are still working, and adds up to !`years` years at full size, which is !`work_ratio = round(years / full_ground, digits=1)` times the work on the ground.
+
+The panels are already big enough to run every computer on the first day. The extra work comes from running the fleet past the second power station without buying a third.
+
+## What !`compute` rents for
+
+The sums above say what the computers cost, and what the work costs. Two readings say what the work is worth. This one is the low reading. The next one is the high reading. A real owner lands somewhere between them.
+
+The low reading is the spot rent. It is what a customer pays for an hour of a machine that is already powered and cooled. The owner who rents the computers out collects that, and no more. If selling the tokens earned less than the rent, the owner would rent the computers out instead. So the rent is a floor.
+
+[Polymarket](https://polymarket.com/compute) now shows that rent, out to 2028. The number comes from Ornn's index of trades, not from a cloud's rate card. On 26 November 2026 a B200 rented for !`b200_hr = 9.79USD/hr`. An H100 SXM was !`h100_hr = 3.10USD/hr` on 25 November, and a B300 was !`b300_hr = 10.83USD/hr` the same day.[^24]
+
+The chips draw !`h100_w = 700W`, !`b200_w = 1000W` and !`b300_w = 1400W`. At those draws, !`compute` of each kind is this many chips, and the floor is this much:
+
+| Chip | Chips in this fleet | An hour | A year |
+|---|---|---|---|
+| H100 | !`round(Int, compute / h100_w)` | !`h100_rent = h100_hr / h100_w * compute` | !`h100_rent * 1yr` |
+| B200 | !`round(Int, compute / b200_w)` | !`b200_rent = b200_hr / b200_w * compute` | !`b200_rent * 1yr` |
+| B300 | !`round(Int, compute / b300_w)` | !`b300_rent = b300_hr / b300_w * compute` | !`b300_rent * 1yr` |
+
+```chart
+kind: bars
+title: The rent for this fleet, each hour
+show: An hour
+from: What !compute rents for
+```
+
+A B300 costs more per chip than a B200, and it draws more. Spread over the chip's own draw, !`compute` of B300s rents for less. The B200 is the dear one per watt of chip.
+
+That rent already includes the power and the cooling. The provider pays the utility. Ornn records the price of the rental, and it does not take the power back out.[^24]
+
+The table spreads each price over the chip's own draw. A rack draws more than its chips. A GB200 rack of 72 GPUs uses about 132 kilowatts, which is !`round(Int, 132000 / 72)` watts for each chip once the rack is counted.[^5] The same B200 rent, spread over that draw, is !`b200_rack_rent = b200_hr / (132kW / 72) * compute` an hour. That is the same money as !`b200_rent`, counted over more watts. It is not a second bill. The page's PUE of !`pue` belongs to a station you own. It does not sit on top of this rent.
 
 ## What the tokens are worth today
+
+The high reading is the tokens. Here the owner runs the model and sells every token, and keeps the whole price. That is more than the rent, because the rent is only what a customer pays to use the computers. The token price also pays for the model.
 
 Most of the fleet's work comes long after launch. Money spent at launch could earn a return somewhere else. So a token that comes in 50 years is worth less than a token that comes today. This part counts each token and each bill at what it's worth on the day of launch. That gives each option its net present value.
 
@@ -365,21 +377,33 @@ $$
 \text{years today} = \text{sun} \int_0^{\infty} (1 + \text{discount})^{-t}\,\min\big(\text{power}(t),\ \text{working}(t)\big)\,dt
 $$
 
-The fleet's !`years` years at full size are worth !`years_now = let d = float(fade * 1yr), a = float(fail * 1yr), g = float(ageing), ρ = log(1 + float(discount)); round(float(sun) * 0.05 * sum(exp(-ρ * t) * min(exp(-d * t), g == 0 ? exp(-a * t) : exp(-a / log(1 + g) * ((1 + g)^t - 1))) for t in 0.025:0.05:2000), digits=1) end` years today. The station's !`full_ground` years are worth !`ground_years_now = let ρ = log(1 + float(discount)), L = float(ground_life / 1yr); round(float(uptime) * (ρ == 0 ? L : (1 - exp(-ρ * L)) / ρ), digits=1) end` years today. So the fleet does !`round(years_now / ground_years_now, digits=1)` times the work of the ground, not !`work_ratio` times.
+The fleet's !`years` years at full size are worth !`years_now = let d = float(fade * 1yr), a = float(fail * 1yr), g = float(ageing), ρ = log(1 + float(discount)); round(float(sun) * 0.05 * sum(exp(-ρ * t) * min(exp(-d * t), g == 0 ? exp(-a * t) : exp(-a / log(1 + g) * ((1 + g)^t - 1))) for t in 0.025:0.05:2000), digits=1) end` years today. The ground's !`full_ground` years are worth !`ground_years_now = let a = float(fail * 1yr), g = float(ageing), ρ = log(1 + float(discount)), L = 2 * float(ground_life / 1yr); n = max(1, round(Int, L / 0.05)); dt = L / n; round(float(uptime) * dt * sum(let t = (i - 0.5) * dt; exp(-ρ * t) * (g == 0 ? exp(-a * t) : exp(-a / log(1 + g) * ((1 + g)^t - 1))) end for i in 1:n), digits=1) end` years today. So the fleet does !`round(years_now / ground_years_now, digits=1)` times the work of the ground, not !`work_ratio` times.
 
-The bills move less, because most of them come first. Orbit pays for the satellites, the computers, the launches and the design before it starts. It pays for the link as the work is done, for the people each year, and for the deorbit fuel at the end. Counted today, orbit costs !`orbit_now = let ρ = log(1 + float(discount)); build + chip_bill + launch + design + link * years_now / years + people * (ρ == 0 ? 1 : (1 - exp(-ρ * life)) / (ρ * life)) + deorbit_cost * exp(-ρ * life) end`, not !`orbit`. The ground pays for its gas each year for !`round(Int, ground_life / 1yr)` years. Counted today, it costs !`ground_cost_now = let ρ = log(1 + float(discount)), L = float(ground_life / 1yr); plant + building + chip_bill + fuel * (ρ == 0 ? 1 : (1 - exp(-ρ * L)) / (ρ * L)) end`, not !`ground`.
+The bills move less, because most of them come first. Orbit pays for the satellites, the computers, the launches and the design before it starts. It pays for the link as the work is done, for the people each year, and for the deorbit fuel at the end. Counted today, orbit costs !`orbit_now = let ρ = log(1 + float(discount)); build + chip_bill + launch + design + link * years_now / years + people * (ρ == 0 ? 1 : (1 - exp(-ρ * life)) / (ρ * life)) + deorbit_cost * exp(-ρ * life) end`, not !`orbit`. The ground pays for its replacement power station at year !`round(Int, ground_life / 1yr)`, and for its gas as the chips run over !`2 * round(Int, ground_life / 1yr)` years. Counted today, it costs !`ground_cost_now = let ρ = log(1 + float(discount)); spacex_w * compute + plant2 * exp(-ρ * float(ground_life / 1yr)) + spacex_fuel * (full_ground == 0 ? 0 : ground_years_now / full_ground) end`, not !`spacex_ground`.
 
 Say a million tokens sells for !`price = 2.50USD`. That's what Kimi K2, a model of a trillion parameters, charges for the tokens that it writes.[^23] The net present value is what the tokens sell for, counted today, less the bills, counted today.
 
-| | Costs, counted today | Tokens, counted today | Each billion tokens | Net present value |
+| | Cost today | Discounted Lifetime Tokens | Cost per million tokens | Net present value (tokens) |
 |---|---|---|---|---|
-| In orbit | !`orbit_now` | !`tokens_now = round(convert(J, compute * years_now * yr) / joules, sigdigits=3)` | $!`per_orbit_now = round(float(orbit_now / 1USD) / tokens_now * 1e9, sigdigits=3)` | !`npv_orbit = price * tokens_now / 1e6 - orbit_now` |
-| On the ground | !`ground_cost_now` | !`ground_tokens_now = round(convert(J, compute * ground_years_now * yr) / joules, sigdigits=3)` | $!`per_ground_now = round(float(ground_cost_now / 1USD) / ground_tokens_now * 1e9, sigdigits=3)` | !`npv_ground = price * ground_tokens_now / 1e6 - ground_cost_now` |
+| In orbit | !`orbit_now` | !`tokens_now = round(convert(J, compute * years_now * yr) / joules, sigdigits=3)` | $!`per_orbit_now = round(float(orbit_now / 1USD) / tokens_now * 1e6, sigdigits=3)` | !`npv_orbit = price * tokens_now / 1e6 - orbit_now` |
+| On the ground | !`ground_cost_now` | !`ground_tokens_now = round(convert(J, compute * ground_years_now * yr) / joules, sigdigits=3)` | $!`per_ground_now = round(float(ground_cost_now / 1USD) / ground_tokens_now * 1e6, sigdigits=3)` | !`npv_ground = price * ground_tokens_now / 1e6 - ground_cost_now` |
+
+### If it is rented out
+
+The table above is the high reading, where the owner sells every token. For the low reading, suppose the owner instead rents the computers out for their whole life at the rack-level B200 rent above, !`b200_rack_rent` an hour (!`b200_rack_rent * 1yr` a year at full size). That rent already includes power and cooling, which are in the costs on both sides.
+
+Spot rent falls as newer chips arrive: above, an H100 rents for about a third of a B200. Say the rent falls by !`rent_drop = 0Percent/yr` each year. At zero, the rent stays flat, like the token price above; drag it up to see how faster ageing in price cuts the return.
+
+| | Costs, counted today | Rent, counted today | Net present value (rent) |
+|---|---|---|---|
+| In orbit | !`orbit_now` | !`rent_now_orbit = let d = float(fade * 1yr), a = float(fail * 1yr), g = float(ageing), ρ = log(1 + float(discount)), r = float(rent_drop * 1yr); yrs = float(sun) * 0.05 * sum(exp(-(ρ + r) * t) * min(exp(-d * t), g == 0 ? exp(-a * t) : exp(-a / log(1 + g) * ((1 + g)^t - 1))) for t in 0.025:0.05:2000); convert(USD, b200_rack_rent * yrs * yr) end` | !`npv_rent_orbit = rent_now_orbit - orbit_now` |
+| On the ground | !`ground_cost_now` | !`rent_now_ground = let a = float(fail * 1yr), g = float(ageing), ρ = log(1 + float(discount)), r = float(rent_drop * 1yr), L = 2 * float(ground_life / 1yr); n = max(1, round(Int, L / 0.05)); dt = L / n; yrs = float(uptime) * dt * sum(let t = (i - 0.5) * dt; exp(-(ρ + r) * t) * (g == 0 ? exp(-a * t) : exp(-a / log(1 + g) * ((1 + g)^t - 1))) end for i in 1:n); convert(USD, b200_rack_rent * yrs * yr) end` | !`npv_rent_ground = rent_now_ground - ground_cost_now` |
 
 ```chart
 kind: bars
-title: The net present value of each option
-show: Net present value
+title: Cost and net present value of each option
+from: What the tokens are worth today, If it is rented out
+show: Cost today, Net present value (tokens), Net present value (rent)
 ```
 
 ## Footnotes
@@ -417,7 +441,7 @@ show: Net present value
 
 [^15]: [Ynot Photonics](https://ynotphotonics.com/insights/what-a-gigawatt-of-ai-data-center-costs/), "What a gigawatt of AI data center actually costs", 8 July 2026, updated 19 October 2026, lines the estimates up. Bernstein and Morgan Stanley say about $35 billion for one gigawatt of GB200 racks. Morgan Stanley says $39 billion for GB300 and $49 billion for the Vera Rubin generation. Epoch's model of a typical centre says $38 billion. Barclays and Nvidia quote $50 billion to $60 billion. The houses do not all mean the same thing by one gigawatt. Some count the power at the computers, and some count it at the meter.
 
-[^16]: US Energy Information Administration, assumptions for the Annual Energy Outlook 2026. A combined-cycle plant of 1,227 megawatts costs $1,032 a kilowatt in 2025 dollars, and it burns 6,226 BTU for each kilowatt-hour. An aeroderivative simple-cycle plant costs $2,275 a kilowatt and burns 9,447 BTU. The Sargent & Lundy study behind the 2025 outlook, in 2023 dollars, put a large combined-cycle plant at $868 a kilowatt. [GridLab's September 2025 review](https://gridlab.org/gas-turbine-cost-report/) of utility filings finds new combined-cycle plants at $2,000 a kilowatt and up. The page's $1,800 sits between the official combined-cycle figure and the price utilities are paying.
+[^16]: US Energy Information Administration, assumptions for the Annual Energy Outlook 2026. A combined-cycle plant of 1,227 megawatts costs $1,032 a kilowatt in 2025 dollars, and it burns 6,226 BTU for each kilowatt-hour. An aeroderivative simple-cycle plant costs $2,275 a kilowatt and burns 9,447 BTU. The Sargent & Lundy study behind the 2025 outlook, in 2023 dollars, put a large combined-cycle plant at $868 a kilowatt. [GridLab's September 2025 review](https://gridlab.org/gas-turbine-cost-report/) of utility filings finds new combined-cycle plants at $2,000 a kilowatt and up.
 
 [^17]: The March 2026 air permit for MZX Tech, a SpaceX company, at Southaven, Mississippi. It allows 17 Solar Titan 130 turbines at 16.48 megawatts, 16 Solar Titan 350 turbines at 35 megawatts, and 8 ProEnergy 6000PE turbines at 50 megawatts. The 6000PE is a jet engine rebuilt as a generator. The permit board upheld the permit on 10 November 2026. An agreed order says the temporary turbines come out by July 2027. The plant is simple cycle. It has no steam turbine behind the gas turbine, which is why the heat rate is the higher one.
 
@@ -432,3 +456,7 @@ show: Net present value
 [^22]: Lazard's reports on the cost of electricity assume 60% debt at 8% interest and 40% equity at 12%, unless they say otherwise ([Lazard LCOE+, June 2025](https://www.lazard.com/media/uounhon4/lazards-lcoeplus-june-2025.pdf)). That mix comes to 0.6 × 8% + 0.4 × 12% = 9.6% a year. The 9.6% includes inflation, but the prices on this page don't rise with it. A rate without inflation would be about 2 or 3 points lower.
 
 [^23]: Artificial Analysis lists Kimi K2 0905 at $0.60 for a million tokens read and $2.50 for a million tokens written ([Artificial Analysis](https://artificialanalysis.ai/models/releases/kimi-k2-0905)). Kimi K2 has 1.04 trillion parameters, and 32 billion of them run for each token ([Kimi K2 technical report](https://arxiv.org/abs/2507.20534)).
+
+[^24]: Polymarket's compute page showed the B200 at $9.79 a GPU-hour on 26 November 2026, from [Ornn's B200 index](https://data.ornn.com/markets/b200). Ornn's own daily settle for 25 November was $9.76. The H100 SXM settle that day was $3.10 ([OCPI-H100](https://data.ornn.com/markets/h100-sxm)) and the B300 settle was $10.83 ([OCPI-B300](https://data.ornn.com/markets/b300)). Each figure is the price of an on-demand rental. The machine is powered and cooled, and the renter does not pay the utility on top. Ornn's method counts prices actually being paid, and it does not strip the power out ([the method](https://data.ornn.com/methodology)). The watts in the table are the usual chip rating: 700 W for an H100 SXM, 1,000 W for a B200, and about 1,400 W for a B300. Drag the three rents and the three draws. The fleet size is the `compute` at the top of the page.
+
+[^25]: Nvidia does not publish wholesale prices, and there is no spot market for bare cards. Integrators such as [Exxact](https://configurator.exxactcorp.com/configure/TS4-169219634) start an 8-GPU HGX B200 node (about 14.3 kilowatts) near $391,000, or $27 a watt ($49 a watt over GPU TDP alone). In bulk, IREN paid $193 million in August 2025 for 4,200 B200s with servers and networking ([IREN](https://irisenergy.gcs-web.com/news-releases/news-release-details/iren-purchases-42k-nvidia-blackwell-gpus-secures-financing-ai)), about $26 a watt, and $168 million for 2,400 B300s and GB300s ([IREN](https://irisenergy.gcs-web.com/news-releases/news-release-details/iren-expands-ai-cloud-109k-gpus-nvidia-preferred-partner-status)), about $37 a watt. [Silicon Analysts](https://siliconanalysts.com/analysis/nvidia-b200-blackwell-cost-breakdown) puts manufacturing cost near $6,750 a B200, so Nvidia's 75% to 83% margins keep even hyperscaler pricing around $21 to $26 a watt for B200s.
