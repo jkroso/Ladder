@@ -548,6 +548,20 @@ try
     @test !kind.open
   end
 
+  @testset "A click on the slider of a question in what the agent says moves it, as on a page, and the reply's line says so" begin
+    sub = reply_shown(joinpath(dir, "slider"), """
+      ```ask
+      How big should the logo be?
+      Size: 48px (16px to 96px)
+      ```""")
+    slider = K.ask_field(sub.nodes[(:block, K.ASK, sub.buf.path, 1)], 1)
+    r = K.rect(slider)
+    # At the slider's left end it goes to near the least
+    mouse_to((r.left + 1px, r.top + r.height / 2))
+    click_here()
+    @test slider.value < 20 && sub.buf.lines[3] == "Size: $(round(Int, slider.value))px (16px to 96px)"
+  end
+
   @testset "The commands after a slash work in a session's file: /resume puts an earlier session in the file, and /new makes a new file" begin
     kept = K.CLAUDE_SESSIONS[] = joinpath(dir, "claude-sessions")
     mkpath(kept)
