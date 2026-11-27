@@ -8,18 +8,28 @@
 @use "github.com/jkroso/UI.jl/Interface/Geometric"...
 @use "github.com/jkroso/UI.jl/Interface/Specific"...
 @use "github.com/jkroso/UI.jl/Interface/abstract" SemanticUI Theme light
-@use "./markdown" Cell
+@use "./markdown" Cell Line
 @use "./spreadsheet" Value
 @use "github.com/jkroso/URI.jl/FS" => FS FSObject
 @use "./look" exports...
 @use "./flow" exports...
 @use "./buffer" exports...
 @use "./folder_page" exports...
+@use "github.com/jkroso/UI.jl/Interface/draw" rect
+@use "github.com/jkroso/UI.jl/Interface/Semantic/Mermaid" problem
+@use "./sheet" Result parts shown
+@use "./chart" => Charts
+@use "./filter" => Filters
+@use "./save" => Saves
+@use "./gallery" => Galleries
 
 export Item, Live, Grid, isspread, Glide, Editor, TopBar, Sidebar, Page, Document, Backdrop, FinderInput,
        ToolButton, TableButton, Mode, Levels, Stop, JuliaCode, Title, CheckCount, ReadOnly, SendButton,
        Paragraph, Heading, List, Quote, CodeBlock, Table, Rule, LiveBlock, SheetBlock, Trouble, Block,
-       FileRow, FileLabel, Entry, EntryLabel, Shown, docdir, item, hosted, top_editor, button, FileView
+       FileRow, FileLabel, Entry, EntryLabel, Shown, docdir, item, hosted, top_editor, button, FileView,
+       Sheet, FileEntry, Crumb, Breadcrumb, FileText, Pages, ChartView, FilterRows, FilterView, SaveView,
+       GalleryView, TermSettings, TERM_SETTINGS, ViewBlock, ItemClock, PlainLine, Rect, TranscriptButton,
+       FileCheck, DesignSheet, FolderPage
 
 # --- what a window holds ---------------------------------------------------------
 
@@ -289,4 +299,230 @@ button(e, action, icon) = node!(() -> ToolButton(icon=icon, action=action), e, a
   viewer::Any = nothing   # the STLViewer, the player or the Pages of the file, kept from one frame to the next
   table::Any = nothing    # the FileSheet of a CSV file: its table, and what's chosen for it
   button::Any = nothing   # the HexButton of a binary file
+end
+
+"A sheet laid out"
+struct Sheet
+  rows::Vector{Int}             # the line of the document each row comes from
+  cells::Vector{Vector{Cell}}   # each row's name and expression, or only its expression
+  names::Vector{Flow}
+  exprs::Vector{Flow}
+  results::Vector{Result}       # what each row comes to
+  heights::Vector{px}
+  name_w::px                    # how wide the column of names is
+  size::px                      # of the text
+end
+
+"One line of the list under a Breadcrumb: a file or a folder"
+@def mutable struct FileEntry <: SemanticUI
+  path::String = ""
+end
+
+"One name in a Breadcrumb"
+@def mutable struct Crumb <: SemanticUI
+  path::String = ""
+  name::String = ""
+end
+
+"The path `at`, as the names of the folders on the way to it"
+@def mutable struct Breadcrumb <: SemanticUI
+  at::String = ""
+  open::Bool = false     # is the list of what's in the folder showing?
+  # Kept so each name and each line knows when the mouse is over it
+  crumbs::Dict{String,Crumb} = Dict{String,Crumb}()
+  entries::Dict{String,FileEntry} = Dict{String,FileEntry}()
+  # The STLViewer of the model at `at`, the player of the sound or the video there, or the Pages
+  # of the PDF file there. It's kept so that the model stays as it was turned, the file plays on
+  # from one frame to the next, and the page stays the one you turned to.
+  viewer::Any = nothing
+  text::Any = nothing    # what `kept!` keeps of the file at `at`, like its text, or false if it has none
+  read::Any = nothing    # what `text` is: its kind, the path of its file and when the file last changed
+  inline::Bool = false   # in a line of text, so its list floats under it and takes no room on the page
+  folders::Bool = false  # only a folder can be the path, as when you choose where something is kept. The folder needn't be made yet.
+  room::Union{Nothing,px} = nothing   # how wide it can be, when it has less room than the page is wide
+  button::Any = nothing  # its OpenButton, once it has shown
+  files::Any = nothing   # a function of a file's name that's true for the files the list shows, when it picks a file of some kinds. Folders always show.
+end
+
+"""
+The text of the file that a breadcrumb previews. It's kept so that the file
+is read once, and so that the text stays where you scrolled it to.
+"""
+mutable struct FileText
+  lines::Vector{String}
+  more::Bool        # the file is longer than what was read
+  scroll::Scroll
+end
+
+FileText(lines, more) = FileText(lines, more, Scroll(width(grow=grow), height(LINE_H * min(length(lines), PREVIEW_LINES) + 2TEXT_PAD)))
+
+"The pages of a PDF file, one at a time. A click on the left half goes back a page, and one on the right half goes on."
+@def mutable struct Pages <: SemanticUI
+  path::String = ""
+  page::Int = 1
+  count::Int = 0
+  wide::px = PAGE_W   # how wide a page shows
+end
+
+"What a `chart` block shows: the numbers of a table, drawn"
+@def mutable struct ChartView <: SemanticUI
+  n::Int = 0                               # its place among the page's charts
+  first::Int = 0                           # the lines of its block, when the page was last laid out
+  last::Int = 0
+  spec::Charts.Chart = Charts.Chart()
+  lines::Vector{String} = String[]         # the lines that `spec` was read from
+  shown::Any = nothing                     # the version of the page, and what the chart shows of that page
+  marks::Vector{Charts.Mark} = Charts.Mark[]   # the parts of the chart, where they were last drawn
+  box::NTuple{4,Float64} = (0.0, 0.0, 0.0, 0.0)   # where the chart was last drawn in the window
+  sourcing::Bool = false                   # the list of files to draw is open, after Choose a file…
+  parts::Dict{Any,Any} = Dict{Any,Any}()   # its buttons, kept between frames
+end
+
+"The rows that a filter reads, and where they came from"
+struct FilterRows
+  rows::Vector{Vector{String}}   # the first row has the names of the columns
+  numbers::Vector{Bool}          # true for each column that holds numbers
+  things::Vector{Any}            # for a JSON file, the thing that each row came from: row k + 1 came from thing k
+  name::String                   # what the top of the block calls where they came from
+  path::String                   # the file, or "" for a table of the page
+  more::Bool                     # the file has rows after these
+  problem::String                # why there are no rows, or ""
+end
+
+"What a `filter` block shows: the rows of a table that meet its conditions"
+@def mutable struct FilterView <: SemanticUI
+  n::Int = 0                               # its place among the page's filters
+  first::Int = 0                           # the lines of its block, when the page was last laid out
+  last::Int = 0
+  spec::Filters.Filter = Filters.Filter()
+  lines::Vector{String} = String[]         # the lines that `spec` was read from
+  shown::Any = nothing                     # what the rows were last worked out for, and what they are
+  whole::Bool = false                      # every row shows, and not only the first FILTER_ROWS
+  widths::Any = nothing                    # what the widths of the columns were worked out for, and the widths
+  values::Dict{Int,Any} = Dict{Int,Any}()  # each column's values, for its menu, or nothing for a column with too many
+  cut::Dict{Any,String} = Dict{Any,String}()   # the text of a cell as it shows, cut short for its column
+  across::px = 0px                         # how far the table is scrolled to the right
+  top::px = 0px                            # where the top of the table was last drawn in the window
+  asking::Int = 0                          # the column whose menu is open, or 0
+  was::Vector{String} = String[]           # the block's lines when that menu opened, which esc puts back
+  saved::String = ""                       # what Save last did, in words
+  lang::String = FILTER                    # filter, or load for a block that loads its rows from a server or a file
+  job::Any = nothing                       # a load from a server that hasn't ended: a function that gives nothing until it has, then how it went
+  asked::Any = nothing                     # the address and the key that the block last asked its server with
+  changed::Float64 = 0.0                   # when the block's lines last changed
+  said::String = ""                        # what came of the last load, in words
+  failed::Bool = false                     # true when that went wrong
+  nokey::Bool = false                      # the Keychain had no key with the name that `key` gives
+  choosing::Bool = false                   # the file picker of a load block is open, after a click on Choose
+  parts::Dict{Any,Any} = Dict{Any,Any}()   # its chips, headings and buttons, kept between frames
+end
+
+"What a `save` block shows: which rows it has, where they go, and what happened when they last went"
+@def mutable struct SaveView <: SemanticUI
+  n::Int = 0                               # its place among the page's save blocks
+  first::Int = 0                           # the lines of its block, when the page was last laid out
+  last::Int = 0
+  spec::Saves.Save = Saves.Save()
+  lines::Vector{String} = String[]         # the lines that `spec` was read from
+  job::Any = nothing                       # a send that hasn't ended: a function that gives nothing until it has, then how it went
+  sending::Any = nothing                   # what that send has: how many rows, where to, and the name of the key
+  said::String = ""                        # what happened at the last click, or ""
+  failed::Bool = false                     # true when that went wrong
+  nokey::Bool = false                      # the Keychain had no key with the name that `key` gives
+  choosing::Bool = false                   # the list of folders is open, after a click on Choose
+  sourcing::Bool = false                   # the list of files to save the rows of is open, after Choose a file…
+  parts::Dict{Any,Any} = Dict{Any,Any}()   # its buttons, kept between frames
+end
+
+"What a `gallery` block shows: the files and the folders of a folder as a grid of squares"
+@def mutable struct GalleryView <: SemanticUI
+  n::Int = 0                               # its place among the page's galleries
+  first::Int = 0                           # the lines of its block, when the page was last laid out
+  last::Int = 0
+  data::Galleries.Gallery = Galleries.Gallery()
+  lines::Vector{String} = String[]         # the lines that `data` was read from
+  shown::Any = nothing                     # what the gallery showed when its folder was last read, and when to read it again
+  # The small picture of each file: its key and whether it fills its square. It's nothing for a file that has no picture.
+  small::Dict{Any,Any} = Dict{Any,Any}()
+  wanted::Vector{Galleries.Item} = Galleries.Item[]   # the files in the window whose small pictures aren't made yet
+  side::px = 0px                           # how big each square was when the grid was last laid out
+  showing::String = ""                     # the file that fills the window, or that last did
+  parts::Dict{Any,Any} = Dict{Any,Any}()   # its squares, its button, and the player of the video that fills the window, kept between frames
+end
+
+"""
+The terminal's settings, which every window has the same. The Terminal page
+of the settings changes them, and the file of the settings keeps them.
+"""
+@def mutable struct TermSettings
+  caret::Symbol = :block   # the caret's shape while a program asks for none: one of TERM_CARETS
+  blink::Bool = false      # that caret blinks
+  copies::Bool = false     # what the mouse selects is copied as soon as the button goes up
+  meta::Bool = false       # ⌥ with a key sends ESC and the key, and not the Mac's character
+  bell::Symbol = :flash    # what a program's bell does: one of TERM_BELLS
+  most::Int = 10_000       # how many lines of the past a terminal keeps: one of TERM_PASTS
+end
+
+const TERM_SETTINGS = TermSettings()
+
+"What a `view` block shows: another file, a folder, or a page of the web"
+@def mutable struct ViewBlock <: SemanticUI
+  n::Int = 0                               # its place among the page's `view` blocks
+  first::Int = 0                           # the lines of its block, when the page was last laid out
+  last::Int = 0
+  lines::Any = nothing                     # the lines that it was last read from
+  source::Vector{String} = String[]        # those lines without its settings: the name of what it shows, or its HTML
+  settings::Vector{String} = String[]      # its lines of settings, like `aspect: 16:9`, as they're written
+  aspect::Float64 = 0.0                    # its width over its height, from its line `aspect:`, or 0 when it has none
+  lang::String = VIEW_BLOCK                # the language of its block: `view`, or `web` as it was called before
+  target::String = ""                      # the path or the address that its line names, as `view_target` gives it
+  held::Bool = false                       # its lines hold the HTML of a page, which starts with a tag
+  browser::Any = nothing                   # the Browser that shows an HTML file or a page of the web
+  crumb::Any = nothing                     # the Breadcrumb that keeps what shows any other file: its model, its player, its text
+  parts::Dict{Any,Any} = Dict{Any,Any}()
+  sent::Any = nothing                      # the page that was last given the sums, and what it was given: see `send_sums!`
+end
+
+"The button beside a to-do item that starts and stops the clock of the page's time log on the item"
+@def mutable struct ItemClock <: SemanticUI
+  key::String = ""                              # the to-do item, by what a schedule calls it
+  rect::NTuple{4,px} = (0px, 0px, 0px, 0px)     # where it was last drawn, to put its tooltip over it
+end
+
+"A line of plain text as a frame laid it out: its text, what kind of line it was, whether its markup showed, and its layout with its height"
+struct PlainLine
+  text::String
+  line::Line
+  raw::Bool
+  flow::Flow
+  tall::px
+end
+
+const Rect = NTuple{4,Float64}   # left, top, right and bottom, in px
+
+"The button beside a video, under its FillButton, that opens the drop-down of what was said in the video"
+@def mutable struct TranscriptButton <: SemanticUI
+  open::Bool = false                          # is its drop-down open?
+  rect::NTuple{4,px} = (0px, 0px, 0px, 0px)   # where it was last drawn, to put its tooltip beside it
+  quiet::Bool = false                         # clicked, so no tooltip until the mouse leaves it
+end
+
+"A check of a file of Julia code, for Fix Check and Show Steps: its line, its code, and how it went when it last ran"
+struct FileCheck
+  line::Int
+  code::String
+  went::Symbol
+end
+
+"The sheet of a SolidCraft design's parameters: see \"the sheet of a SolidCraft design's parameters\""
+@def mutable struct DesignSheet <: SemanticUI
+  sub::Any = nothing          # the editor of its page
+  room::Any = nothing         # how wide the panel has room for it to be, or nothing before the panel says
+  took::Bool = false          # the editor took the last key, which goes no further: see `design_key!`
+  names::Any = nothing        # the design's version, and each parameter's name and value then, for the rows to use
+end
+
+"What the page shows of a folder that has no page of its own: its name, and the table of what's in it"
+@def mutable struct FolderPage <: SemanticUI
+  path::String = ""
 end

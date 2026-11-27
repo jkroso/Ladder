@@ -26,7 +26,8 @@ export SANS, SERIF, MONO, CODE_FONT, CODE_STYLE, CODE_SLANT, CODE_SCALE, code_ty
        num, label, Face, measured, measure, width_in, drawable, has, stand_ins, font_with, one_wide,
        one_width, stand_in_from, runs, hasall, spared_width, spared, LIVE_GAP, BLOCK_ICONS, removed_colour,
        added_colour, TIP_INK, tip_label, dark_page, takeoff_back, elide, FLOAT_ROW, float_row, found_colours,
-       rule, tint, wrapped, ROW_H
+       rule, tint, wrapped, ROW_H, LISTING_W, PANEL_PAD, PREVIEW_LINES, LINE_H, TEXT_PAD, PAGE_W, ZOOM_STEP,
+       FILL_SIDE, CHECK_BAD, MOST_CHOICES, MARK_FILL, THEME_ORDER, NOTE_GAP
 
 # --- look --------------------------------------------------------------------
 
@@ -394,3 +395,29 @@ wrapped(face::Face, words, room) = begin
 end
 
 const ROW_H = 24px
+
+const LISTING_W = 340px
+
+const PANEL_PAD = 6px
+
+const PREVIEW_LINES = 12
+
+const LINE_H = 18px          # the height of a line of a file's text
+
+const TEXT_PAD = 8px         # above the first line and under the last
+
+const PAGE_W = 420px   # how wide a page of a PDF file shows
+
+const ZOOM_STEP = 1.25   # how much bigger the + button, and ⌘+, make a picture
+
+const FILL_SIDE = 24px   # how wide and how tall the button is that makes a picture fill the window
+
+const CHECK_BAD = colorant"rgb(200,60,50)"
+
+const MOST_CHOICES = 8     # the rows that such a list shows before it scrolls
+
+const MARK_FILL = 0.13   # how strong the accent colour is behind a thing that's marked
+
+const THEME_ORDER = (:sepia, :paper, :night)
+
+const NOTE_GAP = 18px    # the least room between a name and what it is

@@ -20,6 +20,9 @@
 @use "./folder_page" MARKDOWN ZIPS
 @use "./look" exports...
 @use "./flow" exports...
+@use "./schedule" => Schedules
+@use "./filter" => Filters
+@use "./timelog" => Timelogs
 
 export look, table_text, in_browser, web_address, copied_from, julia_own, is_reply, web_site, site_runs,
        inspread, insheet, shared_lang, shown_only!, sandbox_only!, Pos, Buffer, readonly, protected, isremote,
@@ -29,7 +32,8 @@ export look, table_text, in_browser, web_address, copied_from, julia_own, is_rep
        restore!, edit!, replace_text!, undo!, redo!, writes, save!, crlf, ismarkdown, CODE_FILES, iscode,
        MOST_TEXT, MOST_PAGE, reading, HEX, HEX_BYTES, HEX_CHARS, BITS, BITS_ROW, BITS_CHARS, same_text,
        unchanged, line_end, FOLDER_PAGE, page_key, unescaped, bytes_page, STEP, FILE_VIEWS, JULIA, LIVE,
-       TEXT_READ, text_file
+       TEXT_READ, text_file, SCHEDULE, FILTER, CODE_RUNS, LOAD, FOLDER_PAGES, TIMELOG, HTMLS, TERM_CARETS,
+       TERM_PASTS, VIEW_BLOCK, PAGE_MODULES, table_reads
 
 # A kind of page or of file decides these, so this file only names them. The
 # file that knows the kind gives each its methods.
@@ -581,3 +585,36 @@ text_file(path) = begin
   TEXT_READ[path] = (at, found)
   found
 end
+
+const SCHEDULE = Schedules.SCHEDULE
+
+const FILTER = Filters.FILTER
+
+"How many times the code of a page has run in this Ladder. A `check` block runs its lines again when it's more than it was."
+const CODE_RUNS = Ref(0)
+
+const LOAD = "load"
+
+# What each folder that a list looks in held when it was last read: its pages, with when each file last changed
+const FOLDER_PAGES = Dict{String,Any}()
+
+const TIMELOG = Timelogs.TIMELOG
+
+const HTMLS = (".html", ".htm")
+
+const TERM_CARETS = (:block, :bar, :underline)
+
+const TERM_PASTS = (1_000, 10_000, 50_000)
+
+const VIEW_BLOCK = "view"
+
+"""
+The module of each Markdown page's `julia` code, by the real path of the
+page's file. There's one for each file, as Kip has one for each Julia file.
+The page's live blocks, the code that you run on it in any window, and the
+kinds of block that it defines are all in the same module. See `page_module`.
+"""
+const PAGE_MODULES = Dict{String,Module}()
+
+# How many times a CSV file has been read. What's worked out from a file's table is worked out again when this changes.
+const table_reads = Ref(0)

@@ -1347,18 +1347,6 @@ editor is made, because a built app forgets its fonts when it starts.
 """
 load_sheet_font() = isempty(SHEET_FILE) || register_font(SHEET_FILE)
 
-"A sheet laid out"
-struct Sheet
-  rows::Vector{Int}             # the line of the document each row comes from
-  cells::Vector{Vector{Cell}}   # each row's name and expression, or only its expression
-  names::Vector{Flow}
-  exprs::Vector{Flow}
-  results::Vector{Result}       # what each row comes to
-  heights::Vector{px}
-  name_w::px                    # how wide the column of names is
-  size::px                      # of the text
-end
-
 """
 The lines that open and close the sheet that line `i` is in, or nothing. A
 sheet needs a row, and it shows as lines of code while the caret is on the
@@ -2328,37 +2316,6 @@ end
 # when the path goes to another file, when the preview closes and when the window
 # shows another page.
 
-"One line of the list under a Breadcrumb: a file or a folder"
-@def mutable struct FileEntry <: SemanticUI
-  path::String = ""
-end
-
-"One name in a Breadcrumb"
-@def mutable struct Crumb <: SemanticUI
-  path::String = ""
-  name::String = ""
-end
-
-"The path `at`, as the names of the folders on the way to it"
-@def mutable struct Breadcrumb <: SemanticUI
-  at::String = ""
-  open::Bool = false     # is the list of what's in the folder showing?
-  # Kept so each name and each line knows when the mouse is over it
-  crumbs::Dict{String,Crumb} = Dict{String,Crumb}()
-  entries::Dict{String,FileEntry} = Dict{String,FileEntry}()
-  # The STLViewer of the model at `at`, the player of the sound or the video there, or the Pages
-  # of the PDF file there. It's kept so that the model stays as it was turned, the file plays on
-  # from one frame to the next, and the page stays the one you turned to.
-  viewer::Any = nothing
-  text::Any = nothing    # what `kept!` keeps of the file at `at`, like its text, or false if it has none
-  read::Any = nothing    # what `text` is: its kind, the path of its file and when the file last changed
-  inline::Bool = false   # in a line of text, so its list floats under it and takes no room on the page
-  folders::Bool = false  # only a folder can be the path, as when you choose where something is kept. The folder needn't be made yet.
-  room::Union{Nothing,px} = nothing   # how wide it can be, when it has less room than the page is wide
-  button::Any = nothing  # its OpenButton, once it has shown
-  files::Any = nothing   # a function of a file's name that's true for the files the list shows, when it picks a file of some kinds. Folders always show.
-end
-
 "The button at the right end of a breadcrumb's names that shows its file or its folder in the window. It shows while the mouse is over the breadcrumb."
 @def mutable struct OpenButton <: SemanticUI
   rect::NTuple{4,px} = (0px, 0px, 0px, 0px)   # where it was last drawn, to put its tooltip under it
@@ -2369,8 +2326,6 @@ end
 @def mutable struct Listing <: SemanticUI
   of::Any = nothing   # the Breadcrumb
 end
-
-const LISTING_W = 340px
 
 describe(f::Listing) =
   Column(width(grow=grow), Alignment.Start, padding(6px), radius(8px), background(colours.block), border(1px, :solid, colours.line),
@@ -2432,8 +2387,6 @@ describe(l::Breadcrumb) = begin
   Column(width(grow=grow), Alignment.Start, padding(PANEL_PAD), radius(8px), background(colours.block), child_gap=1px,
     trail, contents(l)...)
 end
-
-const PANEL_PAD = 6px
 
 "What shows under an open breadcrumb: the lines of a folder, or the preview of a file"
 contents(l::Breadcrumb) = begin
@@ -2556,7 +2509,6 @@ bytes(n) = begin
   end
 end
 
-const PREVIEW_LINES = 12
 const MODEL_HEIGHT = 260px
 "The viewer of the model in the STL, 3MF or glTF file at `path`, or nothing if the file can't be read as a model"
 model(l::Breadcrumb, path) = begin
@@ -2605,20 +2557,6 @@ terminal(l::Breadcrumb, path) = begin
   v.high = min(MODEL_HEIGHT, px(lines * Terms.cell(v)[2] + 2Terms.PAD))
   v
 end
-
-const LINE_H = 18px          # the height of a line of a file's text
-const TEXT_PAD = 8px         # above the first line and under the last
-"""
-The text of the file that a breadcrumb previews. It's kept so that the file
-is read once, and so that the text stays where you scrolled it to.
-"""
-mutable struct FileText
-  lines::Vector{String}
-  more::Bool        # the file is longer than what was read
-  scroll::Scroll
-end
-
-FileText(lines, more) = FileText(lines, more, Scroll(width(grow=grow), height(LINE_H * min(length(lines), PREVIEW_LINES) + 2TEXT_PAD)))
 
 """
 What the breadcrumb `l` keeps of the file at `path`: what `make(path)` gave, or
@@ -2790,16 +2728,6 @@ pageview(e, p::FilePage) = begin
 end
 
 # --- the pages of a PDF file --------------------------------------------------------------------
-
-const PAGE_W = 420px   # how wide a page of a PDF file shows
-
-"The pages of a PDF file, one at a time. A click on the left half goes back a page, and one on the right half goes on."
-@def mutable struct Pages <: SemanticUI
-  path::String = ""
-  page::Int = 1
-  count::Int = 0
-  wide::px = PAGE_W   # how wide a page shows
-end
 
 describe(p::Pages) = begin
   # Twice as many pixels as px, so that the page is sharp on a screen with 2 pixels to the px
@@ -3520,7 +3448,6 @@ end
 # the task's days beside the item, with buttons that make the task a day
 # longer or shorter.
 
-const SCHEDULE = Schedules.SCHEDULE
 const TASK_H = 30.0        # px: how tall the row of a task is
 const TASK_BAR = 20.0         # and how tall its bar is
 const DATES_H = 46.0       # how tall the months and the days over the rows are
@@ -4620,7 +4547,6 @@ const ZOOM_EDGE = 24.0   # px of room round a picture that fits the window
 const BAR_ROOM = 64px    # the bottom of the window, where the bar of buttons is
 const MODEL_FOOT = 34px  # how tall the line under a model is, which says what the model is
 const MOST_ZOOM = 8.0    # the biggest a picture gets: this many times its own size, or the size that fits the window if that's bigger
-const ZOOM_STEP = 1.25   # how much bigger the + button, and ⌘+, make a picture
 "The commands that do what they always do while a picture fills the window. The rest would change the page under it."
 const PAGE_COMMANDS = (:save, :open, :open_project, :print, :close, :settings, :sidebar, :sidebar_keys)
 
@@ -4682,7 +4608,6 @@ end
 "What the button `b` does: what it makes fill the window, or `(:go, path)` for the file that it goes to"
 button_what(b::FillButton) = b.also ? b.parent.also : b.parent.what
 
-const FILL_SIDE = 24px   # how wide and how tall the button is that makes a picture fill the window
 const FILL_GAP = 4px     # between that button and the picture, and between it and the window's edge
 
 """
@@ -5532,20 +5457,6 @@ chart_colour(k::Integer) = begin
   RGBA(towards(c.r), towards(c.g), towards(c.b), 1.0)
 end
 
-"What a `chart` block shows: the numbers of a table, drawn"
-@def mutable struct ChartView <: SemanticUI
-  n::Int = 0                               # its place among the page's charts
-  first::Int = 0                           # the lines of its block, when the page was last laid out
-  last::Int = 0
-  spec::Charts.Chart = Charts.Chart()
-  lines::Vector{String} = String[]         # the lines that `spec` was read from
-  shown::Any = nothing                     # the version of the page, and what the chart shows of that page
-  marks::Vector{Charts.Mark} = Charts.Mark[]   # the parts of the chart, where they were last drawn
-  box::NTuple{4,Float64} = (0.0, 0.0, 0.0, 0.0)   # where the chart was last drawn in the window
-  sourcing::Bool = false                   # the list of files to draw is open, after Choose a file…
-  parts::Dict{Any,Any} = Dict{Any,Any}()   # its buttons, kept between frames
-end
-
 "The part of a chart that shows the bars, the lines or the pie"
 @def mutable struct PlotArea <: SemanticUI
   of::Any = nothing
@@ -6000,24 +5911,12 @@ block_html(e, v::ChartView) = chart_html(e, v)
 # rows came from a JSON file. Ladder reads a file once, and again when it
 # changes on the disk.
 
-const FILTER = Filters.FILTER
 const FILTER_ROWS = 30              # the rows that a filter shows until you ask for the rest
 const FILTER_COLUMNS = 60           # the most columns that the things of a JSON file make
 const FILTER_KEY = :filter_column   # the key of the menu of a filter's column
 const CHIP_H = 24px                 # how tall a condition is, at the top of a filter
 const ADD_W = 230px                 # how wide the field is that adds a condition
 push!(BLOCK_ICONS, "funnel", "x", "download", "eye-slash", "plus")
-
-"The rows that a filter reads, and where they came from"
-struct FilterRows
-  rows::Vector{Vector{String}}   # the first row has the names of the columns
-  numbers::Vector{Bool}          # true for each column that holds numbers
-  things::Vector{Any}            # for a JSON file, the thing that each row came from: row k + 1 came from thing k
-  name::String                   # what the top of the block calls where they came from
-  path::String                   # the file, or "" for a table of the page
-  more::Bool                     # the file has rows after these
-  problem::String                # why there are no rows, or ""
-end
 
 "No rows, and why"
 no_rows(problem; name="", path="") = FilterRows(Vector{String}[], Bool[], Any[], name, path, false, problem)
@@ -6224,34 +6123,6 @@ filter_page_table(e, lines, tables, line; load=false) = begin
   x.subset === nothing && return nothing
   x.table === nothing && (x.table = filter_table(x.data, x.subset))
   x.table
-end
-
-"What a `filter` block shows: the rows of a table that meet its conditions"
-@def mutable struct FilterView <: SemanticUI
-  n::Int = 0                               # its place among the page's filters
-  first::Int = 0                           # the lines of its block, when the page was last laid out
-  last::Int = 0
-  spec::Filters.Filter = Filters.Filter()
-  lines::Vector{String} = String[]         # the lines that `spec` was read from
-  shown::Any = nothing                     # what the rows were last worked out for, and what they are
-  whole::Bool = false                      # every row shows, and not only the first FILTER_ROWS
-  widths::Any = nothing                    # what the widths of the columns were worked out for, and the widths
-  values::Dict{Int,Any} = Dict{Int,Any}()  # each column's values, for its menu, or nothing for a column with too many
-  cut::Dict{Any,String} = Dict{Any,String}()   # the text of a cell as it shows, cut short for its column
-  across::px = 0px                         # how far the table is scrolled to the right
-  top::px = 0px                            # where the top of the table was last drawn in the window
-  asking::Int = 0                          # the column whose menu is open, or 0
-  was::Vector{String} = String[]           # the block's lines when that menu opened, which esc puts back
-  saved::String = ""                       # what Save last did, in words
-  lang::String = FILTER                    # filter, or load for a block that loads its rows from a server or a file
-  job::Any = nothing                       # a load from a server that hasn't ended: a function that gives nothing until it has, then how it went
-  asked::Any = nothing                     # the address and the key that the block last asked its server with
-  changed::Float64 = 0.0                   # when the block's lines last changed
-  said::String = ""                        # what came of the last load, in words
-  failed::Bool = false                     # true when that went wrong
-  nokey::Bool = false                      # the Keychain had no key with the name that `key` gives
-  choosing::Bool = false                   # the file picker of a load block is open, after a click on Choose
-  parts::Dict{Any,Any} = Dict{Any,Any}()   # its chips, headings and buttons, kept between frames
 end
 
 "A condition at the top of a filter. Its × takes it away. With `k` 0, it's the chip that says how many columns are hidden."
@@ -6859,11 +6730,6 @@ end
 const CHECK = "check"
 push!(BLOCK_ICONS, "check2-square", "check-circle-fill", "x-circle-fill", "exclamation-triangle-fill", "arrow-clockwise")
 const CHECK_GOOD = colorant"rgb(52,150,86)"
-const CHECK_BAD = colorant"rgb(200,60,50)"
-
-"How many times the code of a page has run in this Ladder. A `check` block runs its lines again when it's more than it was."
-const CODE_RUNS = Ref(0)
-
 "One line of a `check` block as it came out: its code, how it went, which is :pass, :fail or :stop, and what there is to say of one that didn't pass"
 struct Checked
   code::String
@@ -7567,23 +7433,6 @@ works_here(e, ::Val{:add_check}) = julia_file(e)
 
 const SAVE = Saves.SAVE
 push!(BLOCK_ICONS, "save", "cloud-arrow-up", "arrow-right", "key", "check2", "exclamation-circle")
-
-"What a `save` block shows: which rows it has, where they go, and what happened when they last went"
-@def mutable struct SaveView <: SemanticUI
-  n::Int = 0                               # its place among the page's save blocks
-  first::Int = 0                           # the lines of its block, when the page was last laid out
-  last::Int = 0
-  spec::Saves.Save = Saves.Save()
-  lines::Vector{String} = String[]         # the lines that `spec` was read from
-  job::Any = nothing                       # a send that hasn't ended: a function that gives nothing until it has, then how it went
-  sending::Any = nothing                   # what that send has: how many rows, where to, and the name of the key
-  said::String = ""                        # what happened at the last click, or ""
-  failed::Bool = false                     # true when that went wrong
-  nokey::Bool = false                      # the Keychain had no key with the name that `key` gives
-  choosing::Bool = false                   # the list of folders is open, after a click on Choose
-  sourcing::Bool = false                   # the list of files to save the rows of is open, after Choose a file…
-  parts::Dict{Any,Any} = Dict{Any,Any}()   # its buttons, kept between frames
-end
 
 reread!(v::SaveView, lines) = begin
   lines == v.lines && return v
@@ -8619,7 +8468,6 @@ block_html(e, v::FormView) = form_html(e, v)
 # be reached. The line under the top of the block says when the rows came,
 # or why they didn't.
 
-const LOAD = "load"
 push!(BLOCK_ICONS, "cloud-arrow-down", "file-earmark-arrow-down", "arrow-clockwise")
 
 const LOAD_CACHE = Ref("")   # the folder a test keeps the copies in, in place of the one in the Mac's caches
@@ -10569,7 +10417,6 @@ const FIND_EVERY = 3      # seconds between two looks at the folder, while the w
 const FIND_BUDGET = 0.3   # seconds that one look at the folder can take
 const FIND_BAR = 440px     # the room that the top of a list needs to show its field and its buttons in one row
 const FIND_MENU = :find_choices   # the key of the list that a button at the top opens
-const MOST_CHOICES = 8     # the rows that such a list shows before it scrolls
 push!(BLOCK_ICONS, "search", "file-earmark-text", "folder", "code-slash")
 
 "What a `find` block shows: the lines of a folder's pages that match"
@@ -10855,9 +10702,6 @@ pages_under(folder; budget=FIND_BUDGET) = begin
   end
   first(out, FIND_PAGES), whole
 end
-
-# What each folder that a list looks in held when it was last read: its pages, with when each file last changed
-const FOLDER_PAGES = Dict{String,Any}()
 
 """
 The pages of `folder`, with when the file of each last changed. The folder is
@@ -11168,22 +11012,6 @@ const GALLERY_LABEL = 14px     # how tall the name under such a picture is
 "For each size of square: the icon of the button that changes the size, and what the button says"
 const GALLERY_SIZES = (small=("grid-3x3-gap", "Small"), medium=("grid", "Medium"), large=("square", "Large"))
 push!(BLOCK_ICONS, "images", "image", "grid-3x3-gap", "grid", "square")
-
-"What a `gallery` block shows: the files and the folders of a folder as a grid of squares"
-@def mutable struct GalleryView <: SemanticUI
-  n::Int = 0                               # its place among the page's galleries
-  first::Int = 0                           # the lines of its block, when the page was last laid out
-  last::Int = 0
-  data::Galleries.Gallery = Galleries.Gallery()
-  lines::Vector{String} = String[]         # the lines that `data` was read from
-  shown::Any = nothing                     # what the gallery showed when its folder was last read, and when to read it again
-  # The small picture of each file: its key and whether it fills its square. It's nothing for a file that has no picture.
-  small::Dict{Any,Any} = Dict{Any,Any}()
-  wanted::Vector{Galleries.Item} = Galleries.Item[]   # the files in the window whose small pictures aren't made yet
-  side::px = 0px                           # how big each square was when the grid was last laid out
-  showing::String = ""                     # the file that fills the window, or that last did
-  parts::Dict{Any,Any} = Dict{Any,Any}()   # its squares, its button, and the player of the video that fills the window, kept between frames
-end
 
 "A square of a gallery: one file or folder"
 @def mutable struct GalleryThumb <: SemanticUI
@@ -12957,7 +12785,6 @@ block_html(e, v::CanvasView) = canvas_html(e, v)
 # box round it, and Return writes what's typed there into the line. A `chart` block under a log draws
 # the hours of each task.
 
-const TIMELOG = Timelogs.TIMELOG
 const TASKS_KEY = :timelog_tasks   # the key of the list of tasks under the field
 const MOST_TASKS = 6               # the rows that the list shows before it scrolls
 const LOG_ROW = 28px               # how tall a row of the log is
@@ -14388,8 +14215,6 @@ end
 # fields. After a click it has the keyboard, so the arrows and Space scroll
 # it. When the file changes on the disk, the page shows it afresh.
 
-const HTMLS = (".html", ".htm")
-
 """
 True when the page shows an HTML file at one of its levels: as its page, its
 text, its bytes in hexadecimal or its bits. A page of HTML from a web server
@@ -14511,24 +14336,7 @@ term_palette() = begin
          term_colour(c.comment), strong..., dark ? ink : term_colour(c.line)]
 end
 
-"""
-The terminal's settings, which every window has the same. The Terminal page
-of the settings changes them, and the file of the settings keeps them.
-"""
-@def mutable struct TermSettings
-  caret::Symbol = :block   # the caret's shape while a program asks for none: one of TERM_CARETS
-  blink::Bool = false      # that caret blinks
-  copies::Bool = false     # what the mouse selects is copied as soon as the button goes up
-  meta::Bool = false       # ⌥ with a key sends ESC and the key, and not the Mac's character
-  bell::Symbol = :flash    # what a program's bell does: one of TERM_BELLS
-  most::Int = 10_000       # how many lines of the past a terminal keeps: one of TERM_PASTS
-end
-
-const TERM_SETTINGS = TermSettings()
-const TERM_CARETS = (:block, :bar, :underline)
 const TERM_BELLS = (:flash, :sound, :none)
-const TERM_PASTS = (1_000, 10_000, 50_000)
-
 "The choice of `options` that `x` names, for a live block of the settings: a word like \"bar\", or a number"
 term_choice(options, x) = begin
   c = x isa AbstractString ? Symbol(lowercase(x)) : x
@@ -14675,26 +14483,7 @@ end
 # same as `aspect: 2:1`. With no such line, a page is as tall as what it shows
 # and a model is 260 pixels tall.
 
-const VIEW_BLOCK = "view"
 push!(BLOCK_ICONS, "eye", "arrow-up-right")
-
-"What a `view` block shows: another file, a folder, or a page of the web"
-@def mutable struct ViewBlock <: SemanticUI
-  n::Int = 0                               # its place among the page's `view` blocks
-  first::Int = 0                           # the lines of its block, when the page was last laid out
-  last::Int = 0
-  lines::Any = nothing                     # the lines that it was last read from
-  source::Vector{String} = String[]        # those lines without its settings: the name of what it shows, or its HTML
-  settings::Vector{String} = String[]      # its lines of settings, like `aspect: 16:9`, as they're written
-  aspect::Float64 = 0.0                    # its width over its height, from its line `aspect:`, or 0 when it has none
-  lang::String = VIEW_BLOCK                # the language of its block: `view`, or `web` as it was called before
-  target::String = ""                      # the path or the address that its line names, as `view_target` gives it
-  held::Bool = false                       # its lines hold the HTML of a page, which starts with a tag
-  browser::Any = nothing                   # the Browser that shows an HTML file or a page of the web
-  crumb::Any = nothing                     # the Breadcrumb that keeps what shows any other file: its model, its player, its text
-  parts::Dict{Any,Any} = Dict{Any,Any}()
-  sent::Any = nothing                      # the page that was last given the sums, and what it was given: see `send_sums!`
-end
 
 "A line of settings of a `view` block, like `aspect: 16:9`, or nothing for any other line"
 view_setting(line) = match(r"^\s*(aspect)\s*:\s*(.*?)\s*$"i, line)
@@ -15474,8 +15263,6 @@ block_html(e, v::ResultBlock) = result_html(e, v)
 # `marked(part, name)` is true while the mouse is on a thing of that name
 # anywhere in the page. A kind of block joins in with a method of `pointed`,
 # and a call of `marked` where it draws a thing.
-
-const MARK_FILL = 0.13   # how strong the accent colour is behind a thing that's marked
 
 "A name as two parts of the page compare it. Capital letters, and the space round it, make no other name."
 plain_name(name::AbstractString) = lowercase(strip(name))
@@ -16873,12 +16660,6 @@ onkey(r::ContactWork, ::KeyPress{Keys.mouse_left}) = (m = work_of(r); m === noth
 
 push!(BLOCK_ICONS, "play-fill", "stop-fill")
 
-"The button beside a to-do item that starts and stops the clock of the page's time log on the item"
-@def mutable struct ItemClock <: SemanticUI
-  key::String = ""                              # the to-do item, by what a schedule calls it
-  rect::NTuple{4,px} = (0px, 0px, 0px, 0px)     # where it was last drawn, to put its tooltip over it
-end
-
 "The view of the page's first time log, read again from the lines of its block, or nothing when the page has none or can't be changed"
 page_log(e) = begin
   b = e.buf
@@ -17266,14 +17047,6 @@ block_source(text::AbstractString, lang::AbstractString, folder::AbstractString)
   k = findfirst(ext -> defines(joinpath(folder, lang * ext), lang), (".jl", ".md"))
   k === nothing ? nothing : "./$lang$((".jl", ".md")[k])"
 end
-
-"""
-The module of each Markdown page's `julia` code, by the real path of the
-page's file. There's one for each file, as Kip has one for each Julia file.
-The page's live blocks, the code that you run on it in any window, and the
-kinds of block that it defines are all in the same module. See `page_module`.
-"""
-const PAGE_MODULES = Dict{String,Module}()
 
 "The window whose code ran last in the module of each page, by the page's path. A name of the module that acts on a window, like `page_theme!`, acts on that one."
 const PAGE_WINDOWS = Dict{String,Any}()
@@ -18290,15 +18063,6 @@ end
 # page then costs little more in a frame than a short one. The lines are kept
 # with the other layouts, in `e.flows`, so what empties those empties them too.
 
-"A line of plain text as a frame laid it out: its text, what kind of line it was, whether its markup showed, and its layout with its height"
-struct PlainLine
-  text::String
-  line::Line
-  raw::Bool
-  flow::Flow
-  tall::px
-end
-
 "The kinds of line that are laid out from their own text alone. A to-do item is left out: on a day before today its box shows that day's tick."
 const PLAIN_KINDS = (Kind.blank, Kind.paragraph, Kind.heading, Kind.bullet, Kind.ordered, Kind.blockquote, Kind.code, Kind.rule)
 
@@ -18795,8 +18559,6 @@ selected(b::Buffer, i::Int) = begin
   (lo[1] <= i <= hi[1] && lo != hi) || return nothing
   (i == lo[1] ? lo[2] : 0, i == hi[1] ? hi[2] : length(b.lines[i]), i < hi[1])
 end
-
-const Rect = NTuple{4,Float64}   # left, top, right and bottom, in px
 
 """
 The boxes that cover the selected part of each line of `f`, whose top left
@@ -21216,8 +20978,6 @@ zoom_for(size) = clamp(round(Int, size), 11, 42) / TEXT_SIZE.value
 
 "The one after `x` in `list`, going back to the start after the last"
 after(list, x) = list[mod1(findfirst(==(x), list) + 1, length(list))]
-
-const THEME_ORDER = (:sepia, :paper, :night)
 
 const SLIDE_TIME = 0.25   # seconds for the sidebar to slide in or out
 
@@ -30218,9 +29978,6 @@ istable(path) = lowercase(splitext(path)[2]) in TABLES
 
 # What's known of each CSV file that a page shows: when the file last changed, how big it was then, and its table
 const table_files = Dict{String,Tuple{Float64,Int,Csvs.Table}}()
-# How many times a CSV file has been read. What's worked out from a file's table is worked out again when this changes.
-const table_reads = Ref(0)
-
 "The table in the CSV file at `path`. The file is read once, and again when it changes on the disk."
 file_table(path) = begin
   s = stat(path)
@@ -30541,13 +30298,6 @@ const TRANSCRIPT_W = 520px      # the widest the drop-down is
 const TRANSCRIPT_HIGH = 320px   # the tallest that its words are before they scroll
 const TRANSCRIPT_PAD = 14px     # inside its edge
 const COPIED_FOR = 1.5          # how many seconds the copy button says "Copied"
-
-"The button beside a video, under its FillButton, that opens the drop-down of what was said in the video"
-@def mutable struct TranscriptButton <: SemanticUI
-  open::Bool = false                          # is its drop-down open?
-  rect::NTuple{4,px} = (0px, 0px, 0px, 0px)   # where it was last drawn, to put its tooltip beside it
-  quiet::Bool = false                         # clicked, so no tooltip until the mouse leaves it
-end
 
 "The drop-down of a TranscriptButton: what was said in the video, and a button that copies it"
 @def mutable struct Transcript <: SemanticUI
@@ -34103,8 +33853,6 @@ end
 # Julia's own names. A name that nothing is known about has no words.
 
 const NOTE_COLS = 32     # the most characters of what a name is
-const NOTE_GAP = 18px    # the least room between a name and what it is
-
 "`text` with each type written by its own name, with no module in front: `Main.Page.Wall` is `Wall`"
 bare_names(text) = replace(text, r"(?<![\p{L}\p{N}_.])([\p{L}_][\p{L}\p{N}_]*\.)+(?=[\p{L}_])" => "")
 
@@ -45089,12 +44837,6 @@ add_command!(stop_agent!, title="Stop the agent that's working now. What it chan
 # function is for. See "checks in a file of Julia code" and "ask for a change
 # to a thing".
 
-"A check of a file of Julia code, for Fix Check and Show Steps: its line, its code, and how it went when it last ran"
-struct FileCheck
-  line::Int
-  code::String
-  went::Symbol
-end
 worded(c::FileCheck) = c.code
 sidenote(c::FileCheck) = (c.went == :pass ? "passes" : c.went == :fail ? "fails" : "stops") * " · line $(c.line)"
 
@@ -46548,14 +46290,6 @@ end
 # goes to the next cell, and Return starts a row. Esc, ⌘S and the window's
 # keys go to the design, then to the window. ⌘Z takes back what was typed, and
 # when nothing was, the design's last change.
-
-"The sheet of a SolidCraft design's parameters: see \"the sheet of a SolidCraft design's parameters\""
-@def mutable struct DesignSheet <: SemanticUI
-  sub::Any = nothing          # the editor of its page
-  room::Any = nothing         # how wide the panel has room for it to be, or nothing before the panel says
-  took::Bool = false          # the editor took the last key, which goes no further: see `design_key!`
-  names::Any = nothing        # the design's version, and each parameter's name and value then, for the rows to use
-end
 
 const SHEET_OPEN = "```" * SHEET   # the line that opens the block of the sheet
 
@@ -50230,11 +49964,6 @@ onkey(t::FolderTable, ev::KeyPress{Keys.mouse_right}) = begin
     return handled
   end
   nothing
-end
-
-"What the page shows of a folder that has no page of its own: its name, and the table of what's in it"
-@def mutable struct FolderPage <: SemanticUI
-  path::String = ""
 end
 
 # Under the folder's name is what it holds, as a repository's page has it

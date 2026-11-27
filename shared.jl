@@ -9,7 +9,9 @@
 export drop!, dragging, click_twice!, settle!, answer!, commit!, stop_asking!, full_room, row_at, vertical,
        beside, diff_wide, beside!, found!, on_paper, show_place!, ask!, button!, field, fit!, fit_zoom,
        moved!, order_words, page!, say!, table_head, toolbar, callee, extent, julia_file, level, level!,
-       levels, type_name, add_row!, field_text, hold!, keep!, narrowed, tip, caret, pointed, press!
+       levels, type_name, add_row!, field_text, hold!, keep!, narrowed, tip, caret, pointed, press!,
+       chip_words, choice_input, choose!, choosing_tick!, chosen, draw_drag, hush!, key_given!, locate, marks,
+       more_words, name_row!, own_button, stop_choosing!, theme!, turn!, works_here, step!
 
 "A drag on the part `v` ended: what moved is written down"
 function drop! end
@@ -139,3 +141,57 @@ function pointed end
 
 "True while Ladder is built into an app (see app/bundle.jl)"
 function press! end
+
+"What a chip says"
+function chip_words end
+
+"The field at the top of the list of where rows can come from, that searches it"
+function choice_input end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function choose! end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function choosing_tick! end
+
+"True when the row `r` of the list is where the block's rows come from now, or one of the tables that a chart draws"
+function chosen end
+
+"Draw what a drag is doing"
+function draw_drag end
+
+"Stop the sound or the video that the breadcrumb's player is playing, and end the program of a SolidCraft design that it shows"
+function hush! end
+
+"Keep `key` as the key that `v` names, and say how that went"
+function key_given! end
+
+"The place in a sheet under a point that is (dx, dy) from the top left of its item"
+function locate end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function marks end
+
+"What the line under the table says"
+function more_words end
+
+"Give the row on line `i`, which has no name, a place for one, and put the caret there"
+function name_row! end
+
+"True when the node `n` has a button beside it that stands for all that's in it"
+function own_button end
+
+"Take the list away"
+function stop_choosing! end
+
+"Use the colours called `name` for the page"
+function theme! end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function turn! end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function works_here end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function step! end

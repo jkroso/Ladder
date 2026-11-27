@@ -13,7 +13,19 @@ export editor, page_object, object, list_files!, go_folder!, open!, open_folder!
        page_day, save_settings!, rerun!, page_room, page_tables, named_table, layout!, command_of,
        click_page!, text_object, say_result!, lowered, rewrap!, reload_changed!, loaded_module, fillable,
        diagram_html, outcome_face, julia_code, calendar_today, marked, term_page, chat_page, scroll_page!,
-       keep_talk!, follow_host!, celltext, lowest, component, unscaled, command_kind, pinch_open
+       keep_talk!, follow_host!, celltext, lowest, component, unscaled, command_kind, pinch_open, another_day,
+       blocks, chart_file, chat_shown, code_offered, code_start, complete!, def_call, definition_of,
+       design_field_of, escaped, file_table, folder_pages, follow_wiki!, hide_bar!, hiding_name, html_shown,
+       ispicture, istable, keep_copy, keep_pasted, line_step, listed_agents, mark_colour, markdown_app,
+       name_at, name_notes, needs_run, note_place!, page_covered, page_given, page_log, page_text, page_then,
+       part_lines, part_texts, passing, plain_name, planned_tasks, redraw_windows!, rows, run_in, run_sum,
+       running_code, save_panel, selected, sheet_given, sheet_html, sheet_work, shown_buffers, standing,
+       table_rows, term_choice, term_look!, term_shown, text_left, thing_name, tick!, tick_page!, tip_code,
+       todo_called, todos_then, update_news, value_parts, visit!, wiki_offered, wiki_path, worked,
+       write_blocks!, item_room, item_under, gallery_buttons, gallery_edges, go_view!, view_name, side_w,
+       look_key, player, show_crumb!, video_wide, textview, bytes, model, terminal, html_page, scrolled,
+       design, kept!, text!, make_default!, fill_what, fill_wide, preview, zoomed_node, zoom_for, held_room,
+       square_button, enter, bar_bottom
 
 "The editor of the window that `node`, a part of a page, is part of"
 function editor end
@@ -164,3 +176,300 @@ function command_kind end
 
 "A pinch outwards on a picture, a diagram, a page or a sketch in the page makes it fill the window"
 function pinch_open end
+
+"True when the page shows a day that isn't today"
+function another_day end
+
+"The items as the nodes of the document"
+function blocks end
+
+"What the chart `c` draws when its `from` names a CSV file"
+function chart_file end
+
+"True when the page shows a session's file as the session"
+function chat_shown end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function code_offered end
+
+"The first line of code from line `i` of `lines` on, after blank lines, comments and documentation, or `i` when there's none"
+function code_start end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function complete! end
+
+"The call that the definition `def` of a function starts with, like `share(s)`, without what's written after it, like `where T`"
+function def_call end
+
+"The function that the top part `ex` of a file of Julia code defines"
+function definition_of end
+
+"The field of a SolidCraft design that the editor `e` is the text of, or nothing for any other editor"
+function design_field_of end
+
+"`path` as a link writes it"
+function escaped end
+
+"The table in the CSV file at `path`"
+function file_table end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function folder_pages end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function follow_wiki! end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function hide_bar! end
+
+"The settings page's name for `how` the top bar hides"
+function hiding_name end
+
+"True when the page shows an HTML file as the page that its HTML makes"
+function html_shown end
+
+"True when the name of the file at `path` ends as one of `kinds` does, like .png"
+function ispicture end
+
+"True when the file at `path` is one that holds a table"
+function istable end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function keep_copy end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function keep_pasted end
+
+"The place one line up or down the screen from the caret, in the order of the page's lines"
+function line_step end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function listed_agents end
+
+"The colour `back` with the accent colour over it, as strong as a mark is"
+function mark_colour end
+
+"The app that opens a Markdown file when you double-click one, or an empty string when macOS can't say"
+function markdown_app end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function name_at end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function name_notes end
+
+"True when the check that went as `r` stopped only because the code of the file that the window of `e` shows hasn't run"
+function needs_run end
+
+"Note where the window of `e` is, before it jumps to another line of the file, so ⌘⌥← comes back to it"
+function note_place! end
+
+"True when the folder or the file that shows covers the page's whole space with a view of its own"
+function page_covered end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function page_given end
+
+"The view of the page's first time log, read again from the lines of its block, or nothing when the page has none or can't be changed"
+function page_log end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function page_text end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function page_then end
+
+"The first and the last line of the part of the code of `lines` that line `i` is in, without the blank lines after it"
+function part_lines end
+
+"The text of each part of the Julia code of `lines`, with the line that the part starts on"
+function part_texts end
+
+"True when the file at `path` is a temporary one, which macOS removes later"
+function passing end
+
+"A name as two parts of the page compare it"
+function plain_name end
+
+"The tasks of the page's schedule, when the page shows another day than today"
+function planned_tasks end
+
+"Draw each window again with the methods that Julia has now, after code gave a function a new one"
+function redraw_windows! end
+
+"The lines of a Flow, as rows of text"
+function rows end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function run_in end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function run_sum end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function running_code end
+
+"Ask where to save a file, with `name` to start with, in the document's folder"
+function save_panel end
+
+"The part of line `i` that's selected, as columns, and whether the selection goes on past it"
+function selected end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function sheet_given end
+
+"The sheet between lines `s` and `t`, as an HTML table, or nothing while the sheet shows as code"
+function sheet_html end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function sheet_work end
+
+"The pages whose lines the parts on `e`'s page edit, with the pages that parts of those edit, and so on"
+function shown_buffers end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function standing end
+
+"The rows of the table that line `i` shows when it holds only a CSV file, for a chart to draw"
+function table_rows end
+
+"The choice of `options` that `x` names, for a live block of the settings"
+function term_choice end
+
+"Give the terminal `v` the font of code and the colours of the theme, as the window of `e` has them now, and the terminal's settings"
+function term_look! end
+
+"True when the page shows a terminal's file as the terminal"
+function term_shown end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function text_left end
+
+"What tells a thing of a calendar from the others for the rest of the page"
+function thing_name end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function tick! end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function tick_page! end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function tip_code end
+
+"The to-do item of the page that a schedule calls `key`, or nothing"
+function todo_called end
+
+"The to-do items of the page as they stand on the page's day"
+function todos_then end
+
+"A sentence or two on how far the app's update has got, for the settings page"
+function update_news end
+
+"The parts of the row that `value_row` makes for `text`, in the font `face`"
+function value_parts end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function visit! end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function wiki_offered end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function wiki_path end
+
+"The minutes that the page's time logs have for the task called `name`"
+function worked end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function write_blocks! end
+
+"How far the left edge of `it` is from the left edge of the page's text, and how wide it is"
+function item_room end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function item_under end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function gallery_buttons end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function gallery_edges end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function go_view! end
+
+"What a tooltip calls the file or the page at `target`"
+function view_name end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function side_w end
+
+"What the window's colours are called now, for what's kept with them"
+function look_key end
+
+"The player of the sound or the video file at `path`"
+function player end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function show_crumb! end
+
+"How wide the picture of a video is at most"
+function video_wide end
+
+"The text of a file"
+function textview end
+
+"A file's size in words, like 6.5 KB"
+function bytes end
+
+"The viewer of the model in the STL, 3MF or glTF file at `path`, or nothing if the file can't be read as a model"
+function model end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function terminal end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function html_page end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function scrolled end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function design end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function kept! end
+
+"The text of the file at `path` for the breadcrumb `l`, or nothing if the file isn't text"
+function text! end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function make_default! end
+
+"What fills the window when you click the button over `x`, a node that a live block made, or nothing if it has no button"
+function fill_what end
+
+"How wide `x` is at most in the page, for the button over its top right corner"
+function fill_wide end
+
+"What shows under the path of a file"
+function preview end
+
+"True when `node`, a model or a video, fills the window now"
+function zoomed_node end
+
+"The zoom that makes the page's text `size` pixels tall"
+function zoom_for end
+
+"The empty room that the page keeps for the model or the video that fills the window"
+function held_room end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function square_button end
+
+"Where the caret goes when ↑ or ↓ brings it into a sheet from the line above or below it"
+function enter end
+
+"How far down the window the top bar reaches now"
+function bar_bottom end
