@@ -22624,14 +22624,6 @@ outcome, which waits for the code when the code takes longer than `RUN_WAIT`.
 """
 outcome!(e, r::UnitRange{Int}, code::String=join(e.buf.lines[r], "\n")) = only(run_pieces!(e, [r], [code]))
 
-"""
-How many seconds a window waits for what its code comes to, before it goes on
-drawing. A box whose code takes longer shows a spinner until the code comes
-back. Tests make it longer, so that every result is there when a key's handler
-ends.
-"""
-const RUN_WAIT = Ref(0.1)
-
 "How many seconds the ring of a spinner takes to go round once, and how often it moves"
 const SPIN_TURN = 0.9
 const SPIN_FRAME = 1 / 30
@@ -22652,9 +22644,6 @@ mutable struct CodeRun
   failed::Int              # the first piece that failed, or 0
   after::Any               # what to do when every piece has come back, or nothing
 end
-
-"The task of the code that started to run last, in any window. Each run waits for the one before it to end, so two pieces of code never run at once."
-const LAST_RUN = Ref{Any}(nothing)
 
 """
 Run the code on the lines of each range in `rs` of the page, one piece after
@@ -25874,9 +25863,6 @@ end
 
 const WELCOME = joinpath(@__DIR__, "pages", "welcome.md")
 
-"The editor of each window that's open, in the order they opened"
-const editors = Editor[]
-
 """
 Make a window for the editor `e`. `show_window!` puts it on the screen. Until
 it closes, `e` gets each setting that changes in another window.
@@ -27120,9 +27106,6 @@ add_command!(copy_link_to_block!, title="Copy a link that shows the block at the
 #
 # A window that isn't on the screen, like one a test makes, asks the web for
 # nothing, unless a test put its own function in `PAGE_GETTER`.
-
-"What gets a page from a web server: `Remote.curl`. A test puts its own function here, so that it uses no network."
-const PAGE_GETTER = Ref{Function}(Remote.curl)
 
 "True when the window of `e` may ask a web server for a page: it's on the screen, or a test stands in for `curl`"
 page_online(e) = PAGE_GETTER[] !== Remote.curl || on_screen(e)

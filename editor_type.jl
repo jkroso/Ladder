@@ -30,7 +30,8 @@ export Item, Live, Grid, isspread, Glide, Editor, TopBar, Sidebar, Page, Documen
        FileRow, FileLabel, Entry, EntryLabel, Shown, docdir, item, hosted, top_editor, button, FileView,
        Sheet, FileEntry, Crumb, Breadcrumb, FileText, Pages, ChartView, FilterRows, FilterView, SaveView,
        GalleryView, TermSettings, TERM_SETTINGS, ViewBlock, ItemClock, PlainLine, Rect, TranscriptButton,
-       FileCheck, DesignSheet, FolderPage, SourceChooser, SearchView, SearchChoice, ChoiceMenu, ChoiceRow
+       FileCheck, DesignSheet, FolderPage, SourceChooser, SearchView, SearchChoice, ChoiceMenu, ChoiceRow,
+       editors
 
 # --- what a window holds ---------------------------------------------------------
 
@@ -579,3 +580,6 @@ end
   of::Any = nothing
   k::Int = 0
 end
+
+"The editor of each window that's open, in the order they opened"
+const editors = Editor[]

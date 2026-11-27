@@ -27,7 +27,10 @@ export editor, page_object, object, list_files!, go_folder!, open!, open_folder!
        design, kept!, text!, make_default!, fill_what, fill_wide, preview, zoomed_node, zoom_for, held_room,
        square_button, enter, bar_bottom, chart_path, chart_sources, isfilterable, filter_file, filter_write!,
        filter_table, filter_subset, key_panel, error_words, file_start, server_said, keep_key, table_file,
-       choice_matches, toggle_source!, tick_item!
+       choice_matches, toggle_source!, tick_item!, block_end, type!, web_browser, sum_name, given_and_sums,
+       carry_sums!, follow_remote!, run_place, value_text, usual_module, own_units, remote_src, finding,
+       follow!, filled, todo_at, link_on, close_find!, took, page_bottom, keep_got!, get_page!, browser_path,
+       page_online, changed_here
 
 "The editor of the window that `node`, a part of a page, is part of"
 function editor end
@@ -523,3 +526,78 @@ function toggle_source! end
 
 "True while Ladder is built into an app (see app/bundle.jl)"
 function tick_item! end
+
+"The last line of the block that line `i` is in"
+function block_end end
+
+"Put `new` where the selection is, or at the caret"
+function type! end
+
+"The Browser of the `view` block `v`, for an HTML file or a page of the web"
+function web_browser end
+
+"The name that the code of a sum gives, like `:farm` for `farm = 2GW`, or nothing"
+function sum_name end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function given_and_sums end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function carry_sums! end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function follow_remote! end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function run_place end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function value_text end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function usual_module end
+
+"The expression `ex` of a page's code, with `function bar end` before it for each unit, like `bar`, that it defines a function of"
+function own_units end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function remote_src end
+
+"True while the find bar of the editor `e` is open"
+function finding end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function follow! end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function filled end
+
+"The line of the to-do item whose box is under a point in the window, or nothing"
+function todo_at end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function link_on end
+
+"Close the find bar of the editor `e`, and give the keyboard back to the page"
+function close_find! end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function took end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function page_bottom end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function keep_got! end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function get_page! end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function browser_path end
+
+"True when the window of `e` may ask a web server for a page"
+function page_online end
+
+"True when the file at `path` of the browser folder isn't what the server last sent"
+function changed_here end

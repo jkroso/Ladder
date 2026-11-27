@@ -11,7 +11,7 @@ export drop!, dragging, click_twice!, settle!, answer!, commit!, stop_asking!, f
        moved!, order_words, page!, say!, table_head, toolbar, callee, extent, julia_file, level, level!,
        levels, type_name, add_row!, field_text, hold!, keep!, narrowed, tip, caret, pointed, press!,
        chip_words, choice_input, choose!, choosing_tick!, chosen, draw_drag, hush!, key_given!, locate, marks,
-       more_words, name_row!, own_button, stop_choosing!, theme!, turn!, works_here, step!
+       more_words, name_row!, own_button, stop_choosing!, theme!, turn!, works_here, step!, locked, asks
 
 "A drag on the part `v` ended: what moved is written down"
 function drop! end
@@ -195,3 +195,9 @@ function works_here end
 
 "True while Ladder is built into an app (see app/bundle.jl)"
 function step! end
+
+"True for contacts in a page that can't be changed, like an email"
+function locked end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function asks end
