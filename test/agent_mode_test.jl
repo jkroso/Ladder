@@ -38,6 +38,10 @@ $(join(("Line $i of the brushes." for i in 1:60), "\n\n"))
 The end.
 """)
 
+# A page that the agent links to, with a space in its name, which a file:// address writes as %20
+const notes = joinpath(dir, "my notes.md")
+write(notes, "# Notes\n\n" * join(("Note $i." for i in 1:60), "\n\n") * "\n")
+
 # The agent writes down each line that Ladder gives it, and answers by what your words hold
 const heard = joinpath(dir, "heard.txt")
 const agent = joinpath(dir, "test-agent")
@@ -93,12 +97,16 @@ while IFS= read -r line; do
     done
     say '{"type":"assistant","message":{"content":[{"type":"text","text":"Five looks."}]}}'
     done_ ;;
+  *'a link'*)
+    # Antigravity names a file and its lines with a file:// address
+    say '{"type":"assistant","message":{"content":[{"type":"text","text":"Updated [plan.md](file://PAGE):\n\n- **[Paint](file://PAGE#L5-L7):** more paint.\n- **[A note](file://NOTES#L41):** a note."}]}}'
+    done_ ;;
   *)
     say '{"type":"assistant","message":{"content":[{"type":"text","text":"Plain **words**."}]}}'
     done_ ;;
   esac
 done
-""", "HEARD" => heard))
+""", "HEARD" => heard, "PAGE" => page, "NOTES" => replace(notes, ' ' => "%20")))
 chmod(agent, 0o755)
 K.SESSION_COMMAND[] = Cmd([agent])
 
@@ -1122,6 +1130,49 @@ try
       K.Pasteboard.other[] = C_NULL
       K.AGENT_PICTURES[] = ""
     end
+  end
+
+  @testset "A click on a link in a reply shows the file and the line that it names, from a file:// address too" begin
+    K.agent_mode(e) || (K.agent_mode!(e); frames(w, 3))
+    # URI.jl reads a link as one in the page's file
+    @test K.linked_file(e, "file:///Users/sam/my%20plan.md#L3-L9") == ("/Users/sam/my plan.md", "L3-L9")
+    @test K.linked_file(e, "my%20notes.md#L41") == (notes, "L41") && K.linked_file(e, "#L5") == (page, "L5")
+    @test K.linked_file(e, "~/Mail") == (joinpath(homedir(), "Mail"), "") && K.linked_file(e, "https://example.com/#L3") === nothing
+    # Lines of a file that isn't there are no lines to go to
+    @test !K.go_lines!(e, joinpath(dir, "none.md") * "#L3")
+    pane.field.buf.lines = ["Give me a link"]
+    K.send_words!(pane)
+    ok = until(() -> !pane.session.busy)
+    @test ok && occursin("file://$page#L5-L7", last(items()).text)
+    frames(w, 3)
+    sub = pane.parts[(:reply, objectid(last(items())))]
+    "The middle of the words of the link to `url` in the reply, in the window, or nothing"
+    link_place(url) = begin
+      for it in sub.layout
+        f = it.content
+        f isa K.Flow || continue
+        for vl in f.lines, seg in vl.segs
+          seg.link == url && return (sub.origin[1] + seg.x + seg.w / 2, sub.origin[2] + it.top + f.above + vl.top + vl.high / 2)
+        end
+      end
+      nothing
+    end
+    paint = link_place("file://$page#L5-L7")
+    talk = named("Agent")
+    @test paint !== nothing && talk.top < paint[2] < talk.top + talk.height
+    # The page is scrolled down, away from its line 5
+    e.scroll.offset = 400px
+    frames(w, 3)
+    click(paint...)
+    frames(w, 3)
+    @test e.buf.path == page && e.buf.caret[1] == 5 && e.buf.lines[5] == "## Paint"
+    @test w.focus === e && e.scroll.offset < 400px
+    # A link to lines of another file shows that file, with the line near the top of the window
+    click(link_place("file://$(replace(notes, ' ' => "%20"))#L41")...)
+    frames(w, 3)
+    @test e.buf.path == notes && e.buf.caret[1] == 41 && e.buf.lines[41] == "Note 20." && e.scroll.offset > 0px
+    @test K.agent_mode(e)
+    K.open!(e, page); frames(w, 3)
   end
 
   @testset "Closing the window ends the agent's program" begin

@@ -441,6 +441,7 @@ Guard.LADDER[] = @__MODULE__
 @use "github.com/jkroso/UI.jl/Interface/draw" set_tool! window_tool draw_tool draw_tool_under tool_input tool_cursor invalidate_layout!
 @use "github.com/jkroso/URI.jl/FSPath" FSPath
 @use "github.com/jkroso/URI.jl/FS" => FS FSObject AbstractDirectory
+@use "github.com/jkroso/URI.jl" URI
 @use Colors: @colorant_str, RGBA, RGB, HSV, Colorant
 @use InteractiveUtils: clipboard
 @use InteractiveUtils: code_native, code_llvm
@@ -25828,16 +25829,16 @@ linked_page(e, url::AbstractString) = begin
   startswith(url, '^') && return nothing   # a footnote
   in_browser(e.buf.path) && return nothing   # a page from a web server links to no page of the Mac
   target = wikitarget(url)
-  name, heading = if target !== nothing
-    occursin('#', target) ? String.(split(target, '#', limit=2)) : (String(target), "")
+  path, heading = if target !== nothing
+    name, mark = occursin('#', target) ? String.(split(target, '#', limit=2)) : (String(target), "")
+    name = String(strip(name))
+    (isempty(name) ? e.buf.path : wiki_path(e, name), mark)
   else
-    # An address with a scheme, like https: or mailto:, isn't a file
-    occursin(r"^[a-z][a-z0-9+.-]+:"i, url) && return nothing
-    file, mark = occursin('#', url) ? String.(split(url, '#', limit=2)) : (String(url), "")
-    (unescaped(file), unescaped(mark))
+    # A link to anything but a file, like an https: or a mailto: address, isn't a page
+    to = linked_file(e, url)
+    to === nothing && return nothing
+    (to[1], unescaped(to[2]))
   end
-  name = String(strip(name))
-  path = isempty(name) ? e.buf.path : target !== nothing ? wiki_path(e, name) : abspath(docdir(e), expanduser(name))
   (ismarkdown(path) && (isfile(path) || path == e.buf.path && !isempty(e.buf.lines))) || return nothing
   (path, String(strip(heading)))
 end
@@ -28859,10 +28860,9 @@ the top of the window. It's true when the link names a page. It's false for any
 other link with a # in it, like the address of a web page.
 """
 follow_heading!(e, url) = begin
-  file, name = String.(split(url, '#', limit=2))
-  path = isempty(file) ? e.buf.path : abspath(docdir(e), unescaped(file))
-  (ismarkdown(path) && isfile(path)) || return false
-  go_heading!(e, path, unescaped(name))
+  to = linked_file(e, url)
+  (to !== nothing && occursin('#', url) && ismarkdown(to[1]) && isfile(to[1])) || return false
+  go_heading!(e, to[1], unescaped(to[2]))
 end
 
 "Show the page at `path` with its heading `name` near the top of the window. A page with no such heading shows from where it was. It's true."
@@ -28877,6 +28877,52 @@ go_heading!(e, path, name) = begin
   show_line!(e, i)
   # Its line goes near the top of the window. The next frame does it, once it has laid out the page.
   e.nodes[:hold] = (i, 24px - PAGE_TOP)
+  true
+end
+
+"""
+The file:// address of the page of `e`, which its links are read from. A page
+with no file is read from its folder. A reply of the agent is read from the
+folder that the agent works in, as its page is there.
+"""
+page_uri(e) = URI{:file}(path=FSPath(isempty(e.buf.path) ? joinpath(e.folder, "Untitled") : e.buf.path))
+
+"""
+The file of the Mac that the link `url` in the page of `e` names, with what
+follows its # as it's written, or nothing for a link to anything else, like a
+web page or an email address. URI.jl reads the link as one in the page's own
+file, so `plan.md#tables` is beside the page, `#tables` is in the page, and
+`file:///Users/sam/plan.md#L12`, as an agent like Antigravity writes one, is
+where it says. A path from ~, like `~/Mail`, is from the home folder.
+"""
+linked_file(e, url::AbstractString) = begin
+  to = URI(url, page_uri(e))
+  to isa URI{:file} || return nothing
+  (string(to.path), to.fragment)
+end
+
+"""
+Follow a link to lines of a file, as an agent writes one: `plan.md#L12`, or
+`plan.md#L12-L20` for lines 12 to 20. The file shows in the window, with the
+caret on the first of the lines and that line near the top of the window, as
+a click on a heading in the outline does. A number past the end of the file
+is its last line. It's false for a link that names no lines of a file that's
+there.
+"""
+go_lines!(e, url) = begin
+  to = linked_file(e, url)
+  to === nothing && return false
+  path, mark = to
+  m = match(r"^L(\d+)(?:-L?\d+)?$", mark)
+  (m !== nothing && isfile(path)) || return false
+  e = top_editor(e)   # a link in a reply of the agent, or in a part of another page, shows in the window
+  path == e.buf.path ? note_place!(e) : open!(e, path)   # ⌘⌥← comes back here
+  # A file that shows as a picture, or a page that HTML makes, has no lines to go to
+  (e.buf.path == path && !html_shown(e) && !isempty(e.buf.lines)) || return true
+  line = clamp(parse(Int, m[1]), 1, length(e.buf.lines))
+  show_line!(e, line)
+  # The next frame puts the line near the top of the window, once it has laid out the file
+  e.nodes[:hold] = (line, 24px - PAGE_TOP)
   true
 end
 
@@ -29701,9 +29747,10 @@ follow!(e, url) = begin
   in_browser(e.buf.path) && return follow_remote!(e, url)   # a link of a page from a web server is from the page's address
   target = wikitarget(url)
   target === nothing || return follow_wiki!(e, target)   # a wiki link, like [[Ideas]]
+  go_lines!(e, url) && return e   # lines of a file, like main.jl#L12-L20
   occursin('#', url) && follow_heading!(e, url) && return e   # a heading of a page, like welcome.md#tables
-  path = abspath(docdir(e), expanduser(unescaped(url)))
-  ispath(path) && return show_path!(e, path)
+  to = linked_file(e, url)
+  to !== nothing && ispath(to[1]) && return show_path!(e, to[1])
   # The address of a page of Markdown on a web server shows in the window: see "a page from a web server"
   reads_here(e, url) ? get_page!(e, url, else_browser=true) : open_url(url)
 end
