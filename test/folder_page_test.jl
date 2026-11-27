@@ -1,8 +1,8 @@
 # Tests for a folder's own page: the file `.ladder` in a folder, whose `julia`
 # blocks Ladder runs when it first meets the folder, and whose last value is
-# the folder's kind. See "a folder's own page" in main.jl. Run them with
-# `julia -O0 --project=. test/folder_page_test.jl`. They draw a window that
-# isn't on the screen.
+# the folder's kind. See "a folder's own page" in folder_kinds.jl. Run
+# them with `julia -O0 --project=. test/folder_page_test.jl`. They draw a
+# window that isn't on the screen.
 
 @use Test: @test, @testset
 @use "../main" => K

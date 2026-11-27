@@ -1,7 +1,7 @@
 # Tests for a web folder's own page: the page `.ladder` in a folder on a web
 # server, which gives the folder a kind as a folder's page does on the Mac.
 # Ladder runs its code only for a site that you allow. See "a web folder's
-# own page" in main.jl. Run them with
+# own page" in folder_kinds.jl. Run them with
 # `julia -O0 --project=. test/web_folder_page_test.jl`. A function of the
 # tests stands in for `curl`, and another for the panel that asks you. The
 # window isn't on the screen.

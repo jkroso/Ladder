@@ -40,7 +40,8 @@ export editor, page_object, object, list_files!, go_folder!, open!, open_folder!
        right_panel, side_part, each_selection!, nofile, scrub_tick!, end_companions!, eased, omni_arc, tabs,
        preferred_agent!, inline_tick!, unused, is_companion, outline, companion_pane, screen_room,
        palette_click!, show_window!, shown_parts, window!, paper_window, todo_box, go_chip!, palette_chips,
-       palette, under_palette, startup_page, command_focus, copied!, mark_chips, mark_preview, text_width
+       palette, under_palette, startup_page, command_focus, copied!, mark_chips, mark_preview, text_width,
+       code_module!, page_value, page_code, show_opened!, toast!, untoast!, site_code_changed!
 
 "The editor of the window that `node`, a part of a page, is part of"
 function editor end
@@ -881,3 +882,24 @@ function mark_preview end
 
 "How wide the page's text is in the window"
 function text_width end
+
+"A new module for the code of the startup page, or of a folder's page, at `path`, for Ladder to run the page in now."
+function code_module! end
+
+"Run the code of the Markdown page at `path` in the module `m`, as `run_page!` does."
+function page_value end
+
+"The code of each `julia` block of the Markdown page at `path`, with the line of the page that it starts on."
+function page_code end
+
+"Show the folder that the window was opened on in the page, when it's of a kind that shows there, as a desktop is."
+function show_opened! end
+
+"Show a toast in each window that says `title`, and why in `words`."
+function toast! end
+
+"Close the toast about `key` in every window, if there's one"
+function untoast! end
+
+"Run the code of each page of `site` that a window shows again, from the start, in a new module: after you trust the site, put it back in the sandbox, or let its code do something more."
+function site_code_changed! end

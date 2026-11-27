@@ -1,4 +1,4 @@
-# Tests for Show Folder As, in main.jl: the command that gives the folder in
+# Tests for Show Folder As, in folder_kinds.jl: the command that gives the folder in
 # focus a kind, by writing the folder's own page, the file `.ladder`. The kind
 # is one of Ladder's own, or one that a repository on GitHub has. See "a kind
 # for a folder, in one step". Run them with
