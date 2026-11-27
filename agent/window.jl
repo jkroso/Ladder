@@ -59,7 +59,7 @@
 export SOON, AGENT_W, AGENT_MIN, OUTLINE_W, PAGE_CARD_GAP, PAGE_CARD_ROUND, WINDOW_ROUND, PAGE_CARD_LEAST,
        PAGE_CARD_NARROWEST, PAGE_CARD_CHOSEN, PANE_X, PANE_LEFT, SEND_GROWS, SEND_ROOM, REPLY_SIZE,
        REPLY_NAME, reply_page, OutlinePane, OutlineRow, PageCard, CardEdge, PaneButton, PaneSlot, agent_pane,
-       agent_mode, agent_shows, outline_room, agent_wide, page_card_wide, page_card_setting, page_shape_wide,
+       agent_mode, agent_shows, outline_room, menu_room, agent_wide, page_card_wide, page_card_setting, page_shape_wide,
        page_card!, page_card_span, page_card_round, glass_colour, glass, on_glass, PANE_COLOURS, PAGE_KEPT, colours_over,
        pane_dark, over_colours!, with_colours, with_pane_colours, PaneColours, ColourMark, pane_mark,
        agent_body, GLASS_ALPHA, GLASS_BLUR, see_through, SURFACE_OPACITY, see_through!, glass_window!,
@@ -154,22 +154,30 @@ agent_shows(e) = agent_mode(e) && lowered(e) === nothing && !as_app(e) && slides
 outline_room(e) = e.right && right_view(e) !== nothing ? right_w(e) : 0px
 
 """
-How wide the agent's pane is: all of the window that the page's card and the
-outline leave, so a wider window gives the agent more room.
+How much of the window's width the sidebar has in agent mode, at the left of
+the agent's pane: all of its width while it's open and while it slides, and
+none while it's closed. A side menu that a kind of folder has in the
+sidebar's place has the same. `side_tick!` finds it at the start of each frame.
 """
-agent_wide(e) = px(round(num(max(AGENT_MIN, window_size(e)[1] - outline_room(e) - page_card_wide(e) - 2PAGE_CARD_GAP))))
+menu_room(e) = get(e.nodes, :menu_room, 0px)
+
+"""
+How wide the agent's pane is: all of the window that the sidebar, the page's
+card and the outline leave, so a wider window gives the agent more room.
+"""
+agent_wide(e) = px(round(num(max(AGENT_MIN, window_size(e)[1] - menu_room(e) - outline_room(e) - page_card_wide(e) - 2PAGE_CARD_GAP))))
 
 """
 How wide the page's card is. It has the shape of a sheet of A4 paper that
 stands up, as tall as the window. A window that's too narrow for that beside
-the agent's pane makes it narrower, and it's never narrower than
+the agent's pane and the sidebar makes it narrower, and it's never narrower than
 `PAGE_CARD_LEAST` while there's room for that. A drag of the strip at its
 left edge gives it another width (see `CardEdge`). It keeps its width while
 a pane slides, so the page's text doesn't wrap again on each frame.
 """
 page_card_wide(e) = begin
   w, h = window_size(e)
-  room = w - AGENT_MIN - outline_room(e) - 2PAGE_CARD_GAP
+  room = w - menu_room(e) - AGENT_MIN - outline_room(e) - 2PAGE_CARD_GAP
   px(round(num(max(min(room, something(PAGE_CARD_CHOSEN[], page_shape_wide(h))), PAGE_CARD_NARROWEST))))
 end
 
@@ -186,7 +194,7 @@ of the window. `nothing` gives the card a page's shape again.
 """
 page_card!(e, wide) = begin
   if wide !== nothing
-    room = window_size(e)[1] - AGENT_MIN - outline_room(e) - 2PAGE_CARD_GAP
+    room = window_size(e)[1] - menu_room(e) - AGENT_MIN - outline_room(e) - 2PAGE_CARD_GAP
     wide = px(round(num(clamp(wide, PAGE_CARD_NARROWEST, max(PAGE_CARD_NARROWEST, room)))))
   end
   wide == PAGE_CARD_CHOSEN[] && return e
@@ -224,10 +232,6 @@ page_card_round(e) = begin
   open = right_view(e) === nothing ? 0.0 : right_opened(e)
   (PAGE_CARD_ROUND, shut + (PAGE_CARD_ROUND - shut) * open)
 end
-
-# The agent's pane has no narrower form and never goes: all of it stays, as the compact form of a side menu does.
-# So the top bar has no button that hides it.
-compact_width(p::AgentPane) = agent_wide(editor(p))
 
 """
 The colour of the window behind the two panes of agent mode: dark, whatever
@@ -315,15 +319,19 @@ draw(ctx, size, ui::ConcreteRect, c::ColourMark) = (over_colours!(c.palette); no
 pane_mark(dark::Bool, on::Bool) = dark ? (PaneColours(on=on),) : ()
 
 """
-The window in agent mode: the agent's pane, the page on its card, and the
-outline, on the window's glass. The top bar lies over the top of all three.
+The window in agent mode: the sidebar while it's open, the agent's pane, the
+page on its card, and the outline, on the window's glass. The top bar lies
+over the top of them all. Nothing hides the agent's pane but leaving the
+mode: the sidebar's button shows and hides only the sidebar, at the pane's left.
 """
 agent_body(e) = begin
   glass_window!(e)
   left, _ = page_card_span(e)
-  side = side_w(e)
+  side = side_w(e)        # the sidebar and the agent's pane
+  wide = agent_wide(e)
   Row(width(grow=grow), height(grow=grow), Alignment.Start, background(glass(e)), name="Agent mode",
-    (side > 0px ? (side_part(e),) : ())...,
+    (side > wide ? (side_part(e),) : ())...,
+    Row(fixed(wide), height(grow=grow), Alignment.Start, agent_pane(e)),
     Row(width(grow=grow), height(grow=grow), Alignment.Start, padding(PAGE_CARD_GAP, 0px, PAGE_CARD_GAP, max(0px, left - side - EDGE_W)),   # top, right, bottom, left
       node!(CardEdge, e, :card_edge),
       node!(PageCard, e, :page_card)),

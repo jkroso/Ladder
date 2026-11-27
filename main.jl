@@ -6672,8 +6672,51 @@ after(list, x) = list[mod1(findfirst(==(x), list) + 1, length(list))]
 
 const SLIDE_TIME = 0.25   # seconds for the sidebar to slide in or out
 
-"Show the sidebar if it's hidden, or hide it. It slides from where it is now."
-toggle_panel!(e) = agent_shows(e) ? e.panel : (e.slid_from = opened(e); e.slid = time(); e.panel = !e.panel)   # in agent mode the agent's pane is there, and it stays
+"""
+Show the sidebar if it's hidden, or hide it. It slides from where it is now.
+In agent mode it's at the left of the agent's pane, and the window grows by
+its width where the screen has room: see `sidebar_room!`.
+"""
+toggle_panel!(e) = begin
+  e.slid_from = opened(e)
+  e.slid = time()
+  e.panel = !e.panel
+  agent_shows(e) && sidebar_room!(e)
+  e.panel
+end
+
+"""
+In agent mode, make the window of `e` wider by the sidebar's width as the
+sidebar opens, at the window's left edge. So the agent's pane and the page's
+card keep their widths, and they stay where they are on the screen, as far
+as the screen allows. As the sidebar closes, the window gives back what it
+grew by. The sidebar is then there or gone at once, with no slide, as the
+window's new size is. A window that can't grow, like one that fills a
+screen, stays as it is: there the pane and the card give the sidebar its room.
+"""
+sidebar_room!(e) = begin
+  w = window_of(e)
+  (w === nothing || e.full_screen) && return nothing
+  wide, tall = w.size
+  x, y = w.position
+  if e.panel
+    screen = w.screen
+    grow = px(round(num(clamp(screen.size[1] - wide, 0px, clamp(e.side, PANEL_MIN, PANEL_MAX)))))
+    grow > 0px || return nothing
+    left = px(round(num(clamp(x - grow, screen.position[1], max(screen.position[1], screen.position[1] + screen.size[1] - wide - grow)))))
+    e.nodes[:sidebar_grew] = (grew=grow, moved=left - x)
+    w.position = typeof(w.position)(left, y)
+    w.size = typeof(w.size)(wide + grow, tall)
+  else
+    was = pop!(e.nodes, :sidebar_grew, nothing)
+    was === nothing && return nothing
+    w.size = typeof(w.size)(max(wide - was.grew, 400px), tall)
+    w.position = typeof(w.position)(x - was.moved, y)
+  end
+  e.slid = 0.0
+  empty!(e.flows)   # the page's text is as wide as its new place allows
+  nothing
+end
 
 sliding(e) = time() - e.slid < SLIDE_TIME
 
@@ -7031,11 +7074,20 @@ bar_inks(e) = begin
   (side_w(e) > 0px ? nothing : p, p, right_view(e) !== nothing && right_opened(e) > 0 ? nothing : p)
 end
 
-"The most of the window's width that the sidebar can have, so the page keeps room beside it"
-widest_panel(e) = max(PANEL_MIN, min(PANEL_MAX, px(floor(num(window_size(e)[1]) / 2))))
+"""
+The most of the window's width that the sidebar can have, so the page keeps
+room beside it. In agent mode, the agent's pane and the page's card keep
+their least widths beside it too.
+"""
+widest_panel(e) = begin
+  wide = window_size(e)[1]
+  most = min(PANEL_MAX, px(floor(num(wide) / 2)))
+  agent_shows(e) && (most = min(most, wide - AGENT_MIN - PAGE_CARD_NARROWEST - outline_room(e) - 2PAGE_CARD_GAP))
+  max(PANEL_MIN, most)
+end
 
 "How wide the sidebar is when it's open. A narrow window makes it narrower than you dragged it."
-panel_w(e) = agent_shows(e) ? agent_wide(e) : min(e.side, widest_panel(e))   # in agent mode, the agent's pane has the sidebar's place
+panel_w(e) = min(e.side, widest_panel(e))
 
 "Make the sidebar `w` pixels wide, or as near to that as it can be, and keep the width in the settings"
 side!(e, w) = begin
@@ -8679,7 +8731,7 @@ The buttons that go back to the file that showed before, and forward again.
 They show only while the sidebar is open, at the right of the part of the top
 bar that's over the sidebar.
 """
-history_buttons(e) = e.panel ? (button(e, :back, "arrow-left"), button(e, :forward, "arrow-right")) : ()
+history_buttons(e) = e.panel || agent_shows(e) ? (button(e, :back, "arrow-left"), button(e, :forward, "arrow-right")) : ()   # in agent mode they're at the end of the agent's heading
 
 """
 True when something fills the window in place of the page and the sidebar: a
@@ -8730,7 +8782,8 @@ bar_row(t::TopBar, inks=(nothing, nothing, nothing)) = begin
   # While something fills the window, the sidebar isn't there. The bar has none of the sidebar's buttons
   # then, not the one that shows it either, and the file's name is in the middle of the window.
   full = filled(e)
-  showing = full ? 0.0 : opened(e)   # how far the sidebar shows, from 0 to 1
+  dark = agent_shows(e)
+  showing = full ? 0.0 : dark ? 1.0 : opened(e)   # how far the sidebar shows, from 0 to 1. The agent's pane is always there.
   room = full ? 0px : side_w(e)      # how wide it is now. A side menu's compact form keeps some width while it's closed.
   # A side menu with a compact form is always there, so the bar's own button that shows and hides the sidebar goes.
   # The menu can have a button of its own in that place: see `side_button`.
@@ -8759,7 +8812,9 @@ bar_row(t::TopBar, inks=(nothing, nothing, nothing)) = begin
   own && (w = window_of(e); w !== nothing && any(p -> p.key == :title_trail, popups(w)) && close_popup!(w, :title_trail))
   # The top bar lies over the top of the sidebar. The file's name is in the
   # middle of the space beside the sidebar, so it moves as the sidebar slides.
-  dark = agent_shows(e)
+  # In agent mode the agent's heading is over the agent's pane. So it starts after the bar's buttons, or at the
+  # sidebar's edge when that's further right, with its logo over the left edge of the talk.
+  before_head = dark ? max(0px, menu_w(e) + PANE_LEFT - 7px - mac_buttons_room(e) - 32px * length(buttons)) : 0px
   # Each part is described and drawn with its own colours. With none but the page's, the bar needs no marks.
   marked = any(!isnothing, inks)
   mark(p) = marked ? (ColourMark(palette=p),) : ()
@@ -8769,7 +8824,7 @@ bar_row(t::TopBar, inks=(nothing, nothing, nothing)) = begin
       Row(fixed(left + room), height(grow=grow),
         # The close, minimise and zoom buttons sit over the first 84px. In full screen they're hidden, and the buttons slide left.
         Row(fixed(over), height(grow=grow), padding(0px, 8px, 0px, mac_buttons_room(e)), child_gap=2px,
-          buttons..., (dark ? pane_head(agent_pane(e), e) : (Box(width(grow=grow)),))..., arrows...))   # in agent mode, the heading of the agent's pane
+          buttons..., (dark ? (Box(fixed(before_head), height(grow=grow)), pane_head(agent_pane(e), e)...) : (Box(width(grow=grow)),))..., arrows...))   # in agent mode, the heading of the agent's pane
     end,
     mark(inks[2])...,
     with_colours(() -> Box(width(grow=grow), height(grow=grow), clip=true, crumb), inks[2]),
@@ -11479,8 +11534,12 @@ The sidebar keeps its width as it slides in and out from the left edge of the
 window, so only its right part shows while it's partly out. At its top are the
 tabs of the files that are open. Under them, it lists the folder's files, and
 under each file that's open in the list, that file's headings and components.
+In agent mode it's dark, on the window's glass, as the agent's pane beside
+it is, with a line between the two.
 """
-describe(s::Sidebar) = begin
+describe(s::Sidebar) = (dark = agent_shows(editor(s)); with_pane_colours(() -> sidebar_view(s, dark), dark))
+
+sidebar_view(s::Sidebar, dark::Bool) = begin
   e = editor(s)
   wide = panel_w(e)
   shows = wide * opened(e)
@@ -11490,14 +11549,16 @@ describe(s::Sidebar) = begin
                                        with_theme(() -> describe!(fill_tree!(e, file_tree(e))), panel_theme())) : own.list
   own_scroll!(e.files_scroll)   # the tabs' scroll comes and goes over it
   Row(fixed(shows), height(grow=grow), Alignment.Start, clip=true,
-    Column(fixed(wide), height(grow=grow), Alignment.Start, background(colours.panel), name="Files",
-           border(1px, :solid, colours.line)[:right], offset_x=shows - wide,
-      Box(width(grow=grow), height(max(above_page(e), SIDE_GAP))),   # under the top bar
+    Column(fixed(wide), height(grow=grow), Alignment.Start, background(dark ? clear : colours.panel), name="Files",
+           border(1px, :solid, dark ? on_glass(0.1) : colours.line)[:right], offset_x=shows - wide,
+      (dark ? (PaneColours(on=true, across=true),) : ())...,   # it's drawn with the panes' colours too: see `PaneColours`
+      Box(width(grow=grow), height(max(above_page(e), SIDE_GAP) - (dark ? 1px : 0px))),   # under the top bar
       tab_list(e)...,                            # the files that are open, over the folder
       Row(width(grow=grow), height(30px), padding(16px, 0px), Alignment.Center, clip=true, name="Folder",
         folder_trail(e, wide - 32px)...),
       (own.bar === nothing ? () : (own.bar,))...,
-      reuse!(e.files_scroll, list)))
+      reuse!(e.files_scroll, list),
+      (dark ? (PaneColours(on=false, across=true),) : ())...))
 end
 
 """
@@ -11547,12 +11608,16 @@ Find the side menu of the window of `e` for this frame, before anything is
 laid out: the page beside it needs its width. `side_part` shows it.
 """
 side_tick!(e) = begin
-  # In agent mode, the agent's pane has the sidebar's place
-  menu = agent_shows(e) ? agent_pane(e) : side_menu(e, window_object(e))
+  menu = side_menu(e, window_object(e))
   own = !(menu isa Sidebar)
   e.nodes[:side_menu] = menu
   e.nodes[:own_side_menu] = own
-  e.nodes[:side_least] = own ? clamp(compact_width(menu), 0px, panel_w(e)) : 0px
+  least = own ? clamp(compact_width(menu), 0px, panel_w(e)) : 0px
+  e.nodes[:side_least] = least
+  # In agent mode the agent's pane is beside the side menu, and it gives the menu its room: see `menu_room`. While the
+  # menu slides, the pane is as wide as it is beside the open menu, so its words don't wrap again in each frame.
+  e.nodes[:menu_room] = !agent_shows(e) ? 0px : e.panel || sliding(e) ? panel_w(e) : least
+  agent_shows(e) && sliding(e) && redraw_in!(e, 0)   # one more frame after the slide ends gives the pane its room back
   nothing
 end
 
@@ -11564,7 +11629,14 @@ How wide the sidebar is now, or the side menu that a kind of folder has in its
 place: all of its width while it's open, none while it's closed, or the width
 of its compact form, and between the two while it slides.
 """
-side_w(e) = (least = side_least(e); least + (panel_w(e) - least) * opened(e))
+menu_w(e) = (least = side_least(e); least + (panel_w(e) - least) * opened(e))
+
+"""
+How wide all that's at the left of the page is now: the sidebar, or the side
+menu that a kind of folder has in its place, and in agent mode the agent's
+pane beside it.
+"""
+side_w(e) = menu_w(e) + (agent_shows(e) ? agent_wide(e) : 0px)
 
 """
 What's at the left of the window of `e`: Ladder's sidebar, or the side menu
@@ -11574,7 +11646,7 @@ side_part(e) = begin
   haskey(e.nodes, :side_menu) || side_tick!(e)
   menu = e.nodes[:side_menu]
   menu isa Sidebar && return menu
-  wide, shows = panel_w(e), side_w(e)
+  wide, shows = panel_w(e), menu_w(e)
   # A menu with a compact form narrows to it, and is laid out as wide as it shows
   side_least(e) > 0px && return Row(fixed(shows), height(grow=grow), Alignment.Start, clip=sliding(e), name="Side menu", menu)
   # Another keeps its width while it slides, as the sidebar does. Once it's open nothing clips it, so a shadow of its own shows whole.
@@ -11612,7 +11684,7 @@ onmouse(p::PanelEdge, ev::MouseMove) = begin
 end
 
 "The strip over the sidebar's edge, while the sidebar is open and not sliding. It starts under the top bar."
-panel_edge(e) = e.panel && !sliding(e) && lowered(e) === nothing && !agent_shows(e) ?   # the agent's pane is as wide as the window leaves it
+panel_edge(e) = e.panel && !sliding(e) && lowered(e) === nothing ?
   (Row(width(grow=grow), height(grow=grow), Alignment.Start, padding(above_page(e), 0px, 0px, panel_w(e) - EDGE_W / 2),
        node!(PanelEdge, e, :edge)),) : ()
 

@@ -1923,7 +1923,7 @@ widen_for_agent!(e, w, p::AgentPane, side_was) = begin
   screen = w.screen
   outline = e.right && right_view(e) !== nothing ? OUTLINE_W : 0px   # a page of a kind that has no outline has none
   card = something(PAGE_CARD_CHOSEN[], page_shape_wide(tall))
-  want = AGENT_W + card + outline + 2PAGE_CARD_GAP
+  want = side_was + AGENT_W + card + outline + 2PAGE_CARD_GAP   # the sidebar stays as it is, open or closed
   new = px(round(num(min(max(want, wide), max(screen.size[1], wide)))))
   # The middle of the page's space before, and of the card's room after
   middle = x + side_was + (wide - side_was) / 2
@@ -1959,15 +1959,14 @@ agent_mode!(e) = begin
     e.nodes[:agent_mode] = false
     see_through!(e, w, false)
     narrow_from_agent!(e, w, p)
-    p.was === nothing || (e.panel = p.was.panel)
+    delete!(e.nodes, :sidebar_grew)   # the room that the window grew by for the sidebar stays with the sidebar: see `sidebar_room!`
     e.slid = 0.0   # the sidebar is where it was at once
     focus(e)
   else
-    side_was = side_w(e)
-    p.was = (panel=e.panel,)
-    e.nodes[:agent_mode] = true
-    e.panel = true
     e.slid = 0.0
+    side_was = side_w(e)   # the sidebar stays as it is, open or closed: only you show it and hide it
+    p.was = (;)
+    e.nodes[:agent_mode] = true
     widen_for_agent!(e, w, p, side_was)
     see_through!(e, w, GLASS_ALPHA < 1)
     p.field === nothing && pane_field!(p)

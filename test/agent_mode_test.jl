@@ -712,13 +712,53 @@ try
     typed("half a thought")
     press(Keys.escape)
     @test pane.field.buf.lines == ["half a thought"] && w.focus === pane.field && K.agent_mode(e)
-    # The agent is what agent mode is for, so nothing hides its pane: the top bar has no sidebar button, and ⌘\ does nothing
+    # The agent is what agent mode is for, so nothing hides its pane. The sidebar's button and ⌘\ show the sidebar, with
+    # its tabs and the folder's files, at the pane's left. The pane and the card give it the room, and both stay.
     buttons = [r.from.from.action for r in flat(K.rect(e)) if hasproperty(r.from, :from) && r.from.from isa K.ToolButton]
-    @test !(:panel in buttons) && :right_panel in buttons
-    was = (named("Agent").width, named("Page card").left)
+    @test :panel in buttons && :right_panel in buttons && :back in buttons
+    @test !e.panel && named("Files") === nothing && named("Agent").left == 0px
+    was = (named("Agent").width, named("Page card").left, named("Agent head").left)
+    card_end = named("Page card").left + named("Page card").width
+    window_was = (w.size[1], w.position[1])
+    outline_was = named("Outline").width
     press(Keys.backslash, Keys.cmd)
-    frames(w, 2)
-    @test named("Agent") !== nothing && (named("Agent").width, named("Page card").left) == was
+    e.slid = 0.0
+    frames(w, 3)
+    files, agent, card = named("Files"), named("Agent"), named("Page card")
+    @test e.panel && K.agent_shows(e) && files !== nothing && agent !== nothing
+    @test files.left == 0px && files.width == K.panel_w(e) && agent.left == files.width
+    @test agent.width >= K.AGENT_MIN && agent.left + agent.width + K.PAGE_CARD_GAP == card.left
+    # The window grows by the sidebar's width where the screen has room, so the pane and the card keep their widths.
+    # The outline is a part of the window's width until it's `OUTLINE_W`, so a wider window can give it a little of the pane's room.
+    grew = w.size[1] - window_was[1]
+    more = named("Outline").width - outline_was
+    @test 0px <= grew <= files.width && card.left + card.width == card_end + grew - more && card.width >= K.PAGE_CARD_NARROWEST
+    @test grew < files.width || ((agent.width, card.left) == (was[1] - more, was[2] + grew - more) && w.position[1] <= window_was[2])
+    # It lists the folder's files, on the window's glass
+    @test any(r -> hasproperty(r.from, :name) && r.from.name == "Folder", flat(files)) && files.from.background.color.alpha == 0
+    # The agent's heading is over the agent's pane, and the two arrows are at the pane's right end
+    @test named("Agent head").left >= files.width
+    arrows = [r for r in flat(K.rect(e)) if hasproperty(r.from, :from) && r.from.from isa K.ToolButton && r.from.from.action in (:back, :forward)]
+    @test length(arrows) == 2 && all(r -> files.width < r.left && r.left + r.width <= card.left, arrows)
+    # The button's click hides the sidebar again, and the pane and the card are as they were
+    press(Keys.backslash, Keys.cmd)
+    e.slid = 0.0
+    frames(w, 3)
+    @test !e.panel && named("Files") === nothing && (w.size[1], w.position[1]) == window_was
+    @test (named("Agent").width, named("Page card").left, named("Agent head").left) == was
+    # A window that can't grow, like one that fills a screen, keeps its size: the pane and the card give the sidebar its room
+    e.full_screen = true
+    press(Keys.backslash, Keys.cmd)
+    e.slid = 0.0
+    frames(w, 3)
+    files, agent, card = named("Files"), named("Agent"), named("Page card")
+    @test e.panel && w.size[1] == window_was[1] && agent.left == files.width && card.left + card.width == card_end
+    @test K.AGENT_MIN <= agent.width < was[1] && agent.left + agent.width + K.PAGE_CARD_GAP == card.left
+    press(Keys.backslash, Keys.cmd)
+    e.slid = 0.0
+    e.full_screen = false
+    frames(w, 3)
+    @test !e.panel && w.size[1] == window_was[1] && (named("Agent").width, named("Page card").left) == was[1:2]
     # The button at the right end of the top bar hides the outline. The card stays beside the window's edge, and the agent has the room.
     K.toggle_right!(e)
     e.nodes[:right_slid] = (0.0, 0.0)
@@ -731,7 +771,7 @@ try
     K.toggle_right!(e)
     e.nodes[:right_slid] = (1.0, 0.0)
     frames(w, 2)
-    @test named("Outline") !== nothing && (named("Agent").width, named("Page card").left) == was
+    @test named("Outline") !== nothing && (named("Agent").width, named("Page card").left) == was[1:2]
   end
 
   @testset "A drag of the strip beside the card gives the agent or the page more of the window" begin
