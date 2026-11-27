@@ -14,6 +14,7 @@
 @use "github.com/jkroso/UI.jl/Interface/draw" cursor ishovered show_menu! viewport MouseScroll
 @use "github.com/jkroso/UI.jl/Interface/objc" cls msg nsstring jstring with_pool
 @use "github.com/jkroso/UI.jl/Interface/Semantic/Icon" Icon
+@use "github.com/jkroso/UI.jl/Interface/image" image_aspect
 @use Colors: @colorant_str, RGBA
 @use "./eml" => Eml
 @use "./folders" => Folders
@@ -277,3 +278,29 @@ git_colour(kind) = kind in (:new, :added) ? colours.string : kind in (:deleted, 
 
 "The item of a folder's menu that makes it a favourite, or takes it off the favourites"
 favourite_item(path) = Folders.isfavourite(path) ? "Remove from Favourites" : "Add to Favourites"
+
+# --- the files that a page of a folder lists -----------------------------------------
+
+"True when the file or folder at `path` is a hidden one: its name starts with a dot"
+ishidden(path) = startswith(basename(path), '.')
+
+"""
+True when Ladder's lists leave out the file or the folder at `path`, unless
+they show the hidden files: its name starts with a dot, or you chose to ignore
+it. `ignored` is what you ignore, for a caller that asks of many paths.
+"""
+left_out(path, ignored=Folders.ignored()) = ishidden(path) || Folders.isignored(path, ignored)
+
+"True in a window that's on the screen. A window that a test makes isn't."
+on_screen(node) = (w = window_of(node); w !== nothing && !isempty(w.glfw))
+
+"True when `file` holds a picture that Ladder can draw"
+whole_picture(file) = try image_aspect(file) > 0 catch; false end
+
+const MEDIA_CACHE = Ref("")   # the folder a test keeps the copies in, in place of the one in the Mac's caches
+
+"The folder that keeps the copies of the videos and the sounds from the web"
+media_dir() = isempty(MEDIA_CACHE[]) ? joinpath(homedir(), "Library", "Caches", "Ladder", "media") : MEDIA_CACHE[]
+
+"`path` with ~ for the home folder, as the sidebar writes it"
+tilde(path::AbstractString) = (home = homedir(); path == home ? "~" : startswith(path, home * "/") ? "~" * path[length(home)+1:end] : String(path))

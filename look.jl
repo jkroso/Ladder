@@ -291,3 +291,10 @@ spared_width(text::AbstractString, f::Face) = isempty(text) ? 0px : sum(measure(
 spared(text::AbstractString, f::Face) =
   [Box(fixed(measure(pf, part)), Alignment.Start,
      Text(part, size=pf.size, family=pf.family, subfamily=pf.style, color=pf.color, wrap=WrapMode.none)) for (part, pf) in runs(text, f)]
+
+# --- what every block of a page has ---------------------------------------------------
+
+const LIVE_GAP = 8px   # above and below what a live block shows
+
+"Every icon that a block can show. The built app reads them all when it's made."
+const BLOCK_ICONS = String["bar-chart", "graph-up", "pie-chart"]

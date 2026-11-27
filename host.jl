@@ -23,8 +23,17 @@ function list_files! end
 "Show the folders and the files of `folder` in the sidebar of the editor `e`"
 function go_folder! end
 
+"Show the file or the folder at `path` in the page of the editor `e`"
+function open! end
+
 "Open the folder at `path` in the page of the editor `e`"
 function open_folder! end
+
+"Show the file or the folder at `path` the way that a click on a link to it does, in the window of the editor `e`"
+function show_path! end
+
+"The kind of the folder at `path`: the type under AbstractDirectory that its object has"
+function folder_kind end
 
 "How far down the page of the editor `e` its text starts, under the top bar and what the page shows over its text"
 function page_top end

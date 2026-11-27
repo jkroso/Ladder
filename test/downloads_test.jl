@@ -15,8 +15,8 @@
 include(joinpath(@__DIR__, "dsstore_fake.jl"))   # `store` makes the bytes of a .DS_Store file
 
 const px = K.px
-const M = K.Mac
-const T = K.Trash
+@use "../macfolders" => M
+@use "../trash" => T
 
 const dir = mktempdir()
 K.SETTINGS_FILE[] = joinpath(dir, "settings")
@@ -30,7 +30,7 @@ const disk = mkpath(joinpath(dir, "disk"))
 const desk = mkpath(joinpath(disk, "Users", "sam", "Desktop"))
 K.PLACE_KINDS[down] = K.DownloadsDirectory
 K.PLACE_KINDS[bin] = K.TrashDirectory
-K.TRASH_DISK[] = disk
+K.MacPages.TRASH_DISK[] = disk
 write(joinpath(dir, "page.md"), "# A page\n\n[Downloads](Downloads) and [the Trash](Trash)\n")
 
 const day = 86400
@@ -39,7 +39,7 @@ came(folder, name, ago; site="", text="some bytes") = begin
   path = joinpath(folder, name)
   endswith(name, "/") ? mkpath(path) : write(path, text)
   path = String(rstrip(path, '/'))
-  K.LIST_FACTS[path] = (stat(path).mtime, K.ListItem(name=basename(path), path=path, folder=isdir(path), size=isdir(path) ? 0 : filesize(path),
+  K.MacPages.LIST_FACTS[path] = (stat(path).mtime, K.MacPages.ListItem(name=basename(path), path=path, folder=isdir(path), size=isdir(path) ? 0 : filesize(path),
                                                      when=time() - ago, site=site))
   path
 end
@@ -72,16 +72,16 @@ at((x, y)) = (w.mouse = typeof(w.mouse)(px(x), px(y)); onmouse(w, MouseMove(Vec2
 press() = (w.keys |= Keys.mouse_left; onkey(w, KeyPress{Keys.mouse_left}(0, w)); frames(1); w.keys ⊻= Keys.mouse_left; onkey(w, KeyRelease{Keys.mouse_left}(0, w)); frames(2))
 # A click here is one click, however soon it comes after the last one. Two clicks are `click` and then `press`.
 click(place, held...) = begin
-  foreach(v -> v isa K.FileList && (v.clicked = (0.0, "")), values(e.nodes))
+  foreach(v -> v isa K.MacPages.FileList && (v.clicked = (0.0, "")), values(e.nodes))
   at(place); foreach(h -> w.keys |= h, held); press(); foreach(h -> w.keys ⊻= h, held); frames(1)
 end
 middle(node) = (r = rect(node); (K.num(r.left) + K.num(r.width) / 2, K.num(r.top) + K.num(r.height) / 2))
 "Where the middle of the line of `name` is in the window"
 line(name, folder=down) = begin
   v = view(folder)
-  i = findfirst(l -> l isa K.ListItem && l.name == name, v.lines)
+  i = findfirst(l -> l isa K.MacPages.ListItem && l.name == name, v.lines)
   r = rect(v)
-  (K.num(r.left) + 200, K.num(r.top) + K.filelist_head_h(v) + K.LIST_ROW_H * (i - 0.5))
+  (K.num(r.left) + 200, K.num(r.top) + K.MacPages.filelist_head_h(v) + K.MacPages.LIST_ROW_H * (i - 0.5))
 end
 key(k, held...) = begin
   foreach(h -> w.keys |= h, held)
@@ -90,8 +90,8 @@ key(k, held...) = begin
   frames()
 end
 "What the list shows, from the top: the words over each group, and each name"
-shown(folder=down) = [l isa K.ListItem ? l.name : "— " * l for l in view(folder).lines]
-chosen(folder=down) = K.filelist_chosen(view(folder))
+shown(folder=down) = [l isa K.MacPages.ListItem ? l.name : "— " * l for l in view(folder).lines]
+chosen(folder=down) = K.MacPages.filelist_chosen(view(folder))
 menu() = (ps = [p for p in popups(w) if p.key == :menu]; isempty(ps) ? nothing : only(ps).content)
 choose(name) = (m = menu(); foreach(_ -> key(Keys.down), 1:findfirst(==(name), m.items)); key(Keys.enter))
 
@@ -101,7 +101,7 @@ choose(name) = (m = menu(); foreach(_ -> key(Keys.down), 1:findfirst(==(name), m
   K.open!(e, K.object(e, down))
   frames()
   @test e.buf.path == down && e.folder == down
-  @test view() isa K.FileList && rect(view()) !== nothing
+  @test view() isa K.MacPages.FileList && rect(view()) !== nothing
 end
 
 @testset "the newest thing is first, under the words of its group of days" begin
@@ -130,7 +130,7 @@ end
   shot("chosen")
   # A click on the words of a group chooses nothing
   r = rect(view())
-  click((K.num(r.left) + 200, K.num(r.top) + K.filelist_head_h(view()) + K.LIST_ROW_H * 0.5))
+  click((K.num(r.left) + 200, K.num(r.top) + K.MacPages.filelist_head_h(view()) + K.MacPages.LIST_ROW_H * 0.5))
   @test chosen() == []
 end
 
@@ -202,7 +202,7 @@ end
 @testset "the Trash's page has no buttons, and its first line is right under its name" begin
   v = view(bin)
   @test !haskey(v.buttons, :back) && !haskey(v.buttons, :finder)
-  @test K.filelist_head_h(v) < K.LIST_HEAD_H == K.filelist_head_h(view(down))
+  @test K.MacPages.filelist_head_h(v) < K.MacPages.LIST_HEAD_H == K.MacPages.filelist_head_h(view(down))
   # A click on the first line chooses that line, at the height that it shows
   click(line("plan.pdf", bin))
   @test chosen(bin) == ["plan.pdf"]
@@ -235,12 +235,12 @@ end
   right_click("stray.txt")
   @test menu() !== nothing && !("Put Back" in menu().items)   # the menu has it grey
   key(Keys.escape)
-  K.filelist_put_back!(v, ["stray.txt"])
+  K.MacPages.filelist_put_back!(v, ["stray.txt"])
   frames()
   @test isfile(joinpath(bin, "stray.txt"))
   @test occursin("stray.txt", v.said)
   # The words go in a row over the list, and the list moves down for them
-  @test K.filelist_head_h(v) == K.LIST_HEAD_H
+  @test K.MacPages.filelist_head_h(v) == K.MacPages.LIST_HEAD_H
   click(line("stray.txt", bin))
   @test chosen(bin) == ["stray.txt"]
 end
@@ -281,4 +281,4 @@ end
 
 close(w)
 delete!(K.PLACE_KINDS, down); delete!(K.PLACE_KINDS, bin)
-K.TRASH_DISK[] = "/"
+K.MacPages.TRASH_DISK[] = "/"

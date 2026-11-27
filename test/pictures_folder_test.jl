@@ -17,8 +17,8 @@ include(joinpath(@__DIR__, "png_fake.jl"))   # `write_png` writes a small pictur
 @use "./map_fake" => Fake                    # a pretend program for Apple's maps: no MapKit and no network
 
 const px = K.px
-const M = K.Mac
-const W = K.PictureWords
+@use "../macfolders" => M
+@use "../picture_words" => W
 
 const dir = mktempdir()
 K.SETTINGS_FILE[] = joinpath(dir, "settings")
@@ -36,7 +36,7 @@ K.Maps.HELPER[] = Fake.helper
 K.MEDIA_CACHE[] = joinpath(dir, "media")
 # Where a photo was taken comes from a function of the test's own. No picture says it until the check of the map.
 const taken_at = Dict{String,Any}()
-K.TILE_PLACER[] = path -> get(taken_at, basename(path), nothing)
+K.MacPages.TILE_PLACER[] = path -> get(taken_at, basename(path), nothing)
 
 const pics = mkpath(joinpath(dir, "Pictures"))
 K.PLACE_KINDS[pics] = K.PicturesDirectory
@@ -78,7 +78,7 @@ at((x, y)) = (w.mouse = typeof(w.mouse)(px(x), px(y)); onmouse(w, MouseMove(Vec2
 press() = (w.keys |= Keys.mouse_left; onkey(w, KeyPress{Keys.mouse_left}(0, w)); frames(1); w.keys ⊻= Keys.mouse_left; onkey(w, KeyRelease{Keys.mouse_left}(0, w)); frames(2))
 # A click here is one click, however soon it comes after the last one. Two clicks are `click` and then `press`.
 click(place, held...) = begin
-  foreach(v -> v isa K.TilesView && (v.clicked = (0.0, "")), values(e.nodes))
+  foreach(v -> v isa K.MacPages.TilesView && (v.clicked = (0.0, "")), values(e.nodes))
   at(place); foreach(h -> w.keys |= h, held); press(); foreach(h -> w.keys ⊻= h, held); frames(1)
 end
 "Where the middle of the square of `name` is in the window"
@@ -87,7 +87,7 @@ square(name, folder=pics) = begin
   i = findfirst(l -> l isa Vector && any(t -> t.name == name, l), v.lines)
   k = findfirst(t -> t.name == name, v.lines[i])
   r = rect(v)
-  (K.num(r.left) + (k - 0.5) * v.side + (k - 1) * K.TILE_GAP, K.num(r.top) + K.TILES_HEAD_H + v.tops[i] + v.side / 2)
+  (K.num(r.left) + (k - 0.5) * v.side + (k - 1) * K.MacPages.TILE_GAP, K.num(r.top) + K.MacPages.TILES_HEAD_H + v.tops[i] + v.side / 2)
 end
 key(k, held...) = begin
   foreach(h -> w.keys |= h, held)
@@ -98,14 +98,14 @@ end
 typed(s) = (foreach(c -> ontype(w, Typed(c, w)), s); frames())
 "What the grid shows, from the top: the words over each group, and the names of each row"
 shown(folder=pics) = [l isa Vector ? [t.name for t in l] : l for l in view(folder).lines]
-chosen(folder=pics) = K.tiles_chosen(view(folder))
+chosen(folder=pics) = K.MacPages.tiles_chosen(view(folder))
 
 @testset "a click on Pictures in the sidebar shows it in the page as a grid" begin
   @test K.object(e, pics) isa K.PicturesDirectory
   K.open!(e, K.object(e, pics))
   frames(8)   # a few small pictures are made in each frame
   @test e.buf.path == pics && e.folder == pics
-  @test view() isa K.TilesView && rect(view()) !== nothing
+  @test view() isa K.MacPages.TilesView && rect(view()) !== nothing
   @test K.page_fills(e, K.directory(e))
 end
 
@@ -116,9 +116,9 @@ end
                     M.month_name(time() - 400day), ["old house.png"],
                     "Other files", ["list.txt", "Photos Library.photoslibrary"]]
   v = view()
-  @test v.side >= K.TILE_SIDE
+  @test v.side >= K.MacPages.TILE_SIDE
   # Each picture has a small picture of its own, and a file that isn't a picture has the Finder's icon
-  @test K.TILE_PICTURES[joinpath(pics, "beach.png")][2] !== nothing
+  @test K.MacPages.TILE_PICTURES[joinpath(pics, "beach.png")][2] !== nothing
   shot("grid")
 end
 
@@ -133,7 +133,7 @@ end
   shot("chosen")
   # A click between the squares chooses nothing
   r = rect(view())
-  click((K.num(r.left) + K.num(r.width) - 3, K.num(r.top) + K.TILES_HEAD_H + 8))
+  click((K.num(r.left) + K.num(r.width) - 3, K.num(r.top) + K.MacPages.TILES_HEAD_H + 8))
   @test chosen() == []
 end
 
@@ -237,7 +237,7 @@ end
   @test shown(shots) == ["Today", ["Screenshot 1.png"]]
   v.field.text = ""
   frames()
-  @test length(K.tiles_shown(v)) == 3
+  @test length(K.MacPages.tiles_shown(v)) == 3
 end
 
 @testset "each picture is read once, and what was read is kept in a file" begin
@@ -277,7 +277,7 @@ end
   @test !(:map in v.lines) && isempty(v.spots)   # no photo says where it was taken
   taken_at["beach.png"] = (-33.8908, 151.2743)    # a beach in Sydney
   taken_at["garden.png"] = (-37.8304, 144.9796)   # a garden in Melbourne
-  empty!(K.TILE_PLACES)
+  empty!(K.MacPages.TILE_PLACES)
   frames()
   @test v.lines[1] == "Where 2 photos were taken" && v.lines[2] === :map
   @test v.lines[3] == "Folders"   # the rest of the grid is under the map
@@ -301,7 +301,7 @@ end
   # A click on a dot chooses its photo
   i = findfirst(==(:map), v.lines)
   # The grid scrolls to a photo that's chosen, so the map is looked for again before each click
-  spot(name) = (r = rect(v); (K.num(r.left) + pins[name][1], K.num(r.top) + K.TILES_HEAD_H + v.tops[i] + pins[name][2]))
+  spot(name) = (r = rect(v); (K.num(r.left) + pins[name][1], K.num(r.top) + K.MacPages.TILES_HEAD_H + v.tops[i] + pins[name][2]))
   click(spot("garden.png"))
   @test chosen() == ["garden.png"]
   e.scroll.offset = 0px
@@ -323,16 +323,16 @@ end
 end
 
 @testset "the small pictures that haven't shown for the longest are forgotten" begin
-  n = length(K.TILE_PICTURES)
-  for i in 1:K.TILES_KEPT
-    K.TILE_PICTURES["/nowhere/$i.png"] = (0.0, nothing, time() - 1000 - i)
+  n = length(K.MacPages.TILE_PICTURES)
+  for i in 1:K.MacPages.TILES_KEPT
+    K.MacPages.TILE_PICTURES["/nowhere/$i.png"] = (0.0, nothing, time() - 1000 - i)
   end
   budget = Ref(1)
-  t = K.Tile(name="wall.png", path=joinpath(pics, "wall.png"), kind=:picture, when=0.0)
-  K.tile_picture(e, t, budget)
-  @test length(K.TILE_PICTURES) < K.TILES_KEPT + n
-  @test haskey(K.TILE_PICTURES, t.path)
-  filter!(p -> !startswith(p[1], "/nowhere/"), K.TILE_PICTURES)
+  t = K.MacPages.Tile(name="wall.png", path=joinpath(pics, "wall.png"), kind=:picture, when=0.0)
+  K.MacPages.tile_picture(e, t, budget)
+  @test length(K.MacPages.TILE_PICTURES) < K.MacPages.TILES_KEPT + n
+  @test haskey(K.MacPages.TILE_PICTURES, t.path)
+  filter!(p -> !startswith(p[1], "/nowhere/"), K.MacPages.TILE_PICTURES)
 end
 
 close(w)
@@ -340,6 +340,6 @@ delete!(K.PLACE_KINDS, pics)
 W.reader[] = W.read_words
 W.words_file[] = W.usual_words_file()
 W.loaded[] = ""
-K.TILE_PLACER[] = K.photo_place
+K.MacPages.TILE_PLACER[] = K.photo_place
 K.Maps.HELPER[] = K.Maps.run_program
 K.MEDIA_CACHE[] = ""
