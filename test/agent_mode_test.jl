@@ -331,6 +331,8 @@ try
     @test left.left == 0px && left.left + left.width + K.PAGE_CARD_GAP == card.left
     @test abs(left.width - K.AGENT_W) <= 8px
     @test card.top == K.PAGE_CARD_GAP && card.top + card.height == w.size[2] - K.PAGE_CARD_GAP
+    # Each corner of the card is beside a pane, so all four have the card's own radius
+    @test (card.from.radius.tl, card.from.radius.tr, card.from.radius.br, card.from.radius.bl) == ntuple(_ -> K.PAGE_CARD_ROUND, 4)
     # The card has the shape of a sheet of paper that stands up, and the page's text is on it
     @test isapprox(K.num(card.height) / K.num(card.width), √2, atol=0.01)
     @test e.origin[1] >= card.left + K.PAGE_X && e.origin[1] + e.width <= card.left + card.width - K.PAGE_X
@@ -470,6 +472,7 @@ try
     card = rects[findfirst(r -> hasproperty(r.from, :name) && r.from.name == "Page card", rects)]
     @test !any(r -> hasproperty(r.from, :name) && r.from.name == "Outline", rects)
     @test card.left + card.width + K.PAGE_CARD_GAP == wc.size[1]
+    @test card.from.radius.tr == card.from.radius.br == K.WINDOW_ROUND - K.PAGE_CARD_GAP
     # The top bar has no button for an outline
     @test !any(r -> hasproperty(r.from, :from) && r.from.from isa K.ToolButton && r.from.from.action == :right_panel, rects)
     # The agent's pane and a card in the shape of a sheet of paper fit in 900px, so the window stays as wide as it was
@@ -703,6 +706,9 @@ try
     frames(w, 2)
     @test named("Outline") === nothing && named("Page card").left + named("Page card").width + K.PAGE_CARD_GAP == w.size[1]
     @test named("Agent").width > was[1]
+    # The card's right corners are in the window's corners, and have the window's curve, the gap less round
+    r = named("Page card").from.radius
+    @test r.tl == r.bl == K.PAGE_CARD_ROUND && r.tr == r.br == K.WINDOW_ROUND - K.PAGE_CARD_GAP
     K.toggle_right!(e)
     e.nodes[:right_slid] = (1.0, 0.0)
     frames(w, 2)

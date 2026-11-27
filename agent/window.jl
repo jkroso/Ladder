@@ -43,7 +43,7 @@
 @use "github.com/jkroso/UI.jl/Interface/Geometric"...
 @use "github.com/jkroso/UI.jl/Interface/Specific"...
 @use "github.com/jkroso/UI.jl/Interface/abstract" SemanticUI describe window_of handled
-@use "github.com/jkroso/UI.jl/Interface/draw" draw ishovered cursor redraw_in!
+@use "github.com/jkroso/UI.jl/Interface/draw" draw ishovered cursor redraw_in! box_path
 @use "github.com/jkroso/UI.jl/Interface/objc" libobjc cls sel msg with_pool send
 @use "github.com/jkroso/UI.jl/Interface/window" nswindow
 @use Colors: RGBA
@@ -56,11 +56,11 @@
 @use "../folder_page" exports...
 @use "../slides_view" exports...
 
-export SOON, AGENT_W, AGENT_MIN, OUTLINE_W, PAGE_CARD_GAP, PAGE_CARD_ROUND, PAGE_CARD_LEAST,
+export SOON, AGENT_W, AGENT_MIN, OUTLINE_W, PAGE_CARD_GAP, PAGE_CARD_ROUND, WINDOW_ROUND, PAGE_CARD_LEAST,
        PAGE_CARD_NARROWEST, PAGE_CARD_CHOSEN, PANE_X, PANE_LEFT, SEND_GROWS, SEND_ROOM, REPLY_SIZE,
        REPLY_NAME, reply_page, OutlinePane, OutlineRow, PageCard, CardEdge, PaneButton, PaneSlot, agent_pane,
        agent_mode, agent_shows, outline_room, agent_wide, page_card_wide, page_card_setting, page_shape_wide,
-       page_card!, page_card_span, glass_colour, glass, on_glass, PANE_COLOURS, PAGE_KEPT, colours_over,
+       page_card!, page_card_span, page_card_round, glass_colour, glass, on_glass, PANE_COLOURS, PAGE_KEPT, colours_over,
        pane_dark, over_colours!, with_colours, with_pane_colours, PaneColours, ColourMark, pane_mark,
        agent_body, GLASS_ALPHA, GLASS_BLUR, see_through, SURFACE_OPACITY, see_through!, glass_window!,
        blur_behind!
@@ -71,7 +71,8 @@ const AGENT_W = 400px                    # how wide the agent's pane is in the w
 const AGENT_MIN = 300px                  # the agent's pane is never narrower than this while the window has room for it
 const OUTLINE_W = 260px                  # how wide the outline is, in a window that has room for it
 const PAGE_CARD_GAP = 8px                # between the page's card and the window's edges, and between it and each pane
-const PAGE_CARD_ROUND = 14px             # how round the corners of the page's card are
+const PAGE_CARD_ROUND = 14px             # how round the corners of the page's card are, where they're beside a pane
+const WINDOW_ROUND = 16px                # how round macOS makes the corners of a window: AppKit's _cornerRadius on macOS 26 and later
 const PAGE_CARD_LEAST = 420px            # the card is never narrower than this while the window has room for it
 const PAGE_CARD_NARROWEST = 240px        # nor than this, when you drag its edge or the window is narrow
 "How wide you made the page's card with the strip at its left edge, or `nothing` while it has a page's shape. Every window has it, and the settings file keeps it."
@@ -205,6 +206,23 @@ page_card_span(e) = begin
   wide = page_card_wide(e)
   right = right_view(e) === nothing ? 0px : right_w(e) * right_opened(e)
   (w - right - wide - PAGE_CARD_GAP, wide)
+end
+
+"""
+How round the page's card is at its left and at its right. Its left corners
+are beside the agent's pane. While the outline is hidden, its right corners
+are in the window's own corners, `PAGE_CARD_GAP` in from them. There they
+are that much less round than the window, so the card's curve and the
+window's curve have one middle, and the gap between them is as wide all the
+way round. While the outline slides out, they go to the card's own radius.
+A window that fills a screen has square corners, so there all four corners
+have the card's own radius.
+"""
+page_card_round(e) = begin
+  e.full_screen && return (PAGE_CARD_ROUND, PAGE_CARD_ROUND)
+  shut = WINDOW_ROUND - PAGE_CARD_GAP
+  open = right_view(e) === nothing ? 0.0 : right_opened(e)
+  (PAGE_CARD_ROUND, shut + (PAGE_CARD_ROUND - shut) * open)
 end
 
 # The agent's pane has no narrower form and never goes: all of it stays, as the compact form of a side menu does.
@@ -345,28 +363,46 @@ describe(c::PageCard) = begin
   e = editor(c)
   # The top of the card is under the top bar. Over a web page it has the page's colour, as the bar's middle has.
   tint = bar_tint(e)
-  Column(fixed(page_card_wide(e)), height(grow=grow), Alignment.Start, radius(PAGE_CARD_ROUND), background(colours.bg), clip=true, name="Page card",
+  left, right = page_card_round(e)
+  Column(fixed(page_card_wide(e)), height(grow=grow), Alignment.Start, radius(left, right, right, left), background(colours.bg), clip=true, name="Page card",
     Box(width(grow=grow), height(above_page(e) - PAGE_CARD_GAP), (tint === nothing ? () : (background(tint),))...),
     node!(Page, e, :page))
 end
 
 # A box cuts its children off at its straight edges. So what the page shows in the card's corners, like a picture
 # that's as wide as the card, is painted over with the glass, and then a thin line goes round the card.
+#
+# The glass goes on four small squares, cut by the card's round shape. The graphics card does that cut itself. A
+# path of the card's edge with its round shape as a hole took Skia 4.5 ms a frame: it drew a mask as big as the card
+# with the CPU, and sent it to the graphics card, in each frame.
+#
+# The card's left corners and its right corners can have two radii (see `page_card_round`). Skia makes a round
+# rectangle only with one radius at all four corners, and a shape made of arcs is no round rectangle to it, so it would
+# cut with a mask again. So the two corners at each side have a cut of their own: the card's shape with their radius.
 draw(ctx, size, ui::ConcreteRect, c::PageCard) = begin
   e = editor(c)
-  x, y, w, h, r = num(ui.left), num(ui.top), num(ui.width), num(ui.height), Float32(num(PAGE_CARD_ROUND))
-  edges = Ref(Skia.sk_rect_t(Float32(x), Float32(y), Float32(x + w), Float32(y + h)))
-  corners = Skia.sk_path_new()
-  Skia.sk_path_add_rounded_rect(corners, edges, 0f0, 0f0, Skia.SK_PATH_DIRECTION_CW)
-  Skia.sk_path_add_rounded_rect(corners, edges, r, r, Skia.SK_PATH_DIRECTION_CW)
-  Skia.sk_path_set_filltype(corners, Skia.SK_PATH_FILLTYPE_EVENODD)
+  x, y, w, h = num(ui.left), num(ui.top), num(ui.width), num(ui.height)
+  left, right = page_card_round(e)
   paint = ink(glass(e))
   # The glass takes the place of what's there, so glass that's see-through stays see-through
   Skia.sk_paint_set_blend_mode(paint, Skia.SK_BLEND_MODE_SRC)
-  Skia.sk_canvas_draw_path(ctx, corners, paint)
+  for (r, cx) in ((num(left), x), (num(right), x + w - num(right)))
+    card = Skia.sk_path_new()
+    Skia.sk_path_add_rounded_rect(card, Ref(Skia.sk_rect_t(Float32(x), Float32(y), Float32(x + w), Float32(y + h))), Float32(r), Float32(r), Skia.SK_PATH_DIRECTION_CW)
+    Skia.sk_canvas_save(ctx)
+    Skia.sk_canvas_clip_path_with_operation(ctx, card, Skia.SK_CLIP_OP_DIFFERENCE, true)
+    for cy in (y, y + h - r)
+      Skia.sk_canvas_draw_rect(ctx, Ref(Skia.sk_rect_t(Float32(cx), Float32(cy), Float32(cx + r), Float32(cy + r))), paint)
+    end
+    Skia.sk_canvas_restore(ctx)
+    Skia.sk_path_delete(card)
+  end
   Skia.sk_paint_delete(paint)
-  Skia.sk_path_delete(corners)
-  round_box(ctx, x + 0.5, y + 0.5, w - 1, h - 1, r; line=on_glass(dark_page() ? 0.16 : 0.12))
+  edge = box_path(ui.left + 0.5px, ui.top + 0.5px, ui.width - 1px, ui.height - 1px, left, right, right, left)
+  line = ink(on_glass(dark_page() ? 0.16 : 0.12), 1.0)
+  Skia.sk_canvas_draw_path(ctx, edge, line)
+  Skia.sk_paint_delete(line)
+  Skia.sk_path_delete(edge)
 end
 
 # --- a window that you see through ---
