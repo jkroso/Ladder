@@ -144,6 +144,18 @@ end
   @test !process_running(p) && !ispath(r.socket)
 end
 
+@testset "Antigravity reads a picture that look() saved without a question" begin
+  s = K.AgentSession(agent="Antigravity", dir=dir)
+  asks(tool, path) = K.acp_asks!(s, "1", K.agent_json("""{"toolCall":{"name":"$tool","rawInput":{"AbsolutePath":"$path"}},"options":[{"optionId":"allow","kind":"allow_once"}]}"""))
+  asks("view_file", joinpath(K.agent_looks(), "window-1.png"))
+  @test isempty(s.items)
+  # Another file, a path that leaves the folder, and a change to a picture are still asked for
+  asks("view_file", joinpath(dir, "notes.md"))
+  asks("view_file", joinpath(K.agent_looks(), "..", "notes.md"))
+  asks("write_to_file", joinpath(K.agent_looks(), "window-1.png"))
+  @test length(s.items) == 3 && all(it -> it isa K.AgentWants && it.answer == :none, s.items)
+end
+
 if !Engines.available()
   @info "SolidCraft isn't on this Mac, so the checks of a design are skipped."
 else

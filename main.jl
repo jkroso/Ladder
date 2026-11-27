@@ -45376,6 +45376,8 @@ acp_asks!(s::AgentSession, id, params) = begin
   # The agent's Julia code runs in Ladder without this question: the sandbox asks you before a step of it that could harm
   code_tool(tool) && return acp_choose!(s, AgentWants(input=(id, json_field(params, "options"))), "allow_once")
   input = antigravity_input(json_field(call, "rawInput"))
+  # Nor does reading a picture that `look()` saved, which is in a folder of Ladder's and not in the session's
+  tool == "Read" && a_look(json_field(input, "file_path")) && return acp_choose!(s, AgentWants(input=(id, json_field(params, "options"))), "allow_once")
   command = json_field(input, "command")
   push!(s.items, AgentWants(id=id isa String ? id : sprint(write_json, id), tool=tool, input=(id, json_field(params, "options")),
                             words=lowercasefirst(tool_words(tool, input)), detail=tool == "Bash" && command isa String ? command : ""))
@@ -45448,6 +45450,9 @@ end
 "The folder of the pictures that `look()` saves for agents. A test names one of its own."
 const AGENT_LOOKS = Ref("")
 agent_looks() = isempty(AGENT_LOOKS[]) ? joinpath(homedir(), "Library", "Caches", "Ladder", "Agent looks") : AGENT_LOOKS[]
+
+"True when `path` is a file in the folder of the pictures that `look()` saves"
+a_look(path) = path isa AbstractString && startswith(normpath(path), joinpath(normpath(agent_looks()), ""))
 
 const LOOK_MOST = 1568                   # px: the longer side of a picture that an agent takes whole
 
