@@ -10,6 +10,7 @@
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
 @use GeometryBasics: Vec2
 @use "../main" => K
+@use "./drive" drive middle
 const S, px = K.Schedules, K.px
 
 # 9 November 2026 is a Monday
@@ -37,20 +38,13 @@ The end.
 
 const e = K.build_editor(page)
 const w = Window(e, size=(1000px, 900px))
-frames(n=2) = foreach(_ -> frame(w), 1:n)
+const (; frames, at, press, release, click, typed, key) = drive(w)
 frames()
 const v = only(node for node in values(e.nodes) if node isa K.ScheduleView)
 
-at((x, y)) = (w.mouse = typeof(w.mouse)(px(x), px(y)); onmouse(w, MouseMove(Vec2{px}(px(x), px(y)), w)); frames(1))
-press(place) = (at(place); w.keys |= Keys.mouse_left; onkey(w, KeyPress{Keys.mouse_left}(0, w)))
-release() = (w.keys ⊻= Keys.mouse_left; onkey(w, KeyRelease{Keys.mouse_left}(0, w)); frames())
-click(place) = (press(place); release())
 "Press the mouse at one place, move it to another by way of the place between, and let go"
 drag(from, to) = (press(from); at(((from[1] + to[1]) / 2, (from[2] + to[2]) / 2)); at(to); release())
-key(k) = (onkey(w, KeyPress{k}(0, w)); frames())
 command(k) = (w.keys |= Keys.cmd; key(k); w.keys ⊻= Keys.cmd)
-typed(s) = (foreach(c -> ontype(w, Typed(c, w)), s); frames())
-middle(r) = (K.num(r.left + r.width / 2), K.num(r.top + r.height / 2))
 button(key) = click(middle(rect(v.parts[(:button, key)])))
 block() = (s = K.block_lines(e.buf, K.SCHEDULE, 1); e.buf.lines[s[1]+1:s[2]-1])
 task(i) = v.tasks[i]

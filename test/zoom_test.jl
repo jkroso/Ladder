@@ -11,6 +11,7 @@
 @use GeometryBasics: Vec2
 
 @use "../main" => K
+@use "./drive" drive middle
 const px = K.px
 
 const dir = mktempdir()
@@ -51,19 +52,13 @@ The end.
 
 const e = K.build_editor(page)
 const w = Window(e, size=(1000px, 1400px))
-frames(n=2) = foreach(_ -> frame(w), 1:n)
+const (; frames, at, press, release, click, key) = drive(w, moved=2)
 frames()
 
 const shots = get(ENV, "ZOOM_SHOTS", "")
 shot(name) = isempty(shots) || save_png(joinpath(shots, name * ".png"), w)
 
-at((x, y)) = (w.mouse = typeof(w.mouse)(px(x), px(y)); onmouse(w, MouseMove(Vec2{px}(px(x), px(y)), w)); frames())
-press(place) = (at(place); w.keys |= Keys.mouse_left; onkey(w, KeyPress{Keys.mouse_left}(0, w)))
-release() = (w.keys ⊻= Keys.mouse_left; onkey(w, KeyRelease{Keys.mouse_left}(0, w)); frames())
-click(place) = (press(place); release())
-key(k) = (onkey(w, KeyPress{k}(0, w)); frames())
 command(k) = (w.keys |= Keys.cmd; key(k); w.keys ⊻= Keys.cmd)
-middle(r) = (K.num(r.left) + K.num(r.width) / 2, K.num(r.top) + K.num(r.height) / 2)
 "A place `dx` px in from the right edge of `r` and `dy` px down from its top"
 corner(r, dx=22, dy=22) = (K.num(r.left) + K.num(r.width) - dx, K.num(r.top) + dy)
 fillable_of(owner) = K.fills(e)[objectid(owner)]

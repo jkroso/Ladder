@@ -10,6 +10,7 @@ K.RUN_WAIT[] = Inf   # the code runs in a thread of its own, and each result is 
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
 @use "github.com/jkroso/UI.jl/Interface/testing" pixels
 @use GeometryBasics: Vec2
+@use "./drive" drive middle
 const px = K.px
 
 const dir = mktempdir()
@@ -43,7 +44,7 @@ write(page, TEXT)
 const e = K.build_editor(page)
 const w = Window(e, size=(1000px, 800px))
 const b = e.buf
-frames(n=2) = foreach(_ -> frame(w), 1:n)
+const (; frames, at, typed, key) = drive(w)
 frames()
 
 "Put the text back as it was, with no outcomes, and the caret at `line` and `col`"
@@ -56,18 +57,9 @@ fresh!(line, col=0) = begin
   caret!(line, col)
 end
 caret!(line, col=0) = (b.caret = b.anchor = (line, col); frames())
-key(k, held...) = begin
-  foreach(h -> w.keys |= h, held)
-  onkey(w, KeyPress{k}(0, w))
-  foreach(h -> w.keys ⊻= h, held)
-  frames()
-end
 run!() = key(Keys.enter, Keys.cmd)
 step!() = key(Keys.enter, Keys.shft)
-typed(s) = (foreach(c -> ontype(w, Typed(c, w)), s); frames())
-at((x, y)) = (w.mouse = typeof(w.mouse)(px(x), px(y)); onmouse(w, MouseMove(Vec2{px}(px(x), px(y)), w)); frames(1))
 click(place) = (at(place); w.keys |= Keys.mouse_left; onkey(w, KeyPress{Keys.mouse_left}(0, w)); w.keys ⊻= Keys.mouse_left; frames())
-middle(r) = (K.num(r.left) + K.num(r.width) / 2, K.num(r.top) + K.num(r.height) / 2)
 "The outcome whose code ends on `line`, or nothing"
 outcome(line) = (k = findfirst(o -> o.last == line, K.outcomes(e)); k === nothing ? nothing : K.outcomes(e)[k])
 
