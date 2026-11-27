@@ -18,6 +18,14 @@
 @use Skia
 @use Colors: @colorant_str, RGBA, Colorant
 
+export SANS, SERIF, MONO, CODE_FONT, CODE_STYLE, CODE_SLANT, CODE_SCALE, code_type, codefont, codestyle,
+       codeslant, SYMBOL_FONT, Palette, SEPIA, PAPER, NIGHT, THEMES, colours, SITE, SITE_MEASURE, SITE_RULE,
+       SITE_STARS, SITE_INK2, LABEL, use!, TOPBAR_H, PANEL_W, PANEL_MIN, PANEL_MAX, PROSE_W, PAGE_X,
+       PAGE_TOP, PAGE_BOTTOM, CODE_END, CHIP_X, BLOCK_X, QUOTE_X, CELL_X, CELL_Y, grow, clear, lifted, fixed,
+       spacer, num, label, Face, measured, measure, width_in, drawable, has, stand_ins, font_with, one_wide,
+       one_width, stand_in_from, runs, hasall, spared_width, spared, LIVE_GAP, BLOCK_ICONS, removed_colour,
+       added_colour, TIP_INK, tip_label
+
 # --- look --------------------------------------------------------------------
 
 const SANS = isfile("/System/Library/Fonts/SFNS.ttf") ? ".SF NS" : "Helvetica"
@@ -298,3 +306,14 @@ const LIVE_GAP = 8px   # above and below what a live block shows
 
 "Every icon that a block can show. The built app reads them all when it's made."
 const BLOCK_ICONS = String["bar-chart", "graph-up", "pie-chart"]
+
+"The colour of a line that a change takes away, and of the count of those lines"
+removed_colour() = colours.removed
+
+"The colour of a line that a change adds"
+added_colour() = colours.added
+
+const TIP_INK = colorant"rgb(240,240,240)"   # on the dark grey that every tooltip has
+
+"What a tooltip shows: `words`, with room around them"
+tip_label(words) = Box(padding(10px, 7px), label(words, 12px, color=TIP_INK))
