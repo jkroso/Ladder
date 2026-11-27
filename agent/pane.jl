@@ -29,6 +29,7 @@
 @use "../editor_type" exports...
 @use "../faces" exports...
 @use "../blocks" exports...
+@use "../rich" end_room
 @use "../strokes" exports...
 @use "../shared" exports...
 @use "../host" exports...
@@ -57,7 +58,7 @@ export pane_field!, reply_editor, talk_on_page, talk_zoom, page_symbols, pane_st
        attached_row, PICTURE_TALL, new_session!, close_agent!, session_tick!, pane_tick!, reply_tick!,
        reply_changed, changed_replies, changes_told, send_tip, pane_button, pane_face, pane_head, pane_talk,
        words_block, code_wrapped, talk_row, step_row, pane_foot, pane_slot, model_shows, pane_model, model_words,
-       model_face, model_wide, MODEL_BUTTON_ROOM, one_line, solid_on_glass, send_button, section_now,
+       model_face, model_wide, MODEL_BUTTON_ROOM, MODEL_GAP, one_line, solid_on_glass, send_button, section_now,
        section_in_view, OUTLINE_STEP, widen_for_agent!, narrow_from_agent!, agent_mode!, end_agent_session!,
        CHAT_WIDE, PAGE_TALK, TALK_MARK, chats, pane_wide, pane_context, talk_mark, talk_body, talk_part,
        talk_text, read_talk, load_talk!, chat_part, TALK_SLIDE, TalkRoom, said_nothing, talk_page,
@@ -1561,7 +1562,9 @@ end
 """
 The foot of the agent's pane: the field that you type in, with the button
 that sends or stops at its right. With one line of words it's one line
-tall. The words wrap before the button, which stays at the last line.
+tall. The words wrap before the button, which stays at the last line. While
+the mouse is over the field, the model's button shows beside it, and the last
+line of words ends before that too.
 """
 pane_foot(p::AgentPane, e, room) = begin
   s = p.session
@@ -1576,12 +1579,16 @@ pane_foot(p::AgentPane, e, room) = begin
     (ends, max(6px, ends - 15px), max(14px, ends - 5px))   # the ends, and the room at the right and the left of the words
   end
   # The words are as wide as the slot leaves them: less the room at each side of the slot, its border, its ends, the send
-  # button and the gap before it. The model's button takes none: it lies over the words. It's a whole number of pixels,
-  # as a box a hair narrower than its words would grow the pane by that hair.
+  # button and the gap before it. The model's button lies over the end of the last line of words. It's a whole number of
+  # pixels, as a box a hair narrower than its words would grow the pane by that hair.
   room_for(one) = begin
     _, right, left = sides(one)
     max(40px, px(floor(num(pane_wide(p, e) - 2(PANE_X - 4px) - 2px - left - right - SEND_ROOM))))
   end
+  # While the model's button shows, the words flow round it: the last line ends before it, and its last words go onto
+  # a new line when they'd reach it. The room stays while the mouse is on the send button, whose pill then covers it.
+  model_room = model_shows(p, e) ? model_wide(p, e) + MODEL_GAP : 0px
+  end_room(sub) == model_room || (sub.nodes[:end_room] = model_room)
   # The ends come from the first line as it was last laid out. When it's laid out at another height, the words go again.
   pane_layout!(sub, room_for(one_line(sub, line)))
   one = one_line(sub, line)
@@ -1611,7 +1618,7 @@ pane_foot(p::AgentPane, e, room) = begin
   words = Row(width(grow=grow), Alignment.End, child_gap=SEND_ROOM - 28px,
     Column(width(grow=grow), Alignment.Start, pictures..., Box(width(grow=grow), padding(0px, 4px), text)),   # one line of words is as tall as the button, or taller
     Box(fixed(28px), height(over + 28px + drop)))
-  # The buttons are over the words, at their right end. The model's button moves none of the words, and the send button opens over it.
+  # The buttons are over the words, at their right end. The last line of words ends before the model's button, and the send button opens over it.
   buttons = Row(width(grow=grow), Alignment.Start, justify=Alignment.End, child_gap=SEND_ROOM - 28px,
     (shows ? (Box(padding(over, 0px, drop, 0px), pane_button(p, :model)),) : ())...,
     Box(padding(over, 0px, drop, 0px), pane_button(p, s !== nothing && s.busy && empty ? :stop : :send)))
@@ -1663,6 +1670,7 @@ model_face(e, colour=colours.dim) = pane_face(e, colour; size=12.5px)
 model_wide(p::AgentPane, e) = px(ceil(num(measure(model_face(e), model_words(p, e)) + MODEL_BUTTON_ROOM)))
 
 const MODEL_BUTTON_ROOM = 33px   # the room on the model's button that's not its words: 10px at each end, the chevron and the gap before it
+const MODEL_GAP = 6px            # the least room between the words and the model's button, while the button shows
 
 "How tall one line of the words in `sub` is, as it lays them out: as tall as its first line. Before it lays them out, `line`."
 one_line(sub, line) = begin

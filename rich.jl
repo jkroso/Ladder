@@ -27,7 +27,7 @@ export spread, sheet, spare_flows!, maths_line, has_maths, column_fold, column_a
        comment_only, comment_fold, picked, step_over, settle_rich, stand!, markpairs, cutmask, richcut,
        halves!, flow, laid, restyle!, table, tablerows, rowcells, within, cellat, nearest, settle,
        settle_cells, row_edge, cellpieces, celltexts, tableline, aligns, align, share_widths, grid, TABLE_GAP,
-       cell_origin, cellcol, gridcell, unbroken, spare, PICTURE_LINE, incode
+       cell_origin, cellcol, gridcell, unbroken, spare, PICTURE_LINE, incode, end_room
 
 # The kinds of block decide these, so this file only names them.
 
@@ -562,6 +562,8 @@ flow(e, i::Int, raw::Bool=israw(e.buf, i)) = begin
   # As plain text, a line of text shows the markup of the run that the caret is in, and the rest of it reads as rich text
   open = raw ? nothing : raw_part(e.buf, i)
   build() = laid(e, text, line, raw, i; open)
+  # The last line of a field that has a button at its end leaves room for the button. It's laid out afresh each time.
+  i == length(e.buf.lines) && (room = end_room(e)) > 0px && return laid(e, text, line, raw, i; open, tail=room)
   # What inline code made can change its size, so its line is laid out again each time
   !raw && occursin(INLINE, text) && !(line.kind in (Kind.code, Kind.fence, Kind.rule)) && return build()
   spare_flows!(e)
@@ -577,10 +579,18 @@ flow(e, i::Int, raw::Bool=israw(e.buf, i)) = begin
 end
 
 """
-Lay out `text`, line `i` of the document, which is a line of the kind `line`,
-for a page that's `wide`. `open` is what `raw_part` gives for the line.
+How much room the last line of the text of `e` leaves free at its right end,
+for a button that lies over the end of the words there, like the model's
+button in the field of an agent's pane. Usually none.
 """
-laid(e, text, line::Line, raw::Bool, i::Int, wide=e.width; open=nothing) = begin
+end_room(e) = get(e.nodes, :end_room, 0px)::px
+
+"""
+Lay out `text`, line `i` of the document, which is a line of the kind `line`,
+for a page that's `wide`. `open` is what `raw_part` gives for the line. Its
+last line on the screen leaves `tail` free at its right end: see `wrap`.
+"""
+laid(e, text, line::Line, raw::Bool, i::Int, wide=e.width; open=nothing, tail=0px) = begin
   base = face(e, line)
   ps = spare(pieces(e, text, line, raw, i; open))
   k = line.kind
@@ -594,7 +604,7 @@ laid(e, text, line::Line, raw::Bool, i::Int, wide=e.width; open=nothing) = begin
   hang = k in (Kind.bullet, Kind.ordered, Kind.todo) ? sum(p -> measure(p.face, p.text), ps[1:min(end, line.level > 0 ? 2 : 1)], init=0px) : left
   above = k == Kind.heading ? lh * 0.3 : 0px
   below = k == Kind.heading ? lh * 0.12 : 0px
-  f = wrap(ps, wide; lh, size=base.size, left, hang, above, below, kind=k, raw)
+  f = wrap(ps, wide; lh, size=base.size, left, hang, above, below, kind=k, raw, tail)
   # A blog's site has its first heading in the middle of the page
   k == Kind.heading && line.level == 1 && e.look == :site ? align(f, wide, :center) : f
 end

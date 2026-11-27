@@ -175,8 +175,16 @@ Finder: where that app is, or an empty string when macOS has no app for the file
 """
 opener(path) = begin
   (Sys.isapple() && isfile(path)) || return ""
-  with_pool(() -> url_path(msg(workspace(), "URLForApplicationToOpenURL:", msg(cls("NSURL"), "fileURLWithPath:", nsstring(path)))))
+  # The top bar asks in each frame, and macOS looks through its list of apps each time
+  got = get(OPENERS, path, nothing)
+  got !== nothing && time() - got[2] < 5 && return got[1]
+  app = with_pool(() -> url_path(msg(workspace(), "URLForApplicationToOpenURL:", msg(cls("NSURL"), "fileURLWithPath:", nsstring(path)))))
+  OPENERS[path] = (app, time())
+  app
 end
+
+"The app that `opener` last found for each file, and when it asked macOS"
+const OPENERS = Dict{String,Tuple{String,Float64}}()
 
 "The name of the app at `path`, like Ladder for /Applications/Ladder.app"
 app_name(path) = splitext(basename(path))[1]

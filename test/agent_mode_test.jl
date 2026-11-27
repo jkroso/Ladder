@@ -1050,23 +1050,55 @@ try
     @test [m.id for m in K.agent_models("Grok").listed] == ["grok-4.7", "grok-4.6"] && K.agent_models("Grok").default == "grok-4.7"
     @test K.pretty_model("claude-haiku-4-5-20251001") == "Haiku 4.5" && K.pretty_model("gemini-2.5-pro") == "Gemini 2.5 Pro" && K.pretty_model("grok-4.7-build-fast") == "Grok 4.7 Build Fast"
     # The button shows only while the mouse is over the box that you type in, so the words have the box's whole width
-    mouse_to(named("Agent").left + 20px, named("Agent").top + 200px)
+    away() = mouse_to(named("Agent").left + 20px, named("Agent").top + 200px)
+    away()
     @test named("Model") === nothing && named("Send") !== nothing
-    pane.field.buf.lines = ["Calculate the current value of a gigawatt of compute, and the cost of it in a year"]
+    "The lines on the screen of the last line of your words, and where the last of them ends"
+    screen_lines() = pane.field.layout[end].content.lines
+    words_end() = (s = last(last(screen_lines()).segs); s.x + s.w)
+    pane.field.buf.lines = ["Calculate the value of compute"]
     frames()
-    words = (pane.field.width, length(pane.field.layout), named("Agent foot").height)
+    words = (pane.field.width, length(screen_lines()), named("Agent foot").height)
     on_slot()
     # Before a session, the button shows the model that Claude Code chooses by itself. It's beside the send button, in line with it.
     button, send = named("Model"), named("Send")
     @test button !== nothing && K.model_words(pane, e) == "Opus 5.5"
     @test button.left + button.width <= send.left && button.top == send.top && button.height == send.height
-    # It lies over the end of the words, and moves none of them
-    @test (pane.field.width, length(pane.field.layout), named("Agent foot").height) == words
+    # Words that end before it move for none of it
+    @test (pane.field.width, length(screen_lines()), named("Agent foot").height) == words
+    @test named("Typed words").left + words_end() + K.MODEL_GAP <= button.left
     # A click beside it still goes to the words, and one on it goes to it
     mouse_to(button.left - 20px, button.top + 14px)
     @test named("Model") !== nothing && K.editor(K.hittest(w)) === pane.field
     mouse_to(button.left + 10px, button.top + 10px)
     @test K.hittest(w) isa K.PaneButton && K.hittest(w).action == :model
+    # Words whose last line would go under it flow round it: the last words of that line go onto a new line, which ends before
+    # the button. The lines above keep the box's whole width.
+    away()
+    text = "Calculate the current value of a gigawatt of compute, and the cost of it in a year"
+    pane.field.buf.lines = [text]
+    frames()
+    while words_end() <= pane.field.width - K.model_wide(pane, e) - K.MODEL_GAP
+      text *= " more"
+      pane.field.buf.lines = [text]
+      frames()
+    end
+    before = [[s.text for s in vl.segs] for vl in screen_lines()]
+    tall = named("Agent foot").height
+    on_slot()
+    button, send = named("Model"), named("Send")
+    after = [[s.text for s in vl.segs] for vl in screen_lines()]
+    @test length(after) == length(before) + 1 && after[1:end-2] == before[1:end-1]
+    @test named("Typed words").left + words_end() + K.MODEL_GAP <= button.left
+    @test named("Agent foot").height > tall && button.top == send.top
+    # Its words are all still there, and the caret goes on them as they show
+    @test join(join.(after)) == text
+    pane.field.buf.anchor = pane.field.buf.caret = (1, length(text))
+    frames()
+    @test K.spot(pane.field.layout[end].content, length(text))[1] == length(after)
+    # When the mouse leaves, the words go back to the box's whole width
+    away()
+    @test [[s.text for s in vl.segs] for vl in screen_lines()] == before && named("Agent foot").height == tall
     pane.field.buf.lines = [""]
     # Its menu is over it, with the models that Claude Code lists and a tick on the one that it uses
     model_click()

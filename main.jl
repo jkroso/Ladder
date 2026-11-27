@@ -6416,10 +6416,12 @@ layout!(e, width=text_width(e)) = begin
     get!(() -> Union{Nothing,PlainLine}[], e.flows, (:plain, b.path))::Vector{Union{Nothing,PlainLine}} : nothing
   # A page that has more lines than it had has nothing kept for the new ones
   kept === nothing || length(kept) == length(b.lines) || (had = length(kept); resize!(kept, length(b.lines)); fill!(view(kept, had+1:length(kept)), nothing))
+  # The last line, while it leaves room at its end for a button, is laid out afresh and not kept: see `end_room`
+  room_at_end = end_room(e) > 0px
   while i <= n
     # In a column, the page's text is as wide as the column, and each column starts level with the first
     columns === nothing || (top = column_turn!(columns, e, items, i, top))
-    if kept !== nothing
+    if kept !== nothing && !(room_at_end && i == length(b.lines))
       was = kept[i]
       if was !== nothing && pointer(was.text) == pointer(b.lines[i]) && was.line === ks[i] && was.raw == israw(b, i) && raw_part(b, i) === nothing &&
          html_runs(b)[i][1] == 0
@@ -6584,7 +6586,7 @@ layout!(e, width=text_width(e)) = begin
       content = flow(e, i)::Flow
       high = tall(content)
       push!(items, Item(i, i, top, high, content))
-      kept === nothing || keep_plain!(kept, b, i, ks[i], content, high)
+      kept === nothing || (room_at_end && i == length(b.lines)) || keep_plain!(kept, b, i, ks[i], content, high)
       top += high
       i += 1
     end

@@ -82,15 +82,22 @@ line_at(f::Flow, dy::px) = something(findlast(vl -> f.above + vl.top <= dy, f.li
 
 const INLINE_GAP = 4px   # the least room above and below a node in a line of text, in all
 
-"Wrap `pieces` to `limit`. Lines start at `left`, and all but the first at `hang`."
-wrap(pieces, limit::px; lh, size, left=0px, hang=left, above=0px, below=0px, kind=Kind.paragraph, raw=false) = begin
+"""
+Wrap `pieces` to `limit`. Lines start at `left`, and all but the first at
+`hang`. The last line leaves `tail` free at its right end, for a button that
+lies there: its last words go onto a line of their own when they'd reach it.
+"""
+wrap(pieces, limit::px; lh, size, left=0px, hang=left, above=0px, below=0px, kind=Kind.paragraph, raw=false, tail=0px) = begin
   lines = VLine[]
   segs = Seg[]
   # `flush!` and `add!` change these. A variable that a closure assigns to is
   # boxed, and Julia looks at its type again each time it's used: that was a
   # sixth of the time a page took to describe. A `Ref` keeps its type.
   x, start, top = Ref(left), Ref(left), Ref(0px)
+  # The words on the line that's being built, by their number in `words`
+  here = Int[]
   flush!() = begin
+    empty!(here)
     from = isempty(segs) ? (isempty(lines) ? 0 : last(lines).to) : first(segs).col
     to = isempty(segs) ? from : last(segs).col + last(segs).n
     high = max(lh, maximum(s -> s.node === nothing ? 0px : s.node.h + INLINE_GAP, segs, init=0px))
@@ -142,7 +149,9 @@ wrap(pieces, limit::px; lh, size, left=0px, hang=left, above=0px, below=0px, kin
     p.atomic ? measure(p.face, text) :
     p.face.chip ? measure(p.face, text) + (col == p.col ? 2(CHIP_X + 1px) : 0px) :
     measure(p.face, last ? rstrip(text) : text)
+  place!(k) = (push!(here, k); add!(words[k][1], words[k][2:4]...))
   i = 1
+  group = 1   # where the last words that go onto a line together start
   while i <= length(words)
     # Words with no space between them go onto a line together, like a `code` chip and the comma after it
     j = i
@@ -150,18 +159,30 @@ wrap(pieces, limit::px; lh, size, left=0px, hang=left, above=0px, below=0px, kin
       j += 1
     end
     stop = j   # the closure below sees this, which is never assigned again, so it isn't boxed as `j` would be
+    group = i
     w = sum(k -> reach(words[k], k == stop), i:stop)
     if w <= limit - hang
       x[] + w > limit && x[] > start[] && flush!()
-      foreach(k -> add!(words[k][1], words[k][2:4]...), i:stop)
+      foreach(place!, i:stop)
     else
       # Words that are too wide for a whole line together break where they must
       for k in i:stop
         x[] + reach(words[k], k == stop) > limit && x[] > start[] && flush!()
-        add!(words[k][1], words[k][2:4]...)
+        place!(k)
       end
     end
     i = stop + 1
+  end
+  # The last words go onto a line of their own when they'd reach the room that `tail` keeps free, and fit before it there.
+  # The words before them stay on their line, which is no longer the last.
+  if tail > 0px && x[] + tail > limit && !isempty(here) && first(here) < group &&
+     sum(k -> reach(words[k], k == length(words)), group:length(words)) <= limit - hang - tail
+    before = filter(<(group), here)
+    empty!(segs)
+    x[] = start[]
+    foreach(place!, before)
+    flush!()
+    foreach(place!, group:length(words))
   end
   flush!()
   Flow(lines, lh, size, above, below, kind, raw)
