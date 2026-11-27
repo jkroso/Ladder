@@ -1,9 +1,9 @@
-# Tests for the `save` block of main.jl, which writes the rows of the table
-# above it into a file, or sends them to a server. See "a save of a table's
-# rows". Run them with `julia -O0 --project=. test/save_view_test.jl`. They
-# write files into a temporary folder and click in a window that isn't on the
-# screen. A send goes to a server in this process, or to a function that
-# stands in for one, and no key goes into the Keychain. Set `LADDER_SHOTS` to a
+# Tests for the `save` block of save_view.jl, which writes the rows of the
+# table above it into a file, or sends them to a server. Run them with
+# `julia -O0 --project=. test/save_view_test.jl`. They write files into a
+# temporary folder and click in a window that isn't on the screen. A send
+# goes to a server in this process, or to a function that stands in for one,
+# and no key goes into the Keychain. Set `LADDER_SHOTS` to a
 # folder, and they save pictures there.
 
 @use Test: @test, @testset

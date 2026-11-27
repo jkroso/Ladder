@@ -1,4 +1,4 @@
-# Tests for the `chart` block of main.jl: the chart of a table's numbers. Run
+# Tests for the `chart` block of chart_view.jl: the chart of a table's numbers. Run
 # them with `julia -O0 --project=. test/chart_view_test.jl`. They click in a
 # window that isn't on the screen. Set `LADDER_SHOTS` to a folder, and they
 # save a picture of each kind of chart there.

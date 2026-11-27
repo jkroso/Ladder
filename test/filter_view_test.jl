@@ -1,5 +1,5 @@
-# Tests for the `filter` block of main.jl, which shows only the rows of a table
-# that meet some conditions. See "a filter of a table's rows". Run them with
+# Tests for the `filter` block of filter_view.jl, which shows only the rows of
+# a table that meet some conditions. Run them with
 # `julia -O0 --project=. test/filter_view_test.jl`. They write a CSV file and
 # a JSON file into a temporary folder, and click in a window that isn't on the
 # screen. Set `LADDER_SHOTS` to a folder, and they save pictures there.

@@ -1,6 +1,6 @@
-# Tests for where a `save` block of main.jl saves: with no `to`, or after a
+# Tests for where a `save` block saves (save_view.jl): with no `to`, or after a
 # click on Choose, it lists folders as a breadcrumb, with a field for the name
-# of the file. See "a save of a table's rows". Run them with
+# of the file. Run them with
 # `julia -O0 --project=. test/save_picker_test.jl`. They write files into a
 # temporary folder and click in a window that isn't on the screen. Set
 # `LADDER_SHOTS` to a folder, and they save pictures there.

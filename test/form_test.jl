@@ -1,4 +1,4 @@
-# Tests for forms.jl and main.jl's "a form that adds a row to a table": a
+# Tests for forms.jl and form_view.jl, "a form that adds a row to a table": a
 # `form` block shows a field for each column of a table, and adds a row. Run
 # them with `julia -O0 --project=. test/form_test.jl`. Set `LADDER_SHOTS` to a
 # folder, and they save a picture of the form there.
