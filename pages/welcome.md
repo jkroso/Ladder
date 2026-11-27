@@ -374,6 +374,8 @@ A sum that is one number has a line of dashes under what it shows, like the 16m 
 
 A sum can use the rows of every sheet of the page, with a `_` for each space in a row's name: \!`wall_length` shows !`wall_length`, from the sheets above.
 
+A sum that is only a name, like \!`wall_length`, shows the value of that name. The mouse is a hand over that value. Click it to go to the part of the page that gives the name its value: a sum, a row of a sheet or the code of a `julia` block. Ladder selects that part. The farm above costs !`farm_cost`: click that, and the sum of the farm's cost is selected. ⌘⌥← comes back to where you clicked.
+
 It works the other way too. A sheet under a sum can use the name that the sum gives, with a space for each `_`. Drag the size of the farm above, and the sheet follows.
 
 ```sheet

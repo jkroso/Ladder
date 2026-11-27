@@ -25433,6 +25433,185 @@ underline_scrubs(ctx, e, ui) = begin
   end
 end
 
+# --- where the value of a name comes from ---------------------------------------------------------------
+#
+# A sum in a line of text that is only a name, like !`energy`, shows the value
+# of that name. Another part of the page gives the name its value: a sum like
+# !`energy = convert(TWh, …)`, a row of a sheet like "Energy = …", or the code
+# of a `julia` block. Over that value the mouse is a hand. A click on it goes
+# to the part that gives the name its value, and selects it there. A cell of a
+# table works the same way. ⌘⌥← comes back to where the click was.
+#
+# A name can get a value in more than one place. The sums run from the top of
+# the page down, so the click goes to the last place over the value. When no
+# place is over it, the click goes to the first place under it.
+
+"""
+The sum in a line of text whose value is drawn at the point `pos` of the
+window, when the sum's code is only a name, like !`energy`: the name, and the
+line and the column where the sum's code starts. It's nothing anywhere else,
+and where the line shows its code.
+"""
+value_name_at(e, pos) = begin
+  b = e.buf
+  (isempty(e.layout) || b.view != :markdown || !runs_sums(e) || slideshow(e) !== nothing) && return nothing
+  dx, dy = pos[1] - e.origin[1], pos[2] - e.origin[2]
+  (dy >= 0px && pos[2] >= above_page(e)) || return nothing
+  it = e.layout[item_under(e, dx, dy)]
+  # Until the next frame, the layout is of the page that showed before, which can have more lines than this one
+  it.last <= length(b.lines) || return nothing
+  dx -= item_room(e, it)[1]   # a column of a group starts at its own left edge
+  dy -= it.top
+  c = it.content
+  c isa Flow && return value_name(b, it.first, c, dx, dy)
+  c isa Grid || return nothing
+  # Each cell of a table has its own lines of text. Their columns are the columns of the row's line.
+  for r in eachindex(c.rows), k in eachindex(c.flows[r])
+    cx, cy = cell_origin(c, r, k)
+    found = value_name(b, c.rows[r], c.flows[r][k], dx - cx, dy - cy)
+    found === nothing || return found
+  end
+  nothing
+end
+
+"`value_name_at` for the text `f` of line `i`, at `dx` across and `dy` down from its top left"
+value_name(b::Buffer, i::Int, f::Flow, dx::px, dy::px) = begin
+  f.raw && return nothing
+  k = findfirst(vl -> f.above + vl.top <= dy < f.above + vl.top + vl.high, f.lines)
+  k === nothing && return nothing
+  hit = findfirst(seg -> seg.x <= dx < seg.x + seg.w, f.lines[k].segs)
+  hit === nothing && return nothing
+  seg = f.lines[k].segs[hit]
+  (seg.atomic && seg.node === nothing && 1 <= i <= length(b.lines)) || return nothing
+  line = b.lines[i]
+  for m in eachmatch(r"!`([^`]+)`", line)
+    from = length(line, 1, m.offset) + 1   # the column where the code starts, after the ! and the `
+    n = length(m[1])
+    # The first word of a value stands for all of its code. The words after it are at the code's end: see `wrap`.
+    (later_word(seg) ? seg.col == from + n : seg.col == from && seg.n == n) || continue
+    name = strip(m[1])
+    return Base.isidentifier(name) ? (name=String(name), line=i, col=from) : nothing
+  end
+  nothing
+end
+
+"""
+The places of the page that give the name `name` a value, from the top of the
+page down. Each is the first and the last place of the part that gives it: a
+sum in a line of text, like !`energy = …`, a row of a block, like a sheet's
+"Energy = …", or a name that a `julia` block makes outside of a function.
+"""
+givers(e, name::AbstractString) = get(name_givers(e), name, NO_GIVERS)
+
+const NO_GIVERS = Tuple{Pos,Pos}[]
+
+"`givers` for each name of the page. They're found again when the page has changed."
+name_givers(e) = begin
+  b = e.buf
+  get!(e.flows, (:name_givers, b.path, b.version)) do
+    out = Dict{String,Vector{Tuple{Pos,Pos}}}()
+    give!(name, from, to) = push!(get!(() -> Tuple{Pos,Pos}[], out, name), (from, to))
+    ks = kinds(b)
+    i = 1
+    while i <= length(ks)
+      k = ks[i]
+      if k.kind == Kind.fence && k.level == 0
+        t = codeblock(b, i)[2]
+        if t > i && ks[t].kind == Kind.fence && ks[t].level == 1
+          haskey(BLOCKS, k.lang) && block_givers!(give!, e, k.lang, i, t)
+          i = t
+        end
+      elseif !(k.kind in (Kind.fence, Kind.code))
+        # From the ! to the ` that ends the sum
+        for (_, _, code, col) in get!(() -> named_sums(b.lines[i]), e.flows, (:named_sums, b.lines[i]))
+          give!(String(sum_name(code)), (i, col - 2), (i, col + length(code) + 1))
+        end
+      end
+      i += 1
+    end
+    for m in page_bounds(e)
+      # A line that brings a name in from another file, like `using Dates`, doesn't give it a value here
+      (m.span === nothing && !occursin(r"^\s*(@use|using|import)\b", b.lines[m.at[1]])) || continue
+      give!(m.name, m.at, (m.at[1], m.at[2] + length(m.name)))
+    end
+    foreach(sort!, values(out))
+    out
+  end
+end
+
+"""
+Give `give!` the place of each name that the block in the language `lang`, from
+line `i` to line `t`, gives. A sum uses the name of a row as Julia knows it:
+\"Wall length\" is `wall_length`. The place is the start of the first line
+of the block that starts with the name, or else has it, or else the block's first line.
+"""
+block_givers!(give!, e, lang, i::Int, t::Int) = begin
+  lines = e.buf.lines[i+1:t-1]
+  isempty(lines) && return
+  for (name, _) in get!(() -> block_names(BLOCKS[lang], lines), e.flows, (:block_names, lang, lines))
+    id = ident(name)
+    isempty(id) && continue
+    low = lowercase(strip(name))
+    j = something(findfirst(l -> startswith(lowercase(lstrip(l)), low), lines), findfirst(l -> occursin(low, lowercase(l)), lines), 1)
+    at = (i + j, length(lines[j]) - length(lstrip(lines[j])))
+    give!(id, at, at)
+  end
+end
+
+"""
+Where the value that the name `name` has at the column `col` of line `i` comes
+from, as a place that `givers` gives: the last place over it, or else the
+first place under it. Nothing when no part of the page gives the name a value.
+"""
+giver(e, name::AbstractString, i::Int, col::Int) = begin
+  places = givers(e, name)
+  isempty(places) && return nothing
+  places[something(findlast(p -> p[1] < (i, col), places), 1)]
+end
+
+"The place that gives a value to the name whose value is at the point `pos` of the window, as `giver` gives it, or nothing"
+giver_at(e, pos) = begin
+  found = value_name_at(e, pos)
+  found === nothing ? nothing : giver(e, found.name, found.line, found.col)
+end
+
+"How far the place `p` of the page is under the page's top, and how far the end of its line on screen is"
+place_span(e, p::Pos) = begin
+  it = item(e, p[1])
+  c = it.content
+  if c isa Flow
+    k = spot(c, p[2])[1]
+    top = it.top + line_top(c, k)
+    return (top, top + c.lines[k].high)
+  elseif c isa Sheet && !isempty(c.rows)
+    r = clamp(p[1] - it.first, 1, length(c.rows))
+    top = it.top + row_top(c, r)
+    return (top, top + c.heights[r])
+  end
+  (it.top, it.top + it.tall)
+end
+
+"""
+Go to the part of the page from `from` to `to`, which gives a name its value,
+and select it. A part that's on screen stays where it is. Another comes a
+third of the way down the window. ⌘⌥← comes back.
+"""
+go_to_giver!(e, (from, to)) = begin
+  note_place!(e)
+  b = e.buf
+  b.anchor, b.caret = from, to
+  e.popup = :none
+  # The mouse is still down. A move must not select from here to the mouse: see `drag!`.
+  e.clicked = (time(), (from[1], 0), 0)
+  focus(e)
+  s = e.scroll
+  top, bottom = place_span(e, from)[1], place_span(e, to)[2]
+  (s.offset <= PAGE_TOP + top - 30px && PAGE_TOP + bottom + 40px <= s.offset + s.viewport) ||
+    (s.offset = max(0px, PAGE_TOP + top - s.viewport / 3))
+  touch!(e)
+  e
+end
+
 """
 The words that a click with ⌘ at the point `pos` acts on, as the line and the
 columns where they start and end: a link, or a name of Julia code that has a
@@ -27928,6 +28107,8 @@ cursor(d::Document) = begin
   todo_at(e, w.mouse) === nothing || return :hand
   # A drag on what a number comes to changes the number
   (haskey(e.nodes, :scrub) || scrub_at(e, w.mouse) !== nothing) && return :resize_x
+  # A click on the value of a name goes to where the page gives the name its value
+  unmodified(w) && giver_at(e, w.mouse) !== nothing && return :hand
   # With ⌘ held, a click on a name of Julia code goes to where the name is defined. Julia compiles definition only when ⌘ is first held.
   # ⌘ with another key held, like ⇧ or ⌃, does neither, so the mouse isn't a hand.
   cmd = only_held(w, Keys.cmd)
@@ -28523,6 +28704,9 @@ press!(e, pos) = begin
   # A press on what a number comes to takes hold of the number: a drag then changes it
   found = unmodified(e) ? scrub_at(e, pos) : nothing
   found === nothing || return scrub!(e, found, pos)
+  # A click on the value of a name, like !`energy`, goes to where the page gives the name its value
+  given = unmodified(e) ? giver_at(e, pos) : nothing
+  given === nothing || return go_to_giver!(e, given)
   it = e.layout[item_under(e, pos[1] - e.origin[1], pos[2] - e.origin[2])]
   made = only_held(e, Keys.opt) ? nothing : inline_at(e, pos)
   # A click on a formula in a line of text puts the caret beside it, as a click on a word does
