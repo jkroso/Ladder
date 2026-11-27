@@ -228,7 +228,8 @@ end
   press(Keys.p, Keys.cmd, Keys.shft)
   foreach(c -> ontype(w, Typed(c, w)), "show code"); frames()
   press(Keys.enter)
-  @test K.chip_value(p, K.palette_chips(p), 1).node isa K.Document
+  # The caret is in a paragraph: the node starts with nothing, so no line goes round the whole page
+  @test K.chip_value(p, K.palette_chips(p), 1) === K.UNSAID && p.at == 1 && isempty(K.chip_letters(p, K.palette_chips(p)))
   n = node().clicks
   click()
   @test e.popup == :none && node().clicks == n && shown.buf.caret[1] == first_line

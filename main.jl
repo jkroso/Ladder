@@ -46373,7 +46373,8 @@ end
 # Show Code, in the command palette, takes the thing as its node, as Ask For
 # Change does: it starts as what the caret is on, shown as a blue A, and a
 # click chooses another and shows its code at once. Return shows the code of
-# A. A block of Julia code shows where it is in its file.
+# A. With the caret in a paragraph, it starts with nothing, so a click
+# chooses. A block of Julia code shows where it is in its file.
 #
 # The window with the code shows a file that Ladder loaded. Code that you run
 # there runs in the module that the file made, and not in a module of its own:
@@ -47645,7 +47646,8 @@ end
 #   - A part of the window, like the block of a page that shows a bar. The
 #     change is to the function that draws it.
 #
-# It starts as what the caret is on. The chip shows only a letter in a colour,
+# It starts as what the caret is on, but never as the whole page: see
+# `chip_start`. The chip shows only a letter in a colour,
 # A in blue, and a line of that colour with that letter goes round the thing
 # in the window: see `chip_letters`. A click on the window chooses another: see
 # `chip_click`. The palette's list has the rest, from the nearest.
@@ -48253,8 +48255,16 @@ choices_for(::Type{ToChange}, e) = begin
   append!(out, blocks)
 end
 
-# What the caret was on when the command was taken is the one to change, unless you choose another
-chip_start(::Type{ToChange}, e) = (found = choices_for(ToChange, e); isempty(found) ? nothing : first(found))
+"""
+What the caret was on when the command was taken is the one to change, unless
+you choose another. With the caret in a paragraph, the nearest part is the
+whole page, which isn't what the caret is on: the chip starts with nothing
+then, and draws no line round the page. The list still offers the page.
+"""
+chip_start(::Type{ToChange}, e) = begin
+  found = choices_for(ToChange, e)
+  (isempty(found) || first(found).node isa Document) ? nothing : first(found)
+end
 
 """
 What a click at the mouse of the window `w` chooses for Ask Agent: the
