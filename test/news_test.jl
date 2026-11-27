@@ -488,88 +488,124 @@ end
   rm(joinpath(news, "Feeds.md"))
 end
 
-@testset "a reading companion talks with you about any article of the folder, in a terminal that keeps the talk" begin
-  K.Agent.place[] = mktempdir()
-  started = Any[]
-  K.COMPANION_STARTER[] = v -> push!(started, v)
+@testset "a reading companion talks with you about any article of the folder, in a session whose file keeps the talk" begin
+  # Grok's stand-in for a session: it writes down each line of JSON-RPC that Ladder gives it, and answers as `grok agent stdio` does
+  heard = joinpath(dir, "companion-heard.txt")
+  grok = joinpath(dir, "companion-agent")
+  write(grok, replace(raw"""
+#!/bin/sh
+say() { printf '%s\n' "$1"; }
+answer() { say '{"jsonrpc":"2.0","result":'"$2"',"id":"'"$1"'"}'; }
+words() { say '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"news-1","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"'"$1"'"}}}}'; }
+while IFS= read -r line; do
+  printf '%s\n' "$line" >> "HEARD"
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":"\(ladder-[0-9]*\)".*/\1/p')
+  case "$line" in
+  *'"initialize"'*) answer "$id" '{"protocolVersion":1,"agentCapabilities":{"loadSession":true}}' ;;
+  *'"session/new"'*) answer "$id" '{"sessionId":"news-1","models":{"currentModelId":"grok-4.7"}}' ;;
+  *'"session/resume"'*) answer "$id" '{"models":{"currentModelId":"grok-4.7"}}' ;;
+  *'"session/set_model"'*) answer "$id" '{}' ;;
+  *'"session/prompt"'*)
+    case "$line" in
+    *'reading companion'*) words "I am ready." ;;
+    *)
+      words "I will read the article."
+      say '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"news-1","update":{"sessionUpdate":"tool_call","toolCallId":"c1","title":"read_file","rawInput":{"target_file":"/tmp/story.md"}}}}'
+      say '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"news-1","update":{"sessionUpdate":"tool_call_update","toolCallId":"c1","status":"completed"}}}'
+      words "It is about **paint**." ;;
+    esac
+    answer "$id" '{"stopReason":"end_turn"}' ;;
+  esac
+done
+""", "HEARD" => heard))
+  chmod(grok, 0o755)
+  K.ACP_COMMAND[] = Cmd([grok])
+  K.COMPANION_IN_TEST[] = true
+  K.AGENT_MODELS["Grok"] = K.grok_list("Default model: grok-4.7\n\nAvailable models:\n  * grok-4.7 (default)\n")
+  lines() = isfile(heard) ? readlines(heard) : String[]
+  until(f, most=10) = (t = time(); while !f() && time() - t < most; sleep(0.02); frames(1) end; f())
   folder = realpath(news)
-  # Opening the front page starts one, in a terminal whose file is in the folder of today's articles
+  # Opening the front page starts one: a session of Grok whose file is in the folder of today's articles
   opens() = (K.open_folder!(e, news); e.nodes[:news_shown] = 0.0; frames())
   opens()
-  @test length(started) == 1
-  v = started[1]
-  file = realpath(joinpath(news, K.COMPANION_FILE))
-  script = read(v.command[2], String)
-  @test v.dir == folder && v.path == joinpath(folder, Dates.format(Dates.today(), "yyyy-mm-dd"), "Talk with Grok.vt") && isfile(v.path)
-  @test v in K.terminals(e) && e.nodes[(:term, v.path)] === v
-  @test occursin("ladder wait", script) && occursin(file, script) && occursin("reading companion", script) && occursin("say my question and your answer here too", script)
-  @test !any(p -> startswith(p.name, "."), front().interests)
-  # It doesn't start again while it starts
+  @test haskey(K.NEWS_COMPANIONS, folder)
+  p = K.NEWS_COMPANIONS[folder][2]
+  s = p.session
+  day = joinpath(folder, Dates.format(Dates.today(), "yyyy-mm-dd"))
+  @test p.file == joinpath(day, "Talk with Grok.chat") && isfile(p.file) && any(x -> x === p, K.chats(e)) && e.nodes[(:chat, p.file)] === p
+  @test s.agent == "Grok" && !s.turns && s.dir == day && K.is_companion(p)
+  ok = until(() -> !s.busy)
+  @test ok && K.running(s) && s.id == "news-1" && last(s.items) isa K.AgentReply && last(s.items).text == "I am ready."
+  said = lines()
+  @test occursin("\"method\":\"session/new\"", said[2]) && occursin("\"cwd\":\"$day\"", said[2])
+  @test occursin("\"method\":\"session/prompt\"", said[3]) && occursin("reading companion", said[3]) && occursin(folder, said[3]) && !occursin("ladder wait", said[3])
+  @test !any(i -> startswith(i.name, "."), front().interests)
+  # The file keeps the talk, and the session stays though its file has no tab
+  frames(4)
+  ok = until(() -> occursin("I am ready.", read(p.file, String)))
+  @test ok && K.running(s) && !(p.file in K.tabs(e))
+  # It doesn't start again while it runs
   opens()
-  @test length(started) == 1
-  # While it waits, it's the agent of each article of the folder, and of no other page. No dot says that it waits elsewhere.
-  write(joinpath(K.Agent.folder(), "$(getpid()).wait"), file * "\nGrok\n")
-  delete!(e.nodes, :agents)
+  K.NEWS_COMPANIONS[folder] = (0.0, p)
+  opens()
+  @test count(l -> occursin("\"initialize\"", l), lines()) == 1 && K.NEWS_COMPANIONS[folder][2] === p
+  # It's the agent of each article of the folder, and of no other page
   art = first(a for ed in front().editions for a in ed.articles)
-  @test [w.name for w in K.agents(e, art.path)] == ["Grok"]
-  @test isempty(K.agents(e, joinpath(dir, "page.md"))) && isempty(K.elsewhere(e))
-  # So Ask Agent on an article asks it
+  @test K.companion_pane(e, art.path) === p && K.companion_pane(e, joinpath(dir, "page.md")) === nothing && K.companion_pane(e, p.file) === nothing
+  @test isempty(K.agents(e, art.path)) && isempty(K.elsewhere(e))
+  # So Ask Agent on an article gives the session your words, and what Grok says last shows as the answer
   K.news_open!(e, art.path)
   frames()
   @test K.sharer(e) == "Grok" && K.asks_whom(e) == "Grok"
-  # One that waits and that Ladder didn't start, as before Ladder last opened, stays
-  delete!(K.NEWS_COMPANIONS, folder)
-  opens()
-  @test length(started) == 1
-  rm(joinpath(K.Agent.folder(), "$(getpid()).wait"))
-  # The `ladder wait` of a companion whose program has ended is stopped, and another starts, with a file of its own
-  stale = run(`sleep 60`, wait=false)
-  write(joinpath(K.Agent.folder(), "$(getpid(stale)).wait"), file * "\nGrok\n")
-  delete!(e.nodes, :agents)
-  K.NEWS_COMPANIONS[folder] = (0.0, v)
-  opens()
-  ok = (t = time(); while process_running(stale) && time() - t < 5; sleep(0.05) end; !process_running(stale))
-  @test ok && length(started) == 2 && basename(started[2].path) == "Talk with Grok 2.vt"
+  k = findlast(l -> !isempty(strip(l)), e.buf.lines)
+  thing = K.words_thing(e.buf, (k, 0), (k, 3))
+  K.ask_sharer!(e, K.sharer(e), [thing], "What is this about?"; asks=true)
+  a = K.code_picker(e).asked
+  @test a.session === s && a.sent && a.by == "Grok" && s.busy
+  ok = until(() -> a.ended > 0)
+  @test ok && !a.failed && !a.changed && a.said == "Grok answered." && a.step == "Reading story.md"
+  asked = last(filter(l -> occursin("session/prompt", l), lines()))
+  @test occursin("The user's words: What is this about?", asked) && occursin(basename(art.path), asked) && occursin("answer it in your reply", asked) && !occursin("ladder wait", asked)
+  box = only(K.ask_boxes(e))
+  @test occursin("It is about **paint**.", last(box.answers).answer) && !occursin("I will read", last(box.answers).answer)
+  empty!(K.ask_boxes(e))
+  K.code_picker(e).asked = nothing
   # Settings can turn it off
-  K.NEWS_COMPANIONS[folder] = (0.0, v)
+  K.stop_companion!(e, folder)
+  ok = until(() -> !K.running(s))
+  @test ok && !haskey(K.NEWS_COMPANIONS, folder) && K.companion_pane(e, art.path) === nothing && K.sharer(e) == ""
   N.companion!(false)
   opens()
-  @test length(started) == 2
+  @test !haskey(K.NEWS_COMPANIONS, folder)
   N.companion!(true)
+  # A talk that the day already has goes on: the program resumes the session, and isn't told again what a companion is for
+  n = count(l -> occursin("session/prompt", l), lines())
+  opens()
+  p2 = K.NEWS_COMPANIONS[folder][2]
+  ok = until(() -> any(l -> occursin("\"method\":\"session/resume\"", l) && occursin("\"sessionId\":\"news-1\"", l), lines()))
+  @test ok && p2 === p && K.running(p2.session) && count(l -> occursin("session/prompt", l), lines()) == n
   # A day's talk goes when all that day's articles have gone
   old = mkpath(joinpath(news, Dates.format(Dates.today() - Day(9), "yyyy-mm-dd")))
+  write(joinpath(old, "Talk with Grok.chat"), "Hello\n")
   write(joinpath(old, "Talk with Grok.vt"), "Hello\n")
-  @test joinpath(old, "Talk with Grok.vt") in N.prune!(news; days=7) && !isdir(old)
-  # When Grok asks whether it may work in a folder that's new to it, the front page says where to answer
-  v2 = started[2]
-  K.NEWS_COMPANIONS[folder] = (time(), v2)
-  v2.shell = :running
-  K.Terms.feed!(K.Terms.terminal(v2), Vector{UInt8}("Do you trust the contents of this directory?"))
-  @test occursin("Talk with Grok 2 asks whether it may work in this folder", K.companion_status(news))
-  v2.shell = nothing
+  gone = N.prune!(news; days=7)
+  @test joinpath(old, "Talk with Grok.chat") in gone && joinpath(old, "Talk with Grok.vt") in gone && !isdir(old)
+  # When the session says that something went wrong, the front page says so
+  push!(p.session.items, K.SessionNote(words="Grok didn't start: no login.", bad=true))
+  @test occursin("Grok, your reading companion, has a problem: Grok didn't start: no login.", K.companion_status(news))
+  pop!(p.session.items)
   @test K.companion_status(news) == ""
-  # Its `ladder wait` stops when the window closes its terminal
-  stale = run(`sleep 60`, wait=false)
-  write(joinpath(K.Agent.folder(), "$(getpid(stale)).wait"), file * "\nGrok\n")
-  K.end_companions!(e)
-  ok = (t = time(); while process_running(stale) && time() - t < 5; sleep(0.05) end; !process_running(stale))
-  @test ok && !haskey(K.NEWS_COMPANIONS, folder)
   # The front page has a tab, and the companion ends when the tab closes, but not while an article of the folder shows
-  opens()
-  v3 = started[end]
-  @test news in K.tabs(e) && K.NEWS_COMPANIONS[folder][2] === v3
+  @test news in K.tabs(e)
   K.news_open!(e, art.path)
   frames()
-  @test haskey(K.NEWS_COMPANIONS, folder)
-  stale = run(`sleep 60`, wait=false)
-  write(joinpath(K.Agent.folder(), "$(getpid(stale)).wait"), file * "\nGrok\n")
+  @test haskey(K.NEWS_COMPANIONS, folder) && K.running(p.session)
   K.close_tab!(e, news)
   frames()
-  ok = (t = time(); while process_running(stale) && time() - t < 5; sleep(0.05) end; !process_running(stale))
-  @test ok && !haskey(K.NEWS_COMPANIONS, folder) && !(v3 in K.terminals(e)) && !(news in K.tabs(e))
-  K.COMPANION_STARTER[] = nothing
-  K.Agent.place[] = ""
-  foreach(x -> filter!(o -> o !== x, K.terminals(e)), started)
+  ok = until(() -> !K.running(p.session))
+  @test ok && !haskey(K.NEWS_COMPANIONS, folder) && !(news in K.tabs(e))
+  K.COMPANION_IN_TEST[] = false
+  K.ACP_COMMAND[] = nothing
 end
 
 close(w)

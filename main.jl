@@ -14628,7 +14628,6 @@ end
 "End the shell of every terminal of the window of `e`, and write its file: the window has closed"
 close_terminals!(e) = begin
   haskey(e.nodes, :terminals) || return
-  end_companions!(e)
   foreach(Terms.close!, terminals(e))
   empty!(terminals(e))
   nothing
@@ -23063,13 +23062,12 @@ end
 const TRUE_PATHS = Dict{String,String}()
 truepath(path) = get!(() -> ispath(path) ? realpath(path) : abspath(path), TRUE_PATHS, path)
 
-"The agents that wait for the file at `path`. A page of a folder of news has the folder's reading companion too: see `news_companion!`."
+"The agents that wait for the file at `path`"
 agents(e, path) = begin
   ws = waiters(e)
   (isempty(ws) || isempty(path)) && return ws[1:0]
   at = truepath(path)
-  found = filter(w -> w.page == at, ws)
-  isempty(found) ? filter(w -> companion_for(w, at), ws) : found
+  filter(w -> w.page == at, ws)
 end
 
 "The agents that wait for the page that's showing"
@@ -23080,8 +23078,7 @@ elsewhere(e) = begin
   ws = waiters(e)
   isempty(ws) && return ws
   at = isempty(e.buf.path) ? "" : truepath(e.buf.path)
-  # A reading companion waits for a file that no one opens, and talks about any page of its folder
-  filter(w -> w.page != at && basename(w.page) != COMPANION_FILE, ws)
+  filter(w -> w.page != at, ws)
 end
 
 "Save the page and tell each agent that waits for it what you changed. Nothing happens if no agent waits."
@@ -23214,6 +23211,9 @@ end
 sharer(e) = begin
   ws = agents(e)
   isempty(ws) || return first(ws).name
+  # An article of a folder of news has the folder's reading companion
+  p = readonly(e.buf) ? nothing : companion_pane(e, e.buf.path)
+  p === nothing || return p.session.agent
   sent = get(e.nodes, :sent, nothing)
   sent !== nothing && sent[1] == e.buf.path ? sent[3]::String : ""
 end
@@ -35463,7 +35463,7 @@ the screen. A test's window isn't, so the windows that it opens aren't either.
 """
 show_window!(w, by) = (by !== nothing && isopen(by) && open(w); w)
 
-onclose(e::Editor, ::Window) = (Base.filter!(o -> o !== e, editors); close_designs!(e); close_terminals!(e); close_agent!(e); close_chats!(e); nothing)
+onclose(e::Editor, ::Window) = (Base.filter!(o -> o !== e, editors); close_designs!(e); close_terminals!(e); close_agent!(e); close_chats!(e); close_asks!(e); nothing)
 
 """
 A window that shows the Markdown file or the folder at `path`, with the
@@ -38845,37 +38845,6 @@ end
 "The line of the settings file that keeps the model of each agent: each agent's name, a colon and the model, with commas between them"
 models_setting() = join(("$agent:$id" for (agent, id) in sort!(collect(MODELS_CHOSEN[])) if !isempty(id)), ',')
 
-# --- the script of an agent's session in a terminal ---
-#
-# A reading companion of a folder of news is an agent that runs in a
-# terminal of Ladder's own: see "the agents that get the news". Ladder
-# writes a script that starts the agent there, with the folders of the
-# agent's command and of the `ladder` command on its PATH.
-
-"The folders that can hold the `ladder` command: the one beside this code, and the one that the installed app writes it to"
-ladder_bins() = filter(isdir, [joinpath(@__DIR__, "plugin", "bin"), joinpath(homedir(), "Library", "Application Support", "Ladder", "bin")])
-
-"""
-The script that starts a session of the agent `k` in the folder `dir`, with
-`words` after its command: its options and its first words. The agent's own
-folder, the folders of the `ladder` command and Homebrew's go after the
-terminal's PATH, for a terminal that hasn't got them. The agent's name is
-there for `ladder wait`, so that the top bar shows its logo.
-"""
-session_script(k::AgentKind, dir, words) = begin
-  found = agent_path(k)
-  quoted = Base.shell_escape_posixly
-  folders = join(unique([ladder_bins(); dirname(found); "/opt/homebrew/bin"; "/usr/local/bin"]), ':')
-  """
-  #!/bin/zsh
-  # Ladder wrote this file. It starts $(k.name) in a terminal of Ladder's.
-  export PATH="\$PATH":$(quoted(folders))
-  export LADDER_AGENT=$(quoted(k.name))
-  cd $(quoted(dir)) || exit 1
-  exec $(join(quoted.([found; words]), ' '))
-  """
-end
-
 """
 Start an agent with the command `command` and the words `prompt`, in the
 folder `dir`. It gives the agent's process, and a task that reads what the
@@ -39339,6 +39308,8 @@ in a card: see "the card of an answer".
   talk::Vector{Tuple{String,String}} = Tuple{String,String}[]
   asks::Bool = false
   reply::String = ""         # the file that the page's agent writes its answer to, for words that can be a question
+  session::Any = nothing     # the session that works on it, for an agent whose program stays: see "a request that a session answers"
+  mark::Int = 0              # how many things that session held when it got the request. What comes after is about the request.
 end
 
 "Each change that an agent made since Ladder started, the last last, for Show Change and Undo Change"
@@ -39386,7 +39357,12 @@ ask_change!(e, places::AbstractVector, words::AbstractString; prompt=change_prom
   # What you asked about the things before, from the card of an answer, goes with your words
   prompt *= talk_words(talk)
   try
-    a.process, a.out = start_agent(agent_command(e), prompt, dirname(first(files)), a)
+    if asks_session(e)
+      # An agent whose program stays gets the request in a session of the window: see "a request that a session answers"
+      ask_in!(a, ask_session!(e, dirname(first(files))), prompt)
+    else
+      a.process, a.out = start_agent(agent_command(e), prompt, dirname(first(files)), a)
+    end
   catch err
     a.said, a.failed, a.ended = "The agent didn't start. " * trouble(err), true, time()
   end
@@ -39419,6 +39395,40 @@ reload_files!(places, texts::Dict{String,String}) = begin
   (ran, failed)
 end
 
+"""
+The agent that worked on the request `a` has ended, well or not, and
+`printed` is what it said. Ladder runs the code that it changed, and the
+label of the thing says how it went. An answer to a question shows under
+the words that it's about, or in a card beside the thing.
+"""
+ask_ended!(e, t::CodePicker, a::AskedChange, printed::AbstractString, well::Bool) = begin
+  # What an agent that you stopped changed can be half done, so it doesn't run
+  ran, failed = a.stopped ? (0, "") : reload_files!(a.places, a.before)
+  a.after = Dict(f => read(f, String) for f in keys(a.before) if isfile(f))
+  a.changed = a.after != a.before
+  a.failed = !well || !isempty(failed)
+  a.said = a.stopped ? (a.changed ? "You stopped the agent. Ladder didn't run what it changed. Undo Change puts it back." : "You stopped the agent. Nothing changed.") :
+           !well ? "The agent stopped. " * agent_said(printed) :
+           !isempty(failed) ? "The new code doesn't run. " * failed :
+           !a.changed ? "Nothing changed. " * agent_said(printed) : agent_said(printed)
+  a.ended = time()
+  a.changed && push!(AGENT_CHANGES, a)
+  # Words that asked a question get the agent's answer in a card beside the thing
+  if a.asks && !a.changed && !a.failed && !a.stopped
+    said = String(strip(printed))
+    if !isempty(a.places) && first(a.places).node isa PickedText
+      # A question asked in place is answered in place, under its words: see "a request in place"
+      a.said = "$(isempty(a.by) ? e.ai : a.by) answered."
+      show_answer!(e, a, isempty(said) ? "The agent said nothing." : said)
+    else
+      said = strip(replace(said, "**" => ""))
+      card!(e, AskedAbout(words=a.words, places=a.places, talk=a.talk, answer=isempty(said) ? "The agent said nothing." : String(said)))
+      t.asked = nothing
+    end
+  end
+  a
+end
+
 "In each frame: when the agent that was asked for a change has ended, run the code that it changed, and say how it went"
 ask_tick!(e) = begin
   t = get(e.nodes, :code_picker, nothing)
@@ -39426,37 +39436,14 @@ ask_tick!(e) = begin
   queue_tick!(e, t)
   t.asked === nothing && return nothing
   a = t.asked
+  a.ended == 0 && a.session !== nothing && return session_ask_tick!(e, t, a)
   a.ended == 0 && !isempty(a.by) && return sharer_tick!(e, t, a)
   if a.ended == 0
     yield()   # the agent's end is noticed by a task, which gets its turn here
     process_exited(a.process) && a.gone == 0 && (a.gone = time())
     # What it printed is all read a moment after it ends. A program that it left running can hold that up, so the wait has an end.
     if a.gone > 0 && (istaskdone(a.out) || time() - a.gone > 2)
-      printed = agent_text(istaskdone(a.out) && !istaskfailed(a.out) ? fetch(a.out) : "")
-      # What an agent that you stopped changed can be half done, so it doesn't run
-      ran, failed = a.stopped ? (0, "") : reload_files!(a.places, a.before)
-      a.after = Dict(f => read(f, String) for f in keys(a.before))
-      a.changed = a.after != a.before
-      a.failed = !success(a.process) || !isempty(failed)
-      a.said = a.stopped ? (a.changed ? "You stopped the agent. Ladder didn't run what it changed. Undo Change puts it back." : "You stopped the agent. Nothing changed.") :
-               !success(a.process) ? "The agent stopped. " * agent_said(printed) :
-               !isempty(failed) ? "The new code doesn't run. " * failed :
-               !a.changed ? "Nothing changed. " * agent_said(printed) : agent_said(printed)
-      a.ended = time()
-      a.changed && push!(AGENT_CHANGES, a)
-      # Words that asked a question get the agent's answer in a card beside the thing
-      if a.asks && !a.changed && !a.failed && !a.stopped
-        said = String(strip(printed))
-        if !isempty(a.places) && first(a.places).node isa PickedText
-          # A question asked in place is answered in place, under its words: see "a request in place"
-          a.said = "$(e.ai) answered."
-          show_answer!(e, a, isempty(said) ? "The agent said nothing." : said)
-        else
-          said = strip(replace(said, "**" => ""))
-          card!(e, AskedAbout(words=a.words, places=a.places, talk=a.talk, answer=isempty(said) ? "The agent said nothing." : String(said)))
-          t.asked = nothing
-        end
-      end
+      ask_ended!(e, t, a, agent_text(istaskdone(a.out) && !istaskfailed(a.out) ? fetch(a.out) : ""), success(a.process))
     end
     redraw_in!(e, 0.1)
   elseif time() - a.ended > (a.failed ? 15 : 8)
@@ -39611,6 +39598,7 @@ program has stopped. `busy` is true while the agent works on what you said.
   later::Any = nothing         # a note on a new model, with whether it's bad, to show when the agent has done: see `model_note!`
   talk::Any = nothing          # Ladder's talk with Antigravity's program: see `AcpTalk`
   repl::Any = nothing          # the Julia code that the agent runs inside Ladder: see "the code that an agent runs"
+  brief::String = ""           # what the agent is told of where it is, when it's other than what a pane's session is told
 end
 
 "A command that a test puts in the place of the agent's: a program that reads and prints the same lines of JSON. Nothing means the agent that Settings chose."
@@ -39632,7 +39620,7 @@ You are in Ladder, a Markdown app on the user's Mac. The user's window shows a p
 Each message of the user starts with a block between <ladder> and </ladder>. Ladder wrote the block, not the user. It says which file the window shows, which section of it is in view, where the caret is, and what is selected. The section in view is the one at the top of the window. A web page that an HTML file makes has no lines or columns. Its block gives the exact text of a selection, and the paragraph that holds it between <paragraph> and </paragraph>. When nothing is selected, the caret is where the user last clicked, and the block gives the words before it and its paragraph. These are the words as the page shows them. Where Ladder can tell, the block also gives their lines and columns in the HTML file, which can have tags and entities between the words. Lines and columns count from 1. A column is a place between characters: column 1 is before the first character of its line, so a selection ends before the character at its end column. The exact text of a selection is between <selection> and </selection>: it starts after the line break that follows <selection>, and ends before the line break in front of </selection>. Ladder saves the page to its file before each message, so the file has what the window shows, unless the block says otherwise. When the user asks for a change to the page, change its file: Ladder shows the change at once. Don't run `ladder show` or `ladder wait`: the page is open already, and the user talks to you here."""
 
 "What the agent of the session `s` is told of where it is: a session with a file of its own has no page beside it"
-session_brief(s::AgentSession) = session_brief(!isempty(s.file)) * (has_code(s) ? "\n\n" * BRIEF_CODE * (isempty(s.file) ? " " * BRIEF_SHOWN : "") : "")
+session_brief(s::AgentSession) = (isempty(s.brief) ? session_brief(!isempty(s.file)) : s.brief) * (has_code(s) ? "\n\n" * BRIEF_CODE * (isempty(s.file) ? " " * BRIEF_SHOWN : "") : "")
 
 """
 The command that starts the program of the session `s`: Claude Code, which
@@ -42836,7 +42824,8 @@ chat_tick!(e) = begin
         Base.filter!(o -> o !== p, chats(e))
         continue
       end
-      s !== nothing && !s.busy && running(s) && !(p.file in tabs(e)) && close!(s)
+      # A reading companion's session has no tab of its own: it ends with its folder's tab
+      s !== nothing && !s.busy && running(s) && !(p.file in tabs(e)) && !is_companion(p) && close!(s)
     end
     pane_tick!(p, e)
     s !== nothing && s.version != p.kept && (!s.busy || time() - p.wrote > 2) && keep_talk!(p)
@@ -42847,6 +42836,7 @@ end
 "End the agent of every session's file of the window of `e`, and write each file: the window has closed"
 close_chats!(e) = begin
   haskey(e.nodes, :chats) || return nothing
+  end_companions!(e)
   for p in chats(e)
     s = p.session
     s === nothing && continue
@@ -43720,6 +43710,90 @@ queue_tick!(e, t::CodePicker) = begin
   nothing
 end
 
+# --- a request that a session answers ---
+#
+# Grok and Antigravity have a program that stays for a session: see
+# "Antigravity and Grok, which ask you before a step". So a request of Ask
+# Agent to one of them goes to a session of the window, not to a program
+# that does one thing and ends. The next request goes to the same session,
+# so the agent knows what you asked before. The agent has the tool that runs
+# Julia code in Ladder, so it can change the thing that the window shows.
+# The session ends with the window. A reading companion of a folder of news
+# is such a session too, with a file of its own: see "a reading companion
+# for a folder of news".
+#
+# No pane shows the session while it works on a request, so you can't
+# answer what the agent asks before a step. Ladder allows a step that reads,
+# searches the web or changes a file, and refuses any other, like a shell
+# command, or Julia code that the sandbox stops.
+
+"The tools of a step that Ladder allows for the session of a request, where no pane shows the question"
+const ASK_ALLOWS = ("Read", "Edit", "Write", "MultiEdit", "Grep", "Glob", "List", "WebSearch", "WebFetch", "TodoWrite")
+
+"What the session for the requests of Ask Agent is told of where it is"
+const BRIEF_ASKS = "You are in Ladder, a Markdown app on the user's Mac. The user marks a thing in the window and asks you to change it, or asks you a question about it. Each message says what the thing is and where its code is. Ladder shows the last thing that you say beside the thing. So end with a few short sentences of Markdown: the answer to the question, or what you changed."
+
+"True when a request of Ask Agent in the window of `e` goes to a session: the program of the agent that Settings chose stays for a session, and no test has put a command in the agent's place"
+asks_session(e) = AGENT_COMMAND[] === nothing && haskey(ACP_OPTIONS, agent_kind(e.ai).name)
+
+"""
+The session that works on the requests of Ask Agent in the window of `e`,
+with its program running. The agent works in the folder `dir`. A request for
+another folder, or after you chose another agent, ends the session and
+starts a new one. In the agent's Julia code, `shown` is what the window
+shows.
+"""
+ask_session!(e, dir) = begin
+  e = top_editor(e)
+  agent, dir = agent_kind(e.ai).name, String(dir)
+  s = get(e.nodes, :ask_session, nothing)
+  if !(s isa AgentSession && s.agent == agent && s.dir == dir)
+    s isa AgentSession && close!(s)
+    s = e.nodes[:ask_session] = AgentSession(agent=agent, dir=dir, model=chosen_model(agent), brief=BRIEF_ASKS)
+    r = repl!(s)
+    r.shown = () -> agent_shown(e)
+    r.look = () -> on_main(() -> window_picture(e))
+  end
+  running(s) || start!(s, session_command(s))
+  s
+end
+
+"End the session of the requests of Ask Agent in the window of `e`: the window has closed"
+close_asks!(e) = (s = pop!(e.nodes, :ask_session, nothing); s isa AgentSession && close!(s); nothing)
+
+"Give the session `s` the words `words` of the request `a`. The request keeps the session, and how much the session held before."
+ask_in!(a::AskedChange, s::AgentSession, words::AbstractString) = begin
+  s.turns || running(s) || start!(s, session_command(s))
+  say!(s, words)
+  a.session, a.mark = s, length(s.items)
+  a
+end
+
+"""
+In each frame while a session works on the request `a`: answer what the
+agent asks before a step, show its last step on the thing's label, and when
+the agent has done, take the last thing that it said as what it says of the
+request. Something that went wrong in the session, like a program that
+didn't start, fails the request with those words.
+"""
+session_ask_tick!(e, t::CodePicker, a::AskedChange) = begin
+  s = a.session
+  yield()   # the session's lines are read by a task, which gets its turn here
+  since = s.items[min(a.mark, length(s.items))+1:end]
+  for it in since
+    it isa AgentWants && it.answer == :none && answer!(s, it, !(it.input isa Channel) && it.tool in ASK_ALLOWS)
+  end
+  k = findlast(it -> it isa AgentStep, since)
+  k === nothing || (a.step = since[k].words)
+  if !s.busy
+    said = [it.text for it in since if it isa AgentReply && !isempty(strip(it.text))]
+    wrong = [it.words for it in since if it isa SessionNote && it.bad]
+    ask_ended!(e, t, a, !isempty(wrong) ? join(wrong, " ") : isempty(said) ? "" : last(said), isempty(wrong))
+  end
+  redraw_in!(e, 0.1)
+  nothing
+end
+
 # --- ask the agent of the page ---
 #
 # A page can be shared with an agent: an agent like Claude Code wrote it, and
@@ -43804,7 +43878,9 @@ hand_change!(e, a::AskedChange) = begin
   b.path == a.page || return false
   delete!(e.nodes, :agents)
   ws = agents(e)
-  isempty(ws) && return false
+  # With no agent that waits for the page, an article of a folder of news has the folder's reading companion, which gets one request at a time
+  p = isempty(ws) ? companion_pane(e, b.path) : nothing
+  isempty(ws) && (p === nothing || p.session.busy) && return false
   files = unique(c.file for c in a.places)
   # The agent reads the files, so the page, and what a window shows of a file and didn't write, go to their files first
   save!(b)
@@ -43812,6 +43888,13 @@ hand_change!(e, a::AskedChange) = begin
     !isempty(o.buf.path) && page_key(o.buf.path) in files && dirty(o.buf) && writes(o.buf) && save!(o.buf)
   end
   a.before = Dict(f => read(f, String) for f in files if isfile(f))
+  if p !== nothing
+    # The companion's session gets the words itself, and what it says last is the answer: see "a request that a session answers"
+    s = session!(p, e)
+    ask_in!(a, s, Agent.request(b.path, b.lines, b.lines, a.words, [thing_told(e, c) for c in a.places], talk_words(a.talk), question=a.asks))
+    a.by, a.sent = s.agent, true
+    return true
+  end
   # Words that can be a question get a file for the answer, which shows under the things: see `show_answer!`
   a.asks && isempty(a.reply) && (a.reply = Agent.answer_file())
   hand_over!(e, ws, Agent.request(b.path, b.told, b.lines, a.words, [thing_told(e, c) for c in a.places], talk_words(a.talk), question=a.asks, reply=a.reply))
@@ -43884,6 +43967,7 @@ end
 stop_agents!(e, found) = begin
   for a in found
     a.process === nothing || process_exited(a.process) || kill(a.process)
+    a.session === nothing || stop!(a.session)
     a.stopped = true
   end
   redraw_in!(e, 0)
@@ -50702,170 +50786,149 @@ news_now!(e, folder::AbstractString) = (get_feeds!(folder; now=true); get_news!(
 
 # --- a reading companion for a folder of news ---
 #
-# When you open a folder of news, Ladder starts Grok in a terminal of its own,
-# behind the page, to talk with about what you read: your reading companion.
-# The terminal's file is `Talk with Grok.vt` in the folder of today's articles,
+# When you open a folder of news, Ladder starts a session with Grok behind
+# the page, to talk with about what you read: your reading companion. The
+# session's file is `Talk with Grok.chat` in the folder of today's articles,
 # so it keeps the talk, and it goes when that day's articles go. Open it to
-# read the talk, or to talk with Grok there.
+# read the talk, or to talk with Grok there. A talk that the day already has
+# goes on.
 #
-# The companion waits for the hidden file `.reading.md` in the folder (see
-# agent.jl), and Ladder counts it as the agent of each page of the folder. So
-# on any article, Ask Grok… asks it, and its answer shows under what you
-# marked. It's one session for as long as it runs, so it remembers what you
-# talked about. The folder's front page has a tab, like a file, and the
-# companion ends when that tab closes, or its window.
+# Ladder counts the companion as the agent of each article of the folder. So
+# on any article, Ask Grok… gives its session your words, and what it says
+# shows under what you marked: see "a request that a session answers". It's
+# one session, so it remembers what you talked about. The folder's front
+# page has a tab, like a file, and the companion ends when that tab closes,
+# or its window.
 #
-# Ladder starts another when you open the front page and the companion doesn't
-# wait, didn't start in the last five minutes, and its program has ended. A
-# window that keeps no settings, as a test's, starts none. Settings can turn
-# the companion off.
+# Ladder starts the companion again when you open the front page, its
+# program has ended and it didn't start in the last five minutes. A window
+# that keeps no settings, as a test's, starts none. Settings can turn the
+# companion off.
 
 "The agent that Ladder starts as a reading companion, when it's installed. Else it's the agent that Settings chose."
 const NEWS_COMPANION = "Grok"
-"The hidden file of a folder of news that its reading companion waits for"
-const COMPANION_FILE = ".reading.md"
-"What `.reading.md` says"
-const COMPANION_TEXT = "Ladder made this file. The agent that you talk with about the news waits for it. Ask it from any article with Ask Agent.\n"
-"The reading companions that Ladder started, by their folders: when, and the terminal that each runs in"
+"The reading companions that Ladder started, by their folders: when, and the pane of the session's file of each"
 const NEWS_COMPANIONS = Dict{String,Tuple{Float64,Any}}()
-"How many seconds a companion has to start waiting before Ladder looks at its program"
+"How many seconds a companion has to start before Ladder looks at its program"
 const COMPANION_START = Ref(300.0)
-"What starts a companion's terminal, for a test: a function of the terminal. Nothing means `Terms.start!`."
-const COMPANION_STARTER = Ref{Any}(nothing)
+"A test makes it true, so that its window, which keeps no settings, starts a companion"
+const COMPANION_IN_TEST = Ref(false)
 
-"True when the agent that waits, `w`, is the reading companion of a folder of news that holds the file at `at`"
-companion_for(w, at) = basename(w.page) == COMPANION_FILE && startswith(at, dirname(w.page) * "/")
-
-"""
-What the reading companion of the folder of news `folder` is told first.
-`file` is what it waits for.
-"""
-companion_words(folder, file) = """
+"What the reading companion of the folder of news `folder` is told first"
+companion_words(folder) = """
 You're my reading companion. I read the newspaper in the folder $folder in Ladder, an app that shows it as a newspaper, and I'll ask you about what I'm reading. It's one conversation for as long as I read, so remember what we talk about.
 
-1. Read $(News.INSTRUCTIONS) in that folder to learn how the paper is made, and the titles and summaries of the newest day's articles, in the folder named by the date. $(News.FEEDBACK) says which articles I opened and which I liked. Don't change any file of the paper.
-2. Run `ladder wait $(Base.shell_escape_posixly(file))` in the background. Then say in one sentence that you're ready. Don't run `ladder show`.
-3. When that command ends, it prints what I asked in Ladder, with the page that I'm reading and the words that I marked on it. Read the article. When it doesn't have the answer, search the web, or X. Then answer as the command says: write the answer to the file that it names. Then say my question and your answer here too, so that this conversation keeps them.
-4. Then run the same `ladder wait` command in the background again. Do that each time, until I say that we're done."""
+Read $(News.INSTRUCTIONS) in that folder to learn how the paper is made, and the titles and summaries of the newest day's articles, in the folder named by the date. $(News.FEEDBACK) says which articles I opened and which I liked. Don't change any file of the paper. Then say in one sentence that you're ready.
 
-"What goes after the command of the agent `k` to start it as the companion of `folder`: the first words, and leave to run `ladder wait`"
-companion_args(k::AgentKind, folder, file) = begin
-  words = companion_words(folder, file)
-  k.name == "Claude" ? [words, "--allowedTools", "Bash(ladder wait *)"] :
-  # Grok draws on the terminal's second screen, which keeps no past, unless it's minimal: then the talk goes into the past, which the file keeps
-  k.name == "Grok" ? ["--minimal", "--allow", "Bash(ladder wait*)", words] :
-  k.name == "Antigravity" ? ["-i", words] : [words]
+Each question of mine comes from Ladder, with the page that I'm reading and the words that I marked on it. Read the article. When it doesn't have the answer, search the web, or X. Answer in a few short sentences of Markdown. Ladder shows the last thing that you say under the words that I marked, so put the whole answer there."""
+
+"True when the pane `p` is the session's file of a reading companion that runs"
+is_companion(p) = any(c -> c[2] === p, values(NEWS_COMPANIONS))
+
+"""
+The pane of the reading companion of the file at `path`: the session's file
+of the companion that the window of `e` started for the folder of news that
+holds the file. It's nothing for a file with no companion, and for the
+companion's own file.
+"""
+companion_pane(e, path) = begin
+  (isempty(NEWS_COMPANIONS) || isempty(path)) && return nothing
+  at = truepath(path)
+  for (folder, (_, p)) in NEWS_COMPANIONS
+    startswith(at, folder * "/") && p.session !== nothing && at != truepath(p.file) && any(x -> x === p, chats(e)) && return p
+  end
+  nothing
 end
 
 """
 Start the reading companion of the folder of news `folder` for the window of
-`e`, unless it waits, has just started, or its program still runs. A `ladder
-wait` of a companion whose program has ended is stopped first, so that no
-question goes to it.
+`e`, unless it has just started or its program still runs. Its session goes
+on with the talk that today's folder already has, or starts one with what a
+companion is for.
 """
 news_companion!(e, folder) = begin
-  (News.companion() && (e.remember || COMPANION_STARTER[] !== nothing)) || return nothing
+  (News.companion() && (e.remember || COMPANION_IN_TEST[])) || return nothing
   folder = truepath(folder)
-  file = companion_file(folder)
-  isfile(file) || (try write(file, COMPANION_TEXT) catch; return nothing end)
   started = get(NEWS_COMPANIONS, folder, nothing)
   if started !== nothing
     time() - started[1] < COMPANION_START[] && return nothing
-    Terms.running(started[2]) && return nothing
-  end
-  if any(w -> w.page == truepath(file), waiters(e))
-    started === nothing && return nothing   # one that Ladder didn't start, as before it last opened, or of another window's
-    stop_waits!(e, file)
+    s = started[2].session
+    s !== nothing && (s.busy || running(s)) && return nothing
   end
   k = agent_kind(NEWS_COMPANION)
   k = try agent_path(k); k catch; agent_kind(e.ai) end
   try
-    script = joinpath(tempdir(), "ladder-sessions", "news-$(round(Int, time() * 1000)).command")
-    mkpath(dirname(script))
-    write(script, session_script(k, folder, companion_args(k, folder, truepath(file))))
-    chmod(script, 0o755)
-    # The talk is kept in the folder of today's articles
+    # The file that an earlier Ladder made for a companion in a terminal to wait for
+    rm(joinpath(folder, ".reading.md"), force=true)
+    # The talk is kept in the folder of today's articles, which the agent works in
     day = joinpath(folder, Dates.format(Dates.today(), "yyyy-mm-dd"))
     mkpath(day)
-    talk = News.free_path(day, "Talk with $(k.name)", ".vt")
-    touch(talk)
-    v = Terms.TerminalView(path=talk, dir=folder, command=["/bin/zsh", script])
-    term_look!(v, e)
-    w = window_of(e)
-    v.wake = () -> (w === nothing || isempty(w.glfw) || GLFW.PostEmptyEvent(); nothing)
-    e.nodes[(:term, talk)] = v
-    push!(terminals(e), v)
-    something(COMPANION_STARTER[], Terms.start!)(v)
-    NEWS_COMPANIONS[folder] = (time(), v)
+    talk = joinpath(day, "Talk with $(k.name)$(first(CHATS))")
+    isfile(talk) || write(talk, talk_mark("session", Dict("agent" => k.name, "folder" => day, "id" => "")) * "\n")
+    p = get(e.nodes, (:chat, talk), nothing)
+    if !(p isa AgentPane)
+      p = e.nodes[(:chat, talk)] = AgentPane(file=talk)
+      push!(chats(e), p)
+    end
+    p.session === nothing && load_talk!(p, e)
+    NEWS_COMPANIONS[folder] = (time(), p)
+    s = session!(p, e)
+    any(it -> it isa YouSaid, s.items) || say!(s, companion_words(folder))
   catch
   end
   nothing
 end
 
-"Stop each `ladder wait` of the file `file`, so that no question goes to an agent that has gone"
-stop_waits!(e, file) = begin
-  at = truepath(file)
-  for w in Agent.waiters()
-    w.page == at || continue
-    pid = tryparse(Int, first(split(basename(w.file), '.')))
-    pid === nothing || (try ccall(:kill, Cint, (Cint, Cint), pid, 15) catch end)
-  end
-  delete!(e.nodes, :agents)
-  nothing
-end
-
 """
-End the reading companion of the folder of news `folder`, which runs in a
-terminal of the window of `e`: its program, and its `ladder wait`. Its talk is
-written to its file.
+End the reading companion of the folder of news `folder`, a session of the
+window of `e`: its program ends, and its talk is written to its file.
 """
 stop_companion!(e, folder) = begin
   started = pop!(NEWS_COMPANIONS, folder, nothing)
   started === nothing && return nothing
-  v = started[2]
-  stop_waits!(e, companion_file(folder))
-  Terms.close!(v)
-  filter!(o -> o !== v, terminals(e))
-  get(e.nodes, (:term, v.path), nothing) === v && delete!(e.nodes, (:term, v.path))
+  p = started[2]
+  s = p.session
+  s === nothing && return nothing
+  was = s.busy
+  close!(s)
+  was && (s.version += 1)   # what was under way is whole now
+  keep_talk!(p)
   nothing
 end
 
 "End each reading companion of the window of `e` whose folder's tab has closed. A folder that shows still has its companion."
 companions_tick!(e) = begin
   isempty(NEWS_COMPANIONS) && return nothing
-  for (folder, (_, v)) in collect(NEWS_COMPANIONS)
-    any(x -> x === v, terminals(e)) || continue
-    (any(p -> truepath(p) == folder, tabs(e)) || (!isempty(e.buf.path) && truepath(e.buf.path) == folder)) && continue
+  for (folder, (_, p)) in collect(NEWS_COMPANIONS)
+    any(x -> x === p, chats(e)) || continue
+    (any(t -> truepath(t) == folder, tabs(e)) || (!isempty(e.buf.path) && truepath(e.buf.path) == folder)) && continue
     stop_companion!(e, folder)
   end
   nothing
 end
 
-"The reading companions that run in the terminals of the window of `e` end with it: their `ladder wait` stops too"
+"The reading companions of the window of `e` end with it: `close_chats!` ends each session and writes its file"
 end_companions!(e) = begin
-  for (folder, (_, v)) in collect(NEWS_COMPANIONS)
-    any(x -> x === v, terminals(e)) || continue
-    stop_waits!(e, companion_file(folder))
-    delete!(NEWS_COMPANIONS, folder)
+  for (folder, (_, p)) in collect(NEWS_COMPANIONS)
+    any(x -> x === p, chats(e)) && delete!(NEWS_COMPANIONS, folder)
   end
   nothing
 end
 
 """
-What the front page of `folder` says of its reading companion: that it asks
-whether it may work in the folder, as Grok asks of a folder that's new to it.
-The question is in its terminal, which doesn't show.
+What the front page of `folder` says of its reading companion: what went
+wrong, when the last thing in its session is that, like a program that
+didn't start.
 """
 companion_status(folder) = begin
   started = get(NEWS_COMPANIONS, truepath(folder), nothing)
-  (started === nothing || !Terms.running(started[2]) || started[2].term === nothing) && return ""
-  v = started[2]
-  occursin("trust the contents of this directory", Terms.Screens.words(v.term)) || return ""
-  "$(splitext(basename(v.path))[1]) asks whether it may work in this folder. Open “$(basename(v.path))” in the folder $(basename(dirname(v.path))) to answer it."
+  started === nothing && return ""
+  p = started[2]
+  s = p.session
+  (s === nothing || isempty(s.items)) && return ""
+  it = last(s.items)
+  it isa SessionNote && it.bad ? "$(s.agent), your reading companion, has a problem: $(it.words) Open “$(basename(p.file))” in the folder $(basename(dirname(p.file))) to see the talk." : ""
 end
-
-"The file that the reading companion of the folder of news `folder` waits for"
-companion_file(folder) = joinpath(folder, COMPANION_FILE)
 
 # --- the front page ---
 

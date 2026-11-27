@@ -255,7 +255,7 @@ The command Show Code does the same. Press ⌘⇧P and run it: a blue A goes rou
 
 ## Ask an agent about one thing
 
-You can ask Claude Code to change one thing of the window, or ask it a question about the thing. The thing can be a block, a part of a block like the bar of the `progress` block above, a part of Ladder like the count of words, or a block of Julia code. Ladder starts Claude Code, and gives it your words and the place of the function that draws the thing. This needs Claude Code on your Mac. To use Antigravity, Codex or Grok instead, choose it under Agent in Settings.
+You can ask Claude Code to change one thing of the window, or ask it a question about the thing. The thing can be a block, a part of a block like the bar of the `progress` block above, a part of Ladder like the count of words, or a block of Julia code. Ladder starts Claude Code, and gives it your words and the place of the function that draws the thing. This needs Claude Code on your Mac. To use Antigravity, Codex or Grok instead, choose it under Agent in Settings. Grok and Antigravity get your request in a session that stays while the window is open. The next request goes to the same session, so the agent knows what you asked before. It can also change what the window shows with Julia code that runs inside Ladder, as in [Work with an agent](#work-with-an-agent). It can't ask you before a step from here: Ladder allows a step that reads, searches the web or changes a file, and refuses a shell command.
 
 To ask for a change, or ask a question:
 
@@ -1336,7 +1336,7 @@ Each article's `by` is its reporter: an agent, or the author of a feed's post. E
 
 When you open a folder of news, Ladder starts Grok behind the page, to talk with about what you read. On any article, select words, right-click and choose Ask Grok…. Its answer shows under the words, and you can ask more there. It's one session for all your reading, so it remembers what you asked before, on any article. Grok reads the article, and searches the web or X when the article doesn't say.
 
-Grok runs in a terminal of Ladder's own. Its file, `Talk with Grok.vt` in the folder of today's articles, keeps the whole talk. Open it to read it, or to type to Grok there. It goes when that day's articles go. The front page has a tab in the sidebar, as a file has, and Grok ends when you close that tab. [Settings](settings/settings.md#news) can turn Grok off.
+It's a session like the ones under [Work with an agent](#work-with-an-agent). Its file, `Talk with Grok.chat` in the folder of today's articles, keeps the whole talk. Open it to read it, or to talk with Grok there. A talk that the day already has goes on when you open the news again. It goes when that day's articles go. The front page has a tab in the sidebar, as a file has, and Grok ends when you close that tab. [Settings](settings/settings.md#news) can turn Grok off.
 
 ### Feeds
 

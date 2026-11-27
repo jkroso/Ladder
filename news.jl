@@ -319,8 +319,8 @@ printed(folder::AbstractString, section::AbstractString) =
 
 """
 Delete each article of `folder` that's older than `days` days, and a day's
-folder that it leaves empty. A talk about the news in a day's folder, a `.vt`
-file, goes once all that day's articles have gone: when the whole day is older.
+folder that it leaves empty. A talk about the news in a day's folder, a `.chat`
+or a `.vt` file, goes once all that day's articles have gone: when the whole day is older.
 With `days` 0, nothing goes. It gives the paths of what went.
 """
 prune!(folder::AbstractString; days::Integer=keep_days(), now::DateTime=Dates.now()) = begin
@@ -331,7 +331,7 @@ prune!(folder::AbstractString; days::Integer=keep_days(), now::DateTime=Dates.no
     names = try readdir(dir) catch; continue end
     for n in names
       path = joinpath(dir, n)
-      if !startswith(n, '.') && lowercase(splitext(n)[2]) == ".vt" && DateTime(d) + Day(1) < oldest
+      if !startswith(n, '.') && lowercase(splitext(n)[2]) in (".chat", ".vt") && DateTime(d) + Day(1) < oldest
         try rm(path); push!(gone, path) catch end
         continue
       end

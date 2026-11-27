@@ -1277,4 +1277,100 @@ end
   delete!(K.SOURCE_FILES, "/built/level.jl")
 end
 
+@testset "Ask Agent gives its request to a session of an agent whose program stays, like Grok, and the next request goes to the same session" begin
+  # Grok's stand-in for a session: it writes down each line of JSON-RPC that Ladder gives it. Before its answer it asks to run a
+  # shell command, which no one can answer here.
+  heard = joinpath(dir, "grok-heard.txt")
+  rm(heard, force=true)
+  grok = joinpath(dir, "grok-session")
+  write(grok, replace(raw"""
+#!/bin/sh
+say() { printf '%s\n' "$1"; }
+answer() { say '{"jsonrpc":"2.0","result":'"$2"',"id":"'"$1"'"}'; }
+update() { say '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ask-1","update":'"$1"'}}'; }
+prompt=""
+while IFS= read -r line; do
+  printf '%s\n' "$line" >> "HEARD"
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":"\(ladder-[0-9]*\)".*/\1/p')
+  case "$line" in
+  *'"optionId":"no"'*)
+    update '{"sessionUpdate":"tool_call_update","toolCallId":"c2","status":"failed"}'
+    update '{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"It is blue for the sky."}}'
+    answer "$prompt" '{"stopReason":"end_turn"}' ;;
+  *'"initialize"'*) answer "$id" '{"protocolVersion":1,"agentCapabilities":{"loadSession":true}}' ;;
+  *'"session/new"'*) answer "$id" '{"sessionId":"ask-1","models":{"currentModelId":"grok-4.7"}}' ;;
+  *'"session/set_model"'*) answer "$id" '{}' ;;
+  *'"session/cancel"'*) answer "$prompt" '{"stopReason":"cancelled"}' ;;
+  *'"session/prompt"'*)
+    prompt=$id
+    case "$line" in
+    *'go slow'*) update '{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"I will think."}}' ;;
+    *'and green'*)
+      update '{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Green is for the grass."}}'
+      answer "$id" '{"stopReason":"end_turn"}' ;;
+    *)
+      update '{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"I will look."}}'
+      update '{"sessionUpdate":"tool_call","toolCallId":"c1","title":"read_file","rawInput":{"target_file":"/tmp/level.jl"}}'
+      update '{"sessionUpdate":"tool_call_update","toolCallId":"c1","status":"completed"}'
+      update '{"sessionUpdate":"tool_call","toolCallId":"c2","title":"run_terminal_command","rawInput":{"command":"rm -rf x"}}'
+      say '{"jsonrpc":"2.0","method":"session/request_permission","params":{"sessionId":"ask-1","toolCall":{"toolCallId":"c2","title":"Execute `rm -rf x`"},"options":[{"optionId":"yes","name":"Allow","kind":"allow_once"},{"optionId":"no","name":"Deny","kind":"reject_once"}]},"id":"7"}' ;;
+    esac ;;
+  esac
+done
+""", "HEARD" => heard))
+  chmod(grok, 0o755)
+  lines() = isfile(heard) ? readlines(heard) : String[]
+  K.open!(e, page)
+  frames(w, 4)
+  was = e.ai
+  e.ai = "Grok"
+  K.AGENT_MODELS["Grok"] = K.grok_list("Default model: grok-4.7\n\nAvailable models:\n  * grok-4.7 (default)\n")
+  K.ACP_COMMAND[] = Cmd([grok])
+  K.AGENT_COMMAND[] = `sh -c "echo one-off"`
+  @test !K.asks_session(e)   # a test's command for one request still stands in for any agent
+  K.AGENT_COMMAND[] = nothing
+  @test K.asks_session(e)
+  k = findfirst(l -> length(strip(l)) > 6, e.buf.lines)
+  thing = K.words_thing(e.buf, (k, 0), (k, 5))
+  K.ask_agent!(e, thing, "why is it blue?")
+  a = picker().asked
+  s = a.session
+  @test s isa K.AgentSession && s.agent == "Grok" && !s.turns && e.nodes[:ask_session] === s && K.running(s) && a.process === nothing
+  finish()
+  # The shell command was refused, as no pane shows the question, and the last thing that Grok said is the answer
+  @test a.ended > 0 && !a.failed && !a.changed && a.said == "Grok answered." && a.step == "Running rm -rf x"
+  @test any(l -> occursin("\"id\":\"7\"", l) && occursin("\"optionId\":\"no\"", l), lines())
+  box = only(K.ask_boxes(e))
+  @test last(box.answers).answer == "It is blue for the sky."
+  # The session was told what it's for, and has the tool that runs Julia code in Ladder
+  new = only(filter(l -> occursin("\"method\":\"session/new\"", l), lines()))
+  @test occursin("\"rules\":\"You are in Ladder", new) && occursin("The user marks a thing in the window", new) && occursin("tool named julia", new) && occursin("\"name\":\"ladder\"", new)
+  @test occursin("why is it blue?", last(filter(l -> occursin("session/prompt", l), lines())))
+  # The next request goes to the same session, whose program still runs
+  picker().asked = nothing
+  K.ask_agent!(e, thing, "and green?")
+  b = picker().asked
+  finish()
+  @test b.session === s && K.running(s) && count(l -> occursin("\"initialize\"", l), lines()) == 1 && count(l -> occursin("session/prompt", l), lines()) == 2
+  @test last(only(K.ask_boxes(e)).answers).answer == "Green is for the grass."
+  # Stop Agent stops the turn, and the session stays
+  picker().asked = nothing
+  K.ask_agent!(e, thing, "go slow")
+  c = picker().asked
+  frames(w, 3)
+  K.stop_agent!(e)
+  finish()
+  @test c.stopped && c.ended > 0 && c.said == "You stopped the agent. Nothing changed." && K.running(s)
+  @test any(l -> occursin("\"method\":\"session/cancel\"", l), lines())
+  # The session ends with the window
+  picker().asked = nothing
+  K.close_asks!(e)
+  from = time()
+  while K.running(s) && time() - from < 5; sleep(0.05) end
+  @test !K.running(s) && !haskey(e.nodes, :ask_session)
+  empty!(K.ask_boxes(e))
+  e.ai = was
+  K.ACP_COMMAND[] = nothing
+end
+
 foreach(o -> (win = K.window_of(o); win === nothing || close(win)), copy(K.editors))
