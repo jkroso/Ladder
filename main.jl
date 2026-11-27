@@ -17044,12 +17044,13 @@ The outline of a list and what it hangs over, as the places along it, and the
 outline of what's filled with the list's colour. Over a chip, the outline goes
 round the list, curves in to the chip's sides and goes round the chip, so the
 two are one shape. Over the bar, the list's sides go straight down and flare
-out onto the bar's top line. Both are Centient's shapes.
+out onto the bar's top line. Both are Centient's shapes. `q` is how round the
+list's top corners are.
 """
-lens_shapes(list) = begin
+lens_shapes(list; q=8.0) = begin
   f, t = list.frame, list.target
   l, top, r, bottom = f.x + 0.5, f.y + 0.5, f.x + f.w - 0.5, f.y + f.h
-  q, quarter = 8.0, pi / 2
+  quarter = pi / 2
   crown = [omni_arc(l + q, top + q, q, 2quarter, 3quarter); omni_arc(r - q, top + q, q, 3quarter, 4quarter)]
   if list.kind == :attach
     line = t.y + 0.5
@@ -25603,7 +25604,9 @@ end
 
 const SLASH_MENU = :slash_menu
 const SLASH_MOST = 8        # how many rows of the list show at once. The arrows bring the others.
-const SLASH_ROW = 28px      # how tall a row of the list is
+const SLASH_ROW = 34px      # how tall a row of the list is
+const SLASH_CROWN = 12.0    # how round the list's top corners are
+const SLASH_INSET = 4px     # the room between the list's outline and its rows
 
 """
 The list over the field of the pane `of`, while its words start with a
@@ -25629,8 +25632,35 @@ end
   slot::Int = 1
 end
 
+"""
+What draws the list of commands of `menu` as one shape with the slot under
+it, as the command palette's list is one shape with its bar: the list's sides
+come down and flare out onto the slot's top line, and the slot's line goes
+between them. `fill` and `line` are the slot's colours, and `shade` the
+colour of the list's shadow. It's one pixel at the list's corner, so it takes
+no clicks, and it draws where the list's popup is.
+"""
+@def mutable struct SlashLens <: SemanticUI
+  menu::Any = nothing
+  fill::Any = clear
+  line::Any = clear
+  shade::Any = clear
+end
+
 "The list of commands of the pane `p`"
 slash_menu(p::AgentPane) = get!(() -> SlashMenu(of=p), p.parts, :slash_menu)
+
+"""
+How wide the list of commands is over a slot whose place is `r`: narrower
+than the slot by a tenth of it at each side, as the command palette's list is
+over its bar. Each end leaves room for the slot's round end and the foot that
+flares out onto the slot.
+"""
+slash_wide(r) = begin
+  w, ends = num(r.width), num(r.from.radius.tl)
+  inset = max(48.0, round(w * 0.1))
+  px(max(0.0, min(max(320.0, w - 2inset), w - 2(ends + OMNI_FOOT))))
+end
 
 "The name after the slash that `text` starts with, and what comes after the space behind it, or nothing while no space is typed yet"
 slash_parts(text::AbstractString) = begin
@@ -25726,13 +25756,14 @@ slash_tick!(p::AgentPane, e) = begin
   if isempty(rows) || r === nothing
     menu.open && (close_popup!(w, SLASH_MENU); menu.open = false)
   elseif k === nothing
-    # It's beside the slot's place, not the slot: the words in the slot are a part of the pane, so a list beside the slot itself would count as hidden
-    popup!(w, menu, anchor=(r.left, r.top, r.width, r.height), placement=:top, gap=6px, width=r.width, key=SLASH_MENU, modal=false, theme=component_theme(e.zoom))
+    # It's beside the slot's place, not the slot: the words in the slot are a part of the pane, so a list beside the slot itself would count as hidden.
+    # It stands on the slot's top line, so the two are one shape.
+    popup!(w, menu, anchor=(r.left, r.top, r.width, r.height), placement=:top, gap=0px, width=slash_wide(r), key=SLASH_MENU, modal=false, theme=component_theme(e.zoom))
     menu.open = true
   else
     # The slot moves when the window's size changes, and when the field of a session's file slides down
     q = popups(w)[k]
-    q.anchor, q.width = (r.left, r.top, r.width, r.height), r.width
+    q.anchor, q.width = (r.left, r.top, r.width, r.height), slash_wide(r)
   end
   # The agent's program lists its commands a moment after it starts
   s = p.session
@@ -25866,9 +25897,61 @@ describe(m::SlashMenu) = with_pane_colours(!on_page(m.of)) do
   shown = min(SLASH_MOST, n - m.top + 1)
   more = n > SLASH_MOST ? (Row(width(grow=grow), height(20px), Alignment.Center, padding(10px, 0px), name="More rows",
                                Box(label("$(m.top)–$(m.top + shown - 1) of $n  ·  ↑↓ for the rest", 11px, color=colours.faint))),) : ()
-  Column(width(grow=grow), Alignment.Start, padding(4px), child_gap=1px, radius(10px), name="Commands",
-         background(colours.float), border(1px, :solid, colours.line), shadow(0px, 6px, 20px, RGBA(0, 0, 0, 0.35)),
-    (get!(() -> own!(m, SlashRow(menu=m, slot=k)), p.parts, (:slash_row, k)) for k in 1:shown)..., more...)
+  # The list has the slot's colours, as the slot's border lies on its background
+  page = on_page(p)
+  lens = get!(() -> own!(m, SlashLens(menu=m)), p.parts, :slash_lens)
+  lens.fill, lens.line = solid_on_glass(e, 0.07; page), solid_on_glass(e, 0.07 + 0.93 * 0.1; page)
+  lens.shade = RGBA(0, 0, 0, page ? 0.14 : 0.5)
+  # A line under each row, as the command palette has, which starts and ends where the row's words do.
+  # The row that the arrows are on has none at its top or foot, so its colour is whole.
+  rows = Any[]
+  for k in 1:shown
+    push!(rows, get!(() -> own!(m, SlashRow(menu=m, slot=k)), p.parts, (:slash_row, k)))
+    push!(rows, Row(width(grow=grow), height(1px), padding(10px, 0px),
+                    Box(width(grow=grow), height(1px), background(m.over in (m.top + k - 1, m.top + k) ? clear : on_glass(0.06)))))
+  end
+  # The rows are a little inside the list's own outline, and stop a little over the slot's top line
+  card = Column(width(grow=grow), Alignment.Start, radius(SLASH_CROWN * px - SLASH_INSET), clip=true, rows..., more...)
+  Stack(width(grow=grow), Alignment.Start, name="Commands", lens, Box(width(grow=grow), padding(SLASH_INSET, SLASH_INSET, SLASH_INSET, SLASH_INSET), card))   # top, right, bottom, left
+end
+
+describe(::SlashLens) = Box(fixed(1px), height(1px))
+
+draw(ctx, size, ui::ConcreteRect, lens::SlashLens) = begin
+  m = lens.menu
+  w = window_of(editor(m.of))
+  w === nothing && return
+  k = findfirst(q -> q.key == SLASH_MENU && q.content === m, popups(w))
+  (k === nothing || popups(w)[k].scene === nothing) && return
+  q = popups(w)[k]
+  s, (x, y, wide, tall) = q.scene, num.(q.anchor)
+  f = (x=num(s.left), y=num(s.top), w=num(s.width), h=num(s.height))
+  # It's one shape with the slot while it stands on the slot's top line. Where the window has no room for that, it's a card of its own.
+  outline, inside, closed = if abs(f.y + f.h - y) < 1
+    lens_shapes((frame=f, target=(x=x, y=y, w=wide, h=tall), kind=:attach); q=SLASH_CROWN)
+  else
+    l, t, r, b, c, quarter = f.x + 0.5, f.y + 0.5, f.x + f.w - 0.5, f.y + f.h - 0.5, SLASH_CROWN, pi / 2
+    ps = [omni_arc(l + c, t + c, c, 2quarter, 3quarter); omni_arc(r - c, t + c, c, 3quarter, 4quarter);
+          omni_arc(r - c, b - c, c, 0.0, quarter); omni_arc(l + c, b - c, c, quarter, 2quarter)]
+    (ps, ps, true)
+  end
+  # The list's shadow, which stops at the slot
+  with_clip(ctx, px(f.x - 40), px(f.y - 40), px(f.w + 80), px(min(y, f.y + f.h) - f.y + 40)) do
+    shade = ink(lens.shade)
+    blur = Skia.sk_maskfilter_new_blur_with_flags(Skia.SK_BLUR_STYLE_NORMAL, 9f0, true)
+    Skia.sk_paint_set_maskfilter(shade, blur)
+    shape = path_through([(f.x, f.y + 4); (f.x + f.w, f.y + 4); (f.x + f.w, f.y + f.h + 4); (f.x, f.y + f.h + 4)], true)
+    Skia.sk_canvas_draw_path(ctx, shape, shade)
+    Skia.sk_path_delete(shape)
+    Skia.sk_maskfilter_unref(blur)
+    Skia.sk_paint_delete(shade)
+  end
+  paint = ink(lens.fill)
+  shape = path_through(inside, true)
+  Skia.sk_canvas_draw_path(ctx, shape, paint)
+  Skia.sk_path_delete(shape)
+  Skia.sk_paint_delete(paint)
+  trace(ctx, outline, lens.line, 1; closed)
 end
 
 "The row of the list that the row `r` shows now, a kind and a thing, with its place in the list, or nothing"
@@ -25882,7 +25965,7 @@ describe(r::SlashRow) = begin
   found === nothing && return Box(height(0px))
   k, (kind, x) = found
   rp = rect(pane_slot(p))
-  room = (rp === nothing ? 300px : rp.width) - 8px - 20px   # less the list's own room and the row's
+  room = (rp === nothing ? 300px : slash_wide(rp)) - 2SLASH_INSET - 20px   # less the list's own room and the row's
   face(colour, size=13px) = Face(SANS, "", size, colour, false)
   parts = if kind in (:command, :hint)
     name = "/" * x.name
@@ -25895,7 +25978,7 @@ describe(r::SlashRow) = begin
      (isempty(about) ? () : (Box(label(about, 12px, color=colours.dim)),))...)
   elseif kind == :session
     ago = ago_words(x.at)
-    left = room - measure(face(colours.faint, 12px), ago) - 12px
+    left = room - measure(face(colours.faint, 12px), ago) - 20px   # the row's two gaps, before and after the room between
     (Box(label(shortened(face(colours.ink), x.title, left), 13px, color=colours.ink)), Box(width(grow=grow)),
      Box(label(ago, 12px, color=colours.faint)))
   elseif kind == :model
@@ -26466,9 +26549,13 @@ describe(b::PaneButton) = begin
 end
 cursor(::PaneButton) = :hand
 
-"The colour of the panes' ink at `strength` on the window's glass, as a colour with nothing see-through, which hides what's under it"
-solid_on_glass(e, strength) = begin
-  g, k = talk_on_page[] ? convert(RGBA{Float64}, colours.bg) : glass_colour(e), convert(RGBA{Float64}, colours.ink)
+"""
+The colour of the panes' ink at `strength` on the window's glass, as a
+colour with nothing see-through, which hides what's under it. With `page`
+true, it's on the page's paper, as a session's file has it.
+"""
+solid_on_glass(e, strength; page=talk_on_page[]) = begin
+  g, k = page ? convert(RGBA{Float64}, colours.bg) : glass_colour(e), convert(RGBA{Float64}, colours.ink)
   RGBA(g.r + (k.r - g.r) * strength, g.g + (k.g - g.g) * strength, g.b + (k.b - g.b) * strength, 1.0)
 end
 

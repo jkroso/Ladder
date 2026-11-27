@@ -1291,9 +1291,10 @@ try
     @test all(((kind, x),) -> kind == :command && x.own == (x.name in ("resume", "new", "clear", "model")), menu.rows)
     # A command's words are one line
     @test menu.rows[7][2].about == "(ladder) Show the user a page in Ladder."
-    # The list is over the field, as wide as the field's slot
+    # The list stands on the slot's top line, over its middle, and narrower, so its feet can flare out onto the slot as the command palette's do
     list, slot = only(q for q in K.popups(w) if q.key == K.SLASH_MENU).scene, K.rect(K.pane_slot(pane))
-    @test list.top + list.height <= slot.top && abs(K.num(list.width - slot.width)) < 1
+    @test abs(K.num(list.top + list.height - slot.top)) < 1 && abs(K.num(list.left + list.width / 2 - slot.left - slot.width / 2)) < 1
+    @test list.left - K.OMNI_FOOT * px >= slot.left + slot.from.radius.tl && list.width >= min(320px, slot.width - 2(slot.from.radius.tl + K.OMNI_FOOT * px))
     @test any(r -> occursin("/compact", sprint(show, r.from)), flat(list))
     # What you type after the slash leaves the commands that have it, those that start with it first
     typed("co")
