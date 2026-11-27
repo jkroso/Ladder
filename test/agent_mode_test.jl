@@ -212,6 +212,12 @@ named(name) = (k = findfirst(r -> hasproperty(r.from, :name) && r.from.name == n
 heard_lines() = isfile(heard) ? readlines(heard) : String[]
 const pane = K.agent_pane(e)
 items() = pane.session.items
+"Move the mouse to `x`, `y`"
+mouse_to(x, y) = (w.mouse = typeof(w.mouse)(x, y); onmouse(w, MouseMove(w.mouse, w)); frames())
+"Move the mouse onto the box that you type in, at its left end, where no button is, so the model's button shows"
+on_slot() = (r = K.rect(K.pane_slot(pane)); mouse_to(r.left + 12px, r.top + r.height / 2))
+"Click the model's button, which shows only while the mouse is over the box that you type in"
+model_click() = (on_slot(); b = named("Model"); click(b.left + 10px, b.top + 10px); frames())
 
 try
   @testset "Agent Mode widens the window, with the agent at the left, the page on a card and the outline at the right" begin
@@ -372,6 +378,8 @@ try
     onmouse(w, MouseMove(w.mouse, w)); frames(w, 3); sleep(2K.SEND_GROWS); frames()
     about, pill = named("About"), named("Send pill")
     @test about !== nothing && pill.width > 28px + about.width - 1px && pill.left < send.left && pill.left + pill.width == send.left + send.width
+    # The model's button doesn't show beside it then, though the mouse is over the box that you type in
+    @test named("Model") === nothing
     @test (named("Send").left, named("Send").width, named("Agent foot").height) == (send.left, 28px, foot.height)
     @test (pane.field.width, length(pane.field.layout)) == words && pill.left < send.left - 40px
     # The tooltip says that the words go with what the button shows
@@ -733,13 +741,27 @@ try
     @test K.model_name("Claude", "claude-opus-4-8") == "Opus 4.8" && K.model_name("Claude", "claude-fable-5-2") == "Fable 5.2"
     @test [m.id for m in K.agent_models("Grok").listed] == ["grok-4.7", "grok-4.6"] && K.agent_models("Grok").default == "grok-4.7"
     @test K.pretty_model("claude-haiku-4-5-20251001") == "Haiku 4.5" && K.pretty_model("gemini-2.5-pro") == "Gemini 2.5 Pro" && K.pretty_model("grok-4.7-build-fast") == "Grok 4.7 Build Fast"
+    # The button shows only while the mouse is over the box that you type in, so the words have the box's whole width
+    mouse_to(named("Agent").left + 20px, named("Agent").top + 200px)
+    @test named("Model") === nothing && named("Send") !== nothing
+    pane.field.buf.lines = ["Calculate the current value of a gigawatt of compute, and the cost of it in a year"]
+    frames()
+    words = (pane.field.width, length(pane.field.layout), named("Agent foot").height)
+    on_slot()
     # Before a session, the button shows the model that Claude Code chooses by itself. It's beside the send button, in line with it.
     button, send = named("Model"), named("Send")
     @test button !== nothing && K.model_words(pane, e) == "Opus 5.5"
     @test button.left + button.width <= send.left && button.top == send.top && button.height == send.height
+    # It lies over the end of the words, and moves none of them
+    @test (pane.field.width, length(pane.field.layout), named("Agent foot").height) == words
+    # A click beside it still goes to the words, and one on it goes to it
+    mouse_to(button.left - 20px, button.top + 14px)
+    @test named("Model") !== nothing && K.editor(K.hittest(w)) === pane.field
+    mouse_to(button.left + 10px, button.top + 10px)
+    @test K.hittest(w) isa K.PaneButton && K.hittest(w).action == :model
+    pane.field.buf.lines = [""]
     # Its menu is over it, with the models that Claude Code lists and a tick on the one that it uses
-    click(button.left + 10px, button.top + 10px)
-    frames()
+    model_click()
     rows() = [r for r in flat(only(p for p in K.popups(w) if p.key == K.MODEL_MENU).scene) if hasproperty(r.from, :name) && r.from.name == "Model row"]
     icons(r) = [x.from.from.name for x in flat(r) if hasproperty(x.from, :from) && x.from.from isa K.Icon]
     @test [r.from.from.model.name for r in rows()] == ["Opus 5.5", "Sonnet 5.5", "Haiku 5.5"]
@@ -759,8 +781,7 @@ try
     @test s.running == "claude-sonnet-5-5" && K.model_words(pane, e) == "Sonnet 5.5"
     # While the program runs, a click on another model asks Claude Code to change, and the session says when it has
     n = length(items())
-    click(named("Model").left + 10px, named("Model").top + 10px)
-    frames()
+    model_click()
     haiku = rows()[3]
     click(haiku.left + 20px, haiku.top + 10px)
     ok = until(() -> s.running == "claude-haiku-5-5")
@@ -798,9 +819,8 @@ try
     @test ok && g.running == "gemini-4-neon-low" && K.model_words(pane, e) == "Gemini 4 Neon (Low)"
     @test !("--model" in K.turn_options(g))
     # Antigravity's menu has a row for each model, with a button for each of its efforts, from the least to the most
+    model_click()
     button = named("Model")
-    click(button.left + 10px, button.top + 10px)
-    frames()
     menu = only(p for p in K.popups(w) if p.key == K.MODEL_MENU)
     efforts(r) = [x.from.from.effort for x in flat(r) if hasproperty(x.from, :from) && x.from.from isa K.EffortButton]
     filled(r) = [x.from.from.effort for x in flat(r) if hasproperty(x.from, :from) && x.from.from isa K.EffortButton && K.pane_model(pane, e) == x.from.from.model.id]
@@ -821,8 +841,7 @@ try
     @test !any(p -> p.key == K.MODEL_MENU, K.popups(w))
     @test g.model == "gemini-4-neon-high" && K.model_words(pane, e) == "Gemini 4 Neon (High)" && last(g.items).words == "The model is now Gemini 4 Neon (High)."
     # A click on a model's name keeps the effort, and Medium is for a model that hasn't that effort
-    click(button.left + 10px, button.top + 10px)
-    frames()
+    model_click()
     carbon = rows()[2]
     click(carbon.left + 20px, carbon.top + 10px)
     @test g.model == "gemini-4-carbon-high"

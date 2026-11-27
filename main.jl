@@ -49877,6 +49877,18 @@ end
   what::Any = nothing
 end
 
+"""
+The slot of the agent's pane `of`: the box that you type in, with its
+buttons. It's a node so that Ladder knows where it was drawn, because the
+model's button shows only while the mouse is over it. `inside` is what it
+shows, which `pane_foot` makes on each frame.
+"""
+@def mutable struct PaneSlot <: SemanticUI
+  of::Any = nothing
+  inside::Any = nothing
+end
+describe(s::PaneSlot) = s.inside
+
 "The agent's pane of the window of `e`. It's kept while the window is open, with its session, so leaving agent mode loses nothing."
 agent_pane(e) = node!(AgentPane, e, :agent_pane)
 
@@ -51072,8 +51084,8 @@ pane_foot(p::AgentPane, e, room) = begin
   pane_style!(sub, e)
   line = REPLY_SIZE * talk_zoom(e) * 1.5
   slot = on_page(p)
-  # The slot's round ends take a little more room from the words than square corners would. The model's button is beside the send button.
-  inside = max(40px, pane_wide(p, e) - 2PANE_X - 4px - SEND_ROOM - max(0px, line - 18px) - model_wide(p, e) - (SEND_ROOM - 28px))
+  # The slot's round ends take a little more room from the words than square corners would. The model's button takes none: it lies over the words.
+  inside = max(40px, pane_wide(p, e) - 2PANE_X - 4px - SEND_ROOM - max(0px, line - 18px))
   pane_layout!(sub, inside)
   tall = min(isempty(sub.layout) ? line : lowest(sub, sub.layout), 9line)
   # The field is a slot: with one line of words its ends are half circles, and more lines keep ends as round.
@@ -51089,18 +51101,47 @@ pane_foot(p::AgentPane, e, room) = begin
   over = max(above + tall + 8px, 28px + drop) - 28px - drop
   doc = Box(width(grow=grow), height(tall), Alignment.Start, clip=true, node!(Document, sub, :document))
   who = pane_agent(p, e)
-  # What the slot leaves for its words: less its ends, the two buttons and the gaps before them, and the room at each side of the words
-  words_room = pane_wide(p, e) - 2(PANE_X - 4px) - left - right - 2(SEND_ROOM - 28px) - model_wide(p, e) - 28px - 8px
+  # The model's button shows only while the mouse is over the slot, or while its menu is open.
+  # While the mouse is on the send button, that opens over where the model's button would be.
+  shows = model_shows(p, e) && !ishovered(pane_button(p, :send))
+  # What the slot leaves for its words: less its ends, the send button and the gap before it, and the room at each side of the words.
+  # While the model's button shows, the words of the hint stop before it.
+  words_room = pane_wide(p, e) - 2(PANE_X - 4px) - left - right - (SEND_ROOM - 28px) - 28px - 8px - (shows ? model_wide(p, e) + SEND_ROOM - 28px : 0px)
   empty = sub.buf.lines == [""]
   text = empty ? Stack(width(grow=grow), height(tall), Alignment.Start,
                        Row(width(grow=grow), height(tall), Alignment.Center,
                            label(shortened(pane_face(e, colours.faint), slot ? "Ask $who, or say what to do" : "Ask $who, or say what to change", words_room - 2px), REPLY_SIZE * talk_zoom(e), color=colours.faint)), doc) : doc
-  Box(width(grow=grow), padding(4px, PANE_X - 4px, slot ? 18px : PANE_X - 4px, PANE_X - 4px), name="Agent foot",
-    Row(width(grow=grow), Alignment.End, padding(6px, right, 6px, left), radius(ends), child_gap=SEND_ROOM - 28px,   # top, right, bottom, left
-        background(on_glass(0.07)), border(1px, :solid, on_glass(0.1)),
-      Column(width(grow=grow), Alignment.Start, pictures..., Box(width(grow=grow), padding(0px, 4px), text)),   # one line of words is as tall as the button, or taller
-      Box(padding(over, 0px, drop, 0px), pane_button(p, :model)),
-      Box(padding(over, 0px, drop, 0px), pane_button(p, s !== nothing && s.busy && empty ? :stop : :send))))
+  # The words, with room at their right for the send button
+  words = Row(width(grow=grow), Alignment.End, child_gap=SEND_ROOM - 28px,
+    Column(width(grow=grow), Alignment.Start, pictures..., Box(width(grow=grow), padding(0px, 4px), text)),   # one line of words is as tall as the button, or taller
+    Box(fixed(28px), height(over + 28px + drop)))
+  # The buttons are over the words, at their right end. The model's button moves none of the words, and the send button opens over it.
+  buttons = Row(width(grow=grow), Alignment.Start, justify=Alignment.End, child_gap=SEND_ROOM - 28px,
+    (shows ? (Box(padding(over, 0px, drop, 0px), pane_button(p, :model)),) : ())...,
+    Box(padding(over, 0px, drop, 0px), pane_button(p, s !== nothing && s.busy && empty ? :stop : :send)))
+  holder = pane_slot(p)
+  holder.inside = Row(width(grow=grow), padding(6px, right, 6px, left), radius(ends),   # top, right, bottom, left
+                      background(on_glass(0.07)), border(1px, :solid, on_glass(0.1)),
+                    Stack(width(grow=grow), Alignment.Start, words, buttons))
+  Box(width(grow=grow), padding(4px, PANE_X - 4px, slot ? 18px : PANE_X - 4px, PANE_X - 4px), name="Agent foot", holder)
+end
+
+"The slot of the pane `p`, kept between frames: see `PaneSlot`"
+pane_slot(p::AgentPane) = get!(() -> own!(p, PaneSlot(of=p)), p.parts, :slot)
+
+"""
+True while the model's button of the pane `p` shows: while the mouse is over
+the slot that you type in, as it was last drawn, and while the button's menu
+is open.
+"""
+model_shows(p::AgentPane, e) = begin
+  w = window_of(e)
+  w === nothing && return false
+  any(q -> q.key == MODEL_MENU, popups(w)) && return true
+  r = rect(pane_slot(p))
+  r === nothing && return false
+  x, y = w.mouse
+  r.left <= x < r.left + r.width && r.top <= y < r.top + r.height
 end
 
 """
@@ -51157,8 +51198,9 @@ describe(b::PaneButton) = begin
     w = window_of(e)
     open = w !== nothing && any(q -> q.key == MODEL_MENU, popups(w))
     ink = over || open ? colours.ink : colours.dim
+    # It's over the end of your words, so its colour is the slot's with nothing see-through in it, which hides them
     Row(fixed(model_wide(p, e)), height(28px), Alignment.Center, padding(10px, 0px), child_gap=5px, radius(14px), name="Model",
-        background(over || open ? on_glass(0.1) : clear),
+        background(solid_on_glass(e, over || open ? 0.16 : 0.07)),
       Box(label(model_words(p, e), model_face(e).size, color=ink)),
       Icon("chevron-down", size=8px, color=ink))
   elseif b.action == :unattach

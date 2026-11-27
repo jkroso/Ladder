@@ -314,6 +314,10 @@ try
     p3 = e3.nodes[(:chat, file)]
     s3 = p3.session
     @test K.chat_shown(e3) && s3.model == "haiku" && K.model_words(p3, e3) == "Haiku 5.5"
+    # It shows only while the mouse is over the box that you type in
+    @test named("Model", e3) === nothing
+    r = K.rect(K.pane_slot(p3))
+    w3.mouse = typeof(w3.mouse)(r.left + 12px, r.top + r.height / 2); onmouse(w3, MouseMove(w3.mouse, w3)); frames(w3, 2)
     button, send = named("Model", e3), named("Send", e3)
     @test button !== nothing && button.left + button.width <= send.left && button.top == send.top
     # Another model goes into the file, and the next program starts with it
