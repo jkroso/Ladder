@@ -11,7 +11,7 @@
 export editor, page_object, object, list_files!, go_folder!, open!, open_folder!, show_path!, show_beside!,
        free_path, folder_kind, page_top, trash!, file_act!, show_in_finder, above_page, touch!, show_line!,
        page_day, save_settings!, rerun!, page_room, page_tables, named_table, layout!, command_of,
-       click_page!, text_object, say_result!, lowered
+       click_page!, text_object, say_result!, lowered, rewrap!, reload_changed!, loaded_module, fillable
 
 "The editor of the window that `node`, a part of a page, is part of"
 function editor end
@@ -102,3 +102,15 @@ function say_result! end
 
 "The first and the last line of the block whose lines fill the window of the editor `e` as text, or nothing"
 function lowered end
+
+"Wrap the page's text of the editor `e` again, for a live block that changed a setting"
+function rewrap! end
+
+"Run in the module `mod` the parts of the Julia file `file` that changed since it had the lines `before`"
+function reload_changed! end
+
+"The module that Kip made from the Julia file at `path`, or nothing when Ladder hasn't loaded that file"
+function loaded_module end
+
+"`content`, a part of the page that `owner` shows, with a button beside it that makes `what` fill the window"
+function fillable end

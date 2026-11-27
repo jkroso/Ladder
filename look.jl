@@ -26,7 +26,7 @@ export SANS, SERIF, MONO, CODE_FONT, CODE_STYLE, CODE_SLANT, CODE_SCALE, code_ty
        num, label, Face, measured, measure, width_in, drawable, has, stand_ins, font_with, one_wide,
        one_width, stand_in_from, runs, hasall, spared_width, spared, LIVE_GAP, BLOCK_ICONS, removed_colour,
        added_colour, TIP_INK, tip_label, dark_page, takeoff_back, elide, FLOAT_ROW, float_row, found_colours,
-       rule, tint
+       rule, tint, wrapped
 
 # --- look --------------------------------------------------------------------
 
@@ -376,3 +376,19 @@ rule() = Box(width(9px), height(16px), Alignment.Center, Box(width(1px), height(
 
 "`c` with `alpha` of its colour, from 0 for none to 1 for all"
 tint(c, alpha) = (k = convert(RGBA{Float64}, c); RGBA(k.r, k.g, k.b, alpha))
+
+"The lines that `words` take in `face` when they have `room` px across"
+wrapped(face::Face, words, room) = begin
+  out = String[]
+  line = ""
+  for word in split(words)
+    longer = isempty(line) ? String(word) : line * " " * word
+    if isempty(line) || num(measure(face, longer)) <= room
+      line = longer
+    else
+      push!(out, line)
+      line = String(word)
+    end
+  end
+  push!(out, line)
+end

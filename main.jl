@@ -455,7 +455,8 @@ Guard.LADDER[] = @__MODULE__
 # uses: a line laid out (flow.jl), the document (buffer.jl), what a window
 # holds (editor_type.jl), the faces of the text (faces.jl), rich text and
 # tables (rich.jl), what the page asks of a block (blocks.jl), and the lines and
-# the shapes that a block draws on a canvas (strokes.jl).
+# the shapes that a block draws on a canvas (strokes.jl). shared.jl names the
+# functions that several files give methods to.
 @use "./look" exports...
 @use "./flow" exports...
 @use "./buffer" exports...
@@ -464,6 +465,7 @@ Guard.LADDER[] = @__MODULE__
 @use "./rich" exports...
 @use "./blocks" exports...
 @use "./strokes" exports...
+@use "./shared" exports...
 @use "./host" exports...
 @use "./folder_page" exports...
 @use "./views" exports...
@@ -14537,22 +14539,6 @@ diff_wide(_, v::ChangesView) = num(editor(v).width) - 2
 
 "The face of a comment"
 note_face() = Face(SANS, "", 12.5px, colours.ink, false)
-
-"The lines that `words` take in `face` when they have `room` px across"
-wrapped(face::Face, words, room) = begin
-  out = String[]
-  line = ""
-  for word in split(words)
-    longer = isempty(line) ? String(word) : line * " " * word
-    if isempty(line) || num(measure(face, longer)) <= room
-      line = longer
-    else
-      push!(out, line)
-      line = String(word)
-    end
-  end
-  push!(out, line)
-end
 
 """
 Where the box of a comment is across lines `wide` px wide, and how wide it is.
