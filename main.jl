@@ -41072,6 +41072,11 @@ end
 # selection, they run the code that's selected. With the caret in the line that
 # opens or closes the block, they run every expression of the block.
 #
+# The code of a sum in a line of text runs the same way. With the caret in the
+# code, ⌘Return runs the whole sum, and with a selection in it, like one name,
+# it runs what's selected. The box is under that code, so it covers none of
+# it, and it goes when the caret leaves the sum. See `run_sum_here!`.
+#
 # In a Julia file, the command Run All (⌘⇧P) runs every expression of the
 # file, from the top, and shows what each one comes to. An expression that
 # fails doesn't stop the ones under it, so every result shows. Then the first
@@ -41156,6 +41161,7 @@ outcome_face(size, ink=colours.ink) = Face(codefont(), codestyle(), size, ink, f
   form::Int = 1                     # which of a function's methods and sets of types those levels show
   views::Dict{Any,Any} = Dict{Any,Any}()   # the top line and the lines of each level that has shown, for each set of types
   since::Float64 = 0.0              # when its code was asked to run, while what the code came to isn't here. It's 0 once it is.
+  cols::Any = nothing               # for code of a sum in a line of text, the columns of its line that ran. The box is under them.
   # Each frame sets these, for the room that the window has
   shown::String = ""                # as much of `brief` as fits
   rest::String = ""                 # what shows under the box when it's open
@@ -41769,14 +41775,15 @@ end
 
 """
 Run the code that the caret is in, for ⌘Return and ⇧Return. It's false when
-the caret isn't in a `julia` code block, so the key does what it does in other
-places. With `step`, the caret goes on to the next expression.
+the caret isn't in a `julia` code block or in the code of a sum, so the key
+does what it does in other places. With `step`, the caret goes on to the next
+expression.
 """
 run_here!(e; step=false) = begin
   b = e.buf
   (caretless(b) || readonly(b)) && return false
   found = julia_code(b, b.caret[1])
-  (found !== nothing && julia_code(b, b.anchor[1]) == found) || return false
+  (found !== nothing && julia_code(b, b.anchor[1]) == found) || return run_sum_here!(e)
   from, to = found
   lo, hi = minmax(b.caret, b.anchor)
   if lo != hi
@@ -41803,6 +41810,88 @@ run_here!(e; step=false) = begin
   end
   touch!(e)
   true
+end
+
+"""
+The code of the sum in a line of text that the place `p` is in: its line, and
+the columns where its code starts and ends, between the !` and the last `. It's
+nothing when `p` isn't in the code of a sum.
+"""
+sum_code_at(b::Buffer, (i, col)::Pos) = begin
+  (b.view == :markdown && 1 <= i <= length(b.lines) && occursin(INLINE, b.lines[i])) || return nothing
+  kinds(b)[i].kind in (Kind.fence, Kind.code) && return nothing   # !` in a code block is code
+  line = b.lines[i]
+  for m in eachmatch(r"!`([^`]+)`", line)
+    m.offset > 1 && line[prevind(line, m.offset)] == '\\' && continue   # \!`code` is the code, written out
+    from = length(line, 1, m.offset) + 1
+    to = from + length(m[1])
+    from <= col <= to && return (i, from, to)
+  end
+  nothing
+end
+
+"""
+Run the code of the sum that the caret is in, for ⌘Return and ⇧Return, or the
+part of it that's selected, like a name in the middle of it. What it comes to
+shows in a box under that code, as it does after the code of a `julia` block.
+The code runs in the page's module, where the sums and the `julia` blocks of
+the page run. It's false when the caret isn't in the code of a sum. As rich
+text, the caret stops at each end of what a sum shows, and that isn't in its
+code: there the key does what it does in other places.
+"""
+run_sum_here!(e) = begin
+  b = e.buf
+  foreign(b.path) && return false   # an email runs no code
+  at = sum_code_at(b, b.caret)
+  (at !== nothing && sum_code_at(b, b.anchor) == at) || return false
+  i, from, to = at
+  rich(b) && !(from < b.caret[2] < to && from < b.anchor[2] < to) && return false
+  lo, hi = selecting(b) ? minmax(b.caret[2], b.anchor[2]) : (from, to)
+  code = excerpt(b, (i, lo), (i, hi))
+  if !isempty(strip(code))
+    o = outcome!(e, i:i, code)
+    o.cols = (lo, hi)
+  end
+  touch!(e)
+  true
+end
+
+"""
+True while the caret is in the sum whose code the outcome `o` is of, so the sum
+shows its code: as plain text, from its ! to after its last `, and as rich
+text, in its code. A sum that shows its value has no box under it.
+"""
+in_its_sum(b::Buffer, o::Outcome) = begin
+  at = sum_code_at(b, (o.first, o.cols[1]))
+  (at !== nothing && b.caret[1] == o.first) || return false
+  _, from, to = at
+  rich(b) ? from < b.caret[2] < to : from - 2 <= b.caret[2] <= to + 1
+end
+
+"""
+Where the box of `o`, an outcome of the code of a sum, goes: under the code
+that ran, from the left of it, or from the left of the screen line that the
+code ends on when the code wraps. It gives the left and the top of the box,
+and the left of that screen line, from the top left of the page's text. It's
+nothing when the line isn't laid out as text, or as a cell of a table.
+"""
+sum_box_place(e, o::Outcome) = begin
+  lo, hi = o.cols
+  it = item(e, o.first)
+  g = it.content
+  if g isa Flow
+    f, x, y = g, 0px, it.top
+  elseif g isa Grid && (at = gridcell(g, (o.first, lo))) !== nothing
+    cx, cy = cell_origin(g, at...)
+    f, x, y = g.flows[at[1]][at[2]], cx, it.top + cy
+  else
+    return nothing
+  end
+  isempty(f.lines) && return nothing
+  k1, x1 = spot(f, lo)
+  k2, _ = spot(f, max(lo, hi - 1))   # the screen line of the last character, as the end of a line is the start of the next
+  vl = f.lines[k2]
+  (left=x + (k1 == k2 ? x1 : vl.x), top=y + line_top(f, k2) + vl.high, line=x + vl.x)
 end
 
 """
@@ -41851,7 +41940,8 @@ follow_outcomes!(e) = begin
     i = at(o.first) ? o.first : o.first + n - o.total
     at(i) || return false
     o.first, o.last, o.total = i, i + length(o.code) - 1, n
-    true
+    # The box of a sum's code goes when the caret leaves the sum, which then shows its value
+    o.cols === nothing || in_its_sum(b, o)
   end
 end
 
@@ -41885,17 +41975,26 @@ outcome_over(e) = begin
   fits(left) = floor(Int, num(w - left - OUTCOME_EDGE - 34px) / num(wide))
   boxes, bodies = Any[], Any[]
   for o in list
-    it = item(e, o.last)
-    f = it.content
-    f isa Flow || continue
-    vl = last(f.lines)
-    left = x0 + xcol(vl, vl.to) + OUTCOME_GAP
-    top = y0 + it.top + line_top(f, length(f.lines)) + (vl.high - high) / 2
-    # A line that ends too near the edge of the window has the box under it
+    if o.cols === nothing
+      it = item(e, o.last)
+      f = it.content
+      f isa Flow || continue
+      vl = last(f.lines)
+      left = x0 + xcol(vl, vl.to) + OUTCOME_GAP
+      top = y0 + it.top + line_top(f, length(f.lines)) + (vl.high - high) / 2
+      under = (x0 + vl.x, top + vl.high)
+    else
+      # The box of a sum's code is under that code, and so over none of it
+      p = sum_box_place(e, o)
+      p === nothing && continue
+      left, top = x0 + p.left, y0 + p.top + 2px
+      under = (x0 + p.line, top)
+    end
     # While its code is down a level, the box shows the code of what ran, and not its value
     o.low = code_view(e, o)
     brief = o.low === nothing ? o.brief : o.low.title
-    fits(left) < min(length(brief), 16) && ((left, top) = (x0 + vl.x, top + vl.high))
+    # A line that ends too near the edge of the window has the box under it, and a sum's box starts further left
+    fits(left) < min(length(brief), 16) && ((left, top) = under)
     top = px(round(num(top)))
     # On a page that's scrolled sideways, a box that would go over the numbers of the lines doesn't show
     (top >= above_page(e) && top + high <= h && left >= x0 + sideways(e)) || continue
