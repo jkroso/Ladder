@@ -23614,7 +23614,9 @@ describe(r::SlashRow) = begin
     (Box(label(shortened(face(colours.dim), x, room), 13px, color=colours.dim)),)
   end
   picks = kind in (:command, :session, :model)
-  Row(width(grow=grow), height(SLASH_ROW), Alignment.Center, padding(10px, 0px), child_gap=10px, radius(6px), clip=true, name="Command row",
+  # The top row's top corners follow the list's own, as far in as the rows are from the list's outline
+  Row(width(grow=grow), height(SLASH_ROW), Alignment.Center, padding(10px, 0px), child_gap=10px, radius(r.slot == 1 ? SLASH_CROWN * px - SLASH_INSET : 6px, 6px),
+      clip=true, name="Command row",
       background(picks && m.over == k ? on_glass(0.1) : clear), parts...)
 end
 
