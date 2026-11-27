@@ -52,6 +52,11 @@ done_() { say '{"type":"result","subtype":"success","is_error":false,"result":""
 # It's given Claude Code's options. A model like sonnet is claude-sonnet-5-5, and with none it's Opus.
 model=opus
 session=test-session
+# Ladder runs /usage beside a turn in a program of its own, which prints one line of JSON and ends, as `claude -p /usage --output-format json` does
+case " $* " in *' /usage '*)
+  say '{"type":"result","subtype":"success","is_error":false,"num_turns":0,"result":"Current week (all models): 50% used\nCurrent week (Fable): 11% used","local_command":"usage"}'
+  exit 0 ;;
+esac
 while [ $# -gt 0 ]; do [ "$1" = "--model" ] && model="$2"; [ "$1" = "--resume" ] && session="$2"; shift; done
 say '{"type":"system","subtype":"init","session_id":"'"$session"'","model":"claude-'"$model"'-5-5"}'
 while IFS= read -r line; do
@@ -96,6 +101,8 @@ while IFS= read -r line; do
     say '{"type":"control_request","request_id":"r1","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"make paint","description":"Make the paint"},"tool_use_id":"t2"}}' ;;
   *'go slow'*)
     say '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t3","name":"Read","input":{"file_path":"/tmp/notes.md"}}]}}' ;;
+  *'wait your turn'*)
+    ;;   # Claude Code says nothing of words that come while it works, till its turn has ended
   *'many steps'*)
     for n in 4 5 6 7 8; do
       say '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t'$n'","name":"Grep","input":{"pattern":"paint'$n'"}}]}}'
@@ -1489,6 +1496,63 @@ try
     K.field!(pane, "")
     K.pane_agent!(pane, "Claude")
     frames()
+  end
+
+  @testset "/usage, while the agent works, runs at once in a program of its own, and the reply that the agent was writing goes on over it and over words that wait" begin
+    K.agent_mode(e) || (K.agent_mode!(e); frames(w, 3))
+    K.new_session!(pane); frames()
+    pane.field.buf.lines = ["go slow"]
+    K.send_words!(pane)
+    s = pane.session
+    # The agent reads a file and goes on with its turn. Earlier tests said "go slow" too, so the step shows that this turn started.
+    ok = until(() -> any(x -> x isa K.AgentStep && x.state == :going, items()) && haskey(K.AGENT_COMMANDS, ("Claude", s.dir)))
+    @test ok && s.busy
+    # Claude Code lists /usage for a plan's account. With an API key it has none, and the words go to the agent.
+    pane.field.buf.lines = ["/usage"]
+    @test !K.goes_beside(s, "/usage")
+    listed = K.AGENT_COMMANDS[("Claude", s.dir)]
+    push!(listed, K.SlashCommand("usage", "Show session cost, plan usage, and what's contributing to your limits", "", false))
+    # The agent is writing a reply when you give the command
+    K.take_line!(s, """{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}}""")
+    K.take_line!(s, """{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Half "}}}""")
+    n = length(heard_lines())
+    K.send_words!(pane)
+    it = last(items())
+    @test it isa K.RanBeside && it.words == "/usage" && !it.reply.whole && s.busy && pane.field.buf.lines == [""]
+    frames()
+    @test named("Ran beside") !== nothing
+    ok = until(() -> it.reply.whole)
+    @test ok && !it.bad && it.reply.text == "Current week (all models): 50% used\nCurrent week (Fable): 11% used"
+    # The agent's program never got it, and goes on with its turn
+    @test s.busy && length(heard_lines()) == n
+    # Words that you give now wait for the turn to end
+    pane.field.buf.lines = ["Then wait your turn"]
+    K.send_words!(pane)
+    ok = until(() -> length(heard_lines()) > n)
+    @test ok && occursin("wait your turn", last(heard_lines())) && items()[end] isa K.YouSaid && items()[end].words == "Then wait your turn"
+    # The agent's words go on in the reply that it was writing, over the command and your words, and show once
+    K.take_line!(s, """{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"and the rest."}}}""")
+    @test items()[end-2].text == "Half and the rest." && !items()[end-2].whole && count(x -> x isa K.AgentReply, items()) == 1
+    K.take_line!(s, """{"type":"assistant","message":{"content":[{"type":"text","text":"Half and the rest."}]}}""")
+    @test items()[end-1] === it && items()[end-2] isa K.AgentReply && items()[end-2].text == "Half and the rest." && items()[end-2].whole
+    @test count(x -> x isa K.AgentReply, items()) == 1
+    # A reply of a new turn comes after your words
+    K.take_line!(s, """{"type":"result","subtype":"success","is_error":false,"result":""}""")
+    K.take_line!(s, """{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}}""")
+    K.take_line!(s, """{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Now yours."}}}""")
+    @test items()[end] isa K.AgentReply && items()[end].text == "Now yours." && items()[end-1] isa K.YouSaid
+    K.take_line!(s, """{"type":"assistant","message":{"content":[{"type":"text","text":"Now yours."}]}}""")
+    frames()
+    # A session's file keeps the command and its answer as your words and a reply
+    text = K.talk_text(s)
+    @test occursin("<!-- ladder:you -->\n/usage\n", text) && occursin("Current week (Fable): 11% used", text)
+    @test [typeof(x) for x in K.read_talk(text).items][end-4:end] == [K.AgentReply, K.YouSaid, K.AgentReply, K.YouSaid, K.AgentReply]
+    # With no turn under way, it goes to the agent's program as its other commands do
+    pane.field.buf.lines = ["/usage"]
+    K.send_words!(pane)
+    ok = until(() -> !s.busy && occursin("\"content\":\"/usage\"", last(heard_lines())))
+    @test ok && any(x -> x isa K.YouSaid && x.words == "/usage", items())
+    filter!(c -> c.name != "usage", listed)
   end
 
   @testset "/resume lists the earlier sessions of the folder, also those of a terminal, and goes on with the one that you choose" begin

@@ -32,7 +32,7 @@
 @use "../views" exports...
 @use "./kinds" exports...
 
-export YouSaid, AgentReply, AgentStep, AgentWants, SessionNote, AgentSession, SESSION_COMMAND, BRIEF_SHOWS,
+export YouSaid, AgentReply, AgentStep, AgentWants, SessionNote, RanBeside, newest, agent_newest, AgentSession, SESSION_COMMAND, BRIEF_SHOWS,
        session_brief, session_command, session_options, running, note!, start!, ended!, tell!, user_message,
        pictures_note, AGENT_PICTURE_KINDS, AGENT_PICTURE_MOST, picture_block, sendable_picture, model!,
        model_note!, close!, step_of, open_reply, take_line!, model_answer!, stream_event!, step_file,
@@ -45,6 +45,7 @@ export YouSaid, AgentReply, AgentStep, AgentWants, SessionNote, AgentSession, SE
        tool_step!, step_ended!, turn_step, turn_line!, fault_words, antigravity_input, ANTIGRAVITY_KEYS,
        opening_line, codex_line!, SlashCommand, OWN_COMMANDS, AGENT_COMMANDS, EarlierSession, commands!,
        one_line_of, claude_commands, acp_commands, own_command, slash_commands, slash_named, goes_bare,
+       BESIDE_COMMANDS, goes_beside, beside_command, run_beside!, beside_said,
        ran_note!, your_words, HISTORY_MOST, recent_part, iso_time, ago_words, CLAUDE_SESSIONS, SESSIONS_MOST,
        TITLE_READS, claude_folders, quick_field, claude_said, claude_title, claude_sessions, claude_history,
        acp_list!, acp_sessions, session_loaded!, resume!, pane_agent, on_page
@@ -98,6 +99,33 @@ end
 end
 
 """
+A command of the agent's, like /usage, that you gave while the agent worked,
+and that a program of its own ran beside the turn: see `run_beside!`. `words`
+are the command, and `reply` is what it printed, whole once the command has
+done. `bad` is true when it failed, and `reply` then says why.
+"""
+@def mutable struct RanBeside
+  words::String = ""
+  reply::AgentReply = AgentReply()
+  bad::Bool = false
+end
+
+"""
+The newest of `items` that's part of the agent's turns or of your words, or
+nothing. A command that ran beside a turn is no part of them: the agent's
+words go on in the reply that it was writing when you gave the command.
+"""
+newest(items) = (k = findlast(it -> !(it isa RanBeside), items); k === nothing ? nothing : items[k])
+
+"""
+The newest of `items` that the agent's turns made, or nothing. Words that
+you gave while the agent worked come after it, and wait for its turn to end,
+so the reply that it was writing goes on over them. So does a command that
+ran beside the turn.
+"""
+agent_newest(items) = (k = findlast(it -> !(it isa RanBeside || it isa YouSaid), items); k === nothing ? nothing : items[k])
+
+"""
 A session of an agent in a window: the program, the folder that it runs in,
 and all that you and it said, in order. `page` is the file that the window
 showed when it started, which the agent can change without asking. `id` is
@@ -134,6 +162,7 @@ program has stopped. `busy` is true while the agent works on what you said.
   loading::Bool = false        # the agent gives what was said in an earlier session, which the session goes on with
   before::Any = nothing        # the session's name and what it showed before it went on with an earlier one, which come back if the agent can't open that one
   unbriefed::Bool = false      # the agent's session was made outside Ladder, so your next words tell it what Ladder says of itself
+  beside::Int = 0              # how many of the agent's commands run beside its turn now, each in a program of its own: see `run_beside!`
 end
 
 "A command that a test puts in the place of the agent's: a program that reads and prints the same lines of JSON. Nothing means the agent that Settings chose."
@@ -424,8 +453,8 @@ end
 "The step of the session `s` that the agent names `id`, or nothing"
 step_of(s::AgentSession, id) = (k = findlast(it -> it isa AgentStep && it.id == id, s.items); k === nothing ? nothing : s.items[k])
 
-"The last thing that the session `s` shows when it's a reply whose words still come, or nothing"
-open_reply(s::AgentSession) = !isempty(s.items) && last(s.items) isa AgentReply && !last(s.items).whole ? last(s.items) : nothing
+"The reply that the agent of the session `s` is writing, or nothing. Your words that wait for its turn to end can come after it, and so can a command that ran beside the turn."
+open_reply(s::AgentSession) = (it = agent_newest(s.items); it isa AgentReply && !it.whole ? it : nothing)
 
 """
 Take a line that the program of the session `s` printed. Each line is JSON
@@ -1411,6 +1440,87 @@ goes_bare(s::AgentSession, words::AbstractString) = begin
   known === nothing || any(c -> c.name == named[1], known)
 end
 
+# --- a command beside a turn ---
+#
+# Claude Code runs a command that you give while it works only when its turn
+# has ended, though its terminal shows /usage at once. Some commands show
+# the same in each session, like /usage, which shows how much of your plan
+# you have used. Ladder runs such a command in a program of its own, beside
+# the turn, as soon as you give it: the answer shows under your words a few
+# seconds later, and the agent goes on with its turn. The command costs no
+# tokens, as the agent's program answers it itself.
+
+"Claude Code's commands that show the same in each session, so a program of their own can run them beside a turn. /cost and /stats are other names of /usage."
+const BESIDE_COMMANDS = ("usage", "cost", "stats")
+
+"""
+True when `words` are a command that a program of its own runs beside the
+turn that the agent of the session `s` works on now. The agent must have
+listed the command: with an API key, Claude Code has no /usage, and the
+words would go to the model.
+"""
+goes_beside(s::AgentSession, words::AbstractString) = begin
+  named = slash_named(words)
+  (named === nothing || !s.busy || s.turns || speaks_acp(s) || agent_kind(s.agent).name != "Claude") && return false
+  named[1] in BESIDE_COMMANDS && any(c -> c.name == named[1], get(AGENT_COMMANDS, (s.agent, s.dir), SlashCommand[]))
+end
+
+"The command that runs the agent's command `words` in a program of its own, beside the session `s`. Safe mode starts with no plugins, MCP servers or hooks, so it starts quickly."
+beside_command(s::AgentSession, words::AbstractString) = begin
+  options = ["-p", String(words), "--output-format", "json", "--safe-mode", "--no-session-persistence"]
+  SESSION_COMMAND[] === nothing ? kind_command(agent_kind(s.agent), options) : `$(SESSION_COMMAND[]) $options`
+end
+
+"""
+Run the agent's command `words`, like /usage, in a program of its own, while
+the program of the session `s` works on its turn. Your words show at once,
+and what the command printed shows under them when it has done. A task waits
+for the program: the window gives it its turns (see `pane_tick!`).
+"""
+run_beside!(s::AgentSession, words::AbstractString) = begin
+  it = RanBeside(words=String(words))
+  push!(s.items, it)
+  s.beside += 1
+  s.version += 1
+  command = Cmd(beside_command(s, words); dir=s.dir)
+  @async begin
+    out, err = IOBuffer(), IOBuffer()
+    ok = try
+      success(pipeline(command, stdin=devnull, stdout=out, stderr=err))
+    catch e
+      print(err, sprint(showerror, e))
+      false
+    end
+    text, bad = beside_said(String(take!(out)), String(take!(err)), ok)
+    it.reply.text, it.bad = isempty(text) ? "$(s.agent) ran $(first(split(words))). It gave nothing to show here." : text, bad
+    it.reply.whole = true
+    it.reply.n += 1
+    s.beside -= 1
+    s.version += 1
+  end
+  s
+end
+
+"""
+What a command that ran beside a turn printed, from `out`, the line of JSON
+that Claude Code printed, and `err`, what it wrote of a fault. `ok` is false
+when the program failed. Gives the text and whether it says what went wrong.
+"""
+beside_said(out::AbstractString, err::AbstractString, ok::Bool) = begin
+  o = nothing
+  for line in split(out, '\n')
+    x = agent_json(line)
+    json_field(x, "type") == "result" && (o = x)
+  end
+  said = json_field(o, "result")
+  said = said isa String ? String(strip(said)) : ""
+  if o === nothing || !ok || json_field(o, "is_error") === true
+    why = isempty(said) ? fault_line(err) : said
+    return (isempty(why) ? "The command didn't run." : why, true)
+  end
+  (said, false)
+end
+
 """
 The agent of the session `s` has done with what you said. When that was a
 command of the agent's and nothing came of it to show, the session says that
@@ -1418,7 +1528,7 @@ the command ran, with `said`, what the agent's program says of it, if
 anything. Some commands only show something in the agent's own terminal.
 """
 ran_note!(s::AgentSession, said::AbstractString="") = begin
-  it = isempty(s.items) ? nothing : last(s.items)
+  it = newest(s.items)
   (it isa YouSaid && isempty(it.about) && slash_named(it.words) !== nothing) || return s
   note!(s, isempty(strip(said)) ? "$(s.agent) ran $(first(split(it.words))). It gave nothing to show here." : String(strip(said)))
 end

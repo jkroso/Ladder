@@ -60,7 +60,7 @@ export pane_field!, reply_editor, talk_on_page, talk_zoom, page_symbols, pane_st
        words_block, code_wrapped, talk_row, step_row, pane_foot, pane_slot, model_shows, pane_model, model_words,
        model_face, model_wide, MODEL_BUTTON_ROOM, MODEL_GAP, one_line, solid_on_glass, send_button, section_now,
        section_in_view, OUTLINE_STEP, widen_for_agent!, narrow_from_agent!, agent_mode!, end_agent_session!,
-       CHAT_WIDE, PAGE_TALK, TALK_MARK, chats, pane_wide, pane_context, talk_mark, talk_body, talk_part,
+       CHAT_WIDE, PAGE_TALK, TALK_MARK, chats, pane_wide, pane_context, talk_mark, talk_body, talk_part, talk_parts,
        talk_text, read_talk, load_talk!, chat_part, TALK_SLIDE, TalkRoom, said_nothing, talk_page,
        talk_greeting, chat_tick!, close_chats!, new_agent_session!
 
@@ -703,7 +703,10 @@ send_words!(p::AgentPane) = begin
     return nothing
   end
   p.error = ""
-  if goes_bare(s, words)
+  if goes_beside(s, words)
+    # A command like /usage, given while the agent works, runs at once in a program of its own: see "a command beside a turn"
+    run_beside!(s, words)
+  elseif goes_bare(s, words)
     # A command of the agent's goes as you typed it, with nothing before it, as the agent reads a command only at the start of a message
     say!(s, words; bare=true)
   else
@@ -1294,7 +1297,7 @@ pane_tick!(p::AgentPane, e) = begin
   slash_tick!(p, e)
   s = p.session
   s === nothing && return nothing
-  if s.busy || s.loading || s.looking
+  if s.busy || s.loading || s.looking || s.beside > 0
     yield()
     redraw_in!(e, 0.05)
   end
@@ -1446,10 +1449,11 @@ pane_talk(p::AgentPane, e, room) = begin
     push!(rows, talk_row(p, e, it, room))
     k += 1
   end
-  # While the agent thinks, with nothing of its own under way to show it
-  waits = s !== nothing && s.busy && (isempty(items) || !(last(items) isa AgentStep && last(items).state == :going) &&
-                                                         !(last(items) isa AgentReply && !last(items).whole) &&
-                                                         !(last(items) isa AgentWants && last(items).answer == :none))
+  # While the agent thinks, with nothing of its own under way to show it. Your words that wait for the turn, and a command that ran beside it, are no part of it.
+  now = agent_newest(items)
+  waits = s !== nothing && s.busy && (now === nothing || !(now isa AgentStep && now.state == :going) &&
+                                                         !(now isa AgentReply && !now.whole) &&
+                                                         !(now isa AgentWants && now.answer == :none))
   loads = s !== nothing && s.loading
   (waits || loads) && push!(rows, Row(height(24px), Alignment.Center, child_gap=8px,
                            Box(fixed(16px), height(16px), Alignment.Center, justify=Alignment.Center, Spinner(size=12px)),
@@ -1548,6 +1552,16 @@ end
 
 "A line that the session says of itself"
 talk_row(p::AgentPane, e, it::SessionNote, room) = words_block(e, it.words, it.bad ? PICK_FAILED : colours.dim, room; size=12.5px)
+
+"A command that ran beside a turn: your words, and under them what it printed, or a turning ring while it runs"
+talk_row(p::AgentPane, e, it::RanBeside, room) = begin
+  answer = !it.reply.whole ?
+    Row(height(24px), Alignment.Center, child_gap=8px,
+        Box(fixed(16px), height(16px), Alignment.Center, justify=Alignment.Center, Spinner(size=12px)),
+        Box(label("Running $(first(split(it.words)))", 13px * talk_zoom(e), color=colours.dim))) :
+    it.bad ? words_block(e, it.reply.text, PICK_FAILED, room; size=12.5px) : talk_row(p, e, it.reply, room)
+  Column(width(grow=grow), Alignment.Start, child_gap=10px, name="Ran beside", talk_row(p, e, YouSaid(words=it.words), room), answer)
+end
 
 "A step of the agent as a line: a ring that turns while it's under way, and then the icon of its tool"
 step_row(e, it::AgentStep, room) = begin
@@ -2045,6 +2059,11 @@ talk_part(it::AgentStep) = (talk_mark("step", Dict("tool" => it.tool, "state" =>
 talk_part(it::AgentWants) = (talk_mark("asked", Dict("tool" => it.tool, "answer" => String(it.answer), "detail" => it.detail)), it.words)
 talk_part(it::SessionNote) = (talk_mark("note", it.bad ? Dict("bad" => true) : nothing), it.words)
 
+"The parts of a session's file that keep `it`: one, or for a command that ran beside a turn, your words and then what it printed"
+talk_parts(it) = (talk_part(it),)
+talk_parts(it::RanBeside) = !it.reply.whole ? (talk_part(YouSaid(words=it.words)),) :
+  (talk_part(YouSaid(words=it.words)), talk_part(it.bad ? SessionNote(words=it.reply.text, bad=true) : it.reply))
+
 """
 The text of the file that keeps the session `s`: a line with the agent, its
 folder and the session's name, and then each thing that you and the agent
@@ -2056,8 +2075,7 @@ talk_text(s::AgentSession, before="") = begin
   head = Dict("agent" => s.agent, "folder" => s.dir, "id" => s.id)
   isempty(s.model) || (head["model"] = s.model)
   println(io, talk_mark("session", head))
-  for it in s.items
-    mark, words = talk_part(it)
+  for it in s.items, (mark, words) in talk_parts(it)
     print(io, "\n", mark, "\n", talk_body(words), "\n")
   end
   String(take!(io))
