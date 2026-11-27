@@ -453,6 +453,8 @@ Guard.LADDER[] = @__MODULE__
 #
 # The colours, the fonts and the measures of the page are in look.jl.
 @use "./look" SANS SERIF MONO CODE_FONT CODE_STYLE CODE_SLANT CODE_SCALE code_type codefont codestyle codeslant SYMBOL_FONT Palette SEPIA PAPER NIGHT THEMES colours SITE SITE_MEASURE SITE_RULE SITE_STARS SITE_INK2 LABEL use! TOPBAR_H PANEL_W PANEL_MIN PANEL_MAX PROSE_W PAGE_X PAGE_TOP PAGE_BOTTOM CODE_END CHIP_X BLOCK_X QUOTE_X CELL_X CELL_Y grow clear lifted fixed spacer num label Face measured measure width_in drawable has stand_ins font_with one_wide one_width stand_in_from runs hasall spared_width spared
+@use "./host" editor page_object object list_files! go_folder! open_folder! page_top trash! file_act! show_in_finder
+@use "./folder_page" own! node! MARKDOWN window_size PICTURES MODELS TERMINALS CHATS SOUNDS VIDEOS ZIPS TABLES MAC_PICTURES DOCUMENTS FONTS CODE file_icon dark_page SERIES_LIGHT SERIES_DARK series_colours trouble held_keys only_held unmodified HELD commas file_menu ignore_item menu_theme drawn_menu! workspace url_path opener app_name PAGE_TITLES first_answer email_title page_title DESIGNS PageRow PAGE_ROW_H page_row! page_heading page_note PageButton page_button! git_colour favourite_item
 
 "The page's colours, font and text size, for the components that a live block shows"
 component_theme(zoom=1.0) = Theme(size=TEXT_SIZE * zoom * LABEL, surface=colours.float, text=colours.ink, dim=colours.dim, line=colours.line,
@@ -1319,10 +1321,6 @@ editor(node) = begin
   node
 end
 
-"A node that belongs to `e` and is kept for as long as `e` is"
-own!(e, node) = (node.parent === nothing && setfield!(node, :parent, e); node)
-node!(make, e, key) = get!(() -> own!(e, make()), e.nodes, key)
-
 """
 A part of the page joins the children of the document, so one part can find
 another by a walk of the tree: up to the document, then through its children.
@@ -1356,8 +1354,6 @@ unlist!(d::Document) = begin
   d
 end
 
-# A book review, as a blog's site tool reads it, is Markdown with a header that says the book's title
-const MARKDOWN = (".md", ".markdown", ".mdx", ".review")
 # A folder's own page, `.ladder`, is Markdown too: see "a folder's own page" below
 ismarkdown(path) = lowercase(splitext(path)[2]) in MARKDOWN || basename(path) == FOLDER_PAGE
 
@@ -1908,8 +1904,6 @@ go_back!(e) = (o = page_object(e); o !== nothing && page_back!(e, o)) || step_ba
 
 "Show the file that `go_back!` left. It's false when there is none, or when another file was opened since."
 go_forward!(e) = step_back!(e, e.ahead, e.back)
-
-window_size(e) = something(viewport(e), e.size)
 
 "The folder of the document that's showing. The sidebar can show another folder."
 docdir(e) = isempty(e.buf.path) ? e.folder : dirname(e.buf.path)
@@ -5054,16 +5048,8 @@ bytes(n) = begin
   end
 end
 
-const PICTURES = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp")
 const PREVIEW_LINES = 12
-const MODELS = (".stl", ".3mf", ".glb", ".gltf")   # the files of 3D models that the viewer reads
 const MODEL_HEIGHT = 260px
-const TERMINALS = (".vt",)   # the files that keep what a terminal shows: see "a terminal's file"
-const CHATS = (".chat",)     # the files that keep a session of an agent: see "a session's file"
-# The sound and the video files that macOS plays
-const SOUNDS = (".mp3", ".m4a", ".wav", ".aif", ".aiff", ".aac", ".flac", ".caf")
-const VIDEOS = (".mp4", ".mov", ".m4v")
-
 "The viewer of the model in the STL, 3MF or glTF file at `path`, or nothing if the file can't be read as a model"
 model(l::Breadcrumb, path) = begin
   v = l.viewer
@@ -5208,7 +5194,6 @@ codeline(line, lang, open='\0') = Row(height(LINE_H),
 
 # --- the files in a zip -------------------------------------------------------------------
 
-const ZIPS = (".zip", ".jar")
 const MOST_ZIP = 300_000_000   # bytes. A bigger zip isn't read.
 
 "The files in the zip at `path`, as lines of text: the name of each and how big it is once it's unpacked"
@@ -5223,7 +5208,6 @@ end
 
 # --- a CSV file as a table --------------------------------------------------------------------
 
-const TABLES = (".csv", ".tsv")
 const ROW_H = 24px
 const MOST_COLUMNS = 40
 
@@ -5375,32 +5359,6 @@ pager(l::Breadcrumb, path) = begin
 end
 
 # --- what shows for each kind of file --------------------------------------------------------------
-
-# The pictures that macOS reads and Skia doesn't
-const MAC_PICTURES = (".heic", ".heif", ".tif", ".tiff", ".svg", ".ico", ".icns", ".psd")
-# The files whose first page the Finder can show
-const DOCUMENTS = (".rtf", ".rtfd", ".doc", ".docx", ".pages", ".key", ".numbers", ".xls", ".xlsx", ".ppt", ".pptx", ".odt", ".epub")
-const FONTS = (".ttf", ".otf", ".ttc", ".woff", ".woff2")
-const CODE = (".jl", ".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx", ".py", ".rb", ".rs", ".go", ".c", ".h", ".cc", ".cpp", ".hpp", ".swift",
-              ".kt", ".java", ".sh", ".zsh", ".css", ".less", ".scss", ".mk", ".html", ".json", ".jsonl", ".toml", ".yml", ".yaml", ".xml", ".sql", ".lua")
-
-"The icon for the file at `path`. It says what kind of file it is, from the end of the file's name."
-file_icon(path) = begin
-  ext = lowercase(splitext(path)[2])
-  ext in MARKDOWN || ext == ".txt" ? "file-earmark-text" :
-  ext in PICTURES || ext in MAC_PICTURES ? "file-earmark-image" :
-  ext in SOUNDS ? "file-earmark-music" :
-  ext in VIDEOS ? "file-earmark-play" :
-  ext in MODELS || ext in DESIGNS ? "box" :
-  ext in TERMINALS ? "terminal" :
-  ext in CHATS ? "chat-text" :
-  ext == ".pdf" ? "file-earmark-pdf" :
-  ext in ZIPS ? "file-earmark-zip" :
-  ext in TABLES ? "file-earmark-spreadsheet" :
-  ext in FONTS ? "file-earmark-font" :
-  ext in DOCUMENTS ? "file-earmark-richtext" :
-  ext in CODE ? "file-earmark-code" : "file-earmark"
-end
 
 "Every icon that `file_icon` can give, and those of a file that's only shown: of a binary file, and of the button that opens the file in its own app. The built app reads them all when it's made."
 const FILE_ICONS = ("file-earmark", "file-earmark-text", "file-earmark-image", "file-earmark-music", "file-earmark-play", "box", "terminal",
@@ -8346,8 +8304,6 @@ const PLAN_ICONS = ["cursor", "plus-circle", "vector-pen", "pentagon", "rulers",
                     "aspect-ratio", "file-earmark-pdf", "x-lg", "plus-lg", "map", "person", "receipt", "arrows-fullscreen", "fullscreen-exit",
                     "chevron-up", "chevron-down", "check", "subtract", "magnet", "box-seam"]
 
-"True when the page's theme is a dark one"
-dark_page() = RGBA(colours.bg).r < 0.5
 """
 What's behind the plan's paper, round the table of measures and at the foot of
 a takeoff: the theme's colour for things that float over the page, which is a
@@ -12704,14 +12660,6 @@ const PLOT_H = 260px   # how tall bars and lines are
 const PIE_H = 220px    # and a pie
 "Every icon that a block can show. The built app reads them all when it's made."
 const BLOCK_ICONS = String["bar-chart", "graph-up", "pie-chart"]
-
-# The colours of the columns of numbers, in the order that a chart uses them. Each one can be told from
-# the one before it by a reader who doesn't see every colour. The first eight are for a light page.
-const SERIES_LIGHT = [colorant"#2a78d6", colorant"#eb6834", colorant"#1baf7a", colorant"#eda100",
-                      colorant"#e87ba4", colorant"#008300", colorant"#6250d6", colorant"#e34948"]
-const SERIES_DARK = [colorant"#3987e5", colorant"#d95926", colorant"#199e70", colorant"#c98500",
-                     colorant"#d55181", colorant"#0ca30c", colorant"#9085e9", colorant"#e66767"]
-series_colours() = dark_page() ? SERIES_DARK : SERIES_LIGHT
 
 "The colour at place `k` of a chart. Past the eighth, the colours come round again darker, then lighter: see `Charts.shade`."
 chart_colour(k::Integer) = begin
@@ -26899,9 +26847,6 @@ const LOADED = Dict{String,Float64}()
 "The files that define a kind of block and didn't load, with what went wrong"
 const BROKEN = Dict{String,String}()
 
-"What went wrong, as a block shows it"
-trouble(err) = sprint(showerror, err isa LoadError ? err.error : err)
-
 """
 Load the file of the block of `v` again if it was saved since it was loaded,
 so that a kind of block changes as you write it. Each block that the file
@@ -28495,23 +28440,6 @@ word_at(line::String, col::Int) = begin
 end
 
 held(node, key) = (w = window_of(node); w !== nothing && key in w.keys)
-
-"The keys of ⌃, ⌘, ⌥ and ⇧ that are down in the window `w`"
-held_keys(w::Window) = w.keys & HELD
-
-"""
-True when the keys of ⌃, ⌘, ⌥ and ⇧ that are down are `keys` and no others,
-like `Keys.cmd` for ⌘ alone. It takes a window, the event of a key, a click or
-the wheel, or a part of a window. Each key and click that does something else
-with ⌃, ⌘, ⌥ or ⇧ held asks this, so each does it only with the keys that it's
-for. A key that holds all four, like a hyper key, does none of those things.
-"""
-only_held(w::Window, keys::Keys) = held_keys(w) == keys
-only_held(ev::Union{KeyPress,KeyRelease,MouseScroll,Typed}, keys::Keys) = only_held(ev.window, keys)
-only_held(node, keys::Keys) = (w = window_of(node); w === nothing ? keys == Keys(0) : only_held(w, keys))
-
-"True when no key of ⌃, ⌘, ⌥ and ⇧ is down: in a window, with a key's event, or in the window of a part"
-unmodified(x) = only_held(x, Keys(0))
 
 "The caret moved or the text changed, so show the caret"
 touch!(e; keep_goal=false) = begin
@@ -30896,8 +30824,6 @@ const Shortcut = Tuple{Vararg{Stroke}}
 
 # The keys that are held with another key: the name that the settings file has for each, and the Mac's sign for it
 const HOLDS = ((Keys.ctrl, "ctrl", "⌃"), (Keys.cmd, "cmd", "⌘"), (Keys.opt, "opt", "⌥"), (Keys.shft, "shift", "⇧"))
-const HELD = Keys.ctrl | Keys.cmd | Keys.opt | Keys.shft
-
 "Each key that a shortcut can have, by the name that the settings file has for it, like \"z\", \"f5\" or \"pageup\""
 const KEY_NAMES = Dict{String,Keys}(lstrip(string(name), '_') => getproperty(Keys, name) for name in keys(instances(Keys))
                                     if !(name in (:shft, :cmd, :opt, :ctrl, :capslock, :fn, :mouse_left, :mouse_right, :mouse_middle, :mouse_back, :mouse_forward)))
@@ -32322,8 +32248,6 @@ tip_rect(b::ToolButton) = haskey(BUTTONS, b.action) && get(BUTTONS[b.action], :h
                           (b.rect[1], b.rect[2], b.rect[3], 2b.rect[4]) : b.rect
 
 hush!(b::Tipped) = (b.quiet = true; hide_tooltip!(window_of(b)))
-
-commas(n::Int) = replace(string(n), r"(?<=\d)(?=(\d{3})+$)" => ",")
 
 button(e, action, icon) = node!(() -> ToolButton(icon=icon, action=action), e, action)
 
@@ -35369,29 +35293,8 @@ panel_theme() = Theme(size=Tree.LABEL_SIZE, surface=colours.panel, text=colours.
 # looks and works like the other menus on the Mac. A window that isn't on a
 # screen, like the one a test makes, gets a menu that Ladder draws.
 
-"""
-The items of the menu of the file or the folder at `path`, as `system_menu`
-takes them. "-" is a line between two groups. A file has an item that opens it
-in the app that the Mac uses for it, unless that's Ladder.
-"""
-file_menu(path) = begin
-  isdir(path) && return ["New Page", "New Folder", "New Terminal", "New Agent Session", "-", "Open in New Window", favourite_item(path), "-", "Rename", "Duplicate", "-",
-                         "Copy Path", "Show in Finder", "-", ignore_item(path), "Move to Trash"]
-  app = opener(path)
-  outside = isempty(app) || app_name(app) == "Ladder" ? String[] : ["Open in $(app_name(app))"]
-  ["Open in New Window", outside..., "-", "Rename", "Duplicate", "-", "Copy Path", "Copy Link", "Show in Finder", "-", ignore_item(path), "Move to Trash"]
-end
-
-"The item of a file's menu that leaves the file or the folder at `path` out of Ladder's lists, or shows it again"
-ignore_item(path) = Folders.isignored(path) ? "Stop Ignoring" : "Ignore"
-
 "The menu of the sidebar's own folder, for a right-click under the files that it lists"
 const FOLDER_MENU = ["New Page", "New Folder", "New Terminal", "New Agent Session", "-", "Copy Path", "Show in Finder"]
-
-# A menu's text is 13/12 of its theme's size. This size makes it 13px, the size of a file's name in the sidebar.
-"The colours and the text size of a menu that floats over the window"
-menu_theme() = Theme(size=12px, surface=colours.float, text=colours.ink, dim=colours.dim, line=colours.line,
-                     hover=colours.hover, select=colours.active, family=SANS)
 
 """
 Show the menu of the file or the folder at `path`. `at` is where you
@@ -36703,23 +36606,6 @@ page_act!(e, i::Int, j::Int=0) = begin
     block == "Front Matter" ? add_front_matter!(e) : block == "Recording" ? add_recording!(e) : add_block!(e, INSERTS[j][2], INSERTS[j][3])
   end
   nothing
-end
-
-"""
-Show `items` as a menu that Ladder draws, for a window that macOS has no menu
-for. They're the items that `system_menu` takes. An item that opens a menu
-shows that menu in this one's place.
-"""
-drawn_menu!(w, items, act; off=(), ticked=(), path=(), at=(w.mouse[1], w.mouse[2])) = begin
-  isoff(i) = (path..., i) in off || (isempty(path) && i in off)
-  shown = [(i, entry) for (i, entry) in enumerate(items) if entry != "-" && !isoff(i)]
-  # An item with a tick, like the way that a desktop is sorted now, has the tick before its name
-  names = [entry isa Pair ? first(entry) * "  ›" : (path..., i) in ticked ? "✓ " * entry : entry for (i, entry) in shown]
-  show_menu!(w, names, at[1], at[2], 170px, theme=menu_theme(), item_height=28px, lift=3.0, onselect=k -> begin
-    k in eachindex(shown) || return
-    i, entry = shown[k]
-    entry isa Pair ? drawn_menu!(w, last(entry), act; off, ticked, path=(path..., i), at) : act(path..., i)
-  end)
 end
 
 "Show the page's menu at the mouse"
@@ -38962,10 +38848,6 @@ markdown_type() = begin
   msg(cls("UTType"), "typeWithIdentifier:", nsstring(MARKDOWN_TYPE))
 end
 
-workspace() = msg(cls("NSWorkspace"), "sharedWorkspace")
-"The file path of an NSURL, or an empty string for none"
-url_path(url::Ptr{Cvoid}) = url == C_NULL ? "" : jstring(msg(url, "path"))
-
 "Where the Ladder app is on this Mac, or an empty string when it isn't installed"
 app_path() = Sys.isapple() ? with_pool(() -> url_path(msg(workspace(), "URLForApplicationWithBundleIdentifier:", nsstring(APP_ID)))) : ""
 
@@ -38976,15 +38858,6 @@ markdown_app() = begin
     type = markdown_type()
     type == C_NULL ? "" : url_path(msg(workspace(), "URLForApplicationToOpenContentType:", type))
   end
-end
-
-"""
-The app that opens the file at `path` when you double-click the file in the
-Finder: where that app is, or an empty string when macOS has no app for the file.
-"""
-opener(path) = begin
-  (Sys.isapple() && isfile(path)) || return ""
-  with_pool(() -> url_path(msg(workspace(), "URLForApplicationToOpenURL:", msg(cls("NSURL"), "fileURLWithPath:", nsstring(path)))))
 end
 
 """
@@ -39007,9 +38880,6 @@ file that no app opens, has no button: it would only show it in the Finder.
 Nor has an HTML file: its app is a web browser, and Ladder is one for it.
 """
 outside_button(e) = isempty(opener(e.buf.path)) || html_page(e.buf) ? () : (button(e, :outside, "box-arrow-up-right"),)
-
-"The name of the app at `path`, like Ladder for /Applications/Ladder.app"
-app_name(path) = splitext(basename(path))[1]
 
 """
 Ask macOS to make Ladder the app that opens Markdown files. macOS shows a
@@ -45187,8 +45057,6 @@ while that's on: the button is shaded then, as the sidebar's button is. A
 button whose work takes a while can have `busy=f(e)`: it spins while that's true.
 """
 const BUTTONS = Dict{Symbol,Any}()
-"What the top bar calls the page that shows: `f(e)` gives the words, or nothing to leave the file's name"
-const PAGE_TITLES = Dict{Symbol,Any}()
 "What the card of the page's front matter is called: `f(e)` gives the word, or nothing for FRONTMATTER"
 const MATTER_TITLES = Dict{Symbol,Any}()
 """
@@ -45218,15 +45086,6 @@ add_insert!(name::AbstractString, lines, caret; before="Link Card") = begin
   i = something(findfirst(x -> x isa Tuple && x[1] == before, INSERTS), length(INSERTS))
   insert!(INSERTS, i, item)
   insert!(menu, i, String(name))
-  nothing
-end
-
-"What the first function of `table` that has an answer gives for `args`, or nothing when none has one"
-first_answer(table, args...) = begin
-  for f in values(table)
-    found = f(args...)
-    found === nothing || return found
-  end
   nothing
 end
 
@@ -46524,18 +46383,6 @@ email_shows(e, said) = begin
   b = e.buf
   b.view == :markdown && haskey(said, "date") && (Eml.isemail(b.path) || (haskey(said, "from") && haskey(said, "subject")))
 end
-
-"What the top bar calls an email file: its subject. It's nothing for any other page."
-email_title(e) = begin
-  b = e.buf
-  (b.view == :markdown && Eml.isemail(b.path) && front_matter(b.lines) > 0) || return nothing
-  said, _ = Eml.fields(b.lines)
-  haskey(said, "subject") || return nothing
-  isempty(said["subject"]) ? "No subject" : said["subject"]
-end
-
-"What the top bar calls the page that shows, when that isn't its file's name: what code from the startup page calls it, or an email's subject"
-page_title(e) = something(first_answer(PAGE_TITLES, e), email_title(e), Some(nothing))
 
 # --- the code of a thing ------------------------------------------------------------------
 #
@@ -54576,7 +54423,6 @@ end
 # closes: Save, Don't Save or Cancel. It asks when its red button is clicked,
 # when ⌘W closes it, and when Ladder quits.
 
-const DESIGNS = (".sc", ".solidcraft")
 const DesignFile = Union{FS.File{:sc},FS.File{:SC},FS.File{:solidcraft}}
 push!(BLOCK_ICONS, "arrow-counterclockwise", "arrow-clockwise", "save", "x-lg", "x", "check-lg", "chevron-down", "chevron-right", "eye", "eye-slash",
       "house", "skip-start-fill", "caret-left-fill", "caret-right-fill", "skip-end-fill")
@@ -56131,79 +55977,6 @@ found_kind(path::AbstractString) = begin
   FS.Directory
 end
 
-"""
-A line of a folder's own page that a click acts on, like the name of a file
-that has changes. It's darker while the mouse is over it. The view that it
-belongs to gives it what it shows and does, in each frame.
-"""
-@def mutable struct PageRow <: SemanticUI
-  act::Any = nothing   # what a click does, a function of the window, or nothing for a line that only shows
-  parts::Any = ()      # what the line shows, from the left
-end
-
-const PAGE_ROW_H = 28px
-
-describe(r::PageRow) =
-  Row(width(grow=grow), height(PAGE_ROW_H), padding(8px, 0px), radius(6px), child_gap=8px, clip=true, name="Line",
-      background(r.act !== nothing && ishovered(r) ? colours.hover : clear), r.parts...)
-
-cursor(r::PageRow) = r.act === nothing ? :arrow : :hand
-onkey(r::PageRow, ev::KeyPress{Keys.mouse_left}) = r.act === nothing ? nothing : (r.act(ev.window); handled)
-
-"The line of the view `v` that's kept under `key`, with what a click on it does and what it shows now"
-page_row!(v, key, act, parts...) = begin
-  length(v.rows) > 4000 && empty!(v.rows)
-  r = get!(() -> own!(v, PageRow()), v.rows, key)
-  r.act, r.parts = act, parts
-  r
-end
-
-"The words over a part of a folder's own page"
-page_heading(s) = Box(width(grow=grow), height(30px), padding(8px, 0px), Alignment.Start,
-                      Row(height(grow=grow), Box(label(s, 12px, color=colours.dim, weight="Semibold"))))
-
-"A line of a folder's own page that only says something, like that a list is empty"
-page_note(s) = Box(width(grow=grow), height(PAGE_ROW_H), padding(8px, 0px), Alignment.Start,
-                   Row(height(grow=grow), Box(label(s, 13px, color=colours.faint))))
-
-"""
-A button of a folder's own page, like the one that unpacks a zip file. The
-view that it belongs to gives it what it shows and does, in each frame.
-"""
-@def mutable struct PageButton <: SemanticUI
-  act::Any = nothing   # what a click does, a function of the window
-  icon::String = ""
-  words::String = ""
-  off::Bool = false    # it does nothing now, and shows that
-end
-
-describe(b::PageButton) =
-  Box(height(28px), padding(11px, 0px), radius(6px), name="Button",
-      background(b.off ? clear : ishovered(b) ? colours.active : colours.hover),
-    Row(child_gap=6px,
-      (isempty(b.icon) ? () : (Icon(b.icon, size=13px, color=b.off ? colours.faint : colours.dim),))...,
-      Box(label(b.words, 12px, color=b.off ? colours.faint : colours.ink, weight="Medium"))))
-
-cursor(b::PageButton) = b.off ? :arrow : :hand
-onkey(b::PageButton, ev::KeyPress{Keys.mouse_left}) = (b.off || b.act === nothing || b.act(ev.window); handled)
-
-"The button of the view `v` that's kept under `key`, with what a click on it does and what it shows now"
-page_button!(v, key, act; icon="", words="", off=false) = begin
-  b = get!(() -> own!(v, PageButton()), v.buttons, key)
-  b.act, b.icon, b.words, b.off = act, icon, words, off
-  b
-end
-
-"""
-The name of a folder at the top of its own page, with an icon before it and a
-line of words under it, like what it holds. The path to the folder is in the
-top bar, so it isn't under the name. With no words, there's no line.
-"""
-page_title(icon, name, about) =
-  Column(width(grow=grow), Alignment.Start, padding(8px, 0px, 14px, 8px), child_gap=13px,   # the name's box ends at its baseline, so its p, g and y use about 5px of this
-    Row(child_gap=10px, Icon(icon, size=22px, color=colours.dim), Box(label(name, 24px, weight="Bold"))),
-    (isempty(about) ? () : (Box(label(about, 13px, color=colours.dim)),))...)
-
 # --- a folder with a git repository in it ----------------------------------------------------
 #
 # A folder with a `.git` in it is the top folder of a repository, and Ladder
@@ -56264,9 +56037,6 @@ end
 const GIT_LETTERS = Dict(:changed => "M", :added => "A", :new => "U", :deleted => "D", :renamed => "R", :clash => "!")
 "What the repository's page calls each change of a file"
 const GIT_WORDS = Dict(:changed => "Changed", :added => "Added", :new => "New", :deleted => "Deleted", :renamed => "Renamed", :clash => "In two forms")
-
-"The colour of a change: green for a file that's new, red for one that's gone or in two forms, and the colour of a number for any other"
-git_colour(kind) = kind in (:new, :added) ? colours.string : kind in (:deleted, :clash) ? series_colours()[8] : colours.number
 
 "How many seconds the branch of a repository in a list of folders stays good. A folder can hold many repositories, and each look starts a git."
 const GIT_LIST_FRESH = 30.0
@@ -59434,9 +59204,6 @@ home_folder() = isempty(HOME[]) ? homedir() : HOME[]
 
 "Open the home folder in the page. The sidebar lists the home folder, and a sidebar that's hidden stays hidden."
 go_home!(e) = open_folder!(e, home_folder())
-
-"The item of a folder's menu that makes it a favourite, or takes it off the favourites"
-favourite_item(path) = Folders.isfavourite(path) ? "Remove from Favourites" : "Add to Favourites"
 
 # --- a table of what's in a folder ------------------------------------------------------------
 #
