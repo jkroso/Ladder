@@ -32,7 +32,7 @@ export Item, Live, Grid, isspread, Glide, Editor, TopBar, Sidebar, Page, Documen
        GalleryView, TermSettings, TERM_SETTINGS, ViewBlock, ItemClock, PlainLine, Rect, TranscriptButton,
        FileCheck, DesignSheet, FolderPage, SourceChooser, SearchView, SearchChoice, ChoiceMenu, ChoiceRow,
        editors, EmailHead, EACH_FRAME, AT_QUIT, BAR_PARTS, BUTTONS, AgentKind, WebFolder, WebPage,
-       PAGE_WINDOWS, OutcomeBody, Bound
+       PAGE_WINDOWS, OutcomeBody, Bound, AgentPane, FileBlock, Things, each_thing, SHARED, CodePicker
 
 # --- what a window holds ---------------------------------------------------------
 
@@ -688,4 +688,81 @@ struct Bound
   words::String
   call::Bool
   span::Union{Nothing,UnitRange{Int}}
+end
+
+"""
+The agent's pane of a window: the session, the words that you type, and what
+it keeps between frames. `follow` is true while the newest words stay in sight. `was` is how
+the window was before agent mode, to put it back. `open` holds each run of
+steps that a click opened, by the place of its first step.
+"""
+@def mutable struct AgentPane <: SemanticUI
+  session::Any = nothing
+  field::Any = nothing
+  parts::Dict{Any,Any} = Dict{Any,Any}()
+  scroll::Scroll = Scroll(width(grow=grow), height(grow=grow))
+  follow::Bool = true
+  put::px = 0px                # how far the pane was scrolled when it was last drawn
+  seen::Int = -1               # the version of the session that the window last drew
+  was::Any = nothing
+  open::Set{Int} = Set{Int}()
+  error::String = ""           # why the session couldn't start, or ""
+  file::String = ""            # the file that keeps the session, when the pane is a session's file in the page: see "a session's file"
+  kept::Int = 0                # the version of the session that the file has
+  wrote::Float64 = 0.0         # when the file was last written
+  stamp::Float64 = 0.0         # when the file last changed, as Ladder read it or wrote it
+end
+
+"A block that a file defines: what the file's function made of the lines of the block"
+@def mutable struct FileBlock <: SemanticUI
+  n::Int = 0                               # its place among the page's blocks in its language
+  first::Int = 0                           # the lines of its block, when the page was last laid out
+  last::Int = 0
+  lang::String = ""
+  source::String = ""                      # where its function comes from, as the page names it
+  lines::Vector{String} = String[]         # the lines that `value` was made from, or that it wrote last
+  state::Symbol = :new                     # :new, :ask (you haven't allowed its repository), :wait and :get (its repository comes), :made or :fault
+  from::Any = nothing                      # the module of the file
+  file::String = ""                        # the file on this Mac that the module comes from, or "" for a repository or a folder
+  read::Float64 = 0.0                      # when that file was last saved, as this block last knew it
+  value::Any = nothing                     # what the function made
+  shown::Any = nothing                     # the Shown that draws it
+  said::Any = nothing                      # the lines that `written` last gave for it, or nothing
+  wants::Bool = false                      # what was made asked for its lines to be written
+  inside::Bool = false                     # the caret was in the block's lines in the last frame
+  fault::String = ""                       # what went wrong
+  parts::Dict{Any,Any} = Dict{Any,Any}()   # its button, kept between frames
+end
+
+"""
+Several things that one chip has. ⇧ and a click on the window add a thing to
+a chip for things in the window, when its function takes them: an argument
+of type `Union{T,Things}`, where `T` is the type of one thing.
+"""
+struct Things
+  all::Vector{Any}
+end
+
+"The things that `x`, what a chip has, is: itself, or each of several"
+each_thing(x) = x isa Things ? x.all : Any[x]
+
+"The settings that every window has the same: each is a field of the editor"
+const SHARED = (:theme, :font, :weight, :zoom, :widest, :plain, :spelling, :updates, :autosave, :peeks, :ai, :glide, :wrap, :numbers, :shade, :beside, :indent, :code_scale, :code_font, :code_weight, :guide, :bundle, :rebound, :side, :hidden, :right, :own, :pinned, :hide_bar)
+
+"""
+The tool of a window of the editor `editor` that shows the code of a thing.
+`swallow` is true from a click that it took until the button comes up. `asked` is the change
+that an agent is making, or made a moment ago: see "ask for a change to a
+thing". `about` is a question that an agent is answering, or answered: see
+"ask about a thing". `chosen` is the thing that a click with ⌘ and ⌥ down
+chose, with the method that draws it, while the buttons on its line show.
+`buttons` is where each of those buttons was drawn in the last frame.
+"""
+@def mutable struct CodePicker
+  editor::Any = nothing
+  swallow::Bool = false
+  asked::Any = nothing
+  about::Any = nothing
+  chosen::Any = nothing
+  buttons::Vector{Any} = Any[]
 end

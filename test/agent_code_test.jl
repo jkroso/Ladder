@@ -1,5 +1,5 @@
 # Tests for the Julia code that an agent runs inside Ladder: repl.jl,
-# for_agents.jl, "the code that an agent runs" in main.jl, and cad/agent.jl
+# for_agents.jl, "the code that an agent runs" in agent/session.jl, and cad/agent.jl
 # for a SolidCraft design. Run them with
 # `julia -O0 --project=. test/agent_code_test.jl`. No real agent runs: the
 # agent here is a small script that prints the lines of JSON that Claude

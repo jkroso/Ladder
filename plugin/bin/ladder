@@ -6,7 +6,7 @@
 #     ladder show plan.md
 #     ladder wait plan.md
 #
-# `wait` talks to Ladder through files in one folder. Ladder's agent.jl says
+# `wait` talks to Ladder through files in one folder. Ladder's agent/waiters.jl says
 # what each file is for.
 #
 # What a command prints shows in Ladder too, as a file of its own:

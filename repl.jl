@@ -64,7 +64,7 @@ mutable struct Repl
   lock::ReentrantLock            # one piece of code runs at a time
   code::String                   # the code that runs now
   runs::Int                      # how many pieces have run
-  guided::Set{Any}               # the kinds of thing that the agent was told of: see `guide_once!` in main.jl
+  guided::Set{Any}               # the kinds of thing that the agent was told of: see `guide_once!` in agent/session.jl
 end
 
 """

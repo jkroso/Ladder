@@ -22,7 +22,7 @@
 #     answer-….md  an agent wrote it: its answer to a question that you asked
 #                  in place. The request names the file. See `answer_file`.
 
-@use "./merge" unified
+@use "../merge" unified
 
 "A test names a folder of its own here, to keep out of the real one"
 const place = Ref("")

@@ -32,7 +32,7 @@ export own!, node!, MARKDOWN, window_size, PICTURES, MODELS, TERMINALS, CHATS, S
        PageRow, PAGE_ROW_H, page_row!, page_heading, page_note, PageButton, page_button!, git_colour,
        favourite_item, ishidden, left_out, on_screen, whole_picture, MEDIA_CACHE, media_dir, tilde, title,
        held, not_pictures, picture_key, SETTINGS_FILE, settings_file, BROWSER_FOLDER, browser_folder, path_of,
-       HOME, home_folder, KEY_KEEPER, PAGE_GETTER
+       HOME, home_folder, KEY_KEEPER, PAGE_GETTER, TRUE_PATHS, truepath, PASSING
 
 "A node that belongs to `e` and is kept for as long as `e` is"
 own!(e, node) = (node.parent === nothing && setfield!(node, :parent, e); node)
@@ -357,3 +357,11 @@ const KEY_KEEPER = Ref{Function}(keep_key)
 
 "What gets a page from a web server: `Remote.curl`. A test puts its own function here, so that it uses no network."
 const PAGE_GETTER = Ref{Function}(Remote.curl)
+
+# An agent names its page by the path that has no links in it. Each file's path of that kind is found once.
+const TRUE_PATHS = Dict{String,String}()
+
+truepath(path) = get!(() -> ispath(path) ? realpath(path) : abspath(path), TRUE_PATHS, path)
+
+# The folders that macOS keeps temporary files in, and empties by itself
+const PASSING = ("/private/var/folders/", "/var/folders/", "/private/tmp/", "/tmp/")

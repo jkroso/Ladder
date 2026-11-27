@@ -28,7 +28,7 @@ export SANS, SERIF, MONO, CODE_FONT, CODE_STYLE, CODE_SLANT, CODE_SCALE, code_ty
        added_colour, TIP_INK, tip_label, dark_page, takeoff_back, elide, FLOAT_ROW, float_row, found_colours,
        rule, tint, wrapped, ROW_H, LISTING_W, PANEL_PAD, PREVIEW_LINES, LINE_H, TEXT_PAD, PAGE_W, ZOOM_STEP,
        FILL_SIDE, CHECK_BAD, MOST_CHOICES, MARK_FILL, THEME_ORDER, NOTE_GAP, SPELL_RED, OUTCOME_ROUND,
-       MEMBERS_H
+       MEMBERS_H, EDGE_W, SIDE_GAP, OMNI_FOOT, PICK_FAILED, CHIP_MARKS, QUEUED_LINE
 
 # --- look --------------------------------------------------------------------
 
@@ -428,3 +428,16 @@ const SPELL_RED = colorant"rgb(222,70,56)"
 const OUTCOME_ROUND = 7px       # how round the corners of an open box are, and of the rest under it
 
 const MEMBERS_H = 430px         # the tallest that the list is. The wheel moves through the rest.
+
+const EDGE_W = 8px   # how wide the strip is. Half of it is over the sidebar and half over the page.
+
+const SIDE_GAP = 8px     # the room over the sidebar's list, and over the panel at the right, while the bar hides
+
+const OMNI_FOOT = 12.0         # how far the foot of the commands' list flares out onto the bar
+
+const PICK_FAILED = colorant"rgb(200,60,50)"
+
+"The colours of the chips for things that show in the window, in their order. A chip and the line round its thing have the same colour."
+const CHIP_MARKS = [colorant"rgb(48,128,236)", colorant"rgb(226,112,28)", colorant"rgb(36,150,84)", colorant"rgb(148,76,206)"]
+
+const QUEUED_LINE = colorant"rgb(128,146,176)"   # the line round a thing whose request waits

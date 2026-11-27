@@ -1,9 +1,9 @@
-# Tests for merge.jl and agent.jl. Run them with `julia -O0 --project=. test/merge_test.jl`.
+# Tests for merge.jl and agent/waiters.jl. Run them with `julia -O0 --project=. test/merge_test.jl`.
 
 @use Test: @test, @testset
 @use Random
 @use "../merge" changes combine follow unified
-@use "../agent" => Agent
+@use "../agent/waiters" => Agent
 
 "Text `a` with the changes `cs` that make it `b`"
 apply(a, b, cs) = begin

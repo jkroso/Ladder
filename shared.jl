@@ -15,7 +15,7 @@ export drop!, dragging, click_twice!, settle!, answer!, commit!, stop_asking!, f
        add_to_favourites!, page_covers, remove_from_favourites!, choices_for, put_back!, runs_at_once,
        sidenote, worded, matter_view, on_own_page, table_view, web_kind, table_item, page_side, side_name,
        page_back!, wide_words, chip_click, chip_kind, chip_start, look!, look_of, put_look!, shown_at, drag!,
-       hint, head_in_charge
+       hint, head_in_charge, compact_width, chip_wider
 
 "A drag on the part `v` ended: what moved is written down"
 function drop! end
@@ -74,7 +74,7 @@ function button! end
 "The text field in a box, where the thing that it changes was"
 function field end
 
-"True while Ladder is built into an app (see app/bundle.jl)"
+"Show the whole of the view `v`"
 function fit! end
 
 "How many px to a point fits the whole page in the view, with white round it"
@@ -92,19 +92,19 @@ function page! end
 "A sentence at the foot of the block"
 function say! end
 
-"True while Ladder is built into an app (see app/bundle.jl)"
+"The headings of a table: of the measures of a takeoff, or made from `words`"
 function table_head end
 
 "The buttons over the part `v`"
 function toolbar end
 
-"True while Ladder is built into an app (see app/bundle.jl)"
+"The function that a call names: from the types `tt`, or at a place in code"
 function callee end
 
-"True while Ladder is built into an app (see app/bundle.jl)"
+"How far something goes: the lines of a Flow, a canvas, the data of a chart, or a column of a sheet"
 function extent end
 
-"True while Ladder is built into an app (see app/bundle.jl)"
+"True when the page or the buffer is a file of Julia code that you change. For a method `m`, the file of Julia's own code that it's in"
 function julia_file end
 
 "The level that `node` shows at"
@@ -113,19 +113,19 @@ function level end
 "Show `node` at level `i` of `levels(node)`"
 function level! end
 
-"True while Ladder is built into an app (see app/bundle.jl)"
+"The levels of abstraction that `node` can show at, from the lowest to the highest"
 function levels end
 
 "A type as Julia writes it, with no module's name in front of a type of the module `m`"
 function type_name end
 
-"True while Ladder is built into an app (see app/bundle.jl)"
+"Add a row to the table of the form `v`, with what's in its fields, in one edit, so one ⌘Z takes it away"
 function add_row! end
 
-"True while Ladder is built into an app (see app/bundle.jl)"
+"Lay out the text of the field `f` for `room`, and give what shows it, with how tall its text is and how tall its first line is"
 function field_text end
 
-"True while Ladder is built into an app (see app/bundle.jl)"
+"Keep something as it is: the view on the page, a film's picture for `seconds`, or a column of a sheet"
 function hold! end
 
 "Keep only the rows that have `words` in column `column`"
@@ -137,13 +137,13 @@ function narrowed end
 "What the mouse over a formula says"
 function tip end
 
-"True while Ladder is built into an app (see app/bundle.jl)"
+"Draw a caret: in a Flow, in a sheet, or at a side of a rectangle"
 function caret end
 
 "The name of the thing that the mouse is on in `part`, or nothing"
 function pointed end
 
-"True while Ladder is built into an app (see app/bundle.jl)"
+"What a press of the mouse does on a part: a sheet, a film, or the page"
 function press! end
 
 "What a chip says"
@@ -152,10 +152,10 @@ function chip_words end
 "The field at the top of the list of where rows can come from, that searches it"
 function choice_input end
 
-"True while Ladder is built into an app (see app/bundle.jl)"
+"Choose row `k` of a list, or the thing `item`"
 function choose! end
 
-"True while Ladder is built into an app (see app/bundle.jl)"
+"What happens in each frame to a list while you choose from it"
 function choosing_tick! end
 
 "True when the row `r` of the list is where the block's rows come from now, or one of the tables that a chart draws"
@@ -173,7 +173,7 @@ function key_given! end
 "The place in a sheet under a point that is (dx, dy) from the top left of its item"
 function locate end
 
-"True while Ladder is built into an app (see app/bundle.jl)"
+"The boxes that the selection covers in a Flow or a sheet, or the marks of a folder"
 function marks end
 
 "What the line under the table says"
@@ -191,37 +191,37 @@ function stop_choosing! end
 "Use the colours called `name` for the page"
 function theme! end
 
-"True while Ladder is built into an app (see app/bundle.jl)"
+"Go on: by `by` pages of a PDF file or a view that zooms, or by a turn of an agent's session"
 function turn! end
 
-"True while Ladder is built into an app (see app/bundle.jl)"
+"True when the command called `name` has something to work on in the window of `e`, where the type of what's in focus can't say so"
 function works_here end
 
-"True while Ladder is built into an app (see app/bundle.jl)"
+"While a file of the gallery fills the window, go `by` files on"
 function step! end
 
 "True for contacts in a page that can't be changed, like an email"
 function locked end
 
-"True while Ladder is built into an app (see app/bundle.jl)"
+"The arguments of the method `sig` that the palette asks for by their place, in their order"
 function asks end
 
-"True while Ladder is built into an app (see app/bundle.jl)"
+"Add to Favourites"
 function add_to_favourites! end
 
-"True while Ladder is built into an app (see app/bundle.jl)"
+"True when what `page_view` gives for `o` covers the page's whole space in the window"
 function page_covers end
 
 "Remove from Favourites"
 function remove_from_favourites! end
 
-"True while Ladder is built into an app (see app/bundle.jl)"
+"What the palette's list offers for a chip of the type `T` in the window of `e`, from the nearest"
 function choices_for end
 
 "Give the command `name` the bundle's shortcuts again"
 function put_back! end
 
-"True while Ladder is built into an app (see app/bundle.jl)"
+"True for a command that changes nothing that you'd want to look at before it runs, like Go To or Theme"
 function runs_at_once end
 
 "Fainter words at the right of the row of `x`, or none"
@@ -230,46 +230,46 @@ function sidenote end
 "The words that the palette shows for `x`, in a row and in a chip"
 function worded end
 
-"True while Ladder is built into an app (see app/bundle.jl)"
+"What shows in place of the card of the front matter of the page `o`, which the directory `d` holds, while the caret isn't in it"
 function matter_view end
 
 "True when the page shows the folder `o`'s own page, when that's a file in it, like a blog's Readme"
 function on_own_page end
 
-"True while Ladder is built into an app (see app/bundle.jl)"
+"What shows in place of the table in lines `from` to `to` of the page `o`, which the directory `d` holds, while the caret isn't in it"
 function table_view end
 
-"True while Ladder is built into an app (see app/bundle.jl)"
+"The kind of the web folder at `f`, which is in the web folder `d`"
 function web_kind end
 
 "The table in lines `from` to `to` as what its page's kind of folder shows in its place, or nothing when the kind shows the table"
 function table_item end
 
-"True while Ladder is built into an app (see app/bundle.jl)"
+"What shows in a panel at the right of the window, beside what `page_view` gives for `o`"
 function page_side end
 
 "What the button that hides the panel at the right calls the panel of `o`"
 function side_name end
 
-"True while Ladder is built into an app (see app/bundle.jl)"
+"Take a step back in what `page_view` gives for `o`, before the window shows the file that showed before"
 function page_back! end
 
-"True while Ladder is built into an app (see app/bundle.jl)"
+"True when the words that the command `name` asks for are what it's for, as the words of Ask Agent are"
 function wide_words end
 
-"True while Ladder is built into an app (see app/bundle.jl)"
+"What a click at the mouse of the window `w` chooses for a chip of the type `T`, or nothing"
 function chip_click end
 
-"True while Ladder is built into an app (see app/bundle.jl)"
+"`:choice` for a type whose things to choose from are few and fixed"
 function chip_kind end
 
-"True while Ladder is built into an app (see app/bundle.jl)"
+"What a chip of the type `T` starts as when the palette asks for one, or nothing"
 function chip_start end
 
 "Show in the window what the command `name` does with `args`, for a row that the arrows reached"
 function look! end
 
-"True while Ladder is built into an app (see app/bundle.jl)"
+"`look_of(e, Val(name))` gives how the window of `e` looks now in the ways that the command `name` changes it, for a command that shows each row of its list in the window as the arrows reach it"
 function look_of end
 
 "What `put_look!` gives"
@@ -278,11 +278,17 @@ function put_look! end
 "Where the thing `x` that a chip has shows in the window of `e`, for a line round it, or nothing"
 function shown_at end
 
-"True while Ladder is built into an app (see app/bundle.jl)"
+"While the mouse button is down, go to the level of each stop of `l` that the mouse comes to, and return true"
 function drag! end
 
 "The first shortcut of the command `name` with two spaces before it, to end a tooltip with, or nothing when the command has no keys"
 function hint end
 
-"True while Ladder is built into an app (see app/bundle.jl)"
+"What shows the page's front matter, like the top of an email, while the top bar asks it for its levels"
 function head_in_charge end
+
+"How wide the side menu `menu` stays while the sidebar is closed"
+function compact_width end
+
+"`chip_wider(x, e)` gives the thing of the same type as `x` that holds it in the window of `e`, like the block that a paragraph is in, or nothing"
+function chip_wider end
