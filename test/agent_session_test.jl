@@ -57,14 +57,15 @@ K.SESSION_COMMAND[] = Cmd([agent])
 K.AGENT_MODELS["Claude"] = K.model_list([K.AgentModel("opus", "Opus 5.5", "", "claude-opus-5-5"), K.AgentModel("sonnet", "Sonnet 5.5", "", "claude-sonnet-5-5"),
                                          K.AgentModel("haiku", "Haiku 5.5", "", "claude-haiku-5-5")], K.AgentModel[], "claude-opus-5-5")   # `every` is only for older models
 
-# Grok's stand-in is started for each thing that you say, with the agent's name, the session's name and your words
+# Codex's stand-in is started for each thing that you say, with the agent's name, the session's name and your words
 const turns = joinpath(dir, "turns.txt")
 const turner = joinpath(dir, "turn-agent")
 write(turner, replace(raw"""
 #!/bin/sh
 printf '%s|%s|%s\n' "$1" "$2" "$(printf '%s' "$3" | tr '\n' ' ')" >> "TURNS"
-printf '%s\n' '{"type":"text","data":"It has paint."}'
-printf '%s\n' '{"type":"end","stopReason":"end_turn","sessionId":"sess-Grok"}'
+printf '%s\n' '{"type":"thread.started","thread_id":"sess-Codex"}'
+printf '%s\n' '{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"It has paint."}}'
+printf '%s\n' '{"type":"turn.completed","usage":{}}'
 """, "TURNS" => turns))
 chmod(turner, 0o755)
 
@@ -299,24 +300,24 @@ try
 
   @testset "A session with an agent that works by turns goes on by its name" begin
     K.TURN_COMMAND[] = turner
-    e.ai = "Grok"
+    e.ai = "Codex"
     K.new_agent_session!(e, dir)
     frames(w, 4)
-    grok = joinpath(dir, "Grok.chat")
-    @test e.buf.path == grok && K.chat_shown(e)
-    p = e.nodes[(:chat, grok)]
+    codex = joinpath(dir, "Codex.chat")
+    @test e.buf.path == codex && K.chat_shown(e)
+    p = e.nodes[(:chat, codex)]
     s = p.session
-    @test s.agent == "Grok" && s.turns && e.buf.about == "Grok in $(basename(dir))"
+    @test s.agent == "Codex" && s.turns && e.buf.about == "Codex in $(basename(dir))"
     p.field.buf.lines = ["Read the plan"]
     K.send_words!(p)
     ok = until(() -> !s.busy)
-    @test ok && s.id == "sess-Grok" && last(s.items).text == "It has paint."
+    @test ok && s.id == "sess-Codex" && last(s.items).text == "It has paint."
     ok = until(() -> p.kept == s.version)
-    @test ok && K.read_talk(read(grok, String)).id == "sess-Grok"
+    @test ok && K.read_talk(read(codex, String)).id == "sess-Codex"
     p.field.buf.lines = ["And more"]
     K.send_words!(p)
     ok = until(() -> !s.busy)
-    @test ok && readlines(turns) == ["Grok||Read the plan", "Grok|sess-Grok|And more"]
+    @test ok && startswith(readlines(turns)[1], "Codex||<ladder-brief> You are in Ladder") && endswith(readlines(turns)[1], "Read the plan") && readlines(turns)[2] == "Codex|sess-Codex|And more"
     e.ai = "Claude"
     K.TURN_COMMAND[] = nothing
   end

@@ -39639,10 +39639,11 @@ The command that starts the program of the session `s`: Claude Code, which
 reads and prints lines of JSON. It asks Ladder before anything that your
 settings make it ask for, and it changes the session's page without asking.
 When the session has a name, it goes on with the session of that name.
-Antigravity's is `agy acp`: see "Antigravity, which asks you before a step".
+Antigravity's is `agy acp` and Grok's is `grok agent stdio`: see
+"Antigravity and Grok, which ask you before a step".
 """
 session_command(s::AgentSession) = begin
-  speaks_acp(s) && return ACP_COMMAND[] === nothing ? kind_command(agent_kind(s.agent), ["acp"]) : ACP_COMMAND[]
+  speaks_acp(s) && return ACP_COMMAND[] === nothing ? kind_command(agent_kind(s.agent), ACP_OPTIONS[agent_kind(s.agent).name]) : ACP_COMMAND[]
   SESSION_COMMAND[] === nothing || return `$(SESSION_COMMAND[]) $(session_options(s))`
   kind_command(agent_kind(s.agent), session_options(s))
 end
@@ -39844,10 +39845,10 @@ end
 
 """
 Make the model `id` the one that the agent of the session `s` works with.
-The programs of Claude Code and Antigravity change their model while they
-run, and say when they have: see `take_line!` and `acp_answer!`. Any other
-agent, and a program that has stopped, gets the model when it starts again,
-with your next words. So does Antigravity's program while it starts.
+The programs of Claude Code, Antigravity and Grok change their model while
+they run, and say when they have: see `take_line!` and `acp_answer!`. Any
+other agent, and a program that has stopped, gets the model when it starts
+again, with your next words. So does an ACP program while it starts.
 """
 model!(s::AgentSession, id::AbstractString) = begin
   id = String(id)
@@ -40038,6 +40039,7 @@ tool_words(name::AbstractString, input) = begin
   name in ("Task", "Agent") ? (isempty(get("description")) ? "Starting an agent" : "An agent: $(get("description"))") :
   name == "TodoWrite" ? "Planning the work" :
   name == "Skill" ? "Using the skill $(get("skill"))" :
+  name == "search_tool" ? "Looking for a tool" :   # Grok looks through the tools of its tool servers before it uses one
   code_tool(name) ? code_step(json_field(input, "code")) :
   startswith(name, "mcp__") ? "Using $(replace(replace(name, r"^mcp__" => ""), "__" => ": ", "_" => " "))" : "Using $name"
 end
@@ -40045,24 +40047,33 @@ end
 "The icon of a step with the tool `name`"
 tool_icon(name::AbstractString) =
   name == "Read" ? "file-earmark-text" : name in ("Edit", "Write", "MultiEdit", "NotebookEdit") ? "pencil" :
-  name in ("Grep", "Glob") ? "search" : name == "List" ? "folder" : name == "Bash" || code_tool(name) ? "terminal" : name in ("WebSearch", "WebFetch") ? "globe" :
+  name in ("Grep", "Glob", "search_tool") ? "search" : name == "List" ? "folder" : name == "Bash" || code_tool(name) ? "terminal" : name in ("WebSearch", "WebFetch") ? "globe" :
   name in ("Task", "Agent") ? "robot" : name == "TodoWrite" ? "list-task" : "gear"
 
-# --- Antigravity, which asks you before a step ---
+# --- Antigravity and Grok, which ask you before a step ---
 #
 # Antigravity's program `agy acp` stays for a whole session, as Claude
-# Code's does. It speaks the Agent Client Protocol (ACP), which editors like
-# Zed speak with their agents: lines of JSON-RPC both ways. Ladder asks it
-# for a new session, or for the one of the session's name, and gives it your
-# words with `session/prompt`. The agent tells Ladder each piece of its words
-# and each step with `session/update`. Before a step that its settings make
-# it ask for, like a shell command, it sends `session/request_permission`,
-# and the pane shows Allow and Refuse. Ladder ran `agy -p` before, which has
-# no one to ask, so Antigravity refused each such step. The session is in
-# Antigravity's accept-edits mode: it changes files in the session's folder
-# without asking, and asks before anything else that its settings don't allow.
+# Code's does, and so does Grok's, `grok agent stdio`. Each speaks the Agent
+# Client Protocol (ACP), which editors like Zed speak with their agents:
+# lines of JSON-RPC both ways. Ladder asks the program for a new session, or
+# for the one of the session's name, and gives it your words with
+# `session/prompt`. The agent tells Ladder each piece of its words and each
+# step with `session/update`. Before a step that its settings make it ask
+# for, like a shell command, it sends `session/request_permission`, and the
+# pane shows Allow and Refuse. Ladder ran `agy -p` and `grok -p` before, which
+# have no one to ask, and which can't take a tool from Ladder.
+#
+# A session with Antigravity is in its accept-edits mode: it changes files in
+# the session's folder without asking, and asks before anything else that its
+# settings don't allow. Grok has no such mode to set. It asks as its own
+# settings say: with `permission_mode = "always-approve"` in
+# ~/.grok/config.toml it never asks.
+#
+# Grok's program also sends lines of its own, whose method starts with
+# `_x.ai/`: how its tool servers start, its hooks, its notices. Ladder
+# leaves them out.
 
-"A command that a test puts in the place of `agy acp`: a program that reads and prints the same lines of JSON-RPC"
+"A command that a test puts in the place of `agy acp` or `grok agent stdio`: a program that reads and prints the same lines of JSON-RPC"
 const ACP_COMMAND = Ref{Any}(nothing)
 
 """
@@ -40078,11 +40089,14 @@ what you said that waits for that, or for the end of the turn under way.
   held::Vector{Any} = Any[]
 end
 
-"True when the agent of the session `s` speaks ACP: Antigravity does"
-speaks_acp(s::AgentSession) = agent_kind(s.agent).name == "Antigravity"
+"What comes after an agent's command to start its ACP program: `agy acp`, `grok agent stdio`"
+const ACP_OPTIONS = Dict("Antigravity" => ["acp"], "Grok" => ["agent", "stdio"])
 
-"True when the agent called `name` works by turns: see \"an agent that works by turns\". The programs of Claude Code and Antigravity stay for the session."
-by_turns(name::AbstractString) = !(agent_kind(name).name in ("Claude", "Antigravity"))
+"True when the agent of the session `s` speaks ACP: Antigravity and Grok do"
+speaks_acp(s::AgentSession) = haskey(ACP_OPTIONS, agent_kind(s.agent).name)
+
+"True when the agent called `name` works by turns: see \"an agent that works by turns\". The programs of Claude Code, Antigravity and Grok stay for the session."
+by_turns(name::AbstractString) = !(agent_kind(name).name in ("Claude", "Antigravity", "Grok"))
 
 "Send the ACP program of the session `s` the request `method` with `params`. `what` says what the answer is for: see `acp_answer!`."
 acp_call!(s::AgentSession, method, params, what) = begin
@@ -40107,15 +40121,21 @@ end
 """
 Ask the ACP program of the session `s` for the session of its name, or for
 a new one. What Ladder says of itself goes in the agent's instructions, as
-`--append-system-prompt` does for Claude Code.
+`--append-system-prompt` does for Claude Code. Grok takes it as rules, and
+a session of Grok's keeps the rules that it was made with.
 """
 acp_session!(s::AgentSession) = begin
-  params = Dict{String,Any}("cwd" => s.dir, "mcpServers" => code_servers(s),
-                            "_meta" => Dict("antigravity" => Dict("systemPrompt" => Dict("append" => session_brief(s)))))
+  brief = agent_kind(s.agent).name == "Grok" ? Dict("rules" => session_brief(s)) :
+          Dict("antigravity" => Dict("systemPrompt" => Dict("append" => session_brief(s))))
+  params = Dict{String,Any}("cwd" => s.dir, "mcpServers" => code_servers(s), "_meta" => brief)
   isempty(s.id) && return acp_call!(s, "session/new", params, :new)
   params["sessionId"] = s.id
   acp_call!(s, "session/resume", params, :resume)
 end
+
+"The program of the session `s` has the session. It gets the session's model, when that's another than the one it works with, and then what you said meanwhile."
+acp_model!(s::AgentSession) = isempty(s.model) || s.model == s.running ? acp_ready!(s) :
+  acp_call!(s, "session/set_model", Dict("sessionId" => s.id, "modelId" => s.model), (:model, s.model, nothing))
 
 "The program of the session `s` has the session: what you said meanwhile goes to the agent"
 acp_ready!(s::AgentSession) = begin
@@ -40215,11 +40235,11 @@ acp_answer!(s::AgentSession, what, result, error) = begin
     id isa String && (s.id = id)
     model = json_field(json_field(result, "models"), "currentModelId")
     model isa String && (s.running = model)
-    acp_call!(s, "session/set_mode", Dict("sessionId" => s.id, "modeId" => "accept-edits"), :mode)
+    # Grok has no accept-edits mode: it asks as its own settings say
+    agent_kind(s.agent).name == "Antigravity" ? acp_call!(s, "session/set_mode", Dict("sessionId" => s.id, "modeId" => "accept-edits"), :mode) : acp_model!(s)
   elseif what == :mode
     error === nothing || note!(s, "$(s.agent) didn't take its accept-edits mode, so it can ask before each change: $why", true)
-    isempty(s.model) || s.model == s.running ? acp_ready!(s) :
-      acp_call!(s, "session/set_model", Dict("sessionId" => s.id, "modelId" => s.model), (:model, s.model, nothing))
+    acp_model!(s)
   elseif what isa Tuple && first(what) == :model
     _, asked, was = what
     if error === nothing
@@ -40265,8 +40285,28 @@ acp_update!(s::AgentSession, u) = begin
   s
 end
 
-"The tool of the step that `u` tells of, by Claude Code's name where it has one, which `tool_words` and `tool_icon` know"
-acp_tool(u) = (name = something(json_field(u, "name"), json_field(u, "title"), Some(nothing)); name isa String ? get(TOOL_NAMES, name, name) : "a tool")
+"""
+The tool of the step that `u` tells of, by Claude Code's name where it has
+one, which `tool_words` and `tool_icon` know. Antigravity gives the tool's
+name. Grok gives it in `_meta`, and as the step's first title, which a
+later update changes to words like "Execute `ls`". Grok reaches a tool of
+a tool server through its own tool `use_tool`, whose input names the tool.
+"""
+acp_tool(u) = begin
+  name = something(json_field(json_field(json_field(u, "_meta"), "x.ai/tool"), "name"), json_field(u, "name"), json_field(u, "title"), Some(nothing))
+  name == "use_tool" && (name = something(json_field(json_field(u, "rawInput"), "tool_name"), Some(name)))
+  name isa String ? get(TOOL_NAMES, name, name) : "a tool"
+end
+
+"""
+What the tool of a step was given, by the names that Claude Code gives them,
+which `tool_words` knows. `input` is the step's `rawInput`. For a tool that
+Grok reaches through `use_tool`, it's what that tool is given.
+"""
+acp_input(input) = begin
+  inner = json_field(input, "tool_input")
+  antigravity_input(json_field(input, "tool_name") isa String && inner !== nothing ? inner : input)
+end
 
 """
 The step of the session `s` that the update `u` tells of. Its first update
@@ -40284,7 +40324,7 @@ acp_step!(s::AgentSession, u) = begin
     push!(s.items, step)
   end
   input = json_field(u, "rawInput")
-  (input !== nothing || isempty(step.words)) && (step.words = tool_words(step.tool, antigravity_input(input)))
+  (input !== nothing || isempty(step.words)) && (step.words = tool_words(step.tool, acp_input(input)))
   state = json_field(u, "status")
   state == "completed" ? (step.state = :done) : state == "failed" && (step.state = :failed)
   step
@@ -40298,10 +40338,12 @@ request keeps for `acp_choose!`.
 """
 acp_asks!(s::AgentSession, id, params) = begin
   call = json_field(params, "toolCall")
-  tool = acp_tool(call)
+  # A request can name a step without saying its tool again: the step that the session shows has it
+  step = step_of(s, json_field(call, "toolCallId"))
+  tool = step === nothing ? acp_tool(call) : step.tool
   # The agent's Julia code runs in Ladder without this question: the sandbox asks you before a step of it that could harm
   code_tool(tool) && return acp_choose!(s, AgentWants(input=(id, json_field(params, "options"))), "allow_once")
-  input = antigravity_input(json_field(call, "rawInput"))
+  input = acp_input(json_field(call, "rawInput"))
   # Nor does reading a picture that `look()` saved, which is in a folder of Ladder's and not in the session's
   tool == "Read" && a_look(json_field(input, "file_path")) && return acp_choose!(s, AgentWants(input=(id, json_field(params, "options"))), "allow_once")
   command = json_field(input, "command")
@@ -40425,7 +40467,7 @@ code_config(s::AgentSession) = begin
   sprint(write_json, Dict("mcpServers" => Dict("ladder" => Dict("command" => program, "args" => given))))
 end
 
-"The tool servers that Antigravity's program is given for the session `s`"
+"The tool servers that an ACP program is given for the session `s`"
 code_servers(s::AgentSession) = begin
   has_code(s) || return Any[]
   program, given = Repls.command(repl!(s))
@@ -40464,16 +40506,16 @@ const BRIEF_SHOWN = "In that code, `shown` is the thing that the user's window s
 
 # --- an agent that works by turns ---
 #
-# Claude Code's program stays for a whole session, and so does
-# Antigravity's: see "Antigravity, which asks you before a step". The
-# programs of Codex and Grok do one thing and end. So a session with one of them starts
+# Claude Code's program stays for a whole session, and so do Antigravity's
+# and Grok's: see "Antigravity and Grok, which ask you before a step". The
+# program of Codex does one thing and ends. So a session with it starts
 # its program again for each thing that you say, with the name that the
-# agent gave the session, and the agent goes on from where it was. Each
+# agent gave the session, and the agent goes on from where it was. It
 # prints lines of JSON while it works, in a form of its own, and Ladder shows
-# them as it shows Claude's: words, steps, and the end of the turn. These
-# agents can't ask you before a step. They run with the same options as for
-# a change that you ask for in the page: they change files, and what else
-# they may do is in each agent's own settings.
+# them as it shows Claude's: words, steps, and the end of the turn. Such an
+# agent can't ask you before a step, and has no tool from Ladder. It runs
+# with the same options as for a change that you ask for in the page: it
+# changes files, and what else it may do is in the agent's own settings.
 
 "A command that a test puts in the place of an agent that works by turns. It's given the agent's name, the session's name or \"\", and your words."
 const TURN_COMMAND = Ref{Any}(nothing)
@@ -40502,10 +40544,8 @@ end
 
 "The options of the command for a turn of the session `s`, which your words go after: see `turn_command`"
 turn_options(s::AgentSession) = begin
-  name = agent_kind(s.agent).name
   again = !isempty(s.id)
-  model = isempty(s.model) ? String[] : ["-m", s.model]   # Grok and Codex take -m for the model
-  name == "Grok" ? ["--output-format", "streaming-json", "--rules", session_brief(s), model..., (again ? ["-r", s.id] : String[])..., "--permission-mode", "acceptEdits", "-p"] :
+  model = isempty(s.model) ? String[] : ["-m", s.model]
   ["exec", "--json", "--sandbox", "workspace-write", "--skip-git-repo-check", model..., (again ? ["resume", s.id] : String[])...]
 end
 
@@ -40515,8 +40555,8 @@ agent. A task reads each line that it prints. When the program ends, the
 turn has ended, and the next thing that you said meanwhile starts a turn.
 """
 turn!(s::AgentSession, words::AbstractString) = begin
-  # Grok has what Ladder says of itself as rules. Another agent reads it before your words, until its session has a name to go on with.
-  first_words = isempty(s.id) && s.agent != "Grok"
+  # The agent reads what Ladder says of itself before your words, until its session has a name to go on with
+  first_words = isempty(s.id)
   s.asked += 1
   s.stopped = false
   process = try
@@ -40620,7 +40660,7 @@ turn_line!(s::AgentSession, line::AbstractString) = begin
   o === nothing && return s
   kind = json_field(o, "type")
   kind isa String || return s
-  s.agent == "Grok" ? grok_line!(s, o, kind) : codex_line!(s, o, kind)
+  codex_line!(s, o, kind)
   s.version += 1
   s
 end
@@ -40634,28 +40674,6 @@ fault_words(o, other) = begin
     m isa String && !isempty(m) && return m
   end
   other
-end
-
-# Grok prints `text` for each piece of its words, `tool_call` for a step and `tool_call_update` for how the step goes, and `end` with the session's name
-grok_line!(s::AgentSession, o, kind) = begin
-  if kind == "text"
-    data = json_field(o, "data")
-    data isa String && more_words!(s, data)
-  elseif kind == "tool_call"
-    tool_step!(s, json_field(o, "toolCallId"), json_field(o, "toolName"), json_field(o, "rawInput"))
-  elseif kind == "tool_call_update"
-    status = json_field(o, "status")
-    status in ("completed", "failed") && step_ended!(s, json_field(o, "toolCallId"), status == "completed")
-  elseif kind == "end"
-    id = json_field(o, "sessionId")
-    id isa String && (s.id = id)
-    why = json_field(o, "stopReason")
-    settle!(s)
-    why isa String && !(why in ("end_turn", "cancelled")) && !s.stopped && note!(s, "$(s.agent) stopped: $(replace(why, '_' => ' ')).", true)
-  elseif kind == "error"
-    note!(s, fault_words(o, "$(s.agent) couldn't do that."), true)
-  end
-  s
 end
 
 """

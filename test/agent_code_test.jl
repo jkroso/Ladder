@@ -218,7 +218,7 @@ else
       @test "mcp__ladder__julia" in options[k+1:end] && "Read(/$(K.agent_looks())/**)" in options[k+1:end]
       @test occursin("You have a tool named julia", K.session_brief(s))
       # An agent that works by turns has no tool, and isn't told of one
-      @test !occursin("tool named julia", K.session_brief(K.AgentSession(agent="Grok", turns=true)))
+      @test !occursin("tool named julia", K.session_brief(K.AgentSession(agent="Codex", turns=true)))
       # The first words with a design have what the design says of itself, and each has what it shows now
       said = first(l for l in heard_lines() if occursin("What is this?", l))
       @test occursin("<ladder-guide>\\nThe window shows a SolidCraft design", said) && occursin("run!(shown, id; name=value, …)", said)

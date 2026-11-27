@@ -136,7 +136,7 @@ K.AGENT_MODELS["Antigravity"] = K.antigravity_list("""
   """)
 
 # An agent that works by turns: it's started for each thing that you say, with the agent's name, the session's name and your words.
-# It prints the lines that Grok and Codex print, as Grok's real program printed them on 26 November 2026 (Codex: as its source says).
+# It prints the lines that Codex prints, as its source says.
 const turns = joinpath(dir, "turns.txt")
 const turner = joinpath(dir, "turn-agent")
 write(turner, replace(raw"""
@@ -148,32 +148,19 @@ case "$words" in
 *'fail please'*) echo "warning: something small" >&2; echo "Error: no key for $agent" >&2; echo "at line 3" >&2; exit 1 ;;
 *'go slow'*) exec sleep 30 ;;
 esac
-case "$agent" in
-Grok)
-  say '{"type":"available_commands","tools":["read_file"]}'
-  say '{"type":"thought","data":"I will read it"}'
-  say '{"type":"text","data":"I will read"}'
-  say '{"type":"text","data":" it."}'
-  say '{"type":"tool_call","toolCallId":"c1","title":"read_file","kind":"read","status":"pending","toolName":"read_file","rawInput":{"target_file":"/tmp/plan.md"},"content":[],"locations":[]}'
-  say '{"type":"tool_call_update","toolCallId":"c1","status":null,"content":[],"rawOutput":null,"locations":[]}'
-  say '{"type":"tool_call_update","toolCallId":"c1","status":"completed","content":[],"rawOutput":null,"locations":[]}'
-  say '{"type":"text","data":"It has paint."}'
-  say '{"type":"usage","usage":{"input_tokens":1}}'
-  say '{"type":"end","stopReason":"end_turn","sessionId":"sess-Grok"}' ;;
-*)
   say '{"type":"thread.started","thread_id":"sess-Codex"}'
   say '{"type":"turn.started"}'
   say '{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"I will read it."}}'
   say '{"type":"item.started","item":{"id":"item_1","type":"command_execution","command":"cat plan.md","aggregated_output":"","status":"in_progress"}}'
   say '{"type":"item.completed","item":{"id":"item_1","type":"command_execution","command":"cat plan.md","aggregated_output":"x","exit_code":0,"status":"completed"}}'
   say '{"type":"item.completed","item":{"id":"item_2","type":"agent_message","text":"It has paint."}}'
-  say '{"type":"turn.completed","usage":{}}' ;;
-esac
+  say '{"type":"turn.completed","usage":{}}'
 """, "TURNS" => turns))
 chmod(turner, 0o755)
 
 # Antigravity's program for a session, `agy acp`: it reads the lines of JSON-RPC that Ladder writes, writes each down, and
-# answers by what they hold, with lines like those that `agy acp` 1.5.18 printed on 27 November 2026
+# answers by what they hold, with lines like those that `agy acp` 1.5.18 printed on 27 November 2026.
+# A session that comes with rules is Grok's, and "make it taller" gets lines like those that `grok agent stdio` 1.0.94 printed that day.
 const acp_heard = joinpath(dir, "acp-heard.txt")
 const acp_agent = joinpath(dir, "acp-agent")
 write(acp_agent, replace(raw"""
@@ -200,6 +187,9 @@ while IFS= read -r line; do
   *'"outcome":"cancelled"'*) ;;
   *'"initialize"'*)
     answer "$id" '{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"agentInfo":{"name":"Antigravity ACP Server","version":"1.5.18"}}' ;;
+  *'"session/new"'*'"rules":'*)
+    sid=grok-1
+    answer "$id" '{"sessionId":"grok-1","models":{"availableModels":[{"modelId":"grok-4.7","name":"Grok 4.7"},{"modelId":"grok-4.6","name":"Grok 4.6"}],"currentModelId":"grok-4.7"},"configOptions":[]}' ;;
   *'"session/new"'*)
     sid=acp-1
     answer "$id" '{"sessionId":"acp-1","models":{"availableModels":[{"modelId":"gemini-4-neon-low","name":"Gemini 4 Neon (Low)"}],"currentModelId":"'"$model"'"},"modes":{"currentModeId":"default"}}' ;;
@@ -222,6 +212,23 @@ while IFS= read -r line; do
       update "$(run tool_call in_progress)"
       update "$(run tool_call_update pending)"
       say '{"jsonrpc":"2.0","method":"session/request_permission","params":{"sessionId":"'"$sid"'","toolCall":'"$(run tool_call pending)"',"options":[{"optionId":"allow","name":"Allow","kind":"allow_once"},{"optionId":"deny","name":"Deny","kind":"reject_once"}]},"id":"7"}' ;;
+    *'make it taller'*)
+      say '{"jsonrpc":"2.0","method":"_x.ai/mcp/init_progress","params":{"total":19,"connected":0,"sessionId":"grok-1"}}'
+      say '{"jsonrpc":"2.0","method":"_x.ai/ask_user_question","params":{"sessionId":"grok-1"},"id":"g9"}'
+      update '{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"I will make it taller."}}'
+      say '{"jsonrpc":"2.0","method":"_x.ai/session_notification","params":{"sessionId":"grok-1","update":{"sessionUpdate":"tool_call_delta_chunk","tool_call_id":"c1","tool_index":0,"name":"use_tool"}}}'
+      update '{"sessionUpdate":"tool_call","toolCallId":"c1","title":"use_tool","rawInput":{"tool_name":"ladder__julia","tool_input":{"code":"tall = 25"}},"_meta":{"x.ai/tool":{"version":1,"name":"use_tool","kind":"use_tool","namespace":"grok_build","label":"Use Tool","read_only":false}}}'
+      update '{"sessionUpdate":"tool_call_update","toolCallId":"c1","kind":"other","title":"ladder__julia","locations":[],"rawInput":{"variant":"UseTool","tool_name":"ladder__julia","tool_input":{"code":"tall = 25"}},"_meta":{"x.ai/tool":{"version":1,"name":"use_tool","kind":"use_tool","namespace":"grok_build","label":"Use Tool","read_only":false}}}'
+      update '{"sessionUpdate":"tool_call_update","toolCallId":"c1","status":"completed","rawOutput":{"type":"MCP","tool_name":"julia","server_name":"ladder","output":{"OkayOutput":"25"}}}'
+      update '{"sessionUpdate":"tool_call","toolCallId":"c2","title":"read_file","rawInput":{"target_file":"/tmp/plan.md"},"_meta":{"x.ai/tool":{"version":1,"name":"read_file","kind":"read","namespace":"grok_build","label":"Read","read_only":true}}}'
+      update '{"sessionUpdate":"tool_call_update","toolCallId":"c2","kind":"read","title":"Read `/tmp/plan.md`","locations":[{"path":"/tmp/plan.md"}],"rawInput":{"variant":"ReadFile","target_file":"/tmp/plan.md"},"_meta":{"x.ai/tool":{"version":1,"name":"read_file","kind":"read","namespace":"grok_build","label":"Read","read_only":true,"input":{"path":"/tmp/plan.md"}}}}'
+      update '{"sessionUpdate":"tool_call_update","toolCallId":"c2","status":"completed","content":[{"type":"content","content":{"type":"text","text":"paint"}}],"rawOutput":{"type":"ReadFile"}}'
+      update '{"sessionUpdate":"tool_call","toolCallId":"c3","title":"run_terminal_command","rawInput":{"command":"ls -la","description":"List the files"},"_meta":{"x.ai/tool":{"version":1,"name":"run_terminal_command","kind":"execute","namespace":"grok_build","label":"Run Command","read_only":false}}}'
+      update '{"sessionUpdate":"tool_call_update","toolCallId":"c3","kind":"execute","title":"Execute `ls -la`","content":[],"locations":[],"rawInput":{"variant":"Bash","command":"ls -la","description":"List the files","is_background":false},"_meta":{"x.ai/tool":{"version":1,"name":"run_terminal_command","kind":"execute","namespace":"grok_build","label":"Run Command","read_only":false,"input":{"command":"ls -la"}}}}'
+      update '{"sessionUpdate":"tool_call_update","toolCallId":"c3","status":"in_progress","content":[],"rawOutput":{"type":"Bash","exit_code":0,"command":"ls -la"}}'
+      update '{"sessionUpdate":"tool_call_update","toolCallId":"c3","status":"completed","content":[],"rawOutput":{"type":"Bash","exit_code":0,"command":"ls -la"}}'
+      update '{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"It is 25 tall."}}'
+      answer "$id" '{"stopReason":"end_turn","_meta":{"sessionId":"grok-1","modelId":"grok-4.7"}}' ;;
     *'go slow'*)
       update '{"sessionUpdate":"tool_call","toolCallId":"call_3","name":"view_file","status":"in_progress","kind":"read","title":"notes.md","rawInput":{"AbsolutePath":"/tmp/notes.md"}}' ;;
     *)
@@ -704,7 +711,7 @@ try
     @test ok && pane.session === nothing && named("Reply") === nothing
   end
 
-  @testset "A click on the agent's name lists the agents, and Grok and Codex work by turns" begin
+  @testset "A click on the agent's name lists the agents, and Codex works by turns" begin
     name = named("Agent name")
     @test name !== nothing && name.top + name.height <= K.TOPBAR_H
     click(name.left + 10px, name.top + 10px)
@@ -742,7 +749,7 @@ try
     e.remember = false
     frames()
     K.TURN_COMMAND[] = Cmd([turner])
-    for (agent, step) in (("Grok", "Reading plan.md"), ("Codex", "Running cat plan.md"))
+    for (agent, step) in (("Codex", "Running cat plan.md"),)
       K.pane_agent!(pane, agent)
       frames()
       @test e.ai == agent && pane.session === nothing && K.pane_agent(pane, e) == agent
@@ -764,9 +771,9 @@ try
       ok = until(() -> !s.busy && !K.running(s))
       said = readlines(turns)
       @test ok && pane.session === s && length(items()) == 8
-      # Grok takes what Ladder says of itself as rules. The others read it before the first words.
-      @test startswith(said[end-1], agent == "Grok" ? "Grok||<ladder>" : "$agent||<ladder-brief> You are in Ladder") && endswith(said[end-1], "Read the plan")
-      @test occursin("</ladder-brief>  <ladder>", said[end-1]) == (agent != "Grok")
+      # The agent reads what Ladder says of itself before the first words
+      @test startswith(said[end-1], "$agent||<ladder-brief> You are in Ladder") && endswith(said[end-1], "Read the plan")
+      @test occursin("</ladder-brief>  <ladder>", said[end-1])
       @test startswith(said[end], "$agent|sess-$agent|<ladder>") && endswith(said[end], "And then?")
     end
     s = pane.session
@@ -881,6 +888,53 @@ try
     frames()
     ok = until(() -> !K.running(s))
     @test ok && e.ai == "Claude" && pane.session === nothing
+  end
+
+  @testset "Grok's program stays for the session too: it takes Ladder's words as rules, has the julia tool, and changes its model at once" begin
+    K.pane_agent!(pane, "Grok")
+    frames()
+    @test e.ai == "Grok" && pane.session === nothing && !K.by_turns("Grok")
+    before = length(acp_lines())
+    pane.field.buf.lines = ["make it taller"]
+    K.send_words!(pane)
+    s = pane.session
+    @test !s.turns && K.speaks_acp(s) && K.has_code(s) && K.running(s) && s.busy
+    @test K.session_command(K.AgentSession(agent="Grok")) == K.ACP_COMMAND[] && K.ACP_OPTIONS["Grok"] == ["agent", "stdio"]
+    ok = until(() -> !s.busy)
+    its = items()
+    @test ok && [typeof(i) for i in its] == [K.YouSaid, K.AgentReply, K.AgentStep, K.AgentStep, K.AgentStep, K.AgentReply]
+    @test its[2].text == "I will make it taller." && its[6].text == "It is 25 tall."
+    # Grok reaches Ladder's tool through its own `use_tool`, and a later update gives each step another title. The step keeps its tool.
+    @test K.code_tool(its[3].tool) && its[3].words == "Running tall = 25" && its[3].state == :done
+    @test its[4].tool == "Read" && its[4].words == "Reading plan.md" && its[4].state == :done
+    @test its[5].tool == "Bash" && its[5].words == "List the files" && its[5].state == :done
+    @test K.tool_words("search_tool", nothing) == "Looking for a tool" && K.tool_icon("search_tool") == "search"
+    @test K.running(s) && s.id == "grok-1" && s.running == "grok-4.7"
+    # The session comes with what Ladder says of itself as rules, and with the tool server. Grok has no accept-edits mode to ask for.
+    said = acp_lines()[before+1:end]
+    @test occursin("\"method\":\"initialize\"", said[1])
+    @test occursin("\"method\":\"session/new\"", said[2]) && occursin("\"rules\":\"You are in Ladder", said[2]) && occursin("\"name\":\"ladder\"", said[2])
+    @test occursin("tool named julia", K.session_brief(s))
+    @test occursin("\"method\":\"session/prompt\"", said[3]) && !any(l -> occursin("session/set_mode", l), said)
+    # A request of Grok's own that Ladder doesn't do gets an error, so Grok doesn't wait for an answer
+    @test any(l -> occursin("\"id\":\"g9\"", l) && occursin("-32601", l), said)
+    # The model changes while the program runs
+    K.model!(s, "grok-4.6")
+    ok = until(() -> s.running == "grok-4.6")
+    @test ok && occursin("\"method\":\"session/set_model\"", last(acp_lines())) && occursin("\"modelId\":\"grok-4.6\"", last(acp_lines()))
+    # A program that starts again goes on with the session of its name, which keeps its rules
+    K.close!(s)
+    ok = until(() -> !K.running(s))
+    pane.field.buf.lines = ["Read the plan"]
+    K.send_words!(pane)
+    ok = ok && until(() -> !s.busy && last(items()) isa K.AgentReply)
+    @test ok && any(l -> occursin("\"method\":\"session/resume\"", l) && occursin("\"sessionId\":\"grok-1\"", l), acp_lines())
+    K.pane_agent!(pane, "Claude")
+    frames()
+    ok = until(() -> !K.running(s))
+    @test ok && e.ai == "Claude" && pane.session === nothing
+    empty!(K.MODELS_CHOSEN[])
+    rm(acp_heard, force=true)   # the tests after this one look for a change of model in what the stand-in heard
   end
 
   @testset "The model's button shows the agent's model, and its menu changes it, also while the agent's program runs" begin
@@ -1018,11 +1072,8 @@ try
     ok = ok && until(() -> !g.busy)
     started = acp_lines()[findlast(l -> occursin("session/resume", l), acp_lines()):end]
     @test ok && occursin("\"modelId\":\"gemini-4-carbon-high\"", started[3]) && occursin("session/prompt", started[4])
-    for (agent, model) in (("Grok", "grok-4.6"), ("Codex", "gpt-5.4-mini"))
-      t = K.AgentSession(agent=agent, model=model, id="sess", turns=true)
-      options = K.turn_options(t)
-      @test options[findfirst(==("-m"), options) + 1] == model
-    end
+    options = K.turn_options(K.AgentSession(agent="Codex", model="gpt-5.4-mini", id="sess", turns=true))
+    @test options[findfirst(==("-m"), options) + 1] == "gpt-5.4-mini"
     # The settings file keeps the model of each agent. One that Gemini had before Antigravity took its place is left out.
     e.remember = true
     K.model_chosen!(e, "Antigravity", "gemini-4-neon-high")
