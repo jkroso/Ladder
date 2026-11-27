@@ -295,32 +295,6 @@ SpaceX's finance chief, Bret Johnsen, says its first couple of gigawatts cost in
 
 One real difference is the power plant. The sums above assume a combined-cycle plant at !`heat_rate` BTU a kilowatt-hour and about $1,000 a kilowatt.[^16] Colossus's Southaven plant runs 41 simple-cycle turbines, about 1,240 megawatts, which burn closer to !`sx_heat_rate = 9400` BTU a kilowatt-hour.[^17] With gas at $!`sx_gas = 3.20` a million BTU (near the November 2026 spot price),[^18] across those !`2 * round(Int, ground_life / 1yr)` years its gas comes to !`spacex_fuel = (sx_heat_rate * sx_gas / 1000) * 1USD/MWh * station * full_ground * yr`. Taking Johnsen's figure at !`spacex_w = 33USD/W` for the site and chips, plus !`plant2` for the smaller replacement power station at year !`round(Int, ground_life / 1yr)`, puts SpaceX's total on the ground at !`spacex_ground = spacex_w * compute + plant2 + spacex_fuel`, which is !`round(Int, abs(float(spacex_ground / ground) - 1) / float(1Percent))`% !`spacex_ground >= ground ? "more" : "less"` than the McCalip sum above. That is the ground price used below.
 
-## How many tokens does !`compute` of compute make
-
-Earlier, this page used a single guess of !`joules` for each token. In practice, a watt of computer does not make a fixed number of tokens a second. The rate changes by more than ten times with the model, the precision, the context length, and how many users share a chip at once.
-
-Writing one token from a model with $P$ active parameters at $b$ bytes a weight takes two things: reading all of those active weights from memory ($P \cdot b$ bytes) and doing one multiply-add on each weight ($2P$ floating-point operations). That gives every chip two ceilings:
-
-- **When few users run at once**, memory bandwidth is the limit. Each user gets at most $\text{bandwidth} / (P \cdot b)$ tokens a second, and total throughput grows linearly as more users share the same weight reads.
-- **When many tokens run in one batch**, the chip's arithmetic saturates and total throughput flattens out at $\text{FLOP/s} / (2P)$ tokens a second.
-
-Take a B200 with !`bw_tbs = 8` TB/s of memory bandwidth and !`flops_p = 4.5` PFLOP/s of dense FP8 compute, running a model with !`params_b = 32` billion active parameters at !`weight_bytes = 1` byte a weight and !`util = 80Percent` real-world utilisation. One user gets about !`user_tps = round(Int, float(util) * bw_tbs * 1e12 / (params_b * 1e9 * weight_bytes))` tokens a second. Throughput climbs with batch size until about !`ridge = round(Int, flops_p * 1e15 * weight_bytes / (2 * bw_tbs * 1e12))` concurrent tokens, then hits the compute roof at !`max_tps = round(Int, float(util) * flops_p * 1e15 / (2 * params_b * 1e9))` tokens a second.
-
-```sheet
-Batch = 0 to 500
-Throughput = min(batch * user_tps, max_tps)
-```
-
-```chart
-kind: lines
-title: B200 throughput by batch size
-x: Concurrent tokens (batch size)
-y: Tokens a second
-show: Throughput
-```
-
-At that flat top, a 1,000-watt B200 spends only !`max_tps == 0 ? 0.0 : round(1000 / max_tps, digits=3)` joules a token. Across !`compute` of chips at full batch, that would be !`round(float(compute / 1000W) * max_tps / 1e9, sigdigits=3)` billion tokens a second, against !`round(float(compute / 1W) / float(joules / 1J) / 1e9, sigdigits=3)` billion a second at the !`joules` used on this page. Real clusters land much closer to the lower figure because users want fast replies (pushing servers left down the slope into smaller batches), long contexts add KV-cache memory reads, mixture-of-experts models spend time moving data between GPUs, and the rack and building draw power on top of the chips.[^20] That is why there is no single conversion from watts to tokens, and why buyers measure a curve of tokens a second per megawatt against speed per user.
-
 ## Side by side
 
 The two don't do the same work. The fleet does !`energy` of work before it's gone. On the ground, the computers stop !`100Percent - uptime` of the time, when more turbines are down than the spares can cover. Over its !`2 * round(Int, ground_life / 1yr)` years the revamped site gives them !`energy_ground = convert(TWh, compute * full_ground * yr)`.
@@ -365,6 +339,32 @@ That rent already includes the power and the cooling. The provider pays the util
 
 The table spreads each price over the chip's own draw. A rack draws more than its chips. A GB200 rack of 72 GPUs uses about 132 kilowatts, which is !`round(Int, 132000 / 72)` watts for each chip once the rack is counted.[^5] The same B200 rent, spread over that draw, is !`b200_rack_rent = b200_hr / (132kW / 72) * compute` an hour. That is the same money as !`b200_rent`, counted over more watts. It is not a second bill. The page's PUE of !`pue` belongs to a station you own. It does not sit on top of this rent.
 
+## How many tokens does !`compute` of compute make
+
+Earlier, this page used a single guess of !`joules` for each token. In practice, a watt of computer does not make a fixed number of tokens a second. The rate changes by more than ten times with the model, the precision, the context length, and how many users share a chip at once.
+
+Writing one token from a model with $P$ active parameters at $b$ bytes a weight takes two things: reading all of those active weights from memory ($P \cdot b$ bytes) and doing one multiply-add on each weight ($2P$ floating-point operations). That gives every chip two ceilings:
+
+- **When few users run at once**, memory bandwidth is the limit. Each user gets at most $\text{bandwidth} / (P \cdot b)$ tokens a second, and total throughput grows linearly as more users share the same weight reads.
+- **When many tokens run in one batch**, the chip's arithmetic saturates and total throughput flattens out at $\text{FLOP/s} / (2P)$ tokens a second.
+
+Take a B200 with !`bw_tbs = 8` TB/s of memory bandwidth and !`flops_p = 4.5` PFLOP/s of dense FP8 compute, running a model with !`params_b = 32` billion active parameters at !`weight_bytes = 1` byte a weight and !`util = 80Percent` real-world utilisation. One user gets about !`user_tps = round(Int, float(util) * bw_tbs * 1e12 / (params_b * 1e9 * weight_bytes))` tokens a second. Throughput climbs with batch size until about !`ridge = round(Int, flops_p * 1e15 * weight_bytes / (2 * bw_tbs * 1e12))` concurrent tokens, then hits the compute roof at !`max_tps = round(Int, float(util) * flops_p * 1e15 / (2 * params_b * 1e9))` tokens a second.
+
+```sheet
+Batch = 0 to 500
+Throughput = min(batch * user_tps, max_tps)
+```
+
+```chart
+kind: lines
+title: B200 throughput by batch size
+x: Concurrent tokens (batch size)
+y: Tokens a second
+show: Throughput
+```
+
+At that flat top, a 1,000-watt B200 spends only !`max_tps == 0 ? 0.0 : round(1000 / max_tps, digits=3)` joules a token. Across !`compute` of chips at full batch, that would be !`round(float(compute / 1000W) * max_tps / 1e9, sigdigits=3)` billion tokens a second, against !`round(float(compute / 1W) / float(joules / 1J) / 1e9, sigdigits=3)` billion a second at the !`joules` used on this page. Real clusters land much closer to the lower figure because users want fast replies (pushing servers left down the slope into smaller batches), long contexts add KV-cache memory reads, mixture-of-experts models spend time moving data between GPUs, and the rack and building draw power on top of the chips.[^20] That is why there is no single conversion from watts to tokens, and why buyers measure a curve of tokens a second per megawatt against speed per user.
+
 ## What the tokens are worth today
 
 The high reading is the tokens. Here the owner runs the model and sells every token, and keeps the whole price. That is more than the rent, because the rent is only what a customer pays to use the computers. The token price also pays for the model.
@@ -390,9 +390,7 @@ Say a million tokens sells for !`price = 2.50USD`. That's what Kimi K2, a model 
 
 ### If it is rented out
 
-The table above is the high reading, where the owner sells every token. For the low reading, suppose the owner instead rents the computers out for their whole life at the rack-level B200 rent above, !`b200_rack_rent` an hour (!`b200_rack_rent * 1yr` a year at full size). That rent already includes power and cooling, which are in the costs on both sides.
-
-Spot rent falls as newer chips arrive: above, an H100 rents for about a third of a B200. Say the rent falls by !`rent_drop = 0Percent/yr` each year. At zero, the rent stays flat, like the token price above; drag it up to see how faster ageing in price cuts the return.
+The table above is the high reading, where the owner sells every token. For the low reading, suppose the owner instead rents the computers out for their whole life at the rack-level B200 rent above, !`b200_rack_rent` an hour (!`b200_rack_rent * 1yr` a year at full size).
 
 | | Costs, counted today | Rent, counted today | Net present value (rent) |
 |---|---|---|---|
@@ -405,6 +403,12 @@ title: Cost and net present value of each option
 from: What the tokens are worth today, If it is rented out
 show: Cost today, Net present value (tokens), Net present value (rent)
 ```
+
+## Summary
+
+With the numbers on this page, !`compute` of computers costs !`orbit_now` in orbit and !`ground_cost_now` on the ground, counted today. !`orbit_now < ground_cost_now ? "Orbit" : "The ground"` comes out cheaper by !`orbit_now < ground_cost_now ? ground_cost_now - orbit_now : orbit_now - ground_cost_now`. Both sides pay !`chip_bill` for the chips, so the difference is satellites and launches (!`build + launch`) against a building, turbines and decades of gas.
+
+But that difference in cost is small compared to the value of the asset. The most important thing is simply getting it built. Second is selling tokens at the highest possible price, which means having access to the best models. Cutting costs by going to orbit is a distant third. The real reason to go to orbit isn't to save money — it's to turn data-centre building into a smooth-flowing production line rather than a string of ad hoc megaprojects.
 
 ## Footnotes
 
