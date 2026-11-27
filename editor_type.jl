@@ -10,14 +10,14 @@
 @use "github.com/jkroso/UI.jl/Interface/abstract" SemanticUI Theme light
 @use "./markdown" Cell Line
 @use "./spreadsheet" Value
-@use "github.com/jkroso/URI.jl/FS" => FS FSObject
+@use "github.com/jkroso/URI.jl/FS" => FS FSObject AbstractDirectory
 @use "./look" exports...
 @use "./flow" exports...
 @use "./buffer" exports...
 @use "./folder_page" exports...
 @use "github.com/jkroso/UI.jl/Interface/draw" rect
 @use "github.com/jkroso/UI.jl/Interface/Semantic/Mermaid" problem
-@use "./sheet" Result parts shown
+@use "./sheet" Result parts shown folded
 @use "./chart" => Charts
 @use "./filter" => Filters
 @use "./save" => Saves
@@ -31,7 +31,7 @@ export Item, Live, Grid, isspread, Glide, Editor, TopBar, Sidebar, Page, Documen
        Sheet, FileEntry, Crumb, Breadcrumb, FileText, Pages, ChartView, FilterRows, FilterView, SaveView,
        GalleryView, TermSettings, TERM_SETTINGS, ViewBlock, ItemClock, PlainLine, Rect, TranscriptButton,
        FileCheck, DesignSheet, FolderPage, SourceChooser, SearchView, SearchChoice, ChoiceMenu, ChoiceRow,
-       editors
+       editors, EmailHead, EACH_FRAME, AT_QUIT, BAR_PARTS, BUTTONS, AgentKind, WebFolder, WebPage
 
 # --- what a window holds ---------------------------------------------------------
 
@@ -583,3 +583,76 @@ end
 
 "The editor of each window that's open, in the order they opened"
 const editors = Editor[]
+
+"""
+The top of an email, in place of the card of its front matter. It's a part of
+the page with levels of its own. See "the top of an email".
+"""
+@def mutable struct EmailHead <: SemanticUI
+  rows::Vector{Tuple{Int,String,String}} = Tuple{Int,String,String}[]   # the keys of the front matter: the line, the key and what it's set to
+  size::px = 13px      # of the text
+  wide::px = 0px       # how wide the page's text is
+  path::String = ""    # the page's file. The top goes back to its highest level when another file shows.
+  full::Bool = false   # it shows every field of the email's header
+  fields::Vector{Pair{String,String}} = Pair{String,String}[]   # those fields, as the email's file has them
+  read_for::Tuple{String,Float64} = ("", 0.0)                   # the file that they were read from, and when it was last changed
+  folded::Any = nothing   # the fields cut into lines for the width they were cut for, and that width
+end
+
+"What code does in each frame of each window: `f(e)`"
+const EACH_FRAME = Dict{Symbol,Any}()
+
+"What code does when Ladder quits, after its last window has closed: `f()`"
+const AT_QUIT = Dict{Symbol,Any}()
+
+"More buttons for the right end of the top bar, for the page that shows: `f(e)` gives the nodes, or `()`"
+const BAR_PARTS = Dict{Symbol,Any}()
+
+"""
+What a button of the top bar does, when code from the startup page made it
+with `button(e, action, icon)`, by its action: `(run=f(e), tip=f(e), off=f(e),
+strong=true or false)`. `tip` gives the words of its tooltip. `off` is true
+while the button does nothing. A `strong` button has the colour that says do this.
+A button that turns something on and off can have `on=f(e)`, which is true
+while that's on: the button is shaded then, as the sidebar's button is. A
+button whose work takes a while can have `busy=f(e)`: it spins while that's true.
+"""
+const BUTTONS = Dict{Symbol,Any}()
+
+"""
+An agent that Ladder can start: the name that Settings shows, its command,
+the folders where the command can be besides those of the PATH, and the
+options that go before your words, for a change and for a question. For a
+question, the agent reads files and changes none. `message` are the options
+for a few words that it writes from what it's given, like a commit's
+message, quickly and with no files. `piped` is true when it reads text that's
+piped to it as part of your words. Without it, that text goes in the words.
+"""
+struct AgentKind
+  name::String
+  command::String
+  places::Vector{String}
+  change::Vector{String}
+  look::Vector{String}
+  message::Vector{String}
+  piped::Bool
+end
+
+AgentKind(name, command, places, change, look) = AgentKind(name, command, places, change, look, look, false)
+
+"""
+A folder on a web server: its address, which ends in a /, and the web folder
+that it's in, or nothing at the top of its site. `K` is its kind, a type
+under `AbstractDirectory`, as a folder on the Mac has one. A folder of no
+kind is a `WebFolder{FS.Directory}`.
+"""
+struct WebFolder{K<:AbstractDirectory}
+  address::String
+  parent::Union{WebFolder,Nothing}
+end
+
+"A page on a web server, in the web folder `parent`"
+struct WebPage
+  address::String
+  parent::WebFolder
+end

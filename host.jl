@@ -30,7 +30,9 @@ export editor, page_object, object, list_files!, go_folder!, open!, open_folder!
        choice_matches, toggle_source!, tick_item!, block_end, type!, web_browser, sum_name, given_and_sums,
        carry_sums!, follow_remote!, run_place, value_text, usual_module, own_units, remote_src, finding,
        follow!, filled, todo_at, link_on, close_find!, took, page_bottom, keep_got!, get_page!, browser_path,
-       page_online, changed_here
+       page_online, changed_here, fetched, email_head!, email_shows, ismouse, ignored_shown, file_menu!,
+       holds_words, page_html, new_page!, build_editor, news_look, web_page_kind, rename!, renaming,
+       copy_text!, renamer, move!
 
 "The editor of the window that `node`, a part of a page, is part of"
 function editor end
@@ -601,3 +603,54 @@ function page_online end
 
 "True when the file at `path` of the browser folder isn't what the server last sent"
 function changed_here end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function fetched end
+
+"The top of the email that the page shows"
+function email_head! end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function email_shows end
+
+"True when the key `k` is a button of the mouse"
+function ismouse end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function ignored_shown end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function file_menu! end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function holds_words end
+
+"The document as a page of HTML"
+function page_html end
+
+"Make a new empty page in the folder `dir` and show it"
+function new_page! end
+
+"Open the editor on a file, or on the first Markdown file in a folder"
+function build_editor end
+
+"True when the window shows a front page of a folder of news, or an article of one, which have a newspaper's look"
+function news_look end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function web_page_kind end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function rename! end
+
+"The path of the file that's being renamed in `at`, the `:sidebar` or the `:title`"
+function renaming end
+
+"Put `text` on the clipboard"
+function copy_text! end
+
+"The text field that a file's new name is typed in"
+function renamer end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function move! end

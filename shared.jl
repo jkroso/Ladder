@@ -11,7 +11,9 @@ export drop!, dragging, click_twice!, settle!, answer!, commit!, stop_asking!, f
        moved!, order_words, page!, say!, table_head, toolbar, callee, extent, julia_file, level, level!,
        levels, type_name, add_row!, field_text, hold!, keep!, narrowed, tip, caret, pointed, press!,
        chip_words, choice_input, choose!, choosing_tick!, chosen, draw_drag, hush!, key_given!, locate, marks,
-       more_words, name_row!, own_button, stop_choosing!, theme!, turn!, works_here, step!, locked, asks
+       more_words, name_row!, own_button, stop_choosing!, theme!, turn!, works_here, step!, locked, asks,
+       add_to_favourites!, page_covers, remove_from_favourites!, choices_for, put_back!, runs_at_once,
+       sidenote, worded, matter_view, on_own_page, table_view, web_kind, table_item
 
 "A drag on the part `v` ended: what moved is written down"
 function drop! end
@@ -201,3 +203,42 @@ function locked end
 
 "True while Ladder is built into an app (see app/bundle.jl)"
 function asks end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function add_to_favourites! end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function page_covers end
+
+"Remove from Favourites"
+function remove_from_favourites! end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function choices_for end
+
+"Give the command `name` the bundle's shortcuts again"
+function put_back! end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function runs_at_once end
+
+"Fainter words at the right of the row of `x`, or none"
+function sidenote end
+
+"The words that the palette shows for `x`, in a row and in a chip"
+function worded end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function matter_view end
+
+"True when the page shows the folder `o`'s own page, when that's a file in it, like a blog's Readme"
+function on_own_page end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function table_view end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function web_kind end
+
+"The table in lines `from` to `to` as what its page's kind of folder shows in its place, or nothing when the kind shows the table"
+function table_item end

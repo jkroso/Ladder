@@ -35,7 +35,8 @@ export look, table_text, in_browser, web_address, copied_from, julia_own, is_rep
        MOST_TEXT, MOST_PAGE, reading, HEX, HEX_BYTES, HEX_CHARS, BITS, BITS_ROW, BITS_CHARS, same_text,
        unchanged, line_end, FOLDER_PAGE, page_key, unescaped, bytes_page, STEP, FILE_VIEWS, JULIA, LIVE,
        TEXT_READ, text_file, SCHEDULE, FILTER, CODE_RUNS, LOAD, FOLDER_PAGES, TIMELOG, HTMLS, TERM_CARETS,
-       TERM_PASTS, VIEW_BLOCK, PAGE_MODULES, table_reads, CHART, SAVE, RUN_WAIT, LAST_RUN
+       TERM_PASTS, VIEW_BLOCK, PAGE_MODULES, table_reads, CHART, SAVE, RUN_WAIT, LAST_RUN, fetches,
+       MATTER_TITLES, MATTER_CARDS
 
 # A kind of page or of file decides these, so this file only names them. The
 # file that knows the kind gives each its methods.
@@ -635,3 +636,17 @@ const RUN_WAIT = Ref(0.1)
 
 "The task of the code that started to run last, in any window. Each run waits for the one before it to end, so two pieces of code never run at once."
 const LAST_RUN = Ref{Any}(nothing)
+
+# What's known of each web address that a picture has: the `curl` that's fetching
+# it, the file it's kept in, or nothing if it couldn't be fetched
+const fetches = Dict{String,Any}()
+
+"What the card of the page's front matter is called: `f(e)` gives the word, or nothing for FRONTMATTER"
+const MATTER_TITLES = Dict{Symbol,Any}()
+
+"""
+What shows in place of the card of the page's front matter, while the caret
+isn't in it: `f(e, rows)` gives a node, or nothing to leave the card. `rows`
+are the front matter's keys, each as its line, the key and what it's set to.
+"""
+const MATTER_CARDS = Dict{Symbol,Any}()

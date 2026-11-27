@@ -6124,21 +6124,6 @@ end
   size::px = 13px                                                       # of the text
 end
 
-"""
-The top of an email, in place of the card of its front matter. It's a part of
-the page with levels of its own. See "the top of an email".
-"""
-@def mutable struct EmailHead <: SemanticUI
-  rows::Vector{Tuple{Int,String,String}} = Tuple{Int,String,String}[]   # the keys of the front matter: the line, the key and what it's set to
-  size::px = 13px      # of the text
-  wide::px = 0px       # how wide the page's text is
-  path::String = ""    # the page's file. The top goes back to its highest level when another file shows.
-  full::Bool = false   # it shows every field of the email's header
-  fields::Vector{Pair{String,String}} = Pair{String,String}[]   # those fields, as the email's file has them
-  read_for::Tuple{String,Float64} = ("", 0.0)                   # the file that they were read from, and when it was last changed
-  folded::Any = nothing   # the fields cut into lines for the width they were cut for, and that width
-end
-
 "A key of front matter and what it's set to, in its card"
 @def mutable struct MatterRow <: SemanticUI
   line::Int = 0
@@ -17711,9 +17696,6 @@ cursor(::Picture) = :arrow
 onpinch(p::Picture, ev::Pinch) = pinch_open(p, ev)
 onkey(p::Picture, ev::KeyPress{Keys.mouse_left}) = click_page!(p, ev)
 
-# What's known of each web address that a picture has: the `curl` that's fetching
-# it, the file it's kept in, or nothing if it couldn't be fetched
-const fetches = Dict{String,Any}()
 pictures_dir() = joinpath(homedir(), "Library", "Caches", "Ladder", "pictures")
 
 """
@@ -23807,30 +23789,6 @@ end
 # file either. Each is an object, and a kind of folder is a type, so code
 # writes a method for the type: see `list_files!`.
 
-"What code does in each frame of each window: `f(e)`"
-const EACH_FRAME = Dict{Symbol,Any}()
-"What code does when Ladder quits, after its last window has closed: `f()`"
-const AT_QUIT = Dict{Symbol,Any}()
-"More buttons for the right end of the top bar, for the page that shows: `f(e)` gives the nodes, or `()`"
-const BAR_PARTS = Dict{Symbol,Any}()
-"""
-What a button of the top bar does, when code from the startup page made it
-with `button(e, action, icon)`, by its action: `(run=f(e), tip=f(e), off=f(e),
-strong=true or false)`. `tip` gives the words of its tooltip. `off` is true
-while the button does nothing. A `strong` button has the colour that says do this.
-A button that turns something on and off can have `on=f(e)`, which is true
-while that's on: the button is shaded then, as the sidebar's button is. A
-button whose work takes a while can have `busy=f(e)`: it spins while that's true.
-"""
-const BUTTONS = Dict{Symbol,Any}()
-"What the card of the page's front matter is called: `f(e)` gives the word, or nothing for FRONTMATTER"
-const MATTER_TITLES = Dict{Symbol,Any}()
-"""
-What shows in place of the card of the page's front matter, while the caret
-isn't in it: `f(e, rows)` gives a node, or nothing to leave the card. `rows`
-are the front matter's keys, each as its line, the key and what it's set to.
-"""
-const MATTER_CARDS = Dict{Symbol,Any}()
 "More names for the code of a window's pages: `f(m, e)` adds them to the module `m` that the code runs in"
 const PAGE_NAMES = Dict{Symbol,Any}()
 "A key that code takes while a field of a live block has the keyboard: `f(e, w, K)` is true when it took the key `K`"
@@ -26456,27 +26414,6 @@ const AGENT_COMMAND = Ref{Any}(nothing)
 # the options. Claude Code prints each step as a line of JSON, so the label on
 # the thing says what it's doing: see `agent_step`. The others print only what
 # they say at the end.
-
-"""
-An agent that Ladder can start: the name that Settings shows, its command,
-the folders where the command can be besides those of the PATH, and the
-options that go before your words, for a change and for a question. For a
-question, the agent reads files and changes none. `message` are the options
-for a few words that it writes from what it's given, like a commit's
-message, quickly and with no files. `piped` is true when it reads text that's
-piped to it as part of your words. Without it, that text goes in the words.
-"""
-struct AgentKind
-  name::String
-  command::String
-  places::Vector{String}
-  change::Vector{String}
-  look::Vector{String}
-  message::Vector{String}
-  piped::Bool
-end
-
-AgentKind(name, command, places, change, look) = AgentKind(name, command, places, change, look, look, false)
 
 # Claude's words go straight after -p. An option that takes a list, like --allowedTools, would take them as part of its list.
 const AGENT_KINDS = [
@@ -33535,23 +33472,6 @@ end
 #     matter_view(e, d::WebFolder{<:BlogFolder}, o::WebPage, rows) = ...
 #
 # The page itself still runs no code: see "a page from a web server".
-
-"""
-A folder on a web server: its address, which ends in a /, and the web folder
-that it's in, or nothing at the top of its site. `K` is its kind, a type
-under `AbstractDirectory`, as a folder on the Mac has one. A folder of no
-kind is a `WebFolder{FS.Directory}`.
-"""
-struct WebFolder{K<:AbstractDirectory}
-  address::String
-  parent::Union{WebFolder,Nothing}
-end
-
-"A page on a web server, in the web folder `parent`"
-struct WebPage
-  address::String
-  parent::WebFolder
-end
 
 "What Ladder has of the .ladder page of a web folder"
 mutable struct WebFolderPage
