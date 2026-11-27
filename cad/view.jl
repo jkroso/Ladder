@@ -1024,16 +1024,41 @@ end
 # --- the browser ---------------------------------------------------------------------
 
 const ROW_H = 26px
+"How wide the browser is"
+const BROWSER_W = 244px
+"The room at the right end of a line of the browser, after its eye"
+const ROW_END = 8px
 
-"A line of the browser"
+"""
+`t`, cut short with an … if it's wider than `room`. Its words stay whole if
+they fit.
+"""
+fitted(t, room) = begin
+  s = t.content
+  text_width(t, s) <= room && return t
+  while length(s) > 1 && text_width(t, rstrip(s) * "…") > room
+    s = chop(s)
+  end
+  t.content = rstrip(s) * "…"
+  t
+end
+
+"A line of the browser. A name too long for the line ends in …, and shows whole in a tip."
 browser_row(v::DesignView, key, depth, icon, name; on=false, dim=false, eye=nothing, act=nothing, twice=nothing, other=nothing, note="", tint=nothing) = begin
   t = theme(v)
-  press!(v, key; act, twice, other) do hovered
-    Row(width(grow=grow), height(ROW_H), padding(0px, 6px, 0px, 8px + 14px * depth), radius(5px), child_gap=7px,
+  left = 8px + 14px * depth
+  noted = isempty(note) ? nothing : words(note, 11.5px, color=colorant"rgb(60,180,90)")
+  # The line is as wide as the browser less its border and the list's padding of 4px.
+  # The name gets what its padding, icon, note, eye and the gaps between them leave.
+  room = BROWSER_W - 2px - 8px - left - ROW_END - 15px - 7px * (2 + (noted !== nothing) + (eye !== nothing)) -
+         (noted === nothing ? 0px : text_width(noted, note)) - (eye === nothing ? 0px : 22px)
+  named = fitted(words(name, 12.5px, color=dim ? t.dim : t.text), room)
+  press!(v, key; act, twice, other, tip=named.content == name ? "" : String(name)) do hovered
+    Row(width(grow=grow), height(ROW_H), padding(0px, ROW_END, 0px, left), radius(5px), child_gap=7px,
         background(on ? t.select : hovered ? t.hover : clear),
       Glyph(icon, size=15px, color=dim ? Ink.faded(t.dim, 0.7) : t.dim, accent=tint),
-      Box(words(name, 12.5px, color=dim ? t.dim : t.text)),
-      (isempty(note) ? () : (Box(words(note, 11.5px, color=colorant"rgb(60,180,90)")),))...,
+      Box(clip_x=true, named),
+      (noted === nothing ? () : (Box(noted),))...,
       Box(width(grow=grow)),
       (eye === nothing ? () : (eye,))...)
   end
@@ -1053,7 +1078,7 @@ folder(v::DesignView, name, count=nothing; icon=nothing, shown=nothing, show=not
   open = !(name in v.closed)
   t = theme(v)
   press!(v, (:folder, name); act=e -> (open ? push!(v.closed, name) : delete!(v.closed, name))) do hovered
-    Row(width(grow=grow), height(ROW_H), padding(0px, 6px, 0px, 8px), radius(5px), child_gap=7px, background(hovered ? t.hover : clear),
+    Row(width(grow=grow), height(ROW_H), padding(0px, ROW_END, 0px, 8px), radius(5px), child_gap=7px, background(hovered ? t.hover : clear),
       Glyph(open ? "chevron-down" : "chevron-right", size=10px, color=t.dim),
       (icon === nothing ? () : (Glyph(icon, size=15px, color=t.dim),))...,
       Box(words(count === nothing ? name : "$name ($count)", 12.5px, color=shown === false ? t.dim : t.text)),
@@ -1152,7 +1177,7 @@ browser(v::DesignView) = begin
   tall = min(room, length(rows) * num(ROW_H) + 8 + (isempty(bodies) && isempty(sketches) ? 30 : 0))
   scroll = get!(() -> Scroll(width(grow=grow), height(grow=grow)), v.parts, :browser_scroll)
   card!(v, :browser) do
-    Column(width(244px), panel_look(t)..., Alignment.Start,
+    Column(width(BROWSER_W), panel_look(t)..., Alignment.Start,
       Row(width(grow=grow), height(36px), padding(12px, 0px), border(1px, :solid, Ink.faded(t.line, 0.7))[:bottom],
         Box(words("Browser", 13px, weight="Semibold")), Box(width(grow=grow))),
       Box(width(grow=grow), height(px(tall)), Alignment.Start,

@@ -936,6 +936,20 @@ else
     key(Keys.enter)
     settle()
     @test [b["name"] for b in Models.bodies(m)] == ["Block"]
+    # A name too long for its line ends in …, and the line's tip has all of it. Its eye
+    # stays inside the browser, in line with the other eyes, and clear of its right edge.
+    long = "Front radiator sleeve, bottom, at the far end"
+    Models.change!(m, "body.rename", JSON.Object("body" => "Block", "name" => long))
+    settle()
+    right(n) = (r = rect(n); r.left + r.width)
+    edge = right(v.parts[:browser]) - 1px - 4px                   # inside its border and the list's padding
+    @test v.parts[(:body, long)].tip == long
+    @test right(v.parts[(:body, long)]) <= edge
+    @test right(v.parts[(:eye, :body, long)]) == edge - V.ROW_END
+    @test right(v.parts[(:eye, :folder, "Bodies")]) == edge - V.ROW_END
+    Models.change!(m, "body.rename", JSON.Object("body" => long, "name" => "Block"))
+    settle()
+    @test v.parts[(:body, "Block")].tip == ""
     # The history rolls back and on
     click(v.parts[:back])
     settle()
