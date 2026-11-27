@@ -75,7 +75,7 @@ export GitDirectory, RepoView, GitPanel, follow_words, GIT_RUNS, send_command, S
        close_commit!, CommitLine, LANE_W, TREE_X, COMMIT_PAD, REF_H, dot_y, tree_colour, ref_boxes, bent_line,
        commit_line, file_tally, open_first!, file_changes, message_lines, commit_when, touched_words,
        commit_file, commit_change, unsaved_in, with_windows, commit_file!, commit_part, MESSAGE_COMMAND,
-       MOST_DIFF, message_command, recent_messages, message_prompt, read_message, text_diff, committed_text,
+       MOST_DIFF, message_command, recent_messages, message_prompt, talk_prompt, read_message, clean_message, text_diff, committed_text,
        with_changes, commit_now!, repo_of, save_for_commit!, ticked_text, commit_scope!, commit_all_files!,
        commit_staged_files!, commit_ticked!, commit_tick!, commit_staged!, commit_all!, commit_text!,
        choosing, choose_changes!, tick_key, ticked, TickChange, CommitMore, COMMIT_LIST, COMMIT_WAYS,
@@ -1070,6 +1070,14 @@ end
 # with Commit, for a message that you write. The words of the button and of
 # the list name the agent.
 #
+# In agent mode, once you have talked with the agent beside the page, that
+# agent writes the message, as it knows why the page changed: see
+# `commit_talk`. The Commit button asks it in the conversation, after the
+# turn that's under way, and the pane shows the question and the message. The
+# diff goes with the question, though the pane doesn't show it. If you stop
+# the agent, or it fails, nothing is committed. Before you have talked with
+# it, the agent of Settings writes the message in a run of its own, as above.
+#
 # The chevron beside the button opens a list of the three ways to commit:
 #
 #   - Commit this file, as the button does.
@@ -1125,6 +1133,29 @@ message_prompt(root; piped=true) = begin
 end
 
 """
+The words that Ladder gives the agent of a conversation for the message of a
+commit of `what` (see `commit_now!`) in the repository at `root`, and the
+diff `diff` of it: the words that the pane shows, and the rest, which it
+doesn't. `name` is the file's name.
+"""
+talk_prompt(root, what, name, diff) = begin
+  examples = recent_messages(root)
+  of = what == :all ? "all the changed files" : what == :staged ? "the files that are ticked in git's panel" :
+       what == :part ? "the ticked changes of $name" : name
+  shown = "Write the commit message for $of."
+  told = "The user clicked the Commit button in Ladder's top bar, and Ladder wrote these words for it. " *
+    "Write the git commit message for the change in the diff at the end of these words: it's all that the commit holds. " *
+    "You know from this conversation why some of it was made, so say what the change does, and why when that helps. " *
+    "Write it as the recent messages of this repository are written: a first line of less than 72 characters " *
+    "that says what the change does, and then a blank line and a short body only when the change needs one. " *
+    "Reply with the message alone, with no words before or after it, no quotes and no code fence. " *
+    "Don't run git and don't change a file: Ladder makes the commit with your reply." *
+    (isempty(examples) ? "" : "\n\nThe recent messages, newest first:\n\n" * join(examples, "\n\n---\n\n")) *
+    "\n\nThe diff:\n\n" * diff
+  (shown, told)
+end
+
+"""
 The message that the command `cmd` wrote from `input`, which it reads on its
 stdin, with no code fence and no blank lines round it. It fails with what the
 command said when it fails. `who` is the agent, by its name.
@@ -1137,9 +1168,17 @@ read_message(cmd, input; who="Claude") = begin
     why = strip(String(take!(said)))
     error(isempty(why) ? "$who didn't write a message." : "$who didn't write a message: " * first(split(why, '\n')))
   end
+  clean_message(out; who)
+end
+
+"The message in `out`, what the agent `who` wrote, with no code fence, no blank lines round it, no line that says who helped, and a blank line after its first line when more lines follow. It fails when that leaves nothing."
+clean_message(out; who="Claude") = begin
   text = strip(replace(strip(out), r"^```[a-z]*\n" => "", r"\n```$" => ""))
   # Claude adds a line that says it wrote the commit with you. It wrote the message, not the change, so the line goes.
-  text = strip(join(filter(l -> !occursin(r"^(Co-Authored-By|Claude-Session):"i, l), split(text, '\n')), "\n"))
+  lines = filter(l -> !occursin(r"^(Co-Authored-By|Claude-Session):"i, l), split(text, '\n'))
+  # git takes the lines up to the first blank one as the first line, so the body starts after a blank line
+  length(lines) > 1 && !isempty(strip(lines[2])) && insert!(lines, 2, "")
+  text = strip(join(lines, "\n"))
   isempty(text) && error("$who wrote an empty message.")
   String(text)
 end
@@ -1166,7 +1205,8 @@ whole file with `:file`, of every changed file of its repository with
 `:all`, of the ticked changes of the file with `:part`, or of the files that
 are ticked in git's panel with `:staged`. Changes that aren't saved are saved
 first. The agent writes while the window goes on, and `commit_tick!` commits
-when the message comes.
+when the message comes. The agent is the one of the conversation beside the
+page, once you have talked with it, else the one that Settings chose.
 """
 commit_now!(e, what::Symbol) = begin
   haskey(e.nodes, :writing) && return e   # one at a time
@@ -1193,9 +1233,16 @@ commit_now!(e, what::Symbol) = begin
     what == :staged && isempty(strip(diff)) && error("Tick the files to commit.")
     isempty(strip(diff)) && error("$(what == :all ? basename(root) : basename(path)) has no change to commit.")
     length(diff) > MOST_DIFF && (diff = first(diff, MOST_DIFF) * "\n… (the diff goes on)")
-    cmd, input = message_command(e, root, diff)
-    who = e.ai
-    task = Threads.@spawn read_message(cmd, input; who=who)
+    talk = commit_talk(e)
+    who = talk === nothing ? e.ai : talk.session.agent
+    task = if talk === nothing
+      cmd, input = message_command(e, root, diff)
+      Threads.@spawn read_message(cmd, input; who=who)
+    else
+      # The agent of the conversation writes it. Its session lives on this thread, so the task does too.
+      shown, told = talk_prompt(root, what, basename(path), diff)
+      @async clean_message(ask_talk!(talk, shown, told); who)
+    end
     e.nodes[:writing] = (task=task, what=what, root=root, path=path, rel=rel, part=part, who=who)
     redraw_in!(e, 0.05)
   catch err

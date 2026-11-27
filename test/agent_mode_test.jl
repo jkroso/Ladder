@@ -107,6 +107,10 @@ while IFS= read -r line; do
     # Antigravity names a file and its lines with a file:// address
     say '{"type":"assistant","message":{"content":[{"type":"text","text":"Updated [plan.md](file://PAGE):\n\n- **[Paint](file://PAGE#L5-L7):** more paint.\n- **[A note](file://NOTES#L41):** a note."}]}}'
     done_ ;;
+  *'the Commit button'*)
+    # With no blank line after the first line, as Antigravity wrote one on 27 November 2026
+    say '{"type":"assistant","message":{"content":[{"type":"text","text":"```\nBuy less paint\nThe plan says why.\n```"}]}}'
+    done_ ;;
   *)
     say '{"type":"assistant","message":{"content":[{"type":"text","text":"Plain **words**."}]}}'
     done_ ;;
@@ -1508,6 +1512,46 @@ try
     K.pane_agent!(pane, "Claude")
     frames()
     until(() -> !K.running(s))
+  end
+
+  @testset "Once you have talked with the agent, it writes the message of a commit in the conversation, after the turn that's under way" begin
+    # The page's folder is made a repository, and the page has a change since its first commit
+    merge!(ENV, Dict("GIT_CONFIG_GLOBAL" => "/dev/null", "GIT_AUTHOR_NAME" => "Test", "GIT_AUTHOR_EMAIL" => "test@example.com",
+                     "GIT_COMMITTER_NAME" => "Test", "GIT_COMMITTER_EMAIL" => "test@example.com"))
+    git(args...) = read(`git -C $dir -c commit.gpgsign=false $args`, String)
+    K.agent_shows(e) || (K.agent_mode!(e); frames(w, 3))
+    now = read(page, String)
+    write(page, replace(now, "Buy paint." => "Buy a little paint."))
+    git("init", "-q", "-b", "main"); git("add", "plan.md"); git("commit", "-q", "-m", "Make the plan")
+    write(page, now)
+    empty!(K.GIT_TOPS); K.Git.forget!()
+    frames()
+    tip() = K.BUTTONS[:commit].tip(e)
+    # With nothing said yet, the agent of Settings writes it in a run of its own
+    @test pane.session === nothing && K.commit_talk(e) === nothing && tip() == "Commit plan.md, with a message that Claude writes"
+    pane.field.buf.lines = ["Hello"]
+    K.send_words!(pane)
+    ok = until(() -> !pane.session.busy)
+    s = pane.session
+    @test ok && K.commit_talk(e) === pane && tip() == "Commit plan.md, with a message that Claude writes in the conversation"
+    # While the agent works on what you said, the commit waits
+    pane.field.buf.lines = ["go slow"]
+    K.send_words!(pane)
+    ok = until(() -> any(l -> occursin("go slow", l), heard_lines()))
+    n = length(heard_lines())
+    K.BUTTONS[:commit].run(e)
+    foreach(_ -> (frames(w, 1); sleep(0.02)), 1:10)
+    @test ok && s.busy && length(heard_lines()) == n && haskey(e.nodes, :writing) && tip() == "Claude is writing the commit message…"
+    # When that turn ends, the agent is asked, and its reply is the message
+    K.stop!(s)
+    ok = until(() -> !haskey(e.nodes, :writing))
+    @test ok && strip(git("log", "-1", "--format=%B")) == "Buy less paint\n\nThe plan says why."
+    @test isempty(strip(git("status", "--porcelain", "plan.md"))) && startswith(e.nodes[:result][1], "Committed plan.md: Buy less paint")
+    # The pane shows the question and the message. The diff and the last messages went to the agent, though the pane doesn't show them.
+    asked = s.items[findlast(it -> it isa K.YouSaid, s.items)]
+    @test asked.words == "Write the commit message for plan.md." && last(s.items) isa K.AgentReply && !s.busy
+    line = last(filter(l -> occursin("the Commit button", l), heard_lines()))
+    @test occursin("-Buy a little paint.\\n+Buy paint.", line) && occursin("Make the plan", line) && occursin("Write the commit message for plan.md.", line)
   end
 
   @testset "Closing the window ends the agent's program" begin

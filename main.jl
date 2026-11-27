@@ -27550,14 +27550,63 @@ add_command!(rebase_branch!, name=:rebase, title="Pull the commits of the branch
 
 add_command!(commit_file!, name=:commit, title="Commit the file to its git repository, with words that say what changed")
 
-# A click commits the file with a message that the agent that Settings chose writes, or that you write when the
-# setting says so. While ticked changes are chosen, it commits only those.
+# --- the conversation writes the message of a commit ---
+#
+# In agent mode, once you have talked with the agent beside the page, the
+# Commit button asks that agent for the commit's message in the
+# conversation, as it knows why the page changed. See "an agent writes the
+# commit's message" in git_page.jl.
+
+"The pane of the conversation beside the page of `e`, while agent mode shows and you have said something in it, or nothing"
+commit_talk(e) = begin
+  agent_shows(e) || return nothing
+  p = get(e.nodes, :agent_pane, nothing)
+  p isa AgentPane && p.session !== nothing && any(it -> it isa YouSaid, p.session.items) ? p : nothing
+end
+
+"""
+Give the agent of the pane `p` the words `shown`, which the pane shows, with
+`told` before them, which it doesn't, and give back its last reply once its
+turn has ended. It waits first for the turn that's under way. It fails when
+the turn ends with no reply, when you stop it, and when the agent fails.
+Call it in a task on the window's thread: it waits while the window goes on.
+"""
+ask_talk!(p::AgentPane, shown, told) = begin
+  e = editor(p)
+  while p.session !== nothing && (p.session.busy || p.session.loading)
+    sleep(0.05)
+  end
+  s = session!(p, e)
+  say!(s, shown, "", told)
+  asked = s.items[findlast(it -> it isa YouSaid, s.items)]
+  p.follow = true
+  redraw_in!(e, SOON)
+  while s.busy
+    sleep(0.05)
+  end
+  k = findlast(it -> it === asked, s.items)
+  k === nothing && error("$(s.agent) went on with another session, so it wrote no message.")
+  after = s.items[k+1:end]
+  # A turn that you stopped, or that went wrong, ends with a note that says so
+  n = findfirst(it -> it isa SessionNote && (it.bad || startswith(it.words, "You stopped")), after)
+  n === nothing || error(after[n].bad ? after[n].words : "You stopped $(s.agent), so nothing was committed.")
+  replies = filter(it -> it isa AgentReply, after)
+  isempty(replies) && error("$(s.agent) didn't write a message.")
+  last(replies).text
+end
+
+"Who writes the message of a commit from the Commit button of `e`, in words that go after what it commits"
+message_by(e) = e.own ? ", with a message that you write" :
+  (p = commit_talk(e); p === nothing ? ", with a message that $(e.ai) writes" : ", with a message that $(p.session.agent) writes in the conversation")
+
+# A click commits the file with a message that the agent of the conversation beside the page writes, or else the
+# agent that Settings chose, or that you write when the setting says so. While ticked changes are chosen, it commits only those.
 BUTTONS[:commit] = (run=e -> commit_scope!(e, choosing(e) ? :part : :file), off=e -> choosing(e) && isempty(ticked(e)), strong=false,
                     busy=e -> haskey(e.nodes, :writing),
                     tip=e -> haskey(e.nodes, :writing) ? "$(e.nodes[:writing].who) is writing the commit message…" :
                              (!choosing(e) ? "Commit $(basename(e.buf.path))" :
                               (n = length(ticked(e)); n == 0 ? "Tick the changes to commit" : n == 1 ? "Commit the ticked change" : "Commit the $n ticked changes")) *
-                             (choosing(e) && isempty(ticked(e)) ? "" : e.own ? ", with a message that you write" : ", with a message that $(e.ai) writes"))
+                             (choosing(e) && isempty(ticked(e)) ? "" : message_by(e)))
 
 add_command!(commit_all_files!, name=:commit_all, title="Commit every changed file of the repository, with words that say what changed")
 

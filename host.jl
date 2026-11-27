@@ -33,7 +33,7 @@ export editor, page_object, object, list_files!, go_folder!, open!, open_folder!
        page_online, changed_here, fetched, email_head!, email_shows, ismouse, ignored_shown, file_menu!,
        holds_words, page_html, new_page!, build_editor, news_look, web_page_kind, rename!, renaming,
        copy_text!, renamer, move!, toggle_right!, right_w, open_palette!, lens_shapes, theirs, change_diff,
-       kind_command, right_opened, in_focus, right_view, agent_kind, page_module, detail_view, type_brief,
+       kind_command, right_opened, in_focus, right_view, agent_kind, commit_talk, ask_talk!, page_module, detail_view, type_brief,
        line_rect, declared, detail_wide, sandbox, made_workspace, coloured, code_place, show_method!,
        settled_line, code_blocks, text_lines, show_code!, select_all!, add_block!, sources_tick!,
        from_pick_tick!, page_media, marking, page_span, table_html, isword, places, run!
@@ -691,6 +691,12 @@ function right_view end
 
 "The agent called `name` that Ladder can start, or Claude Code when there's none of that name"
 function agent_kind end
+
+"The pane of the conversation beside the page of the editor `e`, whose agent writes the message of a commit, or nothing"
+function commit_talk end
+
+"Give the agent of the pane `p` words that the pane shows, with words that it doesn't before them, and give back its reply, once it has said it all"
+function ask_talk! end
 
 "True while Ladder is built into an app (see app/bundle.jl)"
 function page_module end
