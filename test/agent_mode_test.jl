@@ -575,6 +575,32 @@ try
     @test ok && last(items()) isa K.AgentReply && last(items()).text == "Plain **words**."
   end
 
+  @testset "At the snake, the run with the caret in a reply shows its markup, as it does in the page" begin
+    sub = pane.parts[(:reply, objectid(last(items())))]
+    drawn() = join(seg.text for it in sub.layout if it.content isa K.Flow for vl in it.content.lines for seg in vl.segs)
+    K.focus(sub)
+    sub.buf.caret = sub.buf.anchor = (1, 9)   # in the bold words
+    K.touch!(sub)
+    frames()
+    @test !e.plain && drawn() == "Plain words."
+    # ⌘E in the reply takes the window down a level, and the reply and your words go down with it
+    press(Keys.e, Keys.cmd)
+    @test e.plain && K.low(e) && w.focus === sub
+    @test sub.plain && pane.field.plain && drawn() == "Plain **words**."
+    # With the caret in plain words, no run shows its markup
+    sub.buf.caret = sub.buf.anchor = (1, 2)
+    K.touch!(sub)
+    frames()
+    @test drawn() == "Plain words."
+    # ⌘E again goes back up, in the page and in the reply
+    sub.buf.caret = sub.buf.anchor = (1, 9)
+    K.touch!(sub)
+    press(Keys.e, Keys.cmd)
+    @test !e.plain && !sub.plain && !pane.field.plain && drawn() == "Plain words."
+    K.focus(pane.field)
+    frames()
+  end
+
   @testset "The agent asks before a command, and Allow lets it run" begin
     pane.field.buf.lines = ["Please run it"]
     K.send_words!(pane)

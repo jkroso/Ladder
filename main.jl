@@ -41100,12 +41100,21 @@ const talk_on_page = Ref(false)
 "How much bigger than its sizes in the pane the talk's text is now: the window's zoom, and in a session's file the page's bigger text"
 talk_zoom(e) = e.zoom * (talk_on_page[] ? PAGE_TALK / REPLY_SIZE : 1.0)
 
-"Give the editor `sub` of a part of the agent's pane the colours and keys of the window of `e`, with the pane's own font and size"
+"""
+True when the window of `e` shows its page at the low level, as symbols: the
+top bar shows the snake. The agent's replies and your words to it are then at
+that level too. A file with more than one way to show, like a session's file,
+and a block that fills the window, are at the high level here.
+"""
+page_symbols(e) = e.plain && e.buf.view == :markdown && full_block(e) === nothing
+
+"Give the editor `sub` of a part of the agent's pane the colours and keys of the window of `e`, with the pane's own font and size, at the level of the window's page"
 pane_style!(sub, e; own=false) = begin
   follow_host!(sub, e)
   # What the agent says in a session's file has the page's own font: `own` is true for it there
   sub.font, sub.zoom, sub.look, sub.spelling = own ? e.font : SANS, talk_zoom(e) * (REPLY_SIZE / TEXT_SIZE), :own, false
   talk_on_page[] || (sub.theme = :night)   # the pane is dark, so what's kept by the theme's name is kept apart from the page's
+  sub.plain = page_symbols(e)   # at the snake, the run with the caret in a reply or in your words shows its markup too
   # Text that was laid out in other colours than the pane's is laid out again: each line keeps the colours that it was laid out in
   inks = (colours.ink, colours.dim, colours.accent)
   get(sub.nodes, :pane_inks, nothing) == inks || (sub.nodes[:pane_inks] = inks; empty!(sub.flows))
