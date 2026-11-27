@@ -10,11 +10,9 @@
 
 @use "github.com/jkroso/UI.jl/Interface/objc" cls msg nsstring jstring with_pool
 @use Dates: Dates, Date
+@use "./dates" day   # the day of a time, in the Mac's own time zone
 
 # --- days ------------------------------------------------------------------------------
-
-"The day of the time `t`, in the Mac's own time zone"
-day(t::Real) = Date(Libc.strftime("%Y-%m-%d", t))
 
 """
 The name of the group of days that the time `t` is in, as the Finder names
