@@ -72,8 +72,13 @@ end
   # Every look that a body gets is one that satellite.jl has a material for
   known = first.(S.MATERIALS)
   @test all(name -> any(l -> l[1] == D.look(name) && l[2][1] in known, D.LOOKS), names)
-  @test D.look("Left cells (7)") == "Solar cells" && D.look("Bus") == "Gold foil" && D.look("Top cord, left") == "Pale paint"
-  @test D.part_of("Left cells (7)") == "Left wing" && D.part_of("Deck") == "Body" && D.part_of("Front sleeve, top") == "Loops"
+  @test D.look("Left cells (7)") == "Solar cells" && D.look("Bus") == "Dark metal" && D.look("Top loop") == "Pale paint"
+  @test D.look("Compute module, front bottom 2") == "Bright metal" && D.look("Strap, back top left 3") == "Black" && D.look("Keel") == "Black"
+  @test D.look("Coolant manifold, bottom left") == "Bright metal"
+  @test D.look("Front radiator panel") == "White paint" && D.look("Front coolant pipe, out") == "Bright metal"
+  @test D.part_of("Left cells (7)") == "Left wing" && D.part_of("Deck") == "Body" && D.part_of("Top loop") == "Loops"
+  @test D.part_of("Front radiator panel") == "Radiator" && D.part_of("Front coolant pipe, out") == "Radiator"
+  @test D.part_of("Coolant manifold, top right") == "Body" && D.part_of("Compute module, back top 1") == "Body" && D.part_of("Keel") == "Body"
   # A radiator with no height keeps a strip, since SolidCraft can't make a box with none
   @test D.lengths(merge(S.sizes(), (rad_high=0.0,))).rad_high == 50.0
 end
@@ -81,11 +86,12 @@ end
 if Engines.available()
   @testset "SolidCraft builds the design, and its parts are those of satellite.jl" begin
     path = joinpath(mktempdir(), "satellite.sc")
-    @test D.build(path) == 81 && isfile(path)
+    @test D.build(path) == 132 && isfile(path)
     p = D.program(path)
     try
       names = D.bodies(p)
-      @test length(names) == 81 && "Left cells (12)" in names && "Right strut, top" in names
+      @test length(names) == 132 && "Left cells (12)" in names && "Right strut, top" in names && "Front radiator panel" in names
+      @test "Compute module, front bottom 3" in names && "Strap, front bottom left 4" in names && "Coolant manifold, bottom left" in names
       parts = D.parts(p)
       own = S.satellite(S.sizes())
       @test sort(first.(parts)) == sort(first.(own))
@@ -106,17 +112,18 @@ if Engines.available()
       @test length(cells) == 12 && length(unique(s.tint[1] for s in cells)) == 12
       # The size of flat piece that each body got is kept. A loop of tube needed larger pieces than the first size
       # that was tried, and the next reading asks for those at once: one request for each body.
-      @test length(D.READ_WITH) == 81 && D.READ_WITH["Top loop"][1] > 0.4 && D.READ_WITH["Top cord, left"][1] < 0.2
+      @test length(D.READ_WITH) == 132 && D.READ_WITH["Top loop"][1] > 0.4 && D.READ_WITH["Laser lens"][1] < 0.2
       asked = p.asked
-      @test box(D.parts(p)) == (lo, hi) && p.asked - asked == 81 + 2
-      # With no panel, the radiator is only its bars
+      @test box(D.parts(p)) == (lo, hi) && p.asked - asked == 132 + 2
+      # With no panels, the radiators are only their bars
       bare = D.parts(p, panel=false)
       @test !any(m == :white_paint for (_, shapes) in bare for (m, _) in shapes)
       # The whole design follows its named lengths
       D.ask(p, "parameters.change", (changes=Dict("reach" => "20000 mm", "chord" => "9000 mm", "deep" => "8000 mm"),))
       lo, hi = box(D.parts(p))
-      # The bars at the wings' tips are 60 mm in radius, the bar at the radiator's tip 40 mm and the sleeve at the front 33 mm
-      @test near((lo[1], hi[1]), (-21.506, 21.506), 0.01) && near((lo[3], hi[3]), (-8.04, 8.033), 0.01) && hi[2] - lo[2] > 9
+      # The drums stand 770 mm from the middle, and the bars at the wings' tips are 60 mm in radius. The bars at the
+      # radiators' tips are 40 mm.
+      @test near((lo[1], hi[1]), (-20.83, 20.83), 0.01) && near((lo[3], hi[3]), (-8.04, 8.04), 0.01) && hi[2] - lo[2] > 9
     finally
       D.stop!(p)
     end

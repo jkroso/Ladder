@@ -34,7 +34,7 @@
 # triangles.
 #
 # SolidCraft has z up and works in mm: the wings go along x, the cells face -y
-# and the radiator reaches along +y. A model has y up and metres.
+# and the two radiators reach along +y and -y. A model has y up and metres.
 @use "./satellite" sizes satellite glb sky VIEW_SKY Shape CELL noise tinted dot cross unit FIRST LIMITS page_numbers
 @use "../cad/engine" => Engines
 @use "github.com/jkroso/JSON.jl" => JSON
@@ -127,12 +127,18 @@ inputs(sums=Dict{String,Any}()) = begin
 end
 
 "Lengths that the design works out from the ones that a page gives it. Each is the sum that `sizes` does, but that the body is a whole number of `BODY_STEP`s."
-const WORKED = ["body" => "round(min(max((sat_kg/450)^(1/3) * 1 m, 800 mm), 4000 mm) / 50 mm) * 50 mm", # a side of the body, at 450 kg a cubic metre
-                "root" => "body/2 + 600 mm",             # from the middle to each drum
+const WORKED = ["body" => "round(min(max((sat_kg/450)^(1/3) * 1 m, 800 mm), 4000 mm) / 50 mm) * 50 mm", # a side of a cube as heavy as the satellite, at 450 kg a cubic metre
+                "bus_long" => "2*body",                  # the length of the bus's spine, in the plane of the radiators
+                "spine_wide" => "0.2*body",              # the spine's width, along the wings
+                "spine_high" => "0.25*body",             # and its height
+                "mod_out" => "0.5*body",                 # how far a compute module reaches up or down from the spine
+                "mod_high" => "0.13*body",               # and how thick it is, along the wings
+                "bus_high" => "spine_high + 2*mod_out + 60 mm", # the height of the bus, across its modules and the rails along their edges
+                "root" => "spine_wide/2 + 600 mm",       # from the middle to each drum
                 "reach" => "max(1000 mm, span/2 - root)", # how far each wing reaches past its drum
                 "tip" => "root + reach",                 # from the middle to the tip of each wing
-                "deep" => "max(loop_out*tip, body/2 + 1400 mm)", # from the middle to the front of each loop, and to its back
-                "rad_long" => "deep - body/2 - 400 mm",
+                "deep" => "max(loop_out*tip, bus_long/2 + 1400 mm)", # from the middle to the front of each loop, and to its back
+                "rad_long" => "deep - bus_long/2 - 400 mm",
                 "scope" => "max(50 mm, 2.5*lens)",       # the radius of the laser's tube
                 "sleeve_r" => "1.1*loop_d",
                 "bay" => "(reach - 11*50 mm)/12"]        # one of the 12 bays of cells, with 50 mm of bare film between two
@@ -146,10 +152,10 @@ const LOOKS = ["Gold foil" => (:gold_foil, "#d9a441", 1.0, 0.4), "Silver foil" =
 
 "The look that the body `name` gets when the design is built"
 look(name) = begin
-  n = replace(name, "Left" => "Right")
+  n = replace(name, "Left" => "Right", "Front radiator" => "Radiator", "Front coolant" => "Coolant")
   has(words...) = any(w -> occursin(w, n), words)
-  n == "Bus" ? "Gold foil" : n == "Deck" ? "Silver foil" : has("cells") ? "Solar cells" : has("film") ? "Amber film" :
-  n == "Radiator panel" ? "White paint" : has("loop", "cord") ? "Pale paint" : has("glass", "lens") ? "Glass" :
+  n in ("Deck", "Keel") || has("Strap") ? "Black" : has("Compute module") ? "Bright metal" : has("cells") ? "Solar cells" : has("film") ? "Amber film" :
+  n == "Radiator panel" ? "White paint" : has("loop") ? "Pale paint" : has("glass", "lens") ? "Glass" :
   has("Laser scope", "Laser hood", "Star tracker") ? "Black" : has("Thruster ring", "Antenna") ? "Ceramic" :
   has("drum cap", "tip bar", "Radiator bar", "Coolant", "cathode", "Launch ring") ? "Bright metal" : "Dark metal"
 end
@@ -167,7 +173,10 @@ steps(l, from_page=inputs()) = begin
   box!(name, long, wide, high, middle) = step!("solid.box", length=long, width=wide, height=high, center=middle, body_name=name, name=name)
   bar!(name, base, long, radius; axis="Z") = step!("solid.cylinder", base=base, height=long, radius=radius, axis=axis, operation="new", body_name=name, name=name)
   round!(name, radius, edges) = step!("solid.fillet", edges=edges, radius=radius, body=name, name="$name edges")
-  half, root = l.body / 2, l.body / 2 + 600
+  # The bus's sizes, as numbers, for the places of edges to round
+  b = l.body
+  long, wide, high, out_, thick = 2b, 0.2b, 0.25b, 0.5b, 0.13b
+  tall, root = high + 2out_ + 60, wide / 2 + 600
 
   for (name, (expression, unit)) in pairs(from_page)
     step!("parameters.add", name=String(name), expression=expression, unit=unit)
@@ -176,23 +185,48 @@ steps(l, from_page=inputs()) = begin
     step!("parameters.add", name=name, expression=sum)
   end
 
-  # The body, wrapped in gold foil, with a silver deck on top
-  box!("Bus", "body", "body", "body", (0, 0, 0))
-  round!("Bus", 30, [ntuple(k -> k == i ? a * half : k == j ? b * half : 0.0, 3) for (i, j) in ((1, 2), (1, 3), (2, 3)) for a in (-1, 1) for b in (-1, 1)])
-  box!("Deck", "0.98*body", "0.98*body", 30, (0, 0, "body/2 + 15 mm"))
-  let d = 0.49 * l.body
-    round!("Deck", 8, vcat([(a * d, 0, half + 30) for a in (-1, 1)], [(0, a * d, half + 30) for a in (-1, 1)], [(a * d, b * d, half + 15) for a in (-1, 1) for b in (-1, 1)]))
+  # The bus, as a rack: a spine that runs between the two radiators, in their plane, with three compute modules above
+  # it and three below at each end. Each module is three trays. A black rail runs along the top, with holes to make it
+  # lighter, and another along the bottom.
+  box!("Bus", "spine_wide", "bus_long", "spine_high", (0, 0, 0))
+  let h = (wide / 2, long / 2, high / 2)
+    round!("Bus", 30, [ntuple(k -> k == i ? a * h[i] : k == j ? c * h[j] : 0.0, 3) for (i, j) in ((1, 2), (1, 3), (2, 3)) for a in (-1, 1) for c in (-1, 1)])
   end
+  box!("Deck", "spine_wide + 40 mm", "bus_long - 40 mm", 30, (0, 0, "bus_high/2 - 15 mm"))
+  let dx = wide / 2 + 20, dy = long / 2 - 20, top = tall / 2
+    round!("Deck", 8, vcat([(a * dx, 0, top) for a in (-1, 1)], [(0, a * dy, top) for a in (-1, 1)], [(a * dx, c * dy, top - 15) for a in (-1, 1) for c in (-1, 1)]))
+  end
+  modules = ["Compute module, back top $k" for k in 1:3]
+  box!(modules[1], "mod_high", "(bus_long/2 - 350 mm)/3 - 20 mm", "mod_out", (0, "250 mm + (bus_long/2 - 350 mm)/6", "spine_high/2 + mod_out/2"))
+  step!("solid.chamfer", edges=[(a * thick / 2, 250 + (long / 2 - 350) / 6, high / 2 + out_) for a in (1, -1)], distance="0.2*mod_high", body=modules[1], name="$(modules[1]) edges")
+  step!("solid.pattern.rectangular", bodies=modules[1:1], dir1=(0, 1, 0), count1=3, spacing1="(bus_long/2 - 350 mm)/3", body_names=modules[2:3], name="Compute modules, back top")
+  # A strap at each end of each module holds it to the spine
+  straps = ["Strap, back top right $k" for k in 1:4]
+  box!(straps[1], 12, 50, "mod_out - 80 mm", ("mod_high/2 + 6 mm", 240, "spine_high/2 + (mod_out - 80 mm)/2"))
+  step!("solid.pattern.rectangular", bodies=straps[1:1], dir1=(0, 1, 0), count1=4, spacing1="(bus_long/2 - 350 mm)/3", body_names=straps[2:4], name="Straps, back top right")
+  # The coolant runs along the spine to the modules, in a pipe at their roots
+  bar!("Coolant manifold, top right", ("mod_high/2 + 30 mm", "-(bus_long/2 - 100 mm)", "spine_high/2 + 30 mm"), "bus_long - 200 mm", 28, axis="Y")
+  step!("solid.cylinder", base=(0, "-(bus_long/2 - 150 mm)", "bus_high/2 - 30 mm"), height=30, radius="0.2*spine_wide", axis="Z", operation="cut", targets=["Deck"], name="Deck hole")
+  step!("solid.pattern.rectangular", features=["Deck hole"], dir1=(0, 1, 0), count1=12, spacing1="(bus_long - 300 mm)/11", name="Deck holes")
+  step!("solid.mirror", bodies=["Deck"], plane="XY", body_names=["Keel"], name="Keel")
+  # The rest are the ones above in mirrors: the other side of the spine, its front half, and its bottom
+  rename(names, from, to) = [replace(n, from => to) for n in names]
+  right = vcat(straps, ["Coolant manifold, top right"])
+  step!("solid.mirror", bodies=right, plane="YZ", body_names=rename(right, "right", "left"), name="Straps, left")
+  back = vcat(modules, straps, rename(straps, "right", "left"))
+  step!("solid.mirror", bodies=back, plane="XZ", body_names=rename(back, "back", "front"), name="Compute modules, front")
+  above = vcat(back, rename(back, "back", "front"), ["Coolant manifold, top right", "Coolant manifold, top left"])
+  step!("solid.mirror", bodies=above, plane="XY", body_names=rename(above, "top", "bottom"), name="Compute modules, bottom")
 
-  # The right wing. A yoke holds the drum that the wing unrolled from: an arm from the middle of the body's side, and a
-  # strut to each end of the drum.
+  # The right wing. A yoke holds the drum that the wing unrolled from: an arm from the middle of the spine's side,
+  # between its modules, and a strut to each end of the drum.
   wing = String[]
   part(name) = (push!(wing, name); name)
-  box!(part("Right arm"), 600, 120, 120, ("body/2 + 300 mm", 0, 0))
-  round!("Right arm", 10, [(half + 300, a * 60, b * 60) for a in (-1, 1) for b in (-1, 1)])
-  rise = "(chord/2 - 200 mm - 0.3*body)"
+  box!(part("Right arm"), "root - spine_wide/2", 120, 120, ("(root + spine_wide/2)/2", 0, 0))
+  round!("Right arm", 10, [(wide / 2 + 300, a * 60, c * 60) for a in (-1, 1) for c in (-1, 1)])
+  rise = "(chord/2 - 200 mm - 0.4*spine_high)"
   for (sign, where) in (("", "top"), ("-", "bottom"))
-    bar!(part("Right strut, $where"), ("body/2", 0, "$(sign)0.3*body"), "sqrt((600 mm)^2 + $rise^2)", 35, axis=("600", "0", "$sign$rise / 1 mm"))
+    bar!(part("Right strut, $where"), ("spine_wide/2", 0, "$(sign)0.4*spine_high"), "sqrt((600 mm)^2 + $rise^2)", 35, axis=("600", "0", "$sign$rise / 1 mm"))
   end
   bar!(part("Right drum"), ("root", 0, "-(chord + 300 mm)/2"), "chord + 300 mm", 220)
   for (where, base, z) in (("top", "chord/2 + 120 mm", l.chord / 2 + 120), ("bottom", "-(chord/2 + 180 mm)", -l.chord / 2 - 180))
@@ -211,45 +245,46 @@ steps(l, from_page=inputs()) = begin
   # The left wing is the right one in a mirror
   step!("solid.mirror", bodies=wing, plane="YZ", body_names=[replace(n, "Right" => "Left") for n in wing], name="Left wing")
 
-  # The radiator stands up behind the body, edge-on to the Sun, and reaches back to the loops
-  box!("Radiator arm", 120, 400, 120, (0, "body/2 + 200 mm", 0))
-  box!("Radiator panel", 20, "rad_long", "max(rad_high, 50 mm)", (0, "(body/2 + 400 mm + deep)/2", 0))
-  bar!("Radiator bar, near", (0, "body/2 + 400 mm", "-(rad_high + 60 mm)/2"), "rad_high + 60 mm", 40)
+  # Two radiators stand up edge-on to the Sun, one off each end of the bus and in its plane. Each reaches out to the
+  # loops. The one in front is the one behind in a mirror.
+  radiator = ["Radiator arm", "Radiator panel", "Radiator bar, near", "Radiator bar, far", "Radiator sleeve, top", "Radiator sleeve, bottom",
+              "Coolant pipe, out", "Coolant pipe, back"]
+  box!("Radiator arm", 120, 400, 120, (0, "bus_long/2 + 200 mm", 0))
+  box!("Radiator panel", 20, "rad_long", "max(rad_high, 50 mm)", (0, "(bus_long/2 + 400 mm + deep)/2", 0))
+  bar!("Radiator bar, near", (0, "bus_long/2 + 400 mm", "-(rad_high + 60 mm)/2"), "rad_high + 60 mm", 40)
   bar!("Radiator bar, far", (0, "deep", "-(max(rad_high, chord) + 60 mm)/2"), "max(rad_high, chord) + 60 mm", 40)
   bar!("Radiator sleeve, top", (-140, "deep", "chord/2"), 280, "sleeve_r", axis="X")
   bar!("Radiator sleeve, bottom", (-140, "deep", "-chord/2"), 280, "sleeve_r", axis="X")
-  bar!("Coolant pipe, out", (110, "body/2", 0), 380, 20, axis="Y")
-  bar!("Coolant pipe, back", (-110, "body/2", 0), 380, 20, axis="Y")
+  bar!("Coolant pipe, out", (110, "bus_long/2", 0), 380, 20, axis="Y")
+  bar!("Coolant pipe, back", (-110, "bus_long/2", 0), 380, 20, axis="Y")
+  step!("solid.mirror", bodies=radiator, plane="XZ", body_names=["Front " * lowercasefirst(n) for n in radiator], name="Front radiator")
 
   # Two loops of tube, one level with each edge of the cells. Each is an oval right round the satellite, through the
-  # tips of both wings and the tip of the radiator. Two cords from the drums pull its front in.
+  # tips of both wings and of both radiators.
   for (name, level) in (("Top", "chord/2"), ("Bottom", "-chord/2"))
     step!("sketch.create", plane="XY", offset=level, name="$name loop path")
     step!("sketch.ellipse", center=(0, 0), major=("tip", 0), minor_radius="deep", axes=false)
     step!("sketch.finish")
     step!("solid.pipe", path_sketch="$name loop path", path=["e1"], diameter="loop_d", body_name="$name loop", name="$name loop")
-    bar!("Front sleeve, $(lowercase(name))", (-140, "-deep", level), 280, "sleeve_r", axis="X")
-    for (sign, back, side) in (("", "-", "right"), ("-", "", "left"))
-      bar!("$name cord, $side", ("$(sign)root", -200, level), "sqrt((root - 100 mm)^2 + (deep - 200 mm)^2)", 4,
-           axis=("$(back)(root - 100 mm) / 1 mm", "-(deep - 200 mm) / 1 mm", "0"))
-    end
   end
 
-  # The laser to the next satellite, which looks along the orbit. It turns on a fork. A hood keeps the Sun off its lens.
-  let x = "0.25*body", y = "-0.25*body", z = "body/2 + 350 mm"
-    bar!("Laser pedestal", (x, y, "body/2 + 30 mm"), 200, 90)
-    box!("Laser fork, front", 50, 30, 200, (x, "$y - scope - 25 mm", "body/2 + 300 mm"))
-    box!("Laser fork, back", 50, 30, 200, (x, "$y + scope + 25 mm", "body/2 + 300 mm"))
+  # The things on the top rail stand on its top, at `bus_high/2`.
+  # The laser to the next satellite, which looks along the orbit. It turns on a fork near the back of the rail. A hood
+  # keeps the Sun off its lens.
+  let x = "0 mm", y = "(bus_long/2 - 500 mm)", z = "bus_high/2 + 320 mm"
+    bar!("Laser pedestal", (x, y, "bus_high/2"), 200, 90)
+    box!("Laser fork, front", 50, 30, 200, (x, "$y - scope - 25 mm", "bus_high/2 + 270 mm"))
+    box!("Laser fork, back", 50, 30, 200, (x, "$y + scope + 25 mm", "bus_high/2 + 270 mm"))
     bar!("Laser scope", ("$x - 110 mm", y, z), 320, "scope", axis="X")
     step!("solid.cone", base=("$x + 210 mm", y, z), axis="X", height=90, radius="scope + 4 mm", top_radius="scope + 20 mm", body_name="Laser hood", name="Laser hood")
     step!("solid.cone", base=("$x + 210 mm", y, z), axis="X", height=90, radius="scope + 2 mm", top_radius="scope + 18 mm", operation="cut", targets=["Laser hood"], name="Laser hood bore")
     bar!("Laser lens", ("$x + 212 mm", y, z), 3, "0.8*scope", axis="X")
   end
 
-  # Two star trackers, which look away from the Sun and the Earth. A baffle keeps stray light out of each.
+  # Two star trackers on the rail, which look away from the Sun and the Earth. A baffle keeps stray light out of each.
   let up = (0.0, sin(0.5), cos(0.5))
     for (sign, side) in (("", "right"), ("-", "left"))
-      at(far) = ("$(sign)0.3*body", "0.3*body + $(round(far * up[2], digits=4)) mm", "body/2 + 30 mm + $(round(far * up[3], digits=4)) mm")
+      at(far) = ("0 mm", "$(sign)0.2*bus_long + $(round(far * up[2], digits=4)) mm", "bus_high/2 + $(round(far * up[3], digits=4)) mm")
       bar!("Star tracker, $side", at(0), 160, 60, axis=up)
       step!("solid.cone", base=at(160), axis=up, height=180, radius=60, top_radius=100, body_name="Star tracker baffle, $side", name="Star tracker baffle, $side")
       step!("solid.cone", base=at(160), axis=up, height=180, radius=57, top_radius=97, operation="cut", targets=["Star tracker baffle, $side"], name="Star tracker bore, $side")
@@ -257,22 +292,24 @@ steps(l, from_page=inputs()) = begin
     end
   end
 
-  # The thruster: a ring of ceramic round a dark centre, for the last burn. The small tube beside it feeds the flame.
-  let x = "-0.25*body", y = "-0.2*body"
-    bar!("Thruster", (x, y, "body/2 + 30 mm"), 100, 110)
-    step!("solid.torus", center=(x, y, "body/2 + 135 mm"), major=75, minor=18, body_name="Thruster ring", name="Thruster ring")
-    bar!("Thruster cathode", (x, y, "body/2 + 125 mm"), 30, 30)
-    bar!("Thruster feed", ("$x + 130 mm", "$y - 50 mm", "body/2 + 30 mm"), round(sqrt(20^2 + 20^2 + 120^2), digits=4), 15, axis=(-20, 20, 120))
+  # The thruster, near the front of the rail: a ring of ceramic round a dark centre, for the last burn. The small tube
+  # beside it feeds the flame.
+  let x = "0 mm", y = "-(bus_long/2 - 300 mm)"
+    bar!("Thruster", (x, y, "bus_high/2"), 100, 110)
+    step!("solid.torus", center=(x, y, "bus_high/2 + 105 mm"), major=75, minor=18, body_name="Thruster ring", name="Thruster ring")
+    bar!("Thruster cathode", (x, y, "bus_high/2 + 95 mm"), 30, 30)
+    bar!("Thruster feed", ("$x + 130 mm", "$y - 50 mm", "bus_high/2"), round(sqrt(20^2 + 20^2 + 120^2), digits=4), 15, axis=(-20, 20, 120))
   end
 
-  # On the face that looks at the Earth: the radio to the ground, and the ring that held the satellite to its rocket
-  box!("Antenna", 300, 300, 20, (0, "-0.2*body", "-body/2 - 10 mm"))
-  let y = -0.2 * l.body
-    round!("Antenna", 4, vcat([(a * 150, y, -half - 20) for a in (-1, 1)], [(0, y + a * 150, -half - 20) for a in (-1, 1)], [(a * 150, y + b * 150, -half - 10) for a in (-1, 1) for b in (-1, 1)]))
+  # Under the bottom rail, which looks at the Earth: the radio to the ground, and the ring that held the satellite to
+  # its rocket
+  box!("Antenna", 300, 300, 20, (0, "0.3*bus_long", "-bus_high/2 - 10 mm"))
+  let y = 0.3long, z = -tall / 2
+    round!("Antenna", 4, vcat([(a * 150, y, z - 20) for a in (-1, 1)], [(0, y + a * 150, z - 20) for a in (-1, 1)], [(a * 150, y + c * 150, z - 10) for a in (-1, 1) for c in (-1, 1)]))
   end
-  bar!("Launch ring", (0, 0, "-body/2 - 50 mm"), 50, "0.42*body")
-  step!("solid.cylinder", base=(0, 0, "-body/2 - 50 mm"), height=50, radius="0.42*body - 8 mm", operation="cut", targets=["Launch ring"], name="Launch ring bore")
-  step!("solid.torus", center=(0, 0, "-body/2 - 50 mm"), major="0.42*body", minor=12, body_name="Launch ring rim", name="Launch ring rim")
+  bar!("Launch ring", (0, 0, "-bus_high/2 - 50 mm"), 50, "0.9*spine_wide")
+  step!("solid.cylinder", base=(0, 0, "-bus_high/2 - 50 mm"), height=50, radius="0.9*spine_wide - 8 mm", operation="cut", targets=["Launch ring"], name="Launch ring bore")
+  step!("solid.torus", center=(0, 0, "-bus_high/2 - 50 mm"), major="0.9*spine_wide", minor=12, body_name="Launch ring rim", name="Launch ring rim")
   out
 end
 
@@ -415,8 +452,9 @@ end
 "The part of the satellite that the body `name` belongs to"
 part_of(name) = begin
   has(words...) = any(w -> occursin(w, name), words)
-  startswith(name, "Left") ? "Left wing" : startswith(name, "Right") ? "Right wing" : has("Radiator", "Coolant") ? "Radiator" :
-  has("loop", "cord", "Front sleeve") ? "Loops" : has("Laser") ? "Laser" : has("Star tracker") ? "Star trackers" : has("Thruster") ? "Thruster" :
+  startswith(name, "Left") ? "Left wing" : startswith(name, "Right") ? "Right wing" : has("manifold") ? "Body" :
+  has("Radiator", "radiator", "Coolant", "coolant") ? "Radiator" :
+  has("loop") ? "Loops" : has("Laser") ? "Laser" : has("Star tracker") ? "Star trackers" : has("Thruster") ? "Thruster" :
   has("Antenna", "Launch ring") ? "Earth face" : "Body"
 end
 
@@ -424,14 +462,14 @@ end
 The parts of the design that `p` has open, as `satellite` of satellite.jl
 gives them: each part has a name, and its shapes by material. A body's
 material is the one that its look in the design names. `panel` is false when
-the radiator has no panel, since the loops shed all of the heat.
+the radiators have no panels, since the loops shed all of the heat.
 """
 parts(p::Program; panel=true) = begin
   looks = ask(p, "appearance.list")["bodies"]
   materials = Dict(name => m for (name, (m, _)) in LOOKS)
   out = Pair{String,Vector{Pair{Symbol,Shape}}}[]
   for name in bodies(p)
-    name == "Radiator panel" && !panel && continue
+    name in ("Radiator panel", "Front radiator panel") && !panel && continue
     given = get(looks, name, nothing)
     m = get(materials, given isa AbstractDict ? get(given, "name", "") : "", :dark_metal)
     s = shape(m, triangles(p, name)...)

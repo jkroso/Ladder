@@ -16,9 +16,9 @@
 # writes pages/satellite.glb, the same model at the page's first numbers. A
 # .glb file is fixed, so that one follows nothing.
 #
-# The model shows small parts too: seams and tape on the foil, wings in bays,
-# yokes for the drums, sleeves where the loops of tube pass the tips, the
-# coolant's pipes, baffles on the star trackers.
+# The model shows small parts too: compute modules strapped to the bus's
+# spine, wings in bays, yokes for the drums, sleeves where the loops of tube
+# pass the tips, the coolant's pipes, baffles on the star trackers.
 #
 # The model also has what's round the satellite: the Sun as a light, and a
 # picture of the whole sky with the Earth in it, 1000 km below. Ladder's viewer
@@ -37,7 +37,7 @@ const UV = NTuple{2,Float64}
 """
 The page's first numbers, in SI units, as Ladder gives a sum to `view`: m
 across the wings, m² of cells in the fleet, satellites, % of the cells' area
-that the radiator has, m across a loop's tube, how far a loop passes in front
+that the radiators have, m across a loop's tube, how far a loop passes in front
 of the middle for each metre of half the span, kg of one satellite, m across
 the laser's lens, and m above the ground.
 """
@@ -59,16 +59,31 @@ sizes(sums=Dict{String,Any}()) = begin
   end
   (; span, array_area, nsat, rad_use, loop_d, loop_out, sat_kg, lens, alt) = NamedTuple{keys(FIRST)}(given)
   area = array_area / nsat                           # m² of cells on one satellite
-  body = clamp(cbrt(sat_kg / 450), 0.8, 4)           # m, a side of the body, at 450 kg a cubic metre
-  reach = max(1, (span - body) / 2 - 0.6)            # m, how far each wing reaches past its drum
+  body = clamp(cbrt(sat_kg / 450), 0.8, 4)           # m, a side of a cube as heavy as the satellite, at 450 kg a cubic metre
+  bus = bus_sizes(body)
+  reach = max(1, span / 2 - bus.root)                # m, how far each wing reaches past its drum
   chord = area / 2reach                              # m, how tall each wing is
   loop_r = loop_d / 2                                # m, the radius of a loop's tube
-  tip = body / 2 + 0.6 + reach                       # m from the middle to the tip of each wing
-  deep = max(loop_out * tip, body / 2 + 1.4)         # m from the middle to the front of each loop, and to its back
-  rad_area = array_area * rad_use / 100 / nsat       # m² of the radiator
-  rad_long = deep - body / 2 - 0.4                   # m: the radiator stands up behind the body, and reaches back to the loops
-  rad_high = rad_area / rad_long
-  (; area, body, reach, chord, loop_r, tip, deep, rad_long, rad_high, lens, alt)
+  tip = bus.root + reach                             # m from the middle to the tip of each wing
+  deep = max(loop_out * tip, bus.long / 2 + 1.4)     # m from the middle to the front of each loop, and to its back
+  rad_area = array_area * rad_use / 100 / nsat       # m² of the two radiators
+  rad_long = deep - bus.long / 2 - 0.4               # m: a radiator comes off each end of the bus, and reaches out to the loops
+  rad_high = rad_area / 2rad_long                    # m: each radiator has half of the area
+  (; area, body, bus, reach, chord, loop_r, tip, deep, rad_long, rad_high, lens, alt)
+end
+
+"""
+The sizes of the bus in m, for a satellite whose mass would fill a cube
+`body` m on a side. The bus is a spine that runs between the two radiators,
+in their plane, with compute modules above and below it, as a rack has its
+trays. `long`, `wide` and `high` are the spine's length, its width and its
+height. A module reaches `out` from the spine and is `thick`. `tall` is the
+whole height, with the rails along the top and the bottom. Each wing's drum
+stands `root` from the middle.
+"""
+bus_sizes(body) = begin
+  wide, high = 0.2body, 0.25body
+  (long=2body, wide, high, out=0.5body, thick=0.13body, tall=high + body + 0.06, root=wide / 2 + 0.6)
 end
 
 const CELL = 0.125                                       # m, one cell
@@ -491,24 +506,44 @@ The parts of a satellite with the sizes `s`, as `sizes` gives them: each part
 has a name, and its shapes by material.
 """
 satellite(s) = begin
-  (; body, reach, chord, loop_r, tip, deep, rad_long, rad_high, lens) = s
+  (; bus, reach, chord, loop_r, tip, deep, rad_long, rad_high, lens) = s
   parts = Pair{String,Vector{Pair{Symbol,Shape}}}[]
   part!(name, shapes...) = push!(parts, name => collect(Pair{Symbol,Shape}, shapes))
 
-  # The body, wrapped in gold foil, with a silver deck on top
-  top, back = body / 2, -body / 2
-  part!("Body",
-    :gold_foil => block(body, body, body, bevel=0.03, edge=(0.01, 0.01)),
-    :silver_foil => moved(block(0.98body, 0.03, 0.98body, bevel=0.008), (0, top + 0.015, 0)))
+  # The bus: a spine that runs along z, between the two radiators and in their plane, with three compute modules above
+  # it and three below at each end. Black straps hold each module to the spine. A coolant pipe runs along each side of
+  # the spine, at the modules' roots. A black rail runs along the top and the bottom.
+  top, back = bus.tall / 2 - 0.03, -bus.tall / 2   # the bottom of the top rail, and the bottom of the lower one
+  let pitch = (bus.long / 2 - 0.35) / 3, by = Dict{Symbol,Vector{Shape}}()
+    add!(m, shape) = push!(get!(by, m, Shape[]), shape)
+    add!(:dark_metal, block(bus.wide, bus.high, bus.long, bevel=0.03, edge=(0.01, 0.01)))
+    for up in (-1, 1)
+      add!(:black, moved(block(bus.wide + 0.04, 0.03, bus.long - 0.04, bevel=0.008), (0, up * (bus.tall / 2 - 0.015), 0)))
+      for side in (-1, 1)
+        pipe = (side * (bus.thick / 2 + 0.03), up * (bus.high / 2 + 0.03))
+        add!(:bright_metal, rod((pipe..., -(bus.long / 2 - 0.1)), (pipe..., bus.long / 2 - 0.1), 0.028, n=16))
+      end
+      for way in (-1, 1)
+        for k in 0:2
+          add!(:bright_metal, moved(block(bus.thick, bus.out, pitch - 0.02, bevel=0.01), (0, up * (bus.high + bus.out) / 2, way * (0.25 + pitch / 2 + k * pitch))))
+        end
+        for k in 0:3, side in (-1, 1)
+          add!(:black, moved(block(0.012, bus.out - 0.08, 0.05), (side * (bus.thick / 2 + 0.006), up * (bus.high / 2 + (bus.out - 0.08) / 2), way * (0.24 + k * pitch))))
+        end
+      end
+    end
+    part!("Body", (m => joined(shapes...) for (m, shapes) in by)...)
+  end
 
   for (side, name) in ((-1, "Left wing"), (1, "Right wing"))
-    root = side * (body / 2 + 0.6)   # where the drum stands, which the wing unrolled from
+    root = side * bus.root           # where the drum stands, which the wing unrolled from
     x(far) = root + side * far       # a place `far` along the wing from the drum
     shapes = Pair{Symbol,Shape}[]
-    # A yoke holds the drum: an arm from the middle of the body's side, and a strut to each end of the drum
-    push!(shapes, :dark_metal => moved(block(0.6, 0.12, 0.12, bevel=0.01), (side * (body / 2 + 0.3), 0, 0)))
+    # A yoke holds the drum: an arm from the middle of the spine's side, between its modules, and a strut to each end
+    # of the drum
+    push!(shapes, :dark_metal => moved(block(0.6, 0.12, 0.12, bevel=0.01), (side * (bus.wide / 2 + 0.3), 0, 0)))
     for end_ in (-1, 1)
-      push!(shapes, :dark_metal => rod((side * body / 2, end_ * 0.6body / 2, 0.0), (root, end_ * (chord / 2 - 0.2), 0.0), 0.035, n=12))
+      push!(shapes, :dark_metal => rod((side * bus.wide / 2, end_ * 0.4bus.high, 0.0), (root, end_ * (chord / 2 - 0.2), 0.0), 0.035, n=12))
       push!(shapes, :bright_metal => moved(tube(0.26, 0.06), (root, end_ * (chord / 2 + 0.15), 0)))
     end
     push!(shapes, :dark_metal => moved(tube(0.22, chord + 0.3), (root, 0, 0)))
@@ -532,49 +567,41 @@ satellite(s) = begin
     part!(name, shapes...)
   end
 
-  # The radiator stands up behind the body, edge-on to the Sun. It reaches back to the loops, which pass through
-  # sleeves on the bar at its tip.
-  let root = back - 0.4, far = -deep
-    shapes = Pair{Symbol,Shape}[:dark_metal => moved(block(0.12, 0.12, 0.4, bevel=0.01), (0, 0, back - 0.2))]
-    # When the loops shed all of the heat, there's no panel, and only its bars hold the back of the loops
-    if rad_high >= 0.05
-      panel = tiled(block(0.02, rad_high, rad_long, bevel=0.003), rad_long / 0.1, 1)
-      push!(shapes, :white_paint => moved(panel, (0, 0, (root + far) / 2)))
-    end
-    for y in (-chord / 2, chord / 2)
-      push!(shapes, :dark_metal => rod((-0.14, y, far), (0.14, y, far), 2.2loop_r, n=12))
-    end
-    # A bar at each end of the panel. The one at the tip is tall enough to reach both loops.
-    for (z, high) in ((root, rad_high), (far, max(rad_high, chord)))
-      push!(shapes, :bright_metal => moved(tube(0.04, high + 0.06), (0, 0, z)))
-    end
-    # The coolant comes from the body to the near bar in one pipe, and goes back in another
-    for side in (-1, 1)
-      push!(shapes, :bright_metal => rod((side * 0.11, 0.0, back), (side * 0.11, 0.0, root + 0.02), 0.02, n=10))
+  # Two radiators stand up edge-on to the Sun, one off each end of the bus and in its plane. Each reaches out to the
+  # loops, which pass through sleeves on the bar at its tip.
+  let shapes = Pair{Symbol,Shape}[]
+    for way in (-1, 1)   # behind the body, then in front of it
+      face, root, far = way * bus.long / 2, way * (bus.long / 2 + 0.4), way * deep
+      push!(shapes, :dark_metal => moved(block(0.12, 0.12, 0.4, bevel=0.01), (0, 0, way * (bus.long / 2 + 0.2))))
+      # When the loops shed all of the heat, there's no panel, and only its bars hold the loops
+      if rad_high >= 0.05
+        panel = tiled(block(0.02, rad_high, rad_long, bevel=0.003), rad_long / 0.1, 1)
+        push!(shapes, :white_paint => moved(panel, (0, 0, (root + far) / 2)))
+      end
+      for y in (-chord / 2, chord / 2)
+        push!(shapes, :dark_metal => rod((-0.14, y, far), (0.14, y, far), 2.2loop_r, n=12))
+      end
+      # A bar at each end of the panel. The one at the tip is tall enough to reach both loops.
+      for (z, high) in ((root, rad_high), (far, max(rad_high, chord)))
+        push!(shapes, :bright_metal => moved(tube(0.04, high + 0.06), (0, 0, z)))
+      end
+      # The coolant comes from the body to the near bar in one pipe, and goes back in another
+      for side in (-1, 1)
+        push!(shapes, :bright_metal => rod((side * 0.11, 0.0, face), (side * 0.11, 0.0, root - way * 0.02), 0.02, n=10))
+      end
     end
     part!("Radiator", shapes...)
   end
 
-  # Two loops of tube hold the wings and the radiator out, one level with each edge of the cells. Each goes right
-  # round the satellite: through the tip of one wing, behind the body through the tip of the radiator, through
-  # the tip of the other wing, and back in front of the body. The three tips can't move apart, so no wing can
-  # swing about its drum. The pressure in a loop pushes it towards a circle. The radiator pulls its back in, and
-  # two cords from the drums pull its front in. So it pushes the wings' tips apart, as a wheel's rim does on its
-  # spokes.
-  let shapes = Pair{Symbol,Shape}[]
-    for y in (-chord / 2, chord / 2)
-      push!(shapes, :pale_paint => loop(tip, deep, y, loop_r))
-      # A sleeve at the front, where the two cords meet the loop. The cords are pale too, so they show against the sky.
-      push!(shapes, :dark_metal => rod((-0.14, y, deep), (0.14, y, deep), 2.2loop_r, n=12))
-      for side in (-1, 1)
-        push!(shapes, :pale_paint => rod((side * (body / 2 + 0.6), y, 0.2), (side * 0.1, y, deep), 0.004, n=6))
-      end
-    end
-    part!("Loops", shapes...)
-  end
+  # Two loops of tube hold the wings and the radiators out, one level with each edge of the cells. Each goes right
+  # round the satellite: through the tip of one wing, the tip of the radiator behind the body, the tip of the other
+  # wing, and the tip of the radiator in front. The four tips can't move apart, so no wing can swing about its drum.
+  # The pressure in a loop pushes it towards a circle. The radiators pull its back and its front in. So it pushes
+  # the wings' tips apart, as a wheel's rim does on its spokes.
+  part!("Loops", (:pale_paint => loop(tip, deep, y, loop_r) for y in (-chord / 2, chord / 2))...)
 
-  # The laser to the next satellite, which looks along the orbit. It turns on a fork.
-  let scope = max(0.05, 2.5lens), at = (0.25body, top + 0.35, 0.25body)
+  # The laser to the next satellite, which looks along the orbit. It turns on a fork on the top rail, near the back.
+  let scope = max(0.05, 2.5lens), at = (0.0, top + 0.35, -(bus.long / 2 - 0.5))
     part!("Laser",
       :dark_metal => moved(tube(0.09, 0.2), (at[1], top + 0.13, at[3])),
       :dark_metal => moved(block(0.05, 0.2, 0.03, bevel=0.005), (at[1], top + 0.3, at[3] + scope + 0.025)),
@@ -585,10 +612,10 @@ satellite(s) = begin
       :glass => rod((at[1] + 0.212, at[2], at[3]), (at[1] + 0.215, at[2], at[3]), 0.8scope))
   end
 
-  # Two star trackers, looking away from the Sun and the Earth. A baffle keeps stray light out of each.
+  # Two star trackers on the top rail, looking away from the Sun and the Earth. A baffle keeps stray light out of each.
   let shapes = Pair{Symbol,Shape}[]
     for side in (-1, 1)
-      foot, up = (side * 0.3body, top + 0.03, -0.3body), unit((0.0, cos(0.5), -sin(0.5)))
+      foot, up = (0.0, top + 0.03, -side * 0.2bus.long), unit((0.0, cos(0.5), -sin(0.5)))
       push!(shapes, :black => rod(foot, foot .+ up .* 0.16, 0.06))
       push!(shapes, :black => rod(foot .+ up .* 0.16, foot .+ up .* 0.34, 0.06, top=0.1, ends=false))
       push!(shapes, :glass => rod(foot .+ up .* 0.163, foot .+ up .* 0.166, 0.05))
@@ -596,8 +623,9 @@ satellite(s) = begin
     part!("Star trackers", shapes...)
   end
 
-  # The thruster: a ring of ceramic round a dark centre, for the last burn. The small tube beside it feeds the flame.
-  let at = (-0.25body, top + 0.03, 0.2body)
+  # The thruster on the top rail, near the front: a ring of ceramic round a dark centre, for the last burn. The small
+  # tube beside it feeds the flame.
+  let at = (0.0, top + 0.03, bus.long / 2 - 0.3)
     part!("Thruster",
       :dark_metal => moved(tube(0.11, 0.1), at .+ (0, 0.05, 0)),
       :ceramic => moved(ring(0.075, 0.018), at .+ (0, 0.105, 0)),
@@ -605,11 +633,12 @@ satellite(s) = begin
       :dark_metal => rod(at .+ (0.13, 0, 0.05), at .+ (0.11, 0.12, 0.03), 0.015, n=10))
   end
 
-  # On the face that looks at the Earth: the radio to the ground, and the ring that held the satellite to its rocket
+  # Under the bottom rail, which looks at the Earth: the radio to the ground, and the ring that held the satellite to
+  # its rocket
   part!("Earth face",
-    :ceramic => moved(block(0.3, 0.02, 0.3, bevel=0.004), (0, back - 0.01, 0.2body)),
-    :bright_metal => moved(tube(0.42body, 0.05, n=48, ends=false), (0, back - 0.025, 0)),
-    :bright_metal => moved(ring(0.42body, 0.012, n=48, m=8), (0, back - 0.05, 0)))
+    :ceramic => moved(block(0.3, 0.02, 0.3, bevel=0.004), (0, back - 0.01, -0.3bus.long)),
+    :bright_metal => moved(tube(0.9bus.wide, 0.05, n=48, ends=false), (0, back - 0.025, 0)),
+    :bright_metal => moved(ring(0.9bus.wide, 0.012, n=48, m=8), (0, back - 0.05, 0)))
   parts
 end
 
