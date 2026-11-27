@@ -32,7 +32,10 @@ export editor, page_object, object, list_files!, go_folder!, open!, open_folder!
        follow!, filled, todo_at, link_on, close_find!, took, page_bottom, keep_got!, get_page!, browser_path,
        page_online, changed_here, fetched, email_head!, email_shows, ismouse, ignored_shown, file_menu!,
        holds_words, page_html, new_page!, build_editor, news_look, web_page_kind, rename!, renaming,
-       copy_text!, renamer, move!
+       copy_text!, renamer, move!, toggle_right!, right_w, open_palette!, lens_shapes, theirs, change_diff,
+       kind_command, right_opened, in_focus, right_view, agent_kind, page_module, detail_view, type_brief,
+       line_rect, declared, detail_wide, sandbox, made_workspace, coloured, code_place, show_method!,
+       settled_line, code_blocks, text_lines, show_code!
 
 "The editor of the window that `node`, a part of a page, is part of"
 function editor end
@@ -654,3 +657,81 @@ function renamer end
 
 "True while Ladder is built into an app (see app/bundle.jl)"
 function move! end
+
+"Show or hide the panel at the right of the page, like git's panel beside a repository's files"
+function toggle_right! end
+
+"How wide the panel at the right is when it's open"
+function right_w end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function open_palette! end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function lens_shapes end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function theirs end
+
+"The diff of the text `was` of the file `file` to the text `now`, as `git diff` writes it, with the file's whole path"
+function change_diff end
+
+"The command of the agent `k` with the options `options`, which the words go after, with its own folder and Homebrew's on its PATH"
+function kind_command end
+
+"How far the panel at the right is open, from 0 to 1"
+function right_opened end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function in_focus end
+
+"What the panel at the right shows for the page, or nothing when the page has no panel"
+function right_view end
+
+"The agent called `name` that Ladder can start, or Claude Code when there's none of that name"
+function agent_kind end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function page_module end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function detail_view end
+
+"What the box of the type `T` says"
+function type_brief end
+
+"Where line `i` of the page is in the window of `e`, across the whole page"
+function line_rect end
+
+"True when the box of the value `v` opens to show the type that `v` is"
+function declared end
+
+"How wide the open box of a function or a module is"
+function detail_wide end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function sandbox end
+
+"The module of the page's `julia` code, or nothing when it has none yet"
+function made_workspace end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function coloured end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function code_place end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function show_method! end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function settled_line end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function code_blocks end
+
+"The lines of the file text `s`, as `text` reads them from a file"
+function text_lines end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function show_code! end

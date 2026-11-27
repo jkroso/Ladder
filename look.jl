@@ -27,7 +27,8 @@ export SANS, SERIF, MONO, CODE_FONT, CODE_STYLE, CODE_SLANT, CODE_SCALE, code_ty
        one_width, stand_in_from, runs, hasall, spared_width, spared, LIVE_GAP, BLOCK_ICONS, removed_colour,
        added_colour, TIP_INK, tip_label, dark_page, takeoff_back, elide, FLOAT_ROW, float_row, found_colours,
        rule, tint, wrapped, ROW_H, LISTING_W, PANEL_PAD, PREVIEW_LINES, LINE_H, TEXT_PAD, PAGE_W, ZOOM_STEP,
-       FILL_SIDE, CHECK_BAD, MOST_CHOICES, MARK_FILL, THEME_ORDER, NOTE_GAP
+       FILL_SIDE, CHECK_BAD, MOST_CHOICES, MARK_FILL, THEME_ORDER, NOTE_GAP, SPELL_RED, OUTCOME_ROUND,
+       MEMBERS_H
 
 # --- look --------------------------------------------------------------------
 
@@ -421,3 +422,9 @@ const MARK_FILL = 0.13   # how strong the accent colour is behind a thing that's
 const THEME_ORDER = (:sepia, :paper, :night)
 
 const NOTE_GAP = 18px    # the least room between a name and what it is
+
+const SPELL_RED = colorant"rgb(222,70,56)"
+
+const OUTCOME_ROUND = 7px       # how round the corners of an open box are, and of the rest under it
+
+const MEMBERS_H = 430px         # the tallest that the list is. The wheel moves through the rest.

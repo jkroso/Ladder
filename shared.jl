@@ -13,7 +13,8 @@ export drop!, dragging, click_twice!, settle!, answer!, commit!, stop_asking!, f
        chip_words, choice_input, choose!, choosing_tick!, chosen, draw_drag, hush!, key_given!, locate, marks,
        more_words, name_row!, own_button, stop_choosing!, theme!, turn!, works_here, step!, locked, asks,
        add_to_favourites!, page_covers, remove_from_favourites!, choices_for, put_back!, runs_at_once,
-       sidenote, worded, matter_view, on_own_page, table_view, web_kind, table_item
+       sidenote, worded, matter_view, on_own_page, table_view, web_kind, table_item, page_side, side_name,
+       page_back!, wide_words, chip_click, chip_kind, chip_start, look!, look_of, put_look!, shown_at
 
 "A drag on the part `v` ended: what moved is written down"
 function drop! end
@@ -242,3 +243,36 @@ function web_kind end
 
 "The table in lines `from` to `to` as what its page's kind of folder shows in its place, or nothing when the kind shows the table"
 function table_item end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function page_side end
+
+"What the button that hides the panel at the right calls the panel of `o`"
+function side_name end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function page_back! end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function wide_words end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function chip_click end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function chip_kind end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function chip_start end
+
+"Show in the window what the command `name` does with `args`, for a row that the arrows reached"
+function look! end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function look_of end
+
+"What `put_look!` gives"
+function put_look! end
+
+"Where the thing `x` that a chip has shows in the window of `e`, for a line round it, or nothing"
+function shown_at end

@@ -8,7 +8,7 @@
 @use "github.com/jkroso/UI.jl/Interface/Geometric"...
 @use "github.com/jkroso/UI.jl/Interface/Specific"...
 @use "github.com/jkroso/UI.jl/Interface/abstract" SemanticUI Theme light
-@use "./markdown" Cell Line
+@use "./markdown" Cell Line words
 @use "./spreadsheet" Value
 @use "github.com/jkroso/URI.jl/FS" => FS FSObject AbstractDirectory
 @use "./look" exports...
@@ -31,7 +31,8 @@ export Item, Live, Grid, isspread, Glide, Editor, TopBar, Sidebar, Page, Documen
        Sheet, FileEntry, Crumb, Breadcrumb, FileText, Pages, ChartView, FilterRows, FilterView, SaveView,
        GalleryView, TermSettings, TERM_SETTINGS, ViewBlock, ItemClock, PlainLine, Rect, TranscriptButton,
        FileCheck, DesignSheet, FolderPage, SourceChooser, SearchView, SearchChoice, ChoiceMenu, ChoiceRow,
-       editors, EmailHead, EACH_FRAME, AT_QUIT, BAR_PARTS, BUTTONS, AgentKind, WebFolder, WebPage
+       editors, EmailHead, EACH_FRAME, AT_QUIT, BAR_PARTS, BUTTONS, AgentKind, WebFolder, WebPage,
+       PAGE_WINDOWS, OutcomeBody, Bound
 
 # --- what a window holds ---------------------------------------------------------
 
@@ -655,4 +656,36 @@ end
 struct WebPage
   address::String
   parent::WebFolder
+end
+
+"The window whose code ran last in the module of each page, by the page's path. A name of the module that acts on a window, like `page_theme!`, acts on that one."
+const PAGE_WINDOWS = Dict{String,Any}()
+
+"What shows under the box of an outcome that's open: the rest of the value, the node that the value is, or the parts of the value"
+@def mutable struct OutcomeBody <: SemanticUI
+  of::Any = nothing
+  detail::Any = nothing    # the Detail of a function or a module, made when the box first opens
+  members::Any = nothing   # the Member of each part of a value that has parts, made when the box first opens
+  pick::Any = nothing      # the FormPick of a function that offers more than one method or set of types
+  showed::Any = nothing    # what the lines of a level were last shown for, so that new lines start at their top
+  scroll::Scroll = Scroll(width(grow=grow), height(grow=grow))   # moves through a list of parts that's taller than `MEMBERS_H`
+  wide::px = 0px           # how wide that list is. Each frame sets it.
+  across::px = 0px         # how wide all of it is, with the space around what it shows. Each frame sets it.
+  corners::Any = radius(OUTCOME_ROUND)   # how round each corner is. A corner that the box stands on is square. Each frame sets it.
+  tall::px = MEMBERS_H     # the tallest that the list is in the room that the window has under the box. Each frame sets it.
+end
+
+"""
+A name that Julia code makes: where it's written, what the code says it is,
+and the lines of the page where code can use it. `span` is nothing for a name
+that all of the page's code can use. `call` is true when `words` is what the
+code calls to make the name's value, like Wall in `door = Wall(0.9)`. That's
+the value's type only when it's the name of a type.
+"""
+struct Bound
+  name::String
+  at::Pos
+  words::String
+  call::Bool
+  span::Union{Nothing,UnitRange{Int}}
 end

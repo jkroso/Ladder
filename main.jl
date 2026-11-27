@@ -5593,9 +5593,6 @@ block_source(text::AbstractString, lang::AbstractString, folder::AbstractString)
   k === nothing ? nothing : "./$lang$((".jl", ".md")[k])"
 end
 
-"The window whose code ran last in the module of each page, by the page's path. A name of the module that acts on a window, like `page_theme!`, acts on that one."
-const PAGE_WINDOWS = Dict{String,Any}()
-
 "The pages whose code has all run in their module, by path, as the kinds of block that a page defines need"
 const PAGES_RUN = Set{String}()
 
@@ -10326,6 +10323,9 @@ const COMMANDS = Dict{Symbol,Command}(c.name => c for (_, cs) in COMMAND_GROUPS 
 
 "What kind of command the command `name` is: :type, :move, :edit, :look or :window"
 command_kind(name::Symbol) = COMMANDS[name].kind
+
+"Open the command palette on the command called `name`, to ask for what it takes"
+open_palette!(e, name::Symbol) = open_palette!(e, COMMANDS[name])
 
 """
 The bundles of key bindings, in the order that the key bindings page offers
@@ -18916,7 +18916,6 @@ stretches(f::Flow, from, to) = begin
   out
 end
 
-const SPELL_RED = colorant"rgb(222,70,56)"
 const FOUND = RGBA(1.0, 0.78, 0.16, 0.45)   # the colour of the mark over a place that the find bar found
 
 "Draw a mark over each place that the find bar found, and a line of dots under each word that's spelt wrong"
@@ -19442,11 +19441,9 @@ const OUTCOME_LINES = 30        # the most lines of a value that Julia writes
 const OUTCOME_COLS = 100        # and the most characters of each
 const OUTCOME_NODE_W = 420px    # how wide a value that's a UI node shows
 const OUTCOME_EDGE = 12px       # the least space between a box and the right edge of the window
-const OUTCOME_ROUND = 7px       # how round the corners of an open box are, and of the rest under it
 const MEMBERS = 100             # the most items of a list that the open box of an outcome lists
 const MEMBER_COLS = 80          # the most characters of a value on a line of that list
 const MEMBER_INDENT = 2         # how many characters further in the parts of a part start
-const MEMBERS_H = 430px         # the tallest that the list is. The wheel moves through the rest.
 const MEMBERS_LEAST = 6         # how many lines of the list show at least, in a box that's near the bottom of the window
 
 "The font of what code came to, which is the font of the code, at `size` and in the colour `ink`"
@@ -19482,20 +19479,6 @@ outcome_face(size, ink=colours.ink) = Face(codefont(), codestyle(), size, ink, f
   high::px = 20px
   across::px = 0px                  # how wide the box is while it's open
   steps::Tuple{px,px} = (0px, 0px)  # how far the rest under an open box goes on past the left of the box, and past its right
-end
-
-"What shows under the box of an outcome that's open: the rest of the value, the node that the value is, or the parts of the value"
-@def mutable struct OutcomeBody <: SemanticUI
-  of::Any = nothing
-  detail::Any = nothing    # the Detail of a function or a module, made when the box first opens
-  members::Any = nothing   # the Member of each part of a value that has parts, made when the box first opens
-  pick::Any = nothing      # the FormPick of a function that offers more than one method or set of types
-  showed::Any = nothing    # what the lines of a level were last shown for, so that new lines start at their top
-  scroll::Scroll = Scroll(width(grow=grow), height(grow=grow))   # moves through a list of parts that's taller than `MEMBERS_H`
-  wide::px = 0px           # how wide that list is. Each frame sets it.
-  across::px = 0px         # how wide all of it is, with the space around what it shows. Each frame sets it.
-  corners::Any = radius(OUTCOME_ROUND)   # how round each corner is. A corner that the box stands on is square. Each frame sets it.
-  tall::px = MEMBERS_H     # the tallest that the list is in the room that the window has under the box. Each frame sets it.
 end
 
 "A part of a value, on a line of its own in the open box of an outcome: a field of a struct, an item of a list, or a child of a UI node"
@@ -21414,21 +21397,6 @@ end
 const Syntax = Base.JuliaSyntax
 const NOWHERE = 1:0   # the lines where a field of a struct is in reach: none
 
-"""
-A name that Julia code makes: where it's written, what the code says it is,
-and the lines of the page where code can use it. `span` is nothing for a name
-that all of the page's code can use. `call` is true when `words` is what the
-code calls to make the name's value, like Wall in `door = Wall(0.9)`. That's
-the value's type only when it's the name of a type.
-"""
-struct Bound
-  name::String
-  at::Pos
-  words::String
-  call::Bool
-  span::Union{Nothing,UnitRange{Int}}
-end
-
 "One block of Julia code as it's read: its lines, the line of the page that it starts on, and the names found so far"
 struct Scan
   lines::Vector{String}
@@ -23259,7 +23227,7 @@ definition!(e, at::Pos) = begin
   n = own_name(e, at)
   if n !== nothing && any(m -> m.name == n.name && m.at == (n.line, n.col), page_bounds(e))
     e.buf.caret = e.buf.anchor = (n.line, n.col)
-    open_palette!(e, COMMANDS[:find_uses])
+    open_palette!(e, :find_uses)
     return true
   end
   place = definition(e, at)
@@ -35104,7 +35072,7 @@ commit_scope!(e, what::Symbol) = begin
   e.own || return commit_now!(e, what)
   # The keyboard goes to the page first, so the file that shows is the one in focus, not a row of the sidebar
   focus(e)
-  open_palette!(e, COMMANDS[what == :file ? :commit : what == :all ? :commit_all : what == :staged ? :commit_staged : :commit_ticked])
+  open_palette!(e, what == :file ? :commit : what == :all ? :commit_all : what == :staged ? :commit_staged : :commit_ticked)
   e
 end
 
@@ -35172,7 +35140,7 @@ commit_tick!(e) = begin
     err = err isa TaskFailedException ? err.task.exception : err
     say_result!(e, trouble(err))
     # A message that you write commits the whole file, as the button did before
-    w.what == :file && (focus(e); open_palette!(e, COMMANDS[:commit]))
+    w.what == :file && (focus(e); open_palette!(e, :commit))
     return
   end
   try
