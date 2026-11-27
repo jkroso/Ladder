@@ -1648,7 +1648,10 @@ act!(v::ChartView, action, w) = begin
   handled
 end
 
-describe(a::PlotArea) = Box(width(grow=grow), height(a.of.spec.kind == :pie ? PIE_H : PLOT_H))
+describe(a::PlotArea) = Box(width(grow=grow), height(plot_height(a.of)))
+
+"How tall the chart `v` is: a pie, or bars and lines with room for the names of their axes"
+plot_height(v::ChartView) = (v.spec.kind == :pie ? PIE_H : PLOT_H) + px(Charts.axis_room(shown!(v), v.spec.kind))
 
 "The mark of the chart that the mouse is over, or nothing"
 chart_hit(v::ChartView) = begin
@@ -1723,7 +1726,7 @@ end
 chart_html(e, v::ChartView) = begin
   d = shown!(v)
   isempty(d.problem) || return nothing
-  wide, tall = 720.0, num(v.spec.kind == :pie ? PIE_H : PLOT_H)
+  wide, tall = 720.0, num(plot_height(v))
   picture = Charts.svg(Charts.plot(d, v.spec.kind, wide, tall, chart_measure), wide, tall, colours=css_colour.(SERIES_LIGHT),
                        ink="#2b2622", dim="#6b6259", line="#e6e0d0", surface="#fdfcf9", family="-apple-system, Helvetica, sans-serif")
   title = isempty(v.spec.title) ? "" : "<p><strong>$(escape(v.spec.title))</strong></p>\n"
@@ -3665,6 +3668,7 @@ several_sources(v) = v isa ChartView ? several_sources(editor(v), v.spec) : Stri
 
 "What the button of `v` says: where its rows come from"
 source_words(v) = begin
+  own_rows(v) && return "Its own rows"
   from = source_from(v)
   isempty(from) && return v isa FilterView && v.lang == LOAD ? "Choose rows" : "The table above"
   n = length(several_sources(v))
@@ -3700,6 +3704,7 @@ source_rows(v) = begin
   ts = page_tables(e)
   from = source_from(v)
   rows = Any[]
+  own_rows(v) && push!(rows, (key=:own, name="Its own rows", short="", words=["its own rows", "own"]))
   v isa FilterView && v.lang == LOAD || push!(rows, (key="", name="The table above", short="", words=["the table above", "nearest"]))
   for k in source_tables(v)
     name, kind = table_name(e, ts, k), table_kind(e, ts[k])
@@ -3710,7 +3715,7 @@ source_rows(v) = begin
     istable(name) && !any(r -> r.key isa String && Charts.same(r.key, name), rows) &&
       push!(rows, (key=name, name=basename(name), short="file", words=[name]))
   end
-  isempty(from) || !isempty(several) || any(r -> r.key == from, rows) || named_table(e, ts, from) !== nothing ||
+  own_rows(v) || isempty(from) || !isempty(several) || any(r -> r.key == from, rows) || named_table(e, ts, from) !== nothing ||
     push!(rows, (key=from, name=source_words(v), short=Saves.isurl(from) ? "server" : "file", words=[from]))
   push!(rows, (key=:file, name="Choose a file…", short="", words=["choose a file", "file"]))
   rows
@@ -3726,7 +3731,8 @@ choice_input(c::SourceChooser) = block_part!(c, :filter) do
 end
 
 "True when the row `r` of the list is where the block's rows come from now, or one of the tables that a chart draws"
-chosen(c::SourceChooser, r) = r.key isa String && (r.key == source_from(c.of) || any(n -> Charts.same(n, r.key), several_sources(c.of)))
+chosen(c::SourceChooser, r) = own_rows(c.of) ? r.key == :own :
+  r.key isa String && (r.key == source_from(c.of) || any(n -> Charts.same(n, r.key), several_sources(c.of)))
 
 """
 Add the table of row `k` of the list to the tables that the chart of `c`
@@ -3811,7 +3817,7 @@ choose!(c::SourceChooser, k::Int) = begin
   key = c.rows[k].key
   stop_choosing!(c)
   v = c.of
-  key == :file ? pick_file!(v) : key == source_from(v) ? close_picker!(v) : set_source!(v, key)
+  key == :file ? pick_file!(v) : key == :own || (key == source_from(v) && !own_rows(v)) ? close_picker!(v) : set_source!(v, key)
   handled
 end
 
@@ -3834,6 +3840,21 @@ end
 
 "Make `from` where the rows of the block `v` come from, and close its file picker"
 set_source!(v, from) = (close_picker!(v); write_block!(v, source_lang(v), with_from(v.lines, from)))
+
+"""
+A chart that holds its own rows draws them, whatever its `from` says. So when
+another table or a file is chosen, the rows go from the block. ⌘Z puts them back.
+"""
+set_source!(v::ChartView, from) = begin
+  close_picker!(v)
+  own_rows(v) || return write_block!(v, CHART, with_from(v.lines, from))
+  c = deepcopy(v.spec)
+  c.rows, c.from = Vector{String}[], String(from)
+  write_block!(v, CHART, Charts.written(c))
+end
+
+"True when the block `v` is a chart that holds its own rows, with a | between the cells, and draws them and no table"
+own_rows(v) = v isa ChartView && !isempty(v.spec.rows)
 
 # The file picker of each kind of block: a filter's and a load block's is `load_picker`
 pick_file!(v::FilterView) = (v.choosing = false; toggle_picker!(v))

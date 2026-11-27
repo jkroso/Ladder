@@ -244,3 +244,49 @@ end
   @test C.joined(c, [C.data(c, TABLE, headed=true, part=true), C.nothing_to_draw("This table has no rows yet.")], ["2025", "2026"]).problem ==
         "The table “2026” has no rows yet."
 end
+
+@testset "the names of the axes" begin
+  # The heading of the column that names the bars is under the chart. One column of numbers names the numbers on the left.
+  d = C.data(C.chart(["show: Costs"]), TABLE, headed=true)
+  @test (d.x, d.y) == ("Month", "Costs")
+  # Several columns have their names over the chart, so the numbers on the left have none
+  @test (C.data(C.Chart(), TABLE, headed=true).x, C.data(C.Chart(), TABLE, headed=true).y) == ("Month", "")
+  # The block can name them, or take a name away
+  c = C.chart(["x: The month", "y: none"])
+  @test (c.x, c.y) == ("The month", "none") && C.written(c) == ["kind: bars", "x: The month", "y: none"]
+  d = C.data(c, TABLE, headed=true)
+  @test (d.x, d.y) == ("The month", "")
+  @test C.data(C.chart(["y: Dollars"]), TABLE, headed=true).y == "Dollars"
+  # A table with no headings has no names, and nor do rows that only have their numbers
+  @test (C.data(C.Chart(), [["Jan", "3"], ["Feb", "5"]]).x, C.data(C.Chart(), [["3"], ["5"]]).x) == ("", "")
+  # When every column is numbers, the first names the rows, as the sizes along the bottom of a line do
+  sizes = [["Concurrent tokens (batch)", "Chip throughput (tokens/s)"], ["1", "125"], ["50", "6250"], ["100", "12500"]]
+  d = C.data(C.chart(["kind: lines"]), sizes)
+  @test d.labels == ["1", "50", "100"] && [s.name for s in d.series] == ["Chip throughput (tokens/s)"]
+  @test (d.x, d.y) == ("Concurrent tokens (batch)", "Chip throughput (tokens/s)")
+  # unless `show` draws that column
+  @test [s.name for s in C.data(C.chart(["show: Concurrent tokens (batch)"]), sizes).series] == ["Concurrent tokens (batch)"]
+  # The names go under the chart and at the top of the numbers on the left. The chart is taller by as much, so its lines keep their room.
+  marks = C.plot(d, :lines, 600, 260 + C.axis_room(d, :lines), measure)
+  words = Dict(m.text => m for m in marks if m.kind == :words)
+  under, up, first_size = words["Concurrent tokens (batch)"], words["Chip throughput (tokens/s)"], words["50"]
+  @test under.style == :middle && under.at[2] > first_size.at[2] && under.at[2] <= 260 + C.axis_room(d, :lines)
+  @test up.style == :start && up.at[2] < minimum(m.at[2] for m in marks if m.kind == :rule)
+  plain = C.data(C.chart(["x: none", "y: none"]), sizes)
+  @test C.axis_room(plain, :lines) == 0 && C.axis_room(d, :lines) == 2C.AXIS_H && C.axis_room(d, :pie) == 0
+  dots(m) = sort([p.at[2] for p in m if p.kind == :dot])
+  @test dots(marks) ≈ dots(C.plot(plain, :lines, 600, 260, measure)) .+ C.AXIS_H
+  # A total shares its row with the name of the numbers
+  costs = [["Part", "Cost"], ["Cells", "3"], ["Chips", "5"], ["In all", "8"]]
+  withtotal = C.data(C.Chart(), costs)
+  @test withtotal.y == "Cost" && C.axis_room(withtotal, :bars) == C.AXIS_H
+  marks = C.plot(withtotal, :bars, 600, 260, measure)
+  @test only(m for m in marks if m.text == "Cost").at[2] == only(m for m in marks if startswith(m.text, "In all")).at[2]
+  # A picture has them too
+  @test occursin(">Concurrent tokens (batch)</text>", C.svg(C.plot(d, :lines, 600, 296, measure), 600, 296, colours=["#2a78d6"], ink="#222", dim="#777", line="#ddd", surface="#fff"))
+  # Several tables have a name under the chart when they agree on it
+  parts = [C.data(C.chart(String[]), t, headed=true, by_first=true, part=true) for t in ([["Age", "Power"], ["0", "100"]], [["Age", "Working"], ["0", "90"]])]
+  @test C.joined(C.chart(String[]), parts, ["Cells", "Chips"]).x == "Age" && C.joined(C.chart(String[]), parts, ["Cells", "Chips"]).y == ""
+  parts[2] = C.data(C.chart(String[]), [["Year", "Working"], ["0", "90"]], headed=true, by_first=true, part=true)
+  @test C.joined(C.chart(["y: %"]), parts, ["Cells", "Chips"]).x == "" && C.joined(C.chart(["y: %"]), parts, ["Cells", "Chips"]).y == "%"
+end

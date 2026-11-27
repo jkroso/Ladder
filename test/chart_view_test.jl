@@ -273,3 +273,23 @@ end
   shot("no-title.png")
   K.write_block!(v, K.CHART, ["title: Sales and costs"]); frames()
 end
+
+@testset "a chart with its own rows says so, and its axes have names" begin
+  v = show_chart(4)
+  @test K.source_words(v) == "Its own rows"
+  # The column of the days is under the chart, and the one column of numbers names them. The chart is taller by as much.
+  d = K.shown!(v)
+  @test (d.x, d.y) == ("Day", "Rain")
+  @test rect(v.parts[:area]).height == K.plot_height(v) == K.PLOT_H + px(2C.AXIS_H)
+  @test all(in([m.text for m in v.marks if m.kind == :words]), ["Day", "Rain"])
+  # Its rows are what the list has picked, not the table above
+  hover(v); click(middle(rect(v.parts[:source])))
+  c = v.parts[:sources]
+  @test c.rows[1].name == "Its own rows" && K.chosen(c, c.rows[1]) && count(r -> K.chosen(c, r), c.rows) == 1
+  shot("own rows.png")
+  # Another table takes the place of the rows, and ⌘Z puts them back
+  click(middle(rect(c.parts[(:choice_row, findfirst(r -> r.name == "The table above", c.rows))])))
+  @test block(4) == ["kind: lines"] && K.source_words(chart(4)) == "The table above" && c.asking === nothing
+  K.undo!(e.buf); frames()
+  @test block(4) == ["kind: lines", "", "Day | Rain", "Mon | 3 mm", "Tue | 12 mm"] && K.source_words(chart(4)) == "Its own rows"
+end

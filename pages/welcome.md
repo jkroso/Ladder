@@ -749,6 +749,8 @@ The first button at its top makes it bars, lines or a pie. The button after the 
 
 A line in the block can say more. `show: Sales` draws only that column. `by: Month` names the column whose words go under the bars. `from: Spreadsheets` draws the first table under that heading. A chart can hold its own rows too, with a `|` between the cells. To see the block's lines, hold ⌥ and click the chart.
 
+Bars and lines have a name under them: the heading of the column whose words go under the bars, like Month above. A chart that draws one column has that column's name at the top of its numbers. `x: The month` and `y: Dollars` name the axes in other words, and `x: none` takes a name away. When every column of a table is numbers, the first column goes under the chart, like the years or the sizes along a line.
+
 A chart can draw several tables in one. Name them in its `from` line, with commas between them. Or click the chart's table button, hold ⌘, and click each table that you want. The numbers of rows with the same name go in the same place, so the two tables below draw two lines over the same months:
 
 ### Last year

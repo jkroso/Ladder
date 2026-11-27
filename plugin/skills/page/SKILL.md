@@ -363,7 +363,7 @@ The changes are counted from the top of the block, and the lines from the first 
 
 ### A chart
 
-A `chart` code block draws the numbers of a table. With nothing in it, it draws the table, the spreadsheet or the sheet that is nearest above it, as bars. The first column that isn't numbers names the bars, and each column of numbers is drawn.
+A `chart` code block draws the numbers of a table. With nothing in it, it draws the table, the spreadsheet or the sheet that is nearest above it, as bars. The first column that isn't numbers names the bars, and each column of numbers is drawn. When every column is numbers, the first column names them, like the years or the batch sizes along a line.
 
 ````
 | Month | Sales | Costs |
@@ -377,7 +377,7 @@ title: Sales and costs
 ```
 ````
 
-`kind` is `bars`, `lines` or `pie`. `show: Sales` draws only that column. `by: Month` names the column whose words name the bars. `from: Budget` draws the first table under the heading "Budget". `from: Budget, Costs` draws both tables in one chart, and rows with the same name, like the same month or the same year, go in the same place. Use it to put the lines of two sheets over the same range in one chart, rather than writing their sums again. A chart under a `filter` or a `load` block draws the rows that the block shows. To draw numbers that are in no table, put the rows in the block, under an empty line, with a `|` between the cells and the names of the columns in the first row. Do not draw two measures with different units in one chart.
+`kind` is `bars`, `lines` or `pie`. `show: Sales` draws only that column. `by: Month` names the column whose words name the bars. `from: Budget` draws the first table under the heading "Budget". `from: Budget, Costs` draws both tables in one chart, and rows with the same name, like the same month or the same year, go in the same place. Use it to put the lines of two sheets over the same range in one chart, rather than writing their sums again. A chart under a `filter` or a `load` block draws the rows that the block shows. To draw numbers that are in no table, put the rows in the block, under an empty line, with a `|` between the cells and the names of the columns in the first row. Do not draw two measures with different units in one chart. Bars and lines name their axes: the heading of the column that names the bars goes under the chart, and the name of the one column drawn goes at the top of the numbers. A chart of several columns shows their names over it instead. `x: Batch size` and `y: Tokens a second` name the axes, and `x: none` or `y: none` takes a name away. Give each axis a name that says what it measures, in the headings or in these lines.
 
 ### A table from a CSV file
 

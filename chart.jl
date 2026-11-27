@@ -11,8 +11,17 @@
 #
 # `kind` is `bars`, `lines` or `pie`. Without it, the chart has bars.
 # `by` names the column whose words name each bar. Without it, that's the
-# first column that isn't numbers. `show` names the columns of numbers to
-# draw. Without it, the chart draws each column of numbers.
+# first column that isn't numbers. When every column is numbers, it's the
+# first column, like the years or the sizes along the bottom of a line.
+# `show` names the columns of numbers to draw. Without it, the chart draws
+# each column of numbers.
+#
+# Bars and lines have a name on each axis. The one under the chart is the
+# heading of the `by` column. The one at the top of the numbers on the left
+# is the name of the column that the chart draws, when it draws one. A
+# chart that draws several has their names over it, so that axis has no
+# name. `x: Batch size` and `y: Tokens a second` name the axes, and
+# `x: none` takes a name away.
 #
 # The numbers come from a table of the page: a table, a spreadsheet or a
 # sheet. `from` names the heading that the table is under. Without it, the
@@ -60,8 +69,11 @@ mutable struct Chart
   from::String                   # the heading that the table is under, or a CSV file, or "" for the table above the chart
   rows::Vector{Vector{String}}   # the chart's own rows
   other::Vector{String}          # the settings that this file doesn't know, kept as they are
+  x::String                      # the name under the chart, or "" for the heading of the `by` column, or "none"
+  y::String                      # the name of the numbers on the left, or "" for the name of the column, or "none"
 end
 
+Chart(kind, title, by, show, from, rows, other) = Chart(kind, title, by, show, from, rows, other, "", "")
 Chart() = Chart(:bars, "", "", String[], "", Vector{String}[], String[])
 
 "The cells of a row that has a | between them"
@@ -101,6 +113,10 @@ chart(lines) = begin
       c.show = listed(value)
     elseif key == "from"
       c.from = value
+    elseif key == "x"
+      c.x = value
+    elseif key == "y"
+      c.y = value
     elseif isempty(c.rows) && kind(text) !== nothing
       c.kind = kind(text)   # the kind by itself, like `pie`
     elseif isempty(c.rows)
@@ -119,6 +135,8 @@ written(c::Chart) = begin
   isempty(c.by) || push!(out, "by: " * c.by)
   isempty(c.show) || push!(out, "show: " * join(c.show, ", "))
   isempty(c.from) || push!(out, "from: " * c.from)
+  isempty(c.x) || push!(out, "x: " * c.x)
+  isempty(c.y) || push!(out, "y: " * c.y)
   append!(out, c.other)
   isempty(c.rows) || push!(out, "", (join(row, " | ") for row in c.rows)...)
   out
@@ -202,15 +220,20 @@ struct Data
   more::Int         # how many columns of numbers it leaves out, because a chart has `MOST` colours
   apart::Union{Nothing,Tuple{String,Float64}}   # a total row, kept out of the bars and the slices: its name, then its number
   colours::Vector{Int}   # the colour of each name, for a pie: the place of its row in the table, or 0 for Other. None when each column has a colour.
+  x::String         # the name of the axis under the chart, or ""
+  y::String         # and of the numbers on its left
 end
 
-Data(labels, series, before, after, problem, more=0, apart=nothing) = Data(labels, series, before, after, problem, more, apart, Int[])
+Data(labels, series, before, after, problem, more=0, apart=nothing, colours=Int[]) = Data(labels, series, before, after, problem, more, apart, colours, "", "")
 nothing_to_draw(problem) = Data(String[], Series[], "", "", problem)
 
 "The most columns that a chart draws. Each has a colour of its own, and a chart has this many colours."
 const MOST = 8
 
 same(a::AbstractString, b::AbstractString) = lowercase(strip(a)) == lowercase(strip(b))
+
+"The name of an axis: what the block's `setting` says, or `found` when it says nothing, or none when it says none"
+axis_name(setting::AbstractString, found::AbstractString) = same(setting, "none") ? "" : isempty(setting) ? String(found) : String(setting)
 
 "The most slices that a pie has: one for each colour. The smallest of any more are one slice, called Other."
 const SLICES = MOST
@@ -258,6 +281,8 @@ data(c::Chart, rows::Vector{Vector{String}}; headed::Bool=false, by_first::Bool=
     !isempty(idx) && 2count(i -> readat(i, k) !== nothing, idx) > length(idx)
   end
   by = !isempty(c.by) ? findfirst(k -> same(head[k], c.by), 1:wide) : by_first ? 1 : findfirst(k -> !numeric(k), 1:wide)
+  # When every column is numbers, the first names the rows, unless `show` draws it
+  by === nothing && isempty(c.by) && wide > 1 && !any(n -> same(head[1], n), c.show) && (by = 1)
   !isempty(c.by) && by === nothing && return nothing_to_draw("The table has no column called “$(c.by)”.")
   shown = Int[]
   for name in c.show
@@ -275,7 +300,9 @@ data(c::Chart, rows::Vector{Vector{String}}; headed::Bool=false, by_first::Bool=
   before, after = marks(2), marks(3)
   series = [Series(isempty(head[k]) ? (length(shown) == 1 ? "" : "Column $k") : head[k],
                    Union{Nothing,Float64}[n === nothing ? nothing : n[1] for n in found[:, j]]) for (j, k) in enumerate(shown)]
-  d = Data(labels, first(series, most), length(before) == 1 ? before[1] : "", length(after) == 1 ? after[1] : "", "", max(length(series) - most, 0))
+  kept = first(series, most)
+  d = Data(labels, kept, length(before) == 1 ? before[1] : "", length(after) == 1 ? after[1] : "", "", max(length(series) - most, 0), nothing, Int[],
+           axis_name(c.x, by === nothing ? "" : head[by]), axis_name(c.y, length(kept) == 1 ? kept[1].name : ""))
   d = part ? d : without_total(d)
   c.kind == :pie && !part ? slices(d) : d
 end
@@ -298,7 +325,7 @@ without_total(d::Data) = begin
   isempty(keep) && return d
   apart = length(d.series) == 1 ? (d.labels[i], d.series[1].values[i]) : nothing
   Data(d.labels[keep], [Series(s.name, s.values[keep]) for s in d.series], d.before, d.after, d.problem, d.more, apart,
-       isempty(d.colours) ? d.colours : d.colours[keep])
+       isempty(d.colours) ? d.colours : d.colours[keep], d.x, d.y)
 end
 
 """
@@ -330,8 +357,10 @@ joined(c::Chart, ds::Vector{Data}, names::Vector{String}; most::Int=MOST) = begi
   end
   isempty(series) && return nothing_to_draw("These tables have no column of numbers.")
   agreed(f) = (marks = unique(f(d) for d in ds if !isempty(d.series)); length(marks) == 1 ? marks[1] : "")
-  d = Data(labels, first(series, most), agreed(d -> d.before), agreed(d -> d.after), "",
-           sum(d -> d.more, ds) + max(length(series) - most, 0))
+  kept = first(series, most)
+  # The axis under the chart has a name when every table gives it the same one
+  d = Data(labels, kept, agreed(d -> d.before), agreed(d -> d.after), "", sum(d -> d.more, ds) + max(length(series) - most, 0), nothing, Int[],
+           axis_name(c.x, agreed(d -> d.x)), axis_name(c.y, length(kept) == 1 ? kept[1].name : ""))
   c.kind == :pie ? slices(d) : d
 end
 
@@ -354,7 +383,7 @@ slices(d::Data) = begin
     rest = sum(p -> p[2], parts[SLICES:end])
     parts = [parts[1:SLICES-1]; ("Other", rest, 0)]
   end
-  Data(first.(parts), [Series(s.name, Union{Nothing,Float64}[p[2] for p in parts])], d.before, d.after, "", 0, d.apart, last.(parts))
+  Data(first.(parts), [Series(s.name, Union{Nothing,Float64}[p[2] for p in parts])], d.before, d.after, "", 0, d.apart, last.(parts), d.x, d.y)
 end
 
 """
@@ -439,6 +468,14 @@ const SMALL = 11.0    # the size of the words of a chart
 const LEGEND_H = 22.0 # how tall a row of the names of the colours is
 const BAR_MOST = 24.0 # the widest that a bar gets
 const BAR_GAP = 2.0   # between two bars that are side by side
+const AXIS_H = 18.0   # how much taller the name of an axis makes a chart
+
+"""
+How much taller a chart of `d` is than one with no names on its axes, so that
+its bars or lines have the same room. A pie has no axes. The name of the
+numbers on the left shares a row with a total, when the chart has one.
+"""
+axis_room(d::Data, kind::Symbol) = kind == :pie ? 0.0 : (isempty(d.x) ? 0.0 : AXIS_H) + (isempty(d.y) || d.apart !== nothing ? 0.0 : AXIS_H)
 
 "`text`, cut short with … so that it's no wider than `room`. `measure(text, size)` says how wide text is."
 fit(text::AbstractString, room::Real, measure, size=SMALL) = begin
@@ -481,17 +518,18 @@ plot(d::Data, kind::Symbol, wide::Real, tall::Real, measure) = begin
   kind == :pie && return pie(d, wide, tall, measure)
   marks, top = legend(d, wide, measure)
   top += 18
-  if d.apart !== nothing
-    name, v = d.apart
-    push!(marks, Mark(:words, (wide - 14, top + 4, 0, 0), text=name * "  " * amount(d, v), style=:end, tone=:ink, size=12.0))
-    top += 18
-  end
+  # A total goes at the right of a row over the chart, and the name of the numbers at its left
+  total = d.apart === nothing ? "" : d.apart[1] * "  " * amount(d, d.apart[2])
+  isempty(total) || push!(marks, Mark(:words, (wide - 14, top + 4, 0, 0), text=total, style=:end, tone=:ink, size=12.0))
+  up = isempty(d.y) ? "" : fit(d.y, wide - 26 - (isempty(total) ? 0.0 : measure(total, 12.0) + 16), measure)
+  isempty(up) || push!(marks, Mark(:words, (12, top + 4, 0, 0), text=up, style=:start, tone=:ink))
+  isempty(total) && isempty(up) || (top += AXIS_H)
   ts = scale(d, kind)
   lo, hi = ts[1], ts[end]
   most = max(abs(lo), abs(hi))
   beside = [(t < 0 ? "−" : "") * d.before * short(abs(t), most) * d.after for t in ts]
   left = maximum(w -> measure(w, SMALL), beside) + 20
-  right, bottom = 14.0, 26.0
+  right, bottom = 14.0, isempty(d.x) ? 26.0 : 26.0 + AXIS_H
   pw, ph = max(wide - left - right, 10.0), max(tall - top - bottom, 10.0)
   y(v) = top + (hi - v) / (hi - lo) * ph
   for (t, words) in zip(ts, beside)
@@ -508,6 +546,8 @@ plot(d::Data, kind::Symbol, wide::Real, tall::Real, measure) = begin
     words = fit(d.labels[i], max(band * every - 6, 16.0), measure)
     isempty(words) || push!(marks, Mark(:words, (middle(i), top + ph + 17, 0, 0), text=words, style=:middle))
   end
+  across = isempty(d.x) ? "" : fit(d.x, pw, measure)
+  isempty(across) || push!(marks, Mark(:words, (left + pw / 2, top + ph + 17 + AXIS_H, 0, 0), text=across, style=:middle, tone=:ink))
   base = y(clamp(0.0, lo, hi))
   if kind == :bars
     bw = clamp((band * 0.72 - BAR_GAP * (m - 1)) / m, 1.0, BAR_MOST)
