@@ -16,7 +16,7 @@ const Z = K.Zips
 
 const dir = mktempdir()
 K.SETTINGS_FILE[] = joinpath(dir, "settings")
-K.ZIP_ROOM[] = joinpath(dir, "room")   # what's unpacked to be shown goes here, not beside the Mac's caches
+K.ZipPages.ZIP_ROOM[] = joinpath(dir, "room")   # what's unpacked to be shown goes here, not beside the Mac's caches
 const work = joinpath(dir, "work")
 const src = joinpath(dir, "src", "plans")
 mkpath(work)
@@ -47,7 +47,7 @@ end
 middle(node) = (r = rect(node); (K.num(r.left) + K.num(r.width) / 2, K.num(r.top) + K.num(r.height) / 2))
 view(path=file) = e.nodes[(:zip, path)]
 "The names of the lines that the list shows, from the top"
-lines(path=file) = [en.name for en in K.zip_lines(view(path))]
+lines(path=file) = [en.name for en in K.ZipPages.zip_lines(view(path))]
 "Draw until the program that unpacks a zip file is done"
 unpacked(path) = begin
   started = time()
@@ -82,7 +82,7 @@ end
 @testset "a click on a file shows that file, and the zip file isn't unpacked" begin
   click(middle(view().rows["plans/house/notes.md"]))
   @test endswith(e.buf.path, joinpath("plans", "house", "notes.md"))
-  @test startswith(e.buf.path, K.ZIP_ROOM[])
+  @test startswith(e.buf.path, K.ZipPages.ZIP_ROOM[])
   @test e.buf.lines[1] == "# Notes"
   @test e.buf.fixed            # a change wouldn't go into the zip file
   @test e.folder == work       # the sidebar stays

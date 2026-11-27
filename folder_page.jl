@@ -304,3 +304,6 @@ media_dir() = isempty(MEDIA_CACHE[]) ? joinpath(homedir(), "Library", "Caches", 
 
 "`path` with ~ for the home folder, as the sidebar writes it"
 tilde(path::AbstractString) = (home = homedir(); path == home ? "~" : startswith(path, home * "/") ? "~" * path[length(home)+1:end] : String(path))
+
+"The name of the file at `path` without its ending"
+title(path) = splitext(basename(path))[1]

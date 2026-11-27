@@ -32,6 +32,12 @@ function open_folder! end
 "Show the file or the folder at `path` the way that a click on a link to it does, in the window of the editor `e`"
 function show_path! end
 
+"Show the folder or the file at `path` in the page of the editor `e`, while the sidebar goes on with the folder that it lists"
+function show_beside! end
+
+"A path in the folder `dir` for something new called `base`, with the ending `ending`, that no file and no page of the editor `e` has yet"
+function free_path end
+
 "The kind of the folder at `path`: the type under AbstractDirectory that its object has"
 function folder_kind end
 
