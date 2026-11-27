@@ -3488,7 +3488,7 @@ draw(ctx, size, ui::ConcreteRect, scene::Scene) = begin
     section = shown_section(v)
     clash = (got = interference(v); got === nothing ? nothing : (got.key, got.answer === nothing))
     of = (m.version, v.eye, w, h, v.hover, hash(v.picked), v.form === nothing ? UInt(0) : hash((v.form.shows, v.form.active, v.form.key)), c, t.accent, Designs.editing(m), v.slice, v.stage,
-          section, clash)
+          section, clash, direct)
     # Where a section cuts a body, the face of the cut shows, hatched as SolidCraft hatches it
     capped = section === nothing ? nothing : (section.origin, section.normal)
     hatch = section === nothing || !section.hatch ? 0.0 : 7.0 * dense
@@ -3571,7 +3571,9 @@ does share it, so that its picture can stay on the graphics card.
 """
 stage!(v::DesignView, share) = begin
   had = get(v.parts, :stage_for, nothing)
-  if v.stage === nothing || (v.stage !== false && had != share)
+  # A picture for a file, like the one that an agent looks at, has no context to share. It keeps the stage that the window's frames
+  # use, and reads its pixels back.
+  if v.stage === nothing || (v.stage !== false && had != share && share != C_NULL)
     stage = share == C_NULL ? nothing : GLs.Stage(share)
     v.parts[:direct] = stage !== nothing
     v.stage = stage !== nothing ? stage : something(GLs.Stage(), false)

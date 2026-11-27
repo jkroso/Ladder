@@ -86,11 +86,19 @@ waiting!() = lock(WAITING_LOCK) do
 end
 
 """
+What `answer`, the answer of a site, says of the action `a` as the code is
+about to do it: true, false, or nothing when you haven't said. A site's
+answer is asked by the action's key. The answer of an agent's code has a
+method of its own, which asks you there and then, and waits: see repl.jl.
+"""
+answer_now(answer, a::Action) = answer(a.key)
+
+"""
 Go on when you said yes to `a` for the site of `c`, or else stop the code.
 When you haven't said, `a` waits for your answer.
 """
 @noinline permit(c::Context, a::Action) = begin
-  said = c.site.answer(a.key)
+  said = answer_now(c.site.answer, a)
   said === true && return nothing
   said === nothing && lock(WAITING_LOCK) do
     any(w -> w[1] == c.site.name && w[2].key == a.key, WAITING) || push!(WAITING, (c.site.name, a))

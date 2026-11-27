@@ -380,6 +380,10 @@ end
 @use "./spreadsheet" SPREADSHEET Value spreadcells spreadtexts isformula letters answers moved
 @use "./merge" changes combine follow unified
 @use "./agent" => Agent
+@use "./for_agents" => Offer
+@use "./for_agents" on_main
+@use "./repl" => Repls
+@use "github.com/jkroso/UI.jl/Interface/save" save_png
 @use "./pasteboard" => Pasteboard
 @use "./takeoff" => Plans
 @use "./schedule" => Schedules
@@ -426,6 +430,7 @@ Guard.LADDER[] = @__MODULE__
 @use "./term/view" => Terms
 @use "./git" => Git
 @use "./cad/view" => Designs
+@use "./cad/agent" => DesignTools
 @use "./notes" => Notes
 @use "./zip" => Zips
 @use "./macfile" => MacFiles
@@ -37427,26 +37432,6 @@ came_back!(run::CodeRun, piece) = begin
 end
 
 """
-Run `f` on the main thread, which draws the windows, and give what `f` gives.
-The code of a page runs in a thread of its own (see `run_pieces!`), and a name
-that acts on a window, like `page_theme!`, calls this, since AppKit and the
-state of a window are the main thread's alone. The main thread runs `f`
-between two frames.
-"""
-on_main(f) = begin
-  Threads.threadid() == 1 && return f()
-  t = Task(f)
-  t.sticky = true
-  ccall(:jl_set_task_tid, Cint, (Any, Cint), t, 0)
-  schedule(t)
-  try
-    fetch(t)
-  catch err
-    err isa TaskFailedException ? throw(err.task.exception) : rethrow()
-  end
-end
-
-"""
 Run the code that the caret is in, for ⌘Return and ⇧Return. It's false when
 the caret isn't in a `julia` code block or in the code of a sum, so the key
 does what it does in other places. With `step`, the caret goes on to the next
@@ -44699,6 +44684,7 @@ program has stopped. `busy` is true while the agent works on what you said.
   was_model::String = ""       # the model before the change that Ladder asked Claude Code for, which comes back if Claude Code says no
   later::Any = nothing         # a note on a new model, with whether it's bad, to show when the agent has done: see `model_note!`
   talk::Any = nothing          # Ladder's talk with Antigravity's program: see `AcpTalk`
+  repl::Any = nothing          # the Julia code that the agent runs inside Ladder: see "the code that an agent runs"
 end
 
 "A command that a test puts in the place of the agent's: a program that reads and prints the same lines of JSON. Nothing means the agent that Settings chose."
@@ -44720,7 +44706,7 @@ You are in Ladder, a Markdown app on the user's Mac. The user's window shows a p
 Each message of the user starts with a block between <ladder> and </ladder>. Ladder wrote the block, not the user. It says which file the window shows, which section of it is in view, where the caret is, and what is selected. The section in view is the one at the top of the window. A web page that an HTML file makes has no lines or columns. Its block gives the exact text of a selection, and the paragraph that holds it between <paragraph> and </paragraph>. When nothing is selected, the caret is where the user last clicked, and the block gives the words before it and its paragraph. These are the words as the page shows them. Where Ladder can tell, the block also gives their lines and columns in the HTML file, which can have tags and entities between the words. Lines and columns count from 1. A column is a place between characters: column 1 is before the first character of its line, so a selection ends before the character at its end column. The exact text of a selection is between <selection> and </selection>: it starts after the line break that follows <selection>, and ends before the line break in front of </selection>. Ladder saves the page to its file before each message, so the file has what the window shows, unless the block says otherwise. When the user asks for a change to the page, change its file: Ladder shows the change at once. Don't run `ladder show` or `ladder wait`: the page is open already, and the user talks to you here."""
 
 "What the agent of the session `s` is told of where it is: a session with a file of its own has no page beside it"
-session_brief(s::AgentSession) = session_brief(!isempty(s.file))
+session_brief(s::AgentSession) = session_brief(!isempty(s.file)) * (has_code(s) ? "\n\n" * BRIEF_CODE * (isempty(s.file) ? " " * BRIEF_SHOWN : "") : "")
 
 """
 The command that starts the program of the session `s`: Claude Code, which
@@ -44739,11 +44725,14 @@ end
 session_options(s::AgentSession) = begin
   page, id = s.page, s.id
   # A rule with // names a file from the top of the disk. A rule can't hold some characters, so such a file has none, and the agent asks.
-  rule = !isempty(page) && occursin(r"^[\w \-./@+~]+$", page) ? ["--allowedTools", "Edit(/$page)"] : String[]
+  rule = !isempty(page) && occursin(r"^[\w \-./@+~]+$", page) ? ["Edit(/$page)"] : String[]
+  # The agent runs Julia code in Ladder without asking, since the sandbox asks you for what could harm, and it reads the pictures that `look()` saves
+  looks = occursin(r"^[\w \-./@+~]+$", agent_looks()) ? ["Read(/$(agent_looks())/**)"] : String[]
   # --allowedTools takes all that comes after it as its list, so it's last
   ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--include-partial-messages",
    "--permission-prompt-tool", "stdio", "--append-system-prompt", session_brief(s),
-   (isempty(s.model) ? String[] : ["--model", s.model])..., (isempty(id) ? String[] : ["--resume", id])..., rule...]
+   (isempty(s.model) ? String[] : ["--model", s.model])..., (isempty(id) ? String[] : ["--resume", id])...,
+   "--mcp-config", code_config(s), "--allowedTools", "mcp__ladder__julia", looks..., rule...]
 end
 
 "True while the program of the session `s` runs"
@@ -44785,6 +44774,7 @@ end
 ended!(s::AgentSession, wrong) = begin
   was = s.busy
   settle!(s)
+  s.repl === nothing || Repls.hang_up!(s.repl)   # the program that reached the code has gone
   # The agent no longer has a session that a file kept, like one of another Mac. A new one starts, with the words that you just said.
   if !s.closing && !isempty(s.id) && !isempty(s.sent) && occursin("No conversation found", wrong)
     s.id = ""
@@ -44814,6 +44804,7 @@ end
 "The agent has done with what you said: nothing of the session `s` is still under way"
 settle!(s::AgentSession) = begin
   s.busy = false
+  release_code!(s)
   for it in s.items
     it isa AgentReply && !it.whole && (it.whole = true; it.n += 1)
     it isa AgentStep && it.state == :going && (it.state = :done)
@@ -44913,7 +44904,9 @@ end
 answer!(s::AgentSession, it::AgentWants, allow::Bool) = begin
   it.answer == :none || return s
   it.answer = allow ? :allowed : :refused
-  if speaks_acp(s)
+  if it.input isa Channel
+    isready(it.input) || put!(it.input, allow)   # the agent's code waits for this: see `code_asks!`
+  elseif speaks_acp(s)
     acp_choose!(s, it, allow ? "allow_once" : "reject_once")
   else
     said = allow ? Dict("behavior" => "allow", "updatedInput" => it.input) : Dict("behavior" => "deny", "message" => "The user refused this in Ladder.")
@@ -44962,6 +44955,7 @@ close!(s::AgentSession) = begin
   s.closing = true
   settle!(s)
   s.to === nothing || try close(s.to) catch end
+  s.repl === nothing || Repls.close!(s.repl)
   running(s) && try kill(s.process) catch end
   s
 end
@@ -45118,13 +45112,14 @@ tool_words(name::AbstractString, input) = begin
   name in ("Task", "Agent") ? (isempty(get("description")) ? "Starting an agent" : "An agent: $(get("description"))") :
   name == "TodoWrite" ? "Planning the work" :
   name == "Skill" ? "Using the skill $(get("skill"))" :
+  code_tool(name) ? code_step(json_field(input, "code")) :
   startswith(name, "mcp__") ? "Using $(replace(replace(name, r"^mcp__" => ""), "__" => ": ", "_" => " "))" : "Using $name"
 end
 
 "The icon of a step with the tool `name`"
 tool_icon(name::AbstractString) =
   name == "Read" ? "file-earmark-text" : name in ("Edit", "Write", "MultiEdit", "NotebookEdit") ? "pencil" :
-  name in ("Grep", "Glob") ? "search" : name == "List" ? "folder" : name == "Bash" ? "terminal" : name in ("WebSearch", "WebFetch") ? "globe" :
+  name in ("Grep", "Glob") ? "search" : name == "List" ? "folder" : name == "Bash" || code_tool(name) ? "terminal" : name in ("WebSearch", "WebFetch") ? "globe" :
   name in ("Task", "Agent") ? "robot" : name == "TodoWrite" ? "list-task" : "gear"
 
 # --- Antigravity, which asks you before a step ---
@@ -45189,7 +45184,7 @@ a new one. What Ladder says of itself goes in the agent's instructions, as
 `--append-system-prompt` does for Claude Code.
 """
 acp_session!(s::AgentSession) = begin
-  params = Dict{String,Any}("cwd" => s.dir, "mcpServers" => Any[],
+  params = Dict{String,Any}("cwd" => s.dir, "mcpServers" => code_servers(s),
                             "_meta" => Dict("antigravity" => Dict("systemPrompt" => Dict("append" => session_brief(s)))))
   isempty(s.id) && return acp_call!(s, "session/new", params, :new)
   params["sessionId"] = s.id
@@ -45378,6 +45373,8 @@ request keeps for `acp_choose!`.
 acp_asks!(s::AgentSession, id, params) = begin
   call = json_field(params, "toolCall")
   tool = acp_tool(call)
+  # The agent's Julia code runs in Ladder without this question: the sandbox asks you before a step of it that could harm
+  code_tool(tool) && return acp_choose!(s, AgentWants(input=(id, json_field(params, "options"))), "allow_once")
   input = antigravity_input(json_field(call, "rawInput"))
   command = json_field(input, "command")
   push!(s.items, AgentWants(id=id isa String ? id : sprint(write_json, id), tool=tool, input=(id, json_field(params, "options")),
@@ -45401,6 +45398,138 @@ acp_choose!(s::AgentSession, it::AgentWants, kind) = begin
   acp_reply!(s, id, Dict("outcome" => outcome))
   s
 end
+
+# --- the code that an agent runs --------------------------------------------------------
+#
+# An agent whose program stays for the session has a tool called `julia`,
+# which runs Julia code inside Ladder: see repl.jl. In that code `shown` is
+# the thing that the window shows, and the thing itself says what it is and
+# gives the functions that change it: see for_agents.jl. So an agent can work
+# with a kind of thing that it has never seen, like a SolidCraft design, and
+# you watch the thing change.
+#
+# The first time that a kind of thing shows in a session, what it says of
+# itself goes to the agent with your words, between <ladder-guide> tags. What
+# it shows now goes with each thing that you say, in the <ladder> block.
+#
+# The code runs in the sandbox, in a thread of its own. Before a step that
+# could harm, the pane asks you, with Allow and Refuse, as it does for a
+# command of the shell. The code waits for your answer.
+
+"True when the agent of the session `s` has the tool that runs Julia code in Ladder: its program stays for the session, and takes a tool from Ladder"
+has_code(s::AgentSession) = !s.turns
+
+"""
+The thing that the page of `e` shows, for an agent: what `page_view` gives
+for the page's file or folder, or else the file's or the folder's object.
+It's nothing for a page of text, which an agent changes in its file.
+"""
+agent_shown(e) = begin
+  o = page_object(e)
+  o === nothing && return nothing
+  v = page_view(e, o)
+  v === nothing ? o : v
+end
+
+"The Julia code of the session `s`, made when it's first asked for"
+repl!(s::AgentSession) = begin
+  s.repl === nothing || return s.repl
+  s.repl = Repls.Repl(s.agent, s.dir; ask=(action, code) -> code_asks!(s, action, code))
+end
+
+"Make the window that the pane `p` is in the one that the code of the session `s` works with: `shown` is what its page shows, and `look()` is its picture"
+beside!(s::AgentSession, p) = begin
+  r = repl!(s)
+  r.shown = () -> on_page(p) ? nothing : agent_shown(editor(p))
+  r.look = () -> on_main(() -> window_picture(editor(p)))
+  s
+end
+
+"The folder of the pictures that `look()` saves for agents. A test names one of its own."
+const AGENT_LOOKS = Ref("")
+agent_looks() = isempty(AGENT_LOOKS[]) ? joinpath(homedir(), "Library", "Caches", "Ladder", "Agent looks") : AGENT_LOOKS[]
+
+const LOOK_MOST = 1568                   # px: the longer side of a picture that an agent takes whole
+
+"""
+Save a picture of the window of `e` as it is now, for an agent to read, and
+give the PNG file's path. The picture has no more pixels than an agent takes
+whole. Each window keeps one picture, so the folder doesn't fill.
+"""
+window_picture(e) = begin
+  w = window_of(e)
+  w === nothing && error("The session's window is closed.")
+  path = joinpath(mkpath(agent_looks()), "window-$(objectid(w) % 100000).png")
+  k = min(2.0, LOOK_MOST / max(num(w.size[1]), num(w.size[2]), 1))
+  save_png(path, w; scale=(k, k))
+  path
+end
+
+"""
+The sandbox stopped the code `code` of the agent of the session `s` before
+the action `action`. The pane asks you, and this waits for your answer on
+the code's thread: true when you allow it. A turn that ends, or that you
+stop, answers no.
+"""
+code_asks!(s::AgentSession, action, code) = begin
+  box = Channel{Bool}(1)
+  on_main() do
+    push!(s.items, AgentWants(id="ladder-code-$(length(s.items))", tool="Julia", words="$(action.words), with this Julia code", detail=String(code), input=box))
+    s.version += 1
+  end
+  take!(box)
+end
+
+"Answer no to each thing that the code of the session `s` waits to be allowed, when nothing will answer it any more"
+release_code!(s::AgentSession) = begin
+  for it in s.items
+    it isa AgentWants && it.answer == :none && it.input isa Channel && !isready(it.input) && put!(it.input, false)
+  end
+  s
+end
+
+"What Claude Code is given to reach the tool of the session `s`: its tool servers, as JSON"
+code_config(s::AgentSession) = begin
+  program, given = Repls.command(repl!(s))
+  sprint(write_json, Dict("mcpServers" => Dict("ladder" => Dict("command" => program, "args" => given))))
+end
+
+"The tool servers that Antigravity's program is given for the session `s`"
+code_servers(s::AgentSession) = begin
+  has_code(s) || return Any[]
+  program, given = Repls.command(repl!(s))
+  Any[Dict("name" => "ladder", "command" => program, "args" => given, "env" => Any[])]
+end
+
+"What a step that runs the Julia code `code` in Ladder shows as: the code's first line"
+code_step(code) = begin
+  lines = code isa String ? filter(!isempty, strip.(split(code, '\n'))) : []
+  isempty(lines) ? "Running Julia code" : "Running $(first(lines))"
+end
+
+"True when `name` is how an agent's program names the tool that runs Julia code in Ladder"
+code_tool(name) = name isa AbstractString && occursin(r"ladder.*julia"i, name)
+
+"""
+What the thing that the page of `e` shows says of itself, for the agent of
+the session `s`, the first time that a thing of its kind shows in the
+session: what it is and the functions that change it, between
+<ladder-guide> tags. After that, and for a page of text, it's "".
+"""
+guide_once!(s::AgentSession, e) = begin
+  (has_code(s) && s.repl !== nothing) || return ""
+  x = agent_shown(e)
+  (x === nothing || typeof(x) in s.repl.guided) && return ""
+  (isempty(Offer.about(x)) && isempty(Offer.tools(x))) && return ""
+  push!(s.repl.guided, typeof(x))
+  "<ladder-guide>\n$(Offer.guide(x))\n</ladder-guide>"
+end
+
+"What every session whose agent has the tool is told of it"
+const BRIEF_CODE = "You have a tool named julia, from the tool server named ladder, which runs Julia code inside Ladder, in a module that is yours for this session: a name that you give a value keeps it, so hold a long result by a name and look only at the part that you need. `look()` saves a picture of the user's window and gives the PNG file's path, which you can read to see what the user sees. The code runs in a sandbox, and Ladder asks the user before a step that could harm, like changing a file."
+
+"What a session beside a page is told of the thing that the page shows, after `BRIEF_CODE`"
+const BRIEF_SHOWN = "In that code, `shown` is the thing that the user's window shows now, `guide(shown)` says what it is and lists the functions that read it and change it, and `status(shown)` says what it shows now. When the window shows something that isn't text, like a 3D design, the <ladder> block says what it shows now, and the first message with a thing of that kind also has a block between <ladder-guide> and </ladder-guide>: what the thing is, and its functions. Change such a thing only with the julia tool, and never by reading or changing its file: Ladder holds the thing in memory, with changes that the file doesn't have, and the user watches it change."
 
 # --- an agent that works by turns ---
 #
@@ -46062,6 +46191,7 @@ session!(p::AgentPane, e) = begin
     agent = pane_agent(p, e)
     s = AgentSession(agent=agent, dir=dir, page=writes(b) ? truepath(b.path) : "", turns=by_turns(agent), model=chosen_model(agent))
   end
+  has_code(s) && beside!(s, p)
   # An agent that works by turns has no program between turns: `say!` starts one
   s.turns || running(s) || start!(s, session_command(s))
   p.session = s
@@ -46408,7 +46538,11 @@ page_context(e) = begin
     picked, some = html_picked(e)
     return ((part === nothing ? name(b) : part.title) * some, "<ladder>\n$shows$seen\n$picked\n</ladder>")
   end
-  b.view in (:markdown, :code) || return (part === nothing ? name(b) : part.title, "<ladder>\n$shows$seen\n</ladder>")
+  if !(b.view in (:markdown, :code))
+    # A thing that isn't text says what it shows now: see "the code that an agent runs"
+    now = Offer.status(agent_shown(e))
+    return (part === nothing ? name(b) : part.title, "<ladder>\n$shows$seen$(isempty(now) ? "" : "\n" * now)\n</ladder>")
+  end
   n = b.caret[1]
   heads = filter(x -> x.level <= 6 && x.line <= n, page_outline(e))
   under = isempty(heads) ? "" : last(heads).title
@@ -46567,7 +46701,8 @@ send_words!(p::AgentPane) = begin
   p.error = ""
   about, told = pane_context(p, e)
   changes = changes_told(s)
-  say!(s, words, about, join(filter(!isempty, [told, changes]), "\n\n"); pictures=pictures, changed=length(edited))
+  guide = on_page(p) ? "" : guide_once!(s, e)
+  say!(s, words, about, join(filter(!isempty, [guide, told, changes]), "\n\n"); pictures=pictures, changed=length(edited))
   # The agent knows what each reply says now
   foreach(it -> it isa AgentReply && (it.saw = nothing), s.items)
   p.follow = true

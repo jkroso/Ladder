@@ -892,10 +892,12 @@ else
         gpus[objectid(w)] = GPU(gr, target, surface, (W, H))
         direct = drawn()
         @test v.parts[:direct] === true          # the stage shares the window's context
-        # Without the window's own context the stage reads its picture back, as it did before, and Skia draws the bytes
+        # Without the window's own context the stage reads its picture back, and Skia draws the bytes. The stage stays the one
+        # that the window's frames use, so a picture for a file, like the one that an agent looks at, costs the window nothing.
         delete!(gpus, objectid(w))
+        shared = v.stage
         read_back = drawn()
-        @test v.parts[:direct] === false
+        @test v.stage === shared
         @test count(i -> abs(Int(direct[i]) - Int(read_back[i])) > 3, eachindex(direct)) == 0
         # The picture follows the eye
         gpus[objectid(w)] = GPU(gr, target, surface, (W, H))
