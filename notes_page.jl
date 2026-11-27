@@ -13,11 +13,11 @@
 @use "github.com/jkroso/URI.jl/FS" => FS FSObject AbstractDirectory
 @use "./git" => Git
 @use "./notes" => Notes
-@use "./look" SANS SERIF MONO CODE_FONT CODE_STYLE CODE_SLANT CODE_SCALE code_type codefont codestyle codeslant SYMBOL_FONT Palette SEPIA PAPER NIGHT THEMES colours SITE SITE_MEASURE SITE_RULE SITE_STARS SITE_INK2 LABEL use! TOPBAR_H PANEL_W PANEL_MIN PANEL_MAX PROSE_W PAGE_X PAGE_TOP PAGE_BOTTOM CODE_END CHIP_X BLOCK_X QUOTE_X CELL_X CELL_Y grow clear lifted fixed spacer num label Face measured measure width_in drawable has stand_ins font_with one_wide one_width stand_in_from runs hasall spared_width spared LIVE_GAP BLOCK_ICONS
-@use "./folder_page" own! node! MARKDOWN window_size PICTURES MODELS TERMINALS CHATS SOUNDS VIDEOS ZIPS TABLES MAC_PICTURES DOCUMENTS FONTS CODE file_icon dark_page SERIES_LIGHT SERIES_DARK series_colours trouble held_keys only_held unmodified HELD commas file_menu ignore_item menu_theme drawn_menu! workspace url_path opener app_name PAGE_TITLES first_answer email_title page_title DESIGNS PageRow PAGE_ROW_H page_row! page_heading page_note PageButton page_button! git_colour favourite_item ishidden left_out on_screen whole_picture MEDIA_CACHE media_dir tilde title 
-@use "./host" editor page_object object list_files! go_folder! open! open_folder! show_path! show_beside! free_path folder_kind page_top trash! file_act! show_in_finder
-@use "./views" entries entry_icon entry_name entry_marks folder_view page_view page_fills page_first page_foot
-@use "./git_marks" GIT_TOPS git_top watch_git! GIT_LETTERS GIT_WORDS GIT_LIST_FRESH git_marks GitBar changes_words
+@use "./look" exports...
+@use "./folder_page" exports...
+@use "./host" exports...
+@use "./views" exports...
+@use "./git_marks" exports...
 
 # --- a folder of notes -------------------------------------------------------------------------
 #

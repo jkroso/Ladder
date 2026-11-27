@@ -19,8 +19,19 @@
 @use "./eml" => Eml
 @use "./folders" => Folders
 @use "./markdown" front_matter
-@use "./look" SANS SERIF MONO CODE_FONT CODE_STYLE CODE_SLANT CODE_SCALE code_type codefont codestyle codeslant SYMBOL_FONT Palette SEPIA PAPER NIGHT THEMES colours SITE SITE_MEASURE SITE_RULE SITE_STARS SITE_INK2 LABEL use! TOPBAR_H PANEL_W PANEL_MIN PANEL_MAX PROSE_W PAGE_X PAGE_TOP PAGE_BOTTOM CODE_END CHIP_X BLOCK_X QUOTE_X CELL_X CELL_Y grow clear lifted fixed spacer num label Face measured measure width_in drawable has stand_ins font_with one_wide one_width stand_in_from runs hasall spared_width spared
-@use "./host" editor page_object object list_files! go_folder! open_folder! page_top trash! file_act! show_in_finder
+@use "./look" exports...
+@use "./host" exports...
+@use "./pictures" picture
+@use "github.com/jkroso/URI.jl/FS" => FS FSObject
+
+export own!, node!, MARKDOWN, window_size, PICTURES, MODELS, TERMINALS, CHATS, SOUNDS, VIDEOS, ZIPS, TABLES,
+       MAC_PICTURES, DOCUMENTS, FONTS, CODE, file_icon, SERIES_LIGHT, SERIES_DARK, series_colours, trouble,
+       held_keys, only_held, unmodified, HELD, commas, file_menu, ignore_item, menu_theme, drawn_menu!,
+       workspace, url_path, opener, app_name, PAGE_TITLES, first_answer, email_title, page_title, DESIGNS,
+       PageRow, PAGE_ROW_H, page_row!, page_heading, page_note, PageButton, page_button!, git_colour,
+       favourite_item, ishidden, left_out, on_screen, whole_picture, MEDIA_CACHE, media_dir, tilde, title,
+       held, not_pictures, picture_key, SETTINGS_FILE, settings_file, BROWSER_FOLDER, browser_folder, path_of,
+       HOME, home_folder
 
 "A node that belongs to `e` and is kept for as long as `e` is"
 own!(e, node) = (node.parent === nothing && setfield!(node, :parent, e); node)
@@ -77,9 +88,6 @@ file_icon(path) = begin
   ext in DOCUMENTS ? "file-earmark-richtext" :
   ext in CODE ? "file-earmark-code" : "file-earmark"
 end
-
-"True when the page's theme is a dark one"
-dark_page() = RGBA(colours.bg).r < 0.5
 
 # The colours of the columns of numbers, in the order that a chart uses them. Each one can be told from
 # the one before it by a reader who doesn't see every colour. The first eight are for a light page.
@@ -307,3 +315,38 @@ tilde(path::AbstractString) = (home = homedir(); path == home ? "~" : startswith
 
 "The name of the file at `path` without its ending"
 title(path) = splitext(basename(path))[1]
+
+# --- the folders and the files of Ladder and of a test ----------------------------------
+
+held(node, key) = (w = window_of(node); w !== nothing && key in w.keys)
+
+# The files that turned out not to be pictures, and when each last changed, so that each is tried once
+const not_pictures = Dict{String,Float64}()
+
+"The key, for an Image, of the picture in the file at `path`, or nothing if the file isn't a picture"
+picture_key(path) = begin
+  isfile(path) || return nothing
+  get(not_pictures, path, -1.0) == mtime(path) && return nothing
+  key = lowercase(splitext(path)[2]) in PICTURES ? path : picture(path)
+  ok = key !== nothing && try image_aspect(key) > 0 catch; false end
+  ok ? key : (not_pictures[path] = mtime(path); nothing)
+end
+
+"The file of Ladder's settings that a test gives, so that it doesn't change yours, or \"\" for the usual one"
+const SETTINGS_FILE = Ref("")
+
+settings_file() = isempty(SETTINGS_FILE[]) ? joinpath(homedir(), "Library", "Application Support", "Ladder", "settings") : SETTINGS_FILE[]
+
+"The browser folder of a test, or \"\" for ~/Browser"
+const BROWSER_FOLDER = Ref("")
+
+"The folder that keeps each page and file that Ladder gets from the web, at its place on its site"
+browser_folder() = isempty(BROWSER_FOLDER[]) ? joinpath(home_folder(), "Browser") : BROWSER_FOLDER[]
+
+"The path of the file or the folder `o` as text, with no / at its end"
+path_of(o::FSObject) = (path = string(o.path); length(path) > 1 ? String(rstrip(path, '/')) : path)
+
+"The home folder that ⌘⇧H opens: the Mac's, unless a test names one of its own"
+const HOME = Ref("")
+
+home_folder() = isempty(HOME[]) ? homedir() : HOME[]

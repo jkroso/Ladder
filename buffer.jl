@@ -28,7 +28,7 @@ export look, table_text, in_browser, web_address, copied_from, julia_own, is_rep
        dirty, name, selecting, selection, head, rest, excerpt, others, keep_others!, clash, snapshot,
        restore!, edit!, replace_text!, undo!, redo!, writes, save!, crlf, ismarkdown, CODE_FILES, iscode,
        MOST_TEXT, MOST_PAGE, reading, HEX, HEX_BYTES, HEX_CHARS, BITS, BITS_ROW, BITS_CHARS, same_text,
-       unchanged, line_end, FOLDER_PAGE
+       unchanged, line_end, FOLDER_PAGE, page_key, unescaped
 
 # A kind of page or of file decides these, so this file only names them. The
 # file that knows the kind gives each its methods.
@@ -542,3 +542,11 @@ line_end(b, i) = (i, length(b.lines[i]))
 
 "The name of the page of a folder that says the folder's kind"
 const FOLDER_PAGE = ".ladder"
+
+# --- paths -----------------------------------------------------------------------------
+
+"The path that the module of the page at `path` is kept by: the file's real path, as Kip keeps a module by, or the address of a page on the web"
+page_key(path::AbstractString) = isremote(path) ? String(path) : isfile(path) ? realpath(path) : abspath(path)
+
+"The path that a link wrote with `escaped`"
+unescaped(path) = replace(path, "%20" => ' ', "%28" => '(', "%29" => ')')

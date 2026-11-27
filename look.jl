@@ -17,14 +17,16 @@
 @use "github.com/jkroso/MiniFB.jl/skia" measure_text
 @use Skia
 @use Colors: @colorant_str, RGBA, Colorant
+@use "github.com/jkroso/UI.jl/Interface/Semantic/Icon" Icon
 
 export SANS, SERIF, MONO, CODE_FONT, CODE_STYLE, CODE_SLANT, CODE_SCALE, code_type, codefont, codestyle,
        codeslant, SYMBOL_FONT, Palette, SEPIA, PAPER, NIGHT, THEMES, colours, SITE, SITE_MEASURE, SITE_RULE,
-       SITE_STARS, SITE_INK2, LABEL, use!, TOPBAR_H, PANEL_W, PANEL_MIN, PANEL_MAX, PROSE_W, PAGE_X,
-       PAGE_TOP, PAGE_BOTTOM, CODE_END, CHIP_X, BLOCK_X, QUOTE_X, CELL_X, CELL_Y, grow, clear, lifted, fixed,
-       spacer, num, label, Face, measured, measure, width_in, drawable, has, stand_ins, font_with, one_wide,
+       SITE_STARS, SITE_INK2, LABEL, use!, TOPBAR_H, PANEL_W, PANEL_MIN, PANEL_MAX, PROSE_W, PAGE_X, PAGE_TOP,
+       PAGE_BOTTOM, CODE_END, CHIP_X, BLOCK_X, QUOTE_X, CELL_X, CELL_Y, grow, clear, lifted, fixed, spacer,
+       num, label, Face, measured, measure, width_in, drawable, has, stand_ins, font_with, one_wide,
        one_width, stand_in_from, runs, hasall, spared_width, spared, LIVE_GAP, BLOCK_ICONS, removed_colour,
-       added_colour, TIP_INK, tip_label
+       added_colour, TIP_INK, tip_label, dark_page, takeoff_back, elide, FLOAT_ROW, float_row, found_colours,
+       rule, tint
 
 # --- look --------------------------------------------------------------------
 
@@ -317,3 +319,60 @@ const TIP_INK = colorant"rgb(240,240,240)"   # on the dark grey that every toolt
 
 "What a tooltip shows: `words`, with room around them"
 tip_label(words) = Box(padding(10px, 7px), label(words, 12px, color=TIP_INK))
+
+# --- lists that float over the page, and a few more looks ---------------------------
+
+"True when the page's theme is a dark one"
+dark_page() = RGBA(colours.bg).r < 0.5
+
+"""
+What's behind the plan's paper, round the table of measures and at the foot of
+a takeoff: the theme's colour for things that float over the page, which is a
+little lighter than the page. In a dark page it's the page's own colour.
+"""
+takeoff_back() = dark_page() ? colours.bg : colours.float
+
+"""
+`s` cut short with … so that it's no wider than `wide` at `size`. It's all of
+`s` when it fits, and when there's no width to fit it to yet.
+"""
+elide(s::AbstractString, size, wide) = begin
+  face = Face(SANS, "", size, colours.ink, false)
+  (wide <= 0px || measure(face, s) <= wide) && return String(s)
+  # The most letters that fit with the … after them
+  cs = collect(s)
+  lo, hi = 0, length(cs)
+  while lo < hi
+    mid = (lo + hi + 1) ÷ 2
+    measure(face, rstrip(String(cs[1:mid])) * "…") <= wide ? (lo = mid) : (hi = mid - 1)
+  end
+  rstrip(String(cs[1:lo])) * "…"
+end
+
+const FLOAT_ROW = 28px   # how tall a row of such a list is
+
+"""
+A row of such a list. `picked` is the row that Return takes, and `on` is the
+one that's chosen now, which is in bold. `short` is a word at its right.
+`icon` goes at its left, in the colour `tint` when it has one.
+"""
+float_row(name, short=""; picked=false, on=false, icon="", tint=nothing) = begin
+  c = found_colours()
+  Row(width(grow=grow), height(FLOAT_ROW), padding(8px, 0px), radius(6px), child_gap=8px, Alignment.Center,
+      background(picked ? c.pick : c.frame),
+    (isempty(icon) ? () : (Icon(icon, size=14px, color=something(tint, on ? c.ink : c.dim)),))...,
+    Row(width(grow=grow), height(grow=grow), Alignment.Center, clip=true, label(name, 13px, color=c.ink, weight=on ? "Semibold" : "")),
+    (isempty(short) ? () : (Box(label(short, 12px, color=c.dim)),))...)
+end
+
+"The colours of the list: Centient's cream in a light page, and the page's own in a dark one"
+found_colours() = dark_page() ?
+  (frame=colours.float, pick=colours.active, ink=colours.ink, dim=colours.dim, line=colorant"rgb(86,86,94)", rule=colours.line) :
+  (frame=colorant"rgb(233,224,202)", pick=colorant"rgb(224,212,185)", ink=colorant"rgb(27,23,16)", dim=colorant"rgb(110,104,88)",
+   line=colorant"rgb(176,164,136)", rule=colorant"rgb(221,212,192)")
+
+"A thin line between two groups of buttons"
+rule() = Box(width(9px), height(16px), Alignment.Center, Box(width(1px), height(16px), background(colours.line)))
+
+"`c` with `alpha` of its colour, from 0 for none to 1 for all"
+tint(c, alpha) = (k = convert(RGBA{Float64}, c); RGBA(k.r, k.g, k.b, alpha))

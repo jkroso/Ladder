@@ -14,11 +14,12 @@
 @use "./look" exports...
 @use "./flow" exports...
 @use "./buffer" exports...
+@use "./folder_page" exports...
 
 export Item, Live, Grid, isspread, Glide, Editor, TopBar, Sidebar, Page, Document, Backdrop, FinderInput,
        ToolButton, TableButton, Mode, Levels, Stop, JuliaCode, Title, CheckCount, ReadOnly, SendButton,
        Paragraph, Heading, List, Quote, CodeBlock, Table, Rule, LiveBlock, SheetBlock, Trouble, Block,
-       FileRow, FileLabel, Entry, EntryLabel, Shown
+       FileRow, FileLabel, Entry, EntryLabel, Shown, docdir, item, hosted, top_editor, button
 
 # --- what a window holds ---------------------------------------------------------
 
@@ -265,3 +266,19 @@ a click on a checkbox shows.
   was::Theme = light     # the theme that the text in a GeometricUI value has now
   inline::Bool = false   # made by inline code, so it's in a line of text and only as wide as what it shows
 end
+
+# --- what the parts of a window ask of it ------------------------------------------------
+
+"The folder of the document that's showing. The sidebar can show another folder."
+docdir(e) = isempty(e.buf.path) ? e.folder : dirname(e.buf.path)
+
+"The item that shows line `i`"
+item(e, i::Int) = e.layout[something(findfirst(it -> it.first <= i <= it.last, e.layout), length(e.layout))]
+
+"The editor of the page that shows the part of a page that `e` edits, or nothing when `e` is the window's own"
+hosted(e) = get(e.nodes, :host, nothing)
+
+"The editor of the window that `e` is in: `e`, or the editor of the page that shows the part that `e` edits, and so on up"
+top_editor(e) = (h = hosted(e); h === nothing ? e : top_editor(h))
+
+button(e, action, icon) = node!(() -> ToolButton(icon=icon, action=action), e, action)

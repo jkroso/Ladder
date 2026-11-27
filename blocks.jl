@@ -26,7 +26,7 @@
 @use "./faces" exports...
 @use "./rich" exports...
 
-export act!, keyboard_part, takeoff_back, reread!, BlockKind, BLOCKS, block_name, block_icon, block_make,
+export act!, keyboard_part, reread!, BlockKind, BLOCKS, block_name, block_icon, block_make,
        block_insert, block_is_code, block_safe, block_outline_inside, block_outline, block_table_kind,
        block_tables!, block_names, block_places, block_lines, block_view, prepare_block!, measure_block!,
        block_item, block_layout, block_place, block_html, write_block!, block_tick!, before_save!,
@@ -40,9 +40,6 @@ function act! end
 
 "The part of the block `v` that takes the keys, while the block fills the window"
 function keyboard_part end
-
-"The colour behind a takeoff"
-function takeoff_back end
 
 "Read the block `v` again from its lines `lines`, when they changed"
 function reread! end

@@ -7,6 +7,8 @@
 #     page_view(e, d::DownloadsDirectory) = ...   # the page of the Downloads folder
 #     entry_icon(o::TrashDirectory) = "trash"     # its icon in the sidebar
 
+export entries, entry_icon, entry_name, entry_marks, folder_view, page_view, page_fills, page_first, page_foot
+
 "What the sidebar of the editor `e` lists of the directory `d`"
 function entries end
 

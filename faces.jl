@@ -11,7 +11,7 @@
 @use "github.com/jkroso/MiniFB.jl"... onfiledrop onscroll
 @use "github.com/jkroso/UI.jl/Interface/Geometric"...
 @use "github.com/jkroso/UI.jl/Interface/Specific"...
-@use "github.com/jkroso/UI.jl/Interface/abstract" SemanticUI GeometricUI WrapMode light describe detach! inputs
+@use "github.com/jkroso/UI.jl/Interface/abstract" SemanticUI GeometricUI WrapMode light describe detach! inputs Theme
 @use "github.com/jkroso/UI.jl/Interface/fonts" weight_of weight_name isitalic installed_faces
 @use "github.com/jkroso/UI.jl/Interface/Semantic/Icon" Icon
 @use "./html" NOTE
@@ -21,7 +21,7 @@
 @use "./sheet" shown
 @use "./math" => Maths
 @use Colors: RGBA
-@use "./folder_page" own! node! dark_page
+@use "./folder_page" own! node!
 @use "./look" exports...
 @use "./flow" exports...
 @use "./buffer" exports...
@@ -35,7 +35,7 @@ export note_mark, equation, ticked_then, evaluate, keep_value!, TEXT_SIZE, body,
        callout_colour, callout_name, callout_tint, CalloutMark, CALLOUT_GAP, icon_size, wide, callout_mark,
        INLINE, inline_lines, ordinal, sums_run, sums_shown, made, fit, INLINE_W, inline, LONGEST_VALUE, said,
        SYMBOLS, symbols!, codeblock, code_size, CELL_LANG, geometry, SITE_FONT, NEWS_TYPE, NEWS_HEADINGS,
-       markup_shows
+       markup_shows, component_theme, SHEET_FILE, SHEET_FONT, SHEET_WEIGHT
 
 # The kinds of block and of mark decide these, so this file only names them.
 
@@ -603,3 +603,23 @@ const NEWS_HEADINGS = (2.0, 1.3, 1.1, 1.0, 1.0, 1.0)
 
 "True when the columns `lo` to `hi` of a line show their markup, where `open` is what `raw_part` gave for the line"
 markup_shows(open, lo::Int, hi::Int) = open !== nothing && any(r -> r[1] <= lo && hi <= r[2], open)
+
+# --- the theme of the components on the page ------------------------------------------
+
+"The page's colours, font and text size, for the components that a live block shows"
+component_theme(zoom=1.0) = Theme(size=TEXT_SIZE * zoom * LABEL, surface=colours.float, text=colours.ink, dim=colours.dim, line=colours.line,
+                          track=colours.faint, hover=colours.hover, select=colours.active,
+                          accent=colours.accent, on_accent=colours.bg, family=SANS, mono=SHEET_FONT, mono_style=SHEET_WEIGHT,
+                          number=colours.number, string=colours.string, symbol=colours.call,
+                          keyword=colours.keyword, type=colours.type)
+
+# A sheet's text is in Source Code Pro ExtraLight, a step lighter than
+# Centient's Light. A Mac without that font gets the font of the code blocks.
+const SHEET_FILE = something(findfirst(isfile, joinpath.((joinpath(homedir(), "Library/Fonts"), "/Library/Fonts"),
+                                                         "SourceCodePro-ExtraLight.ttf")) |>
+                             i -> i === nothing ? nothing : joinpath((joinpath(homedir(), "Library/Fonts"), "/Library/Fonts")[i],
+                                                                     "SourceCodePro-ExtraLight.ttf"), "")
+
+const SHEET_FONT = isempty(SHEET_FILE) ? MONO : "Source Code Pro"
+
+const SHEET_WEIGHT = isempty(SHEET_FILE) ? "" : "ExtraLight"

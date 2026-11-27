@@ -454,7 +454,8 @@ Guard.LADDER[] = @__MODULE__
 # files under main.jl have the rest of the page that every part of the window
 # uses: a line laid out (flow.jl), the document (buffer.jl), what a window
 # holds (editor_type.jl), the faces of the text (faces.jl), rich text and
-# tables (rich.jl), and what the page asks of a block (blocks.jl).
+# tables (rich.jl), what the page asks of a block (blocks.jl), and the lines and
+# the shapes that a block draws on a canvas (strokes.jl).
 @use "./look" exports...
 @use "./flow" exports...
 @use "./buffer" exports...
@@ -462,20 +463,14 @@ Guard.LADDER[] = @__MODULE__
 @use "./faces" exports...
 @use "./rich" exports...
 @use "./blocks" exports...
-@use "./host" editor page_object object list_files! go_folder! open_folder! page_top trash! file_act! show_in_finder open! folder_kind show_path! free_path show_beside!
-@use "./folder_page" own! node! MARKDOWN window_size PICTURES MODELS TERMINALS CHATS SOUNDS VIDEOS ZIPS TABLES MAC_PICTURES DOCUMENTS FONTS CODE file_icon dark_page SERIES_LIGHT SERIES_DARK series_colours trouble held_keys only_held unmodified HELD commas file_menu ignore_item menu_theme drawn_menu! workspace url_path opener app_name PAGE_TITLES first_answer email_title page_title DESIGNS PageRow PAGE_ROW_H page_row! page_heading page_note PageButton page_button! git_colour favourite_item tilde left_out ishidden on_screen whole_picture media_dir MEDIA_CACHE title
-@use "./views" entries entry_icon entry_name entry_marks folder_view page_view page_fills page_first page_foot
-@use "./git_marks" GIT_TOPS git_top watch_git! GIT_LETTERS GIT_WORDS GIT_LIST_FRESH git_marks GitBar changes_words
+@use "./strokes" exports...
+@use "./host" exports...
+@use "./folder_page" exports...
+@use "./views" exports...
+@use "./git_marks" exports...
 @use "./notes_page" => NotesPages NotesDirectory
 @use "./zip_page" => ZipPages
 @use "./macfolders_page" => MacPages DownloadsDirectory TrashDirectory PicturesDirectory ScreenshotsDirectory mac_kind
-
-"The page's colours, font and text size, for the components that a live block shows"
-component_theme(zoom=1.0) = Theme(size=TEXT_SIZE * zoom * LABEL, surface=colours.float, text=colours.ink, dim=colours.dim, line=colours.line,
-                          track=colours.faint, hover=colours.hover, select=colours.active,
-                          accent=colours.accent, on_accent=colours.bg, family=SANS, mono=SHEET_FONT, mono_style=SHEET_WEIGHT,
-                          number=colours.number, string=colours.string, symbol=colours.call,
-                          keyword=colours.keyword, type=colours.type)
 
 # --- the app -------------------------------------------------------------------------
 
@@ -1051,9 +1046,6 @@ go_back!(e) = (o = page_object(e); o !== nothing && page_back!(e, o)) || step_ba
 "Show the file that `go_back!` left. It's false when there is none, or when another file was opened since."
 go_forward!(e) = step_back!(e, e.ahead, e.back)
 
-"The folder of the document that's showing. The sidebar can show another folder."
-docdir(e) = isempty(e.buf.path) ? e.folder : dirname(e.buf.path)
-
 """
 True when a list shows the file or the folder at `path` only because it shows
 the hidden files too: you chose to ignore it. Its row is faint, as a hidden
@@ -1330,15 +1322,6 @@ const SHEET_X = 10px    # beside the text of a cell
 const SHEET_Y = 4px     # above the first row and below the last
 const RAISE = 0.28      # of the size of the text: how far a character from the spare font goes up, twice over
 const RESULT_X = 8px    # beside the text of what a row comes to
-
-# A sheet's text is in Source Code Pro ExtraLight, a step lighter than
-# Centient's Light. A Mac without that font gets the font of the code blocks.
-const SHEET_FILE = something(findfirst(isfile, joinpath.((joinpath(homedir(), "Library/Fonts"), "/Library/Fonts"),
-                                                         "SourceCodePro-ExtraLight.ttf")) |>
-                             i -> i === nothing ? nothing : joinpath((joinpath(homedir(), "Library/Fonts"), "/Library/Fonts")[i],
-                                                                     "SourceCodePro-ExtraLight.ttf"), "")
-const SHEET_FONT = isempty(SHEET_FILE) ? MONO : "Source Code Pro"
-const SHEET_WEIGHT = isempty(SHEET_FILE) ? "" : "ExtraLight"
 
 """
 Read the sheet's font from its file. A request for a weight of this font by
@@ -5757,13 +5740,6 @@ const PLAN_ICONS = ["cursor", "plus-circle", "vector-pen", "pentagon", "rulers",
                     "aspect-ratio", "file-earmark-pdf", "x-lg", "plus-lg", "map", "person", "receipt", "arrows-fullscreen", "fullscreen-exit",
                     "chevron-up", "chevron-down", "check", "subtract", "magnet", "box-seam"]
 
-"""
-What's behind the plan's paper, round the table of measures and at the foot of
-a takeoff: the theme's colour for things that float over the page, which is a
-little lighter than the page. In a dark page it's the page's own colour.
-"""
-takeoff_back() = dark_page() ? colours.bg : colours.float
-
 "The colour of the measure at place `i` in the list"
 hue(i) = HUES[mod1(i, length(HUES))]
 
@@ -6414,23 +6390,6 @@ density(ctx) = begin
   sqrt(abs(m[].scaleX * m[].scaleY - m[].skewX * m[].skewY))
 end
 
-const plan_sampling = Skia.sk_sampling_options_t(0, false, Skia.sk_cubic_resampler_t(0f0, 0f0),
-                                                 Skia.SK_FILTER_MODE_LINEAR, Skia.SK_MIPMAP_MODE_NONE)
-
-"Draw the part `from` of a picture of Skia's into the part `to` of the window. Each is a left, a top, a width and a height."
-paint_picture(ctx, image, from, to) = begin
-  paint = Skia.sk_paint_new()
-  Skia.sk_paint_set_antialias(paint, true)
-  paint_picture(ctx, image, from, to, paint)
-  Skia.sk_paint_delete(paint)
-end
-"The same, drawn with `paint`, which the caller deletes"
-paint_picture(ctx, image, from, to, paint) = begin
-  a = Ref(Skia.sk_rect_t(Float32(from[1]), Float32(from[2]), Float32(from[1] + from[3]), Float32(from[2] + from[4])))
-  b = Ref(Skia.sk_rect_t(Float32(to[1]), Float32(to[2]), Float32(to[1] + to[3]), Float32(to[2] + to[4])))
-  Skia.sk_canvas_draw_image_rect(ctx, image, a, b, Ref(plan_sampling), paint, Skia.SRC_RECT_CONSTRAINT_FAST)
-end
-
 "The part of a page of a PDF plan that the view shows, drawn at the screen's own pixels and kept until the view moves"
 sharpen!(v::TakeoffView, path, of, k, x, y, w, h) = sharpen!(v.sharp, path, v.data.page, of, k, x, y, w, h)
 
@@ -6519,63 +6478,6 @@ plan_ink(ctx, v::TakeoffView, s, path, paper) = begin
   image == C_NULL && return
   # The picture is of the whole view, with white where the paper ends. The paper's edge cuts it off.
   paint_picture(ctx, image, (0, 0, w, h), (left, top, wide, tall))
-end
-
-"A paint for lines `wide` px wide, or for filling when `wide` is 0"
-ink(colour, wide=0.0) = begin
-  paint = Skia.sk_paint_new()
-  Skia.sk_paint_set_antialias(paint, true)
-  Skia.sk_paint_set_color(paint, sk_color(colour))
-  Skia.sk_paint_set_style(paint, wide > 0 ? Skia.SK_PAINT_STYLE_STROKE : Skia.SK_PAINT_STYLE_FILL)
-  if wide > 0
-    Skia.sk_paint_set_stroke_width(paint, Float32(wide))
-    Skia.sk_paint_set_stroke_join(paint, Skia.SK_STROKE_JOIN_ROUND)
-    Skia.sk_paint_set_stroke_cap(paint, Skia.SK_STROKE_CAP_ROUND)
-  end
-  paint
-end
-
-"Skia's path through the places `ps`. `closed` joins its end to its start."
-path_through(ps, closed) = begin
-  shape = Skia.sk_path_new()
-  for (i, (x, y)) in enumerate(ps)
-    i == 1 ? Skia.sk_path_move_to(shape, Float32(x), Float32(y)) : Skia.sk_path_line_to(shape, Float32(x), Float32(y))
-  end
-  closed && Skia.sk_path_close(shape)
-  shape
-end
-
-"""
-Draw a line through the places `ps`. `fill` colours what's inside it, but not
-what's inside one of the outlines `holes`. `closed` joins its end to its start.
-`dashed` draws it in dashes.
-"""
-trace(ctx, ps, colour, wide; fill=nothing, closed=false, holes=(), dashed=false) = begin
-  length(ps) < 2 && return
-  shape = path_through(ps, closed)
-  if fill !== nothing
-    paint = ink(fill)
-    Skia.sk_canvas_save(ctx)
-    for hole in holes
-      length(hole) < 3 && continue
-      cut = path_through(hole, true)
-      Skia.sk_canvas_clip_path_with_operation(ctx, cut, Skia.SK_CLIP_OP_DIFFERENCE, true)
-      Skia.sk_path_delete(cut)
-    end
-    Skia.sk_canvas_draw_path(ctx, shape, paint)
-    Skia.sk_canvas_restore(ctx)
-    Skia.sk_paint_delete(paint)
-  end
-  paint = ink(colour, wide)
-  if dashed
-    dashes = Float32[6, 5]
-    effect = Skia.sk_path_effect_create_dash(dashes, Cint(2), 0f0)
-    Skia.sk_paint_set_path_effect(paint, effect)
-    Skia.sk_path_effect_unref(effect)
-  end
-  Skia.sk_canvas_draw_path(ctx, shape, paint)
-  Skia.sk_paint_delete(paint)
-  Skia.sk_path_delete(shape)
 end
 
 """
@@ -7129,23 +7031,6 @@ price_text(row) = begin
 end
 
 """
-`s` cut short with … so that it's no wider than `wide` at `size`. It's all of
-`s` when it fits, and when there's no width to fit it to yet.
-"""
-elide(s::AbstractString, size, wide) = begin
-  face = Face(SANS, "", size, colours.ink, false)
-  (wide <= 0px || measure(face, s) <= wide) && return String(s)
-  # The most letters that fit with the … after them
-  cs = collect(s)
-  lo, hi = 0, length(cs)
-  while lo < hi
-    mid = (lo + hi + 1) ÷ 2
-    measure(face, rstrip(String(cs[1:mid])) * "…") <= wide ? (lo = mid) : (hi = mid - 1)
-  end
-  rstrip(String(cs[1:lo])) * "…"
-end
-
-"""
 What the table calls measure `m`. With an item that Centient has told of, it's
 the item's name. With no item, it's the words that describe the measure, which
 are its name in the block.
@@ -7379,8 +7264,6 @@ end
 # list. These three draw it: the box with the field at its top, a row of it, and
 # the words that take the place of its rows when nothing matches.
 
-const FLOAT_ROW = 28px   # how tall a row of such a list is
-
 """
 A list that floats beside what it's for, with a field at its top that searches
 it. `input` is the field, or nothing for a list with no field, and `body` is
@@ -7394,20 +7277,6 @@ float_list(input, body; name="List") = begin
   Box(width(grow=grow), padding(6px), radius(8px), background(c.frame), border(1px, :solid, c.line),
       shadow(0, 6, 16, RGBA(60 / 255, 45 / 255, 20 / 255, 0.2)), name=name,
     Column(width(grow=grow), Alignment.Start, child_gap=4px, field..., body))
-end
-
-"""
-A row of such a list. `picked` is the row that Return takes, and `on` is the
-one that's chosen now, which is in bold. `short` is a word at its right.
-`icon` goes at its left, in the colour `tint` when it has one.
-"""
-float_row(name, short=""; picked=false, on=false, icon="", tint=nothing) = begin
-  c = found_colours()
-  Row(width(grow=grow), height(FLOAT_ROW), padding(8px, 0px), radius(6px), child_gap=8px, Alignment.Center,
-      background(picked ? c.pick : c.frame),
-    (isempty(icon) ? () : (Icon(icon, size=14px, color=something(tint, on ? c.ink : c.dim)),))...,
-    Row(width(grow=grow), height(grow=grow), Alignment.Center, clip=true, label(name, 13px, color=c.ink, weight=on ? "Semibold" : "")),
-    (isempty(short) ? () : (Box(label(short, 12px, color=c.dim)),))...)
 end
 
 "What such a list says in place of its rows when nothing in it matches"
@@ -7472,12 +7341,6 @@ onkey(m::UnitMenu, ev::KeyPress{Keys.up}) = unmodified(ev) ? (v = m.of; v.pick =
 # takes it. Esc closes the list, and so does a click somewhere else.
 
 const FOUND_KEY = :takeoff_found
-"The colours of the list: Centient's cream in a light page, and the page's own in a dark one"
-found_colours() = dark_page() ?
-  (frame=colours.float, pick=colours.active, ink=colours.ink, dim=colours.dim, line=colorant"rgb(86,86,94)", rule=colours.line) :
-  (frame=colorant"rgb(233,224,202)", pick=colorant"rgb(224,212,185)", ink=colorant"rgb(27,23,16)", dim=colorant"rgb(110,104,88)",
-   line=colorant"rgb(176,164,136)", rule=colorant"rgb(221,212,192)")
-
 # The search for an item looks in one catalogue at a time, as Centient's own
 # item field does. It starts in the business's own items. ⌥ in an empty field,
 # or a click on the foot of the list, shows the suppliers whose catalogues
@@ -7809,9 +7672,6 @@ onkey(m::ColumnMenu, ev::KeyPress{Keys.escape}) = begin
 end
 
 # --- the whole block ---------------------------------------------------------------------
-
-"A thin line between two groups of buttons"
-rule() = Box(width(9px), height(16px), Alignment.Center, Box(width(1px), height(16px), background(colours.line)))
 
 toolbar(v::TakeoffView) = begin
   t = v.data
@@ -8443,27 +8303,6 @@ zoom_days!(v::ScheduleView, by, x) = begin
 end
 
 # --- drawing -------------------------------------------------------------------------------
-
-"Write `words` on the canvas, with their left end at `x` and the line that they stand on at `y`"
-write_ink(ctx, words, x, y, face::Face) = begin
-  paint = ink(face.color)
-  blob = Skia.sk_textblob_make_from_string(words, skia_font(face.family, face.size, face.style).raw, Skia.SK_TEXT_ENCODING_UTF8)
-  Skia.sk_canvas_draw_text_blob(ctx, blob, Float32(x), Float32(y), paint)
-  Skia.sk_textblob_unref(blob)
-  Skia.sk_paint_delete(paint)
-end
-
-"Draw a box whose corners have the radius `r`. `fill` colours it in, and `line` draws its edge, `wide` px wide."
-round_box(ctx, x, y, w, h, r; fill=nothing, line=nothing, wide=1.0) = begin
-  shape = Skia.sk_path_new()
-  rect = Ref(Skia.sk_rect_t(Float32(x), Float32(y), Float32(x + w), Float32(y + h)))
-  Skia.sk_path_add_rounded_rect(shape, rect, Float32(r), Float32(r), Skia.SK_PATH_DIRECTION_CW)
-  for paint in ((fill === nothing ? () : (ink(fill),))..., (line === nothing ? () : (ink(line, wide),))...)
-    Skia.sk_canvas_draw_path(ctx, shape, paint)
-    Skia.sk_paint_delete(paint)
-  end
-  Skia.sk_path_delete(shape)
-end
 
 "Draw a line through the corners `ps`, each corner a little round, with the head of an arrow at its end"
 arrow(ctx, ps, colour, wide) = begin
@@ -10473,13 +10312,6 @@ describe(a::PlotArea) = Box(width(grow=grow), height(a.of.spec.kind == :pie ? PI
 chart_hit(v::ChartView) = begin
   w = window_of(v)
   w === nothing ? nothing : Charts.hit(v.marks, num(w.mouse[1]) - v.box[1], num(w.mouse[2]) - v.box[2])
-end
-
-"Draw a filled circle"
-disc(ctx, x, y, r, colour) = begin
-  paint = ink(colour)
-  Skia.sk_canvas_draw_circle(ctx, Float32(x), Float32(y), Float32(r), paint)
-  Skia.sk_paint_delete(paint)
 end
 
 "Draw the marks of a chart, with the top left corner of the chart at `(x0, y0)`. The mark `hot` is the one under the mouse."
@@ -24122,9 +23954,6 @@ const PAGE_WINDOWS = Dict{String,Any}()
 "The pages whose code has all run in their module, by path, as the kinds of block that a page defines need"
 const PAGES_RUN = Set{String}()
 
-"The path that the module of the page at `path` is kept by: the file's real path, as Kip keeps a module by, or the address of a page on the web"
-page_key(path::AbstractString) = isremote(path) ? String(path) : isfile(path) ? realpath(path) : abspath(path)
-
 "The name of the module of the page at `path`: its path, with ~ for your home folder, and a ⭒ in front, as Kip's modules have"
 page_module_name(path::AbstractString) = Symbol("⭒", Base.Filesystem.contractuser(page_key(path)))
 
@@ -25376,9 +25205,6 @@ layout!(e, width=text_width(e)) = begin
   e.layout = slide_items(e, items)   # while the page shows as slides, only the items of one slide
 end
 
-"The item that shows line `i`"
-item(e, i::Int) = e.layout[something(findfirst(it -> it.first <= i <= it.last, e.layout), length(e.layout))]
-
 "Scroll so the caret is on screen"
 reveal!(e) = begin
   e.buf.view == :file && return   # a viewer has no caret
@@ -26052,8 +25878,6 @@ word_at(line::String, col::Int) = begin
   (lo, hi)
 end
 
-held(node, key) = (w = window_of(node); w !== nothing && key in w.keys)
-
 "The caret moved or the text changed, so show the caret"
 touch!(e; keep_goal=false) = begin
   e.buf.reading = false
@@ -26621,12 +26445,6 @@ end
 @def mutable struct PartSource <: SemanticUI
   of::Any = nothing   # the Transclusion
 end
-
-"The editor of the page that shows the part of a page that `e` edits, or nothing when `e` is the window's own"
-hosted(e) = get(e.nodes, :host, nothing)
-
-"The editor of the window that `e` is in: `e`, or the editor of the page that shows the part that `e` edits, and so on up"
-top_editor(e) = (h = hosted(e); h === nothing ? e : top_editor(h))
 
 "The files of `e`'s page, of the page that shows a part of it, and so on up to the window's page"
 host_paths(e) = (h = hosted(e); h === nothing ? [e.buf.path] : [e.buf.path; host_paths(h)])
@@ -29574,9 +29392,6 @@ named(e, path) = (dir = docdir(e); startswith(path, dir * "/") ? relpath(path, d
 
 "`path` as a link writes it. A space or a bracket would end the link early, so each is written as its code."
 escaped(path) = replace(path, ' ' => "%20", '(' => "%28", ')' => "%29")
-"The path that a link wrote with `escaped`"
-unescaped(path) = replace(path, "%20" => ' ', "%28" => '(', "%29" => ')')
-
 ispicture(path) = (ext = lowercase(splitext(path)[2]); ext in PICTURES || ext in MAC_PICTURES)
 
 "The Markdown that shows the file or the folder at `path`"
@@ -29902,8 +29717,6 @@ tip_rect(b::ToolButton) = haskey(BUTTONS, b.action) && get(BUTTONS[b.action], :h
                           (b.rect[1], b.rect[2], b.rect[3], 2b.rect[4]) : b.rect
 
 hush!(b::Tipped) = (b.quiet = true; hide_tooltip!(window_of(b)))
-
-button(e, action, icon) = node!(() -> ToolButton(icon=icon, action=action), e, action)
 
 # --- a page that an agent waits for -------------------------------------------------------
 #
@@ -31224,9 +31037,6 @@ end
 #   - ⌫ and ⌦ take the part away, and the commands that move, copy and delete
 #     a line do that to all of its lines.
 #   - ⌘E shows its code, with the caret in it.
-
-"`c` with `alpha` of its colour, from 0 for none to 1 for all"
-tint(c, alpha) = (k = convert(RGBA{Float64}, c); RGBA(k.r, k.g, k.b, alpha))
 
 const RING_OUT = 10.0   # px from the page's text to the line round a part that the caret is on
 
@@ -36623,18 +36433,6 @@ describe(p::Picture) = Box(width(grow=grow), Alignment.Start, fillable(p, (:pict
 cursor(::Picture) = :arrow
 onpinch(p::Picture, ev::Pinch) = pinch_open(p, ev)
 onkey(p::Picture, ev::KeyPress{Keys.mouse_left}) = click_page!(p, ev)
-
-# The files that turned out not to be pictures, and when each last changed, so that each is tried once
-const not_pictures = Dict{String,Float64}()
-
-"The key, for an Image, of the picture in the file at `path`, or nothing if the file isn't a picture"
-picture_key(path) = begin
-  isfile(path) || return nothing
-  get(not_pictures, path, -1.0) == mtime(path) && return nothing
-  key = lowercase(splitext(path)[2]) in PICTURES ? path : picture(path)
-  ok = key !== nothing && try image_aspect(key) > 0 catch; false end
-  ok ? key : (not_pictures[path] = mtime(path); nothing)
-end
 
 # What's known of each web address that a picture has: the `curl` that's fetching
 # it, the file it's kept in, or nothing if it couldn't be fetched
@@ -42511,11 +42309,6 @@ adopt_settings!(o, e) = begin
   o
 end
 
-"The file of Ladder's settings that a test gives, so that it doesn't change yours, or \"\" for the usual one"
-const SETTINGS_FILE = Ref("")
-
-settings_file() = isempty(SETTINGS_FILE[]) ? joinpath(homedir(), "Library", "Application Support", "Ladder", "settings") : SETTINGS_FILE[]
-
 # The app was called Kaydown until 18 November 2026, and its folders in
 # ~/Library had that name. The first time Ladder starts, it gives them its own
 # name, so the settings and the Welcome pages stay. A folder that has the new
@@ -43646,12 +43439,6 @@ end
 # folder's .ladder page, which would run its code, is never in the folder:
 # see "a web folder's own page".
 
-"The browser folder of a test, or \"\" for ~/Browser"
-const BROWSER_FOLDER = Ref("")
-
-"The folder that keeps each page and file that Ladder gets from the web, at its place on its site"
-browser_folder() = isempty(BROWSER_FOLDER[]) ? joinpath(home_folder(), "Browser") : BROWSER_FOLDER[]
-
 """
 True when `path` is a file or a folder in the browser folder, of a site. A file
 at the top of the folder, like Favourites.md, is of no site: it's a page of your own.
@@ -44089,9 +43876,6 @@ end
 # one is in focus, and works on the nearest: the row of the sidebar that the
 # arrows are on, or else the file that shows. A command of a folder works on
 # the folder that holds that file.
-
-"The path of the file or the folder `o` as text, with no / at its end"
-path_of(o::FSObject) = (path = string(o.path); length(path) > 1 ? String(rstrip(path, '/')) : path)
 
 # The name is typed where it shows: in the sidebar, or in the top bar when the sidebar doesn't list it
 rename!(e, o::FSObject) = (path = path_of(o); rename!(e, path, at=e.panel && path in e.listed ? :sidebar : :title); nothing)
@@ -55634,10 +55418,6 @@ works_here(e, ::Val{:previous_change}) = commit_change(e, e.buf.path) !== nothin
 # sidebar has Add to Favourites, and Remove from Favourites once it's one. The
 # palette's command Go To Favourite opens one from any page. folders.jl keeps
 # the list.
-
-"The home folder that ⌘⇧H opens: the Mac's, unless a test names one of its own"
-const HOME = Ref("")
-home_folder() = isempty(HOME[]) ? homedir() : HOME[]
 
 "Open the home folder in the page. The sidebar lists the home folder, and a sidebar that's hidden stays hidden."
 go_home!(e) = open_folder!(e, home_folder())
