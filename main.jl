@@ -39599,6 +39599,11 @@ program has stopped. `busy` is true while the agent works on what you said.
   talk::Any = nothing          # Ladder's talk with Antigravity's program: see `AcpTalk`
   repl::Any = nothing          # the Julia code that the agent runs inside Ladder: see "the code that an agent runs"
   brief::String = ""           # what the agent is told of where it is, when it's other than what a pane's session is told
+  earlier::Any = nothing       # the earlier sessions of the folder, the newest first, once Ladder has looked for them: see "the commands of a session"
+  looking::Bool = false        # Ladder waits for the agent's list of its earlier sessions
+  loading::Bool = false        # the agent gives what was said in an earlier session, which the session goes on with
+  before::Any = nothing        # the session's name and what it showed before it went on with an earlier one, which come back if the agent can't open that one
+  unbriefed::Bool = false      # the agent's session was made outside Ladder, so your next words tell it what Ladder says of itself
 end
 
 "A command that a test puts in the place of the agent's: a program that reads and prints the same lines of JSON. Nothing means the agent that Settings chose."
@@ -39668,9 +39673,12 @@ start!(s::AgentSession, command::Cmd) = begin
   close(to.out)
   s.process, s.to, s.closing = process, to, false
   speaks_acp(s) && acp_start!(s)
+  # Claude Code's first answer lists its commands: see "the commands of a session"
+  s.turns || speaks_acp(s) || tell!(s, Dict("type" => "control_request", "request_id" => "ladder-start", "request" => Dict("subtype" => "initialize")))
   wrong = @async read(err, String)
   @async begin
     for line in eachline(out)
+      s.process === process || break   # the session has another program now: see `resume!`
       try
         take_line!(s, line)
       catch err
@@ -39689,6 +39697,9 @@ end
 ended!(s::AgentSession, wrong) = begin
   was = s.busy
   settle!(s)
+  s.looking = false
+  # An earlier session that the program was still loading isn't there: the one before comes back
+  s.loading && ((s.loading = false); s.before === nothing || ((s.id, s.items) = s.before); s.before = nothing)
   s.repl === nothing || Repls.hang_up!(s.repl)   # the program that reached the code has gone
   # The agent no longer has a session that a file kept, like one of another Mac. A new one starts, with the words that you just said.
   if !s.closing && !isempty(s.id) && !isempty(s.sent) && occursin("No conversation found", wrong)
@@ -39737,8 +39748,13 @@ tell!(s::AgentSession, o) = begin
 end
 
 "Give the agent of the session `s` the words `words`. `about` is what the window shows, and `told` says it to the agent."
-say!(s::AgentSession, words, about="", told=""; pictures=String[], changed=0) = begin
+say!(s::AgentSession, words, about="", told=""; pictures=String[], changed=0, bare=false) = begin
   push!(s.items, YouSaid(words=String(words), about=String(about), pictures=copy(pictures), changed=changed))
+  # A session that was made outside Ladder doesn't know of Ladder yet. A command of the agent's goes as it is: see `send_words!`.
+  if s.unbriefed && !bare
+    told = join(filter(!isempty, ["<ladder-brief>\n$(session_brief(s))\n</ladder-brief>", String(told)]), "\n\n")
+    s.unbriefed = false
+  end
   content = join(filter(!isempty, [String(told), String(words), isempty(pictures) ? "" : pictures_note(s, pictures)]), "\n\n")
   s.sent = content
   if speaks_acp(s)
@@ -39905,8 +39921,13 @@ take_line!(s::AgentSession, line::AbstractString) = begin
     json_field(o, "subtype") == "init" && id isa String && (s.id = id)
     # Each turn starts with this, and it names the model that works on it
     json_field(o, "subtype") == "init" && model isa String && (s.running = model)
+    # Its commands changed, as when a skill was added
+    json_field(o, "subtype") == "commands_changed" && commands!(s, claude_commands(json_field(o, "commands")))
+    # Its /compact, or Claude Code itself when the session grew long
+    json_field(o, "subtype") == "compact_boundary" && note!(s, "$(s.agent) summed up what was said so far, to make room.")
   elseif kind == "control_response"
-    model_answer!(s, json_field(o, "response"))
+    r = json_field(o, "response")
+    json_field(r, "request_id") == "ladder-start" ? commands!(s, claude_commands(json_field(json_field(r, "response"), "commands"))) : model_answer!(s, r)
   elseif kind == "stream_event"
     stream_event!(s, json_field(o, "event"))
   elseif kind == "assistant"
@@ -39950,6 +39971,7 @@ take_line!(s::AgentSession, line::AbstractString) = begin
     json_field(o, "is_error") === true && json_field(o, "subtype") != "error_during_execution" &&
       note!(s, said isa String && !isempty(said) ? said : "$(s.agent) couldn't do that.", true)
     json_field(o, "subtype") == "error_during_execution" && note!(s, "You stopped $(s.agent).")
+    json_field(o, "is_error") === true || ran_note!(s, said isa String ? said : "")
   end
   s.version += 1
   s
@@ -40118,7 +40140,8 @@ acp_session!(s::AgentSession) = begin
   params = Dict{String,Any}("cwd" => s.dir, "mcpServers" => code_servers(s), "_meta" => brief)
   isempty(s.id) && return acp_call!(s, "session/new", params, :new)
   params["sessionId"] = s.id
-  acp_call!(s, "session/resume", params, :resume)
+  # An earlier session that you chose is loaded: the agent then says again all that was said in it. See "the commands of a session".
+  s.loading ? acp_call!(s, "session/load", params, :load) : acp_call!(s, "session/resume", params, :resume)
 end
 
 "The program of the session `s` has the session. It gets the session's model, when that's another than the one it works with, and then what you said meanwhile."
@@ -40128,6 +40151,7 @@ acp_model!(s::AgentSession) = isempty(s.model) || s.model == s.running ? acp_rea
 "The program of the session `s` has the session: what you said meanwhile goes to the agent"
 acp_ready!(s::AgentSession) = begin
   s.talk.ready = true
+  s.looking && acp_list!(s)   # you asked for the earlier sessions while the program started
   isempty(s.talk.held) || acp_prompt!(s, popfirst!(s.talk.held))
   s
 end
@@ -40217,8 +40241,19 @@ acp_answer!(s::AgentSession, what, result, error) = begin
     s.id = ""
     note!(s, "$(s.agent) doesn't have this session any more, so a new one starts here. It doesn't know what was said before.")
     acp_session!(s)
-  elseif what in (:new, :resume)
+  elseif what == :load && error !== nothing
+    # The session before comes back, with what it showed
+    s.loading = false
+    s.before === nothing || ((s.id, s.items) = s.before)
+    s.before = nothing
+    note!(s, "$(s.agent) couldn't open that session: $why", true)
+    acp_session!(s)
+  elseif what == :list
+    s.looking = false
+    s.earlier = error === nothing ? acp_sessions(s, json_field(result, "sessions")) : EarlierSession[]
+  elseif what in (:new, :resume, :load)
     error === nothing || return acp_failed!(s, "$(s.agent) couldn't start a session: $why")
+    what == :load && session_loaded!(s)
     id = json_field(result, "sessionId")
     id isa String && (s.id = id)
     model = json_field(json_field(result, "models"), "currentModelId")
@@ -40250,6 +40285,8 @@ acp_answer!(s::AgentSession, what, result, error) = begin
       note!(s, "You stopped $(s.agent).")
     elseif stop isa String && stop != "end_turn"
       note!(s, "$(s.agent) stopped: $(replace(stop, '_' => ' ')).", true)
+    else
+      ran_note!(s)
     end
     isempty(s.talk.held) || (acp_prompt!(s, popfirst!(s.talk.held)); s.busy = true)
   end
@@ -40269,6 +40306,13 @@ acp_update!(s::AgentSession, u) = begin
     words isa String && more_words!(s, words)
   elseif kind in ("tool_call", "tool_call_update")
     acp_step!(s, u)
+  elseif kind == "available_commands_update"
+    commands!(s, acp_commands(json_field(u, "availableCommands")))
+  elseif kind == "user_message_chunk" && s.loading
+    # What you said in an earlier session, which the agent says again as it loads the session
+    words = json_field(json_field(u, "content"), "text")
+    end_words!(s)
+    words isa String && !isempty(your_words(words)) && push!(s.items, YouSaid(words=your_words(words)))
   end
   s
 end
@@ -41109,6 +41153,8 @@ command for the window runs in the window's page. Esc does nothing.
 """
 agent_key!(e, w, K, command) = begin
   p, kind = agent_part_of(e)
+  # While the list of commands shows over the words, the arrows, Tab and Return are the list's
+  kind == :field && slash_key!(p, w, K) && return true
   kind == :field && K == Keys.enter && unmodified(w) && (send_words!(p); return true)
   K == Keys.escape && return true
   (command !== nothing && (COMMANDS[command].kind == :window || command in (:find, :find_next, :find_last))) || return false
@@ -41626,6 +41672,9 @@ send_words!(p::AgentPane) = begin
   pictures = filter(isfile, attached(p))
   edited = p.session === nothing ? AgentReply[] : changed_replies(p.session)
   isempty(words) && isempty(pictures) && isempty(edited) && return nothing
+  # A command that Ladder does itself, like /resume, doesn't go to the agent
+  named = slash_named(words)
+  named !== nothing && own_command(p, named[1]) !== nothing && return (run_own!(p, named...); nothing)
   b = e.buf
   s = try
     writes(b) && (dirty(b) || !isfile(b.path)) && save!(b)
@@ -41636,12 +41685,17 @@ send_words!(p::AgentPane) = begin
     return nothing
   end
   p.error = ""
-  about, told = pane_context(p, e)
-  changes = changes_told(s)
-  guide = on_page(p) ? "" : guide_once!(s, e)
-  say!(s, words, about, join(filter(!isempty, [guide, told, changes]), "\n\n"); pictures=pictures, changed=length(edited))
-  # The agent knows what each reply says now
-  foreach(it -> it isa AgentReply && (it.saw = nothing), s.items)
+  if goes_bare(s, words)
+    # A command of the agent's goes as you typed it, with nothing before it, as the agent reads a command only at the start of a message
+    say!(s, words; bare=true)
+  else
+    about, told = pane_context(p, e)
+    changes = changes_told(s)
+    guide = on_page(p) ? "" : guide_once!(s, e)
+    say!(s, words, about, join(filter(!isempty, [guide, told, changes]), "\n\n"); pictures=pictures, changed=length(edited))
+    # The agent knows what each reply says now
+    foreach(it -> it isa AgentReply && (it.saw = nothing), s.items)
+  end
   p.follow = true
   # A new field takes the keyboard, when the old one had it
   w = window_of(e)
@@ -41650,6 +41704,689 @@ send_words!(p::AgentPane) = begin
   typing && focus(p.field)
   redraw_in!(e, SOON)
   nothing
+end
+
+# --- the commands of a session ---
+#
+# Words that start with a slash are a command, as in the agent's own
+# terminal. While you type one, a list of the commands shows over the
+# field: the arrows move in it, Tab writes the command out for you to add
+# to, and Return runs it.
+#
+# Ladder does a few commands itself. `/resume` lists the earlier sessions of
+# the folder, also the ones that you had in a terminal, and goes on with the
+# one that you choose: what was said in it shows in the pane. `/new` ends the
+# session and starts with nothing, and `/model` chooses the model.
+#
+# The rest are the agent's own, as the agent's program lists them: its
+# commands, like `/compact`, and its skills. Such a command goes to the agent
+# as you typed it, with nothing of Ladder's before it, because the agent
+# reads a command only at the start of a message. An agent that works by
+# turns has no commands of its own, and no earlier session to go on with.
+
+"""
+A command that you type after a slash. `about` says what it does in a few
+words, `hint` is what can come after its name, and `own` is true for one
+that Ladder does itself.
+"""
+struct SlashCommand
+  name::String
+  about::String
+  hint::String
+  own::Bool
+end
+
+"The commands that Ladder does itself, in the order that the list shows them"
+const OWN_COMMANDS = [
+  SlashCommand("resume", "Go on with an earlier session of this folder", "[words of its title]", true),
+  SlashCommand("new", "End this session, and start a new one", "", true),
+  SlashCommand("clear", "End this session, and start a new one", "", true),
+  SlashCommand("model", "Choose the model that the agent works with", "[its name]", true)]
+
+"The commands of each agent in each folder, as the agent's program last listed them, by the agent's name and the folder"
+const AGENT_COMMANDS = Dict{Tuple{String,String},Vector{SlashCommand}}()
+
+"An earlier session of an agent: the name that the agent goes on with it by, its title, when it was last used, and for Claude Code the file that keeps it"
+struct EarlierSession
+  id::String
+  title::String
+  at::Float64
+  file::String
+end
+
+"The session `s` has the list `found` of its agent's commands, or nothing when the agent's program gave none"
+commands!(s::AgentSession, found) = (found === nothing || (AGENT_COMMANDS[(s.agent, s.dir)] = found); s.version += 1; s)
+
+"The first line of `words`, with one space where it had more"
+one_line_of(words::AbstractString) = String(replace(opening_line(words), r"\s+" => " "))
+
+"The commands in `found`, Claude Code's list: each has a name, what it does and what comes after it. Nothing when it's no list."
+claude_commands(found) = begin
+  found isa AbstractVector || return nothing
+  list = SlashCommand[]
+  for c in found
+    name, about, hint = json_field(c, "name"), json_field(c, "description"), json_field(c, "argumentHint")
+    name isa String && !isempty(name) && push!(list, SlashCommand(name, about isa String ? one_line_of(about) : "", hint isa String ? hint : "", false))
+  end
+  list
+end
+
+"The commands in `found`, the list of an agent that speaks ACP: each has a name, what it does, and a hint of what comes after it. Nothing when it's no list."
+acp_commands(found) = begin
+  found isa AbstractVector || return nothing
+  list = SlashCommand[]
+  for c in found
+    name, about, hint = json_field(c, "name"), json_field(c, "description"), json_field(json_field(c, "input"), "hint")
+    name isa String && !isempty(name) && push!(list, SlashCommand(name, about isa String ? one_line_of(about) : "", hint isa String ? hint : "", false))
+  end
+  list
+end
+
+"The command of Ladder's own called `name` that the pane `p` has, or nothing. An agent that works by turns has no earlier session to go on with."
+own_command(p::AgentPane, name::AbstractString) = begin
+  k = findfirst(c -> c.name == name, OWN_COMMANDS)
+  k === nothing && return nothing
+  name == "resume" && by_turns(pane_agent(p, editor(p))) && return nothing
+  OWN_COMMANDS[k]
+end
+
+"The commands that the pane `p` lists: Ladder's own, and then the agent's own, each name once"
+slash_commands(p::AgentPane) = begin
+  e = editor(p)
+  s = p.session
+  list = SlashCommand[c for c in OWN_COMMANDS if own_command(p, c.name) !== nothing]
+  s === nothing && return list
+  for c in get(AGENT_COMMANDS, (s.agent, s.dir), SlashCommand[])
+    any(o -> o.name == c.name, list) || push!(list, c)
+  end
+  list
+end
+
+"The name of the command that `words` start with, and what comes after it, or nothing when they don't start with a command"
+slash_named(words::AbstractString) = begin
+  m = match(r"^/([\w:.-]+)(?:\s+(.*))?$"s, words)
+  m === nothing ? nothing : (String(m[1]), m[2] === nothing ? "" : String(strip(m[2])))
+end
+
+"""
+True when `words` go to the agent of the session `s` as they are, with
+nothing before them: they start with a command of the agent's. Before the
+agent has listed its commands, any words that start like a command do.
+"""
+goes_bare(s::AgentSession, words::AbstractString) = begin
+  named = slash_named(words)
+  (named === nothing || s.turns) && return false
+  known = get(AGENT_COMMANDS, (s.agent, s.dir), nothing)
+  known === nothing || any(c -> c.name == named[1], known)
+end
+
+"""
+The agent of the session `s` has done with what you said. When that was a
+command of the agent's and nothing came of it to show, the session says that
+the command ran, with `said`, what the agent's program says of it, if
+anything. Some commands only show something in the agent's own terminal.
+"""
+ran_note!(s::AgentSession, said::AbstractString="") = begin
+  it = isempty(s.items) ? nothing : last(s.items)
+  (it isa YouSaid && isempty(it.about) && slash_named(it.words) !== nothing) || return s
+  note!(s, isempty(strip(said)) ? "$(s.agent) ran $(first(split(it.words))). It gave nothing to show here." : String(strip(said)))
+end
+
+"""
+What you said, from `text`, a message as the agent got it: without what
+Ladder put before your words and after them. A command that you typed in a
+terminal is the command. What a terminal wrote itself, like what a command
+printed, is "".
+"""
+your_words(text::AbstractString) = begin
+  t = replace(text, r"<ladder-brief>.*?</ladder-brief>\s*"s => "", r"<ladder-guide>.*?</ladder-guide>\s*"s => "",
+              r"<ladder>.*?</ladder>\s*"s => "", r"<changes>.*?</changes>\s*"s => "")
+  t = replace(t, r"\s*(The pictures with these words are also in these files:|With these words come these pictures, in files that you can read:)\n.*\z"s => "")
+  m = match(r"<command-name>/?([^<]+)</command-name>", t)
+  if m !== nothing
+    given = match(r"<command-args>([^<]*)</command-args>", t)
+    return String(strip("/" * m[1] * " " * (given === nothing ? "" : given[1])))
+  end
+  t = strip(t)
+  occursin(r"^<[a-z][\w-]*>", t) ? "" : String(t)
+end
+
+const HISTORY_MOST = 30   # an earlier session shows no more than this many of the things that you said, the newest, with what came of them
+
+"The newest part of `items`, what was said in an earlier session: a long session shows from one of your later messages on"
+recent_part(items) = begin
+  yours = findall(it -> it isa YouSaid, items)
+  length(yours) <= HISTORY_MOST && return items
+  Any[SessionNote(words="What was said before this isn't shown here. The agent still knows it."); items[yours[end-HISTORY_MOST+1]:end]]
+end
+
+"When the day and time `text` says was, like 2026-11-26T12:28:58Z, in seconds, or 0.0. It's read as the time at Greenwich, as the agents write it."
+iso_time(text) = begin
+  m = text isa AbstractString ? match(r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d", text) : nothing
+  m === nothing ? 0.0 : try Dates.datetime2unix(Dates.DateTime(m.match)) catch; 0.0 end
+end
+
+"How long ago `at` was, in a few words: \"5 min ago\", \"3 hr ago\", \"yesterday\", or the day"
+ago_words(at::Real, now::Real=time()) = begin
+  at <= 0 && return ""
+  d = now - at
+  d < 90 ? "just now" : d < 3600 ? "$(round(Int, d / 60)) min ago" : d < 86400 ? "$(round(Int, d / 3600)) hr ago" : d < 2 * 86400 ? "yesterday" :
+    Dates.format(Dates.unix2datetime(at) + (Dates.now() - Dates.now(Dates.UTC)), "d u")
+end
+
+# --- the earlier sessions of Claude Code ---
+#
+# Claude Code keeps each session of a folder in a file of its own, in a
+# folder of ~/.claude/projects that's named for the session's folder. Each
+# line of the file is JSON: what you said, what Claude said, a title that
+# Claude gave the session. Claude Code's program has no request that lists
+# them, so Ladder reads the files.
+
+"A folder that a test puts in the place of the one where Claude Code keeps the sessions of a folder. \"\" means Claude Code's own."
+const CLAUDE_SESSIONS = Ref("")
+const SESSIONS_MOST = 40        # how many earlier sessions the list has at most
+const TITLE_READS = 96 * 1024   # how many bytes of each end of a session's file Ladder reads for its title
+
+"The folders where Claude Code keeps the sessions of the folder `dir`: it names the folder by the path, with a - for each character that's no letter or digit"
+claude_folders(dir) = begin
+  isempty(CLAUDE_SESSIONS[]) || return [CLAUDE_SESSIONS[]]
+  top = joinpath(get(ENV, "CLAUDE_CONFIG_DIR", joinpath(homedir(), ".claude")), "projects")
+  unique([joinpath(top, replace(d, r"[^A-Za-z0-9]" => "-")) for d in (dir, truepath(dir))])
+end
+
+"The text of the JSON string that follows `key` in `line`, or nothing: a quick look, for a line that's too long to read whole"
+quick_field(line, key) = begin
+  m = match(Regex("\"" * key * "\"\\s*:\\s*(\"(?:[^\"\\\\]|\\\\.)*\")"), line)
+  m === nothing && return nothing
+  v = try json_value(Vector{UInt8}(m[1])) catch; nothing end
+  v isa AbstractString ? String(v) : nothing
+end
+
+"What you said in the line `o` of a session's file of Claude Code, or \"\" when the line isn't something that you said"
+claude_said(o) = begin
+  (json_field(o, "type") == "user" && json_field(o, "isMeta") !== true && json_field(o, "isSidechain") !== true &&
+   json_field(o, "isCompactSummary") !== true) || return ""
+  content = json_field(json_field(o, "message"), "content")
+  content isa AbstractString && return your_words(content)
+  content isa AbstractVector || return ""
+  your_words(join((t for t in (json_field(part, "text") for part in content if json_field(part, "type") == "text") if t isa AbstractString), "\n"))
+end
+
+"""
+The title of the session that Claude Code keeps in `file`: the one that you
+gave it, else the one that Claude gave it, else the first thing that you
+said. "" for a file with none of them, like one of a program that ran once
+for Ladder. Only the two ends of a long file are read.
+"""
+claude_title(file) = begin
+  size = filesize(file)
+  head, tail = open(file) do io
+    head = String(read(io, min(size, TITLE_READS)))
+    size > 2TITLE_READS ? (seek(io, size - TITLE_READS); (head, String(read(io)))) : (head * String(read(io)), "")
+  end
+  for (kind, key) in (("custom-title", "customTitle"), ("ai-title", "aiTitle")), part in (tail, head)
+    title = ""
+    for line in eachsplit(part, '\n')
+      occursin("\"$kind\"", line) || continue
+      found = quick_field(line, key)
+      found === nothing || (title = found)
+    end
+    isempty(title) || return one_line_of(title)
+  end
+  for line in eachsplit(head, '\n')
+    occursin("\"user\"", line) || continue
+    said = claude_said(agent_json(line))
+    isempty(said) || return first(one_line_of(said), 90)
+  end
+  ""
+end
+
+"The earlier sessions that Claude Code keeps for the folder of the session `s`, the newest first, without the one that `s` goes on with"
+claude_sessions(s::AgentSession) = begin
+  files = String[]
+  for folder in claude_folders(s.dir)
+    isdir(folder) && append!(files, (joinpath(folder, f) for f in readdir(folder) if endswith(f, ".jsonl")))
+  end
+  found = EarlierSession[]
+  for file in first(sort!(files, by=mtime, rev=true), 3SESSIONS_MOST)
+    id = String(chop(basename(file), tail=6))
+    id == s.id && continue
+    title = try claude_title(file) catch; "" end
+    isempty(title) || push!(found, EarlierSession(id, title, mtime(file), file))
+    length(found) >= SESSIONS_MOST && break
+  end
+  found
+end
+
+"""
+What was said in the session that Claude Code keeps in `file`, as the things
+that a session shows: your words, Claude's replies, and its steps. What an
+agent that Claude started said to it is left out, and so is what Claude
+thought.
+"""
+claude_history(file) = begin
+  items = Any[]
+  steps = Dict{String,AgentStep}()
+  for line in eachline(file)
+    (occursin("\"user\"", line) || occursin("\"assistant\"", line)) || continue
+    o = agent_json(line)
+    kind = json_field(o, "type")
+    (kind in ("user", "assistant") && json_field(o, "isSidechain") !== true && json_field(o, "isMeta") !== true) || continue
+    content = json_field(json_field(o, "message"), "content")
+    if kind == "user"
+      if json_field(o, "isCompactSummary") === true
+        push!(items, SessionNote(words="Claude summed up what was said before this, to make room."))
+        continue
+      end
+      said = claude_said(o)
+      isempty(said) || push!(items, YouSaid(words=said))
+      for part in (content isa AbstractVector ? content : ())
+        json_field(part, "type") == "tool_result" || continue
+        step = get(steps, something(json_field(part, "tool_use_id"), ""), nothing)
+        step === nothing || json_field(part, "is_error") !== true || (step.state = :failed)
+      end
+    else
+      for part in (content isa AbstractVector ? content : ())
+        what = json_field(part, "type")
+        if what == "text"
+          text = json_field(part, "text")
+          text isa AbstractString && !isempty(strip(text)) && push!(items, AgentReply(text=String(text), whole=true, n=1))
+        elseif what == "tool_use"
+          id, name = json_field(part, "id"), json_field(part, "name")
+          (id isa String && name isa String) || continue
+          step = AgentStep(id=id, tool=name, words=tool_words(name, json_field(part, "input")), state=:done)
+          steps[id] = step
+          push!(items, step)
+        end
+      end
+    end
+  end
+  items
+end
+
+# --- the earlier sessions of an agent that speaks ACP ---
+
+"Ask the ACP program of the session `s` for the earlier sessions of its folder. While the program still starts, `acp_ready!` asks."
+acp_list!(s::AgentSession) = begin
+  t = s.talk
+  (t !== nothing && t.ready && !(:list in values(t.calls))) && acp_call!(s, "session/list", Dict("cwd" => s.dir), :list)
+  s
+end
+
+"The earlier sessions in `found`, the list of the ACP program of the session `s`: those of its folder, the newest first, without the one that `s` has now"
+acp_sessions(s::AgentSession, found) = begin
+  list = EarlierSession[]
+  found isa AbstractVector || return list
+  here = truepath(s.dir)
+  for o in found
+    id, dir, title = json_field(o, "sessionId"), json_field(o, "cwd"), json_field(o, "title")
+    (id isa String && id != s.id && dir isa String && truepath(dir) == here) || continue
+    push!(list, EarlierSession(id, title isa String && !isempty(strip(title)) ? one_line_of(title) : "A session with no title", iso_time(json_field(o, "updatedAt")), ""))
+  end
+  first(sort!(list, by=x -> x.at, rev=true), SESSIONS_MOST)
+end
+
+"""
+The agent of the session `s` has said again all that was said in the earlier
+session that it loaded. Each thing of it is whole. A session of Grok's keeps
+the rules that it was made with, so one that was made outside Ladder is told
+of Ladder with your next words.
+"""
+session_loaded!(s::AgentSession) = begin
+  s.loading, s.before = false, nothing
+  for it in s.items
+    it isa AgentReply && !it.whole && (it.whole = true; it.n += 1)
+    it isa AgentStep && it.state == :going && (it.state = :done)
+  end
+  s.items = recent_part(s.items)
+  s.unbriefed = agent_kind(s.agent).name == "Grok"
+  s
+end
+
+"""
+Make the session `s` go on with the earlier session `x`. Claude Code's
+program starts again with that session's name, and Ladder reads what was
+said from the session's file. An agent that speaks ACP loads the session,
+and says again what was said. The caller starts the program when this ends
+it: see `resume_session!`.
+"""
+resume!(s::AgentSession, x::EarlierSession) = begin
+  if speaks_acp(s)
+    live = running(s) && s.talk !== nothing && s.talk.ready && isempty(s.talk.calls)
+    live || (close!(s); s.process = s.to = nothing)
+    s.before = (s.id, s.items)
+    s.id, s.items, s.loading = x.id, Any[], true
+    live && (s.talk.ready = false; acp_session!(s))
+  else
+    close!(s)
+    s.process = s.to = nothing
+    s.id, s.items = x.id, recent_part(claude_history(x.file))
+  end
+  s.sent, s.earlier, s.looking, s.unbriefed = "", nothing, false, false
+  s.version += 1
+  s
+end
+
+# --- the list of commands over the field ---
+
+const SLASH_MENU = :slash_menu
+const SLASH_MOST = 8        # how many rows of the list show at once. The arrows bring the others.
+const SLASH_ROW = 28px      # how tall a row of the list is
+
+"""
+The list over the field of the pane `of`, while its words start with a
+slash. `rows` are what it lists now, each a kind and a thing: a command, an
+earlier session, a model, or a line of words. `over` is the row that the
+arrows or the mouse are on, and `top` the first row that shows. `typed` is
+the text that `over` was last set for.
+"""
+@def mutable struct SlashMenu <: SemanticUI
+  of::Any = nothing
+  rows::Vector{Any} = Any[]
+  over::Int = 1
+  top::Int = 1
+  typed::String = ""
+  open::Bool = false
+  woke::Bool = false
+  mode::Symbol = :none
+end
+
+"A row of the list of commands: the one that shows in place `slot`, from the top"
+@def mutable struct SlashRow <: SemanticUI
+  menu::Any = nothing
+  slot::Int = 1
+end
+
+"The list of commands of the pane `p`"
+slash_menu(p::AgentPane) = get!(() -> SlashMenu(of=p), p.parts, :slash_menu)
+
+"The name after the slash that `text` starts with, and what comes after the space behind it, or nothing while no space is typed yet"
+slash_parts(text::AbstractString) = begin
+  m = match(r"^/(\S*)(\s(.*))?$"s, text)
+  (String(m[1]), m[2] === nothing ? nothing : String(strip(m[3])))
+end
+
+"True when `words`, in small letters, hold each word of `asked`"
+holds_words(words::AbstractString, asked::AbstractString) = (w = lowercase(words); all(x -> occursin(x, w), split(lowercase(asked))))
+
+"""
+What the list over the field of the pane `p` holds for `text`, the words in
+the field: the commands whose names start with what's typed, and then those
+that have it. After `/resume` and a space it's the earlier sessions, and
+after `/model` and a space the models, each time those that have the words
+typed after it. Nothing shows for words that don't start with a slash.
+"""
+slash_rows(p::AgentPane, text::AbstractString) = begin
+  rows = Any[]
+  (startswith(text, "/") && !occursin('\n', text)) || return rows
+  e = editor(p)
+  s = p.session
+  name, rest = slash_parts(text)
+  if rest === nothing
+    q = lowercase(name)
+    all = slash_commands(p)
+    append!(rows, ((:command, c) for c in all if startswith(lowercase(c.name), q)))
+    append!(rows, ((:command, c) for c in all if !startswith(lowercase(c.name), q) && occursin(q, lowercase(c.name))))
+  elseif name == "resume" && own_command(p, name) !== nothing
+    who = pane_agent(p, e)
+    if s === nothing || s.earlier === nothing
+      push!(rows, (:note, "Looking for the earlier sessions of this folder…"))
+    else
+      append!(rows, ((:session, x) for x in s.earlier if holds_words(x.title, rest)))
+      isempty(rows) && push!(rows, (:note, s.looking ? "Looking for the earlier sessions of this folder…" :
+                                           isempty(s.earlier) ? "$who has no earlier session of this folder." : "No earlier session has those words in its title."))
+    end
+  elseif name == "model" && own_command(p, name) !== nothing
+    append!(rows, ((:model, m) for m in agent_models(pane_agent(p, e)).listed if holds_words(m.name * " " * m.id, rest)))
+    isempty(rows) && push!(rows, (:note, "No model has those words in its name."))
+  else
+    k = findfirst(c -> c.name == name, slash_commands(p))
+    k === nothing || push!(rows, (:hint, slash_commands(p)[k]))
+  end
+  rows
+end
+
+"Put `text` in the field of the pane `p`, with the caret after it. The pictures that go with the words stay."
+field!(p::AgentPane, text::AbstractString) = begin
+  e = editor(p)
+  w = window_of(e)
+  was = p.field
+  typing = w !== nothing && was !== nothing && w.focus === was
+  pane_field!(p)
+  if was !== nothing
+    for key in (:pictures, :made_pictures)
+      haskey(was.nodes, key) && (p.field.nodes[key] = was.nodes[key])
+    end
+  end
+  b = p.field.buf
+  b.lines = [String(text)]
+  b.caret = b.anchor = (1, length(text))
+  typing && focus(p.field)
+  redraw_in!(e, SOON)
+  p
+end
+
+"""
+In each frame: show the list of commands over the field of the pane `p`
+while the field has the keyboard and its words start with a slash, and take
+it away when they don't. The first slash starts the agent's program, which
+lists the agent's commands. `/resume` and a space looks for the earlier
+sessions.
+"""
+slash_tick!(p::AgentPane, e) = begin
+  w = window_of(e)
+  (w === nothing || p.field === nothing) && return nothing
+  menu = slash_menu(p)
+  text = join(p.field.buf.lines, "\n")
+  rows = w.focus === p.field ? slash_rows(p, text) : Any[]
+  text == menu.typed || (menu.typed = text; menu.over = menu.top = 1)
+  menu.rows = rows
+  mode = isempty(rows) ? :none : first(first(rows)) == :note ? (startswith(text, "/resume") ? :session : :model) : first(first(rows))
+  if mode != :none && !menu.woke
+    menu.woke = true
+    try session!(p, e) catch end   # an agent that isn't on this Mac has no commands of its own. Your words say so when you send them.
+  end
+  mode == :none && (menu.woke = false)
+  mode == :session && menu.mode != :session && look_for_sessions!(p)
+  menu.mode = mode
+  k = menu.open ? findfirst(q -> q.key == SLASH_MENU && q.content === menu, popups(w)) : nothing
+  r = rect(pane_slot(p))
+  if isempty(rows) || r === nothing
+    menu.open && (close_popup!(w, SLASH_MENU); menu.open = false)
+  elseif k === nothing
+    # It's beside the slot's place, not the slot: the words in the slot are a part of the pane, so a list beside the slot itself would count as hidden
+    popup!(w, menu, anchor=(r.left, r.top, r.width, r.height), placement=:top, gap=6px, width=r.width, key=SLASH_MENU, modal=false, theme=component_theme(e.zoom))
+    menu.open = true
+  else
+    # The slot moves when the window's size changes, and when the field of a session's file slides down
+    q = popups(w)[k]
+    q.anchor, q.width = (r.left, r.top, r.width, r.height), r.width
+  end
+  # The agent's program lists its commands a moment after it starts
+  s = p.session
+  mode == :command && s !== nothing && !s.turns && running(s) && !haskey(AGENT_COMMANDS, (s.agent, s.dir)) && (yield(); redraw_in!(e, 0.1))
+  nothing
+end
+
+"Look for the earlier sessions of the folder of the pane `p`: Ladder reads Claude Code's, and asks an agent that speaks ACP for its own"
+look_for_sessions!(p::AgentPane) = begin
+  e = editor(p)
+  s = try session!(p, e) catch; return nothing end
+  s.turns && return nothing
+  if speaks_acp(s)
+    s.looking = true
+    acp_list!(s)
+  else
+    s.earlier = claude_sessions(s)
+  end
+  nothing
+end
+
+"""
+What a key does while the list of commands shows over the field of the pane
+`p`. True when the key is done with. The arrows move over the rows. Tab
+writes the row's command in the field, for you to add to. Return runs the
+row: see `slash_pick!`.
+"""
+slash_key!(p::AgentPane, w, K) = begin
+  (K in (Keys.down, Keys.up, Keys.tab, Keys.enter) && unmodified(w)) || return false
+  rows = slash_rows(p, join(p.field.buf.lines, "\n"))
+  isempty(rows) && return false
+  menu = slash_menu(p)
+  n = length(rows)
+  over = clamp(menu.over, 1, n)
+  if K == Keys.down || K == Keys.up
+    menu.over = mod1(over + (K == Keys.down ? 1 : -1), n)
+    redraw_in!(editor(p), SOON)
+    return true
+  end
+  slash_pick!(p, rows[over]; fill=K == Keys.tab) || K == Keys.tab
+end
+
+"""
+Take the row `row` of the list of commands of the pane `p`. A command of
+Ladder's own runs, and one that needs a choice, like `/resume`, is written
+in the field with a space, which lists what to choose from. A command of
+the agent's goes to the agent as it is. With `fill`, as for Tab, a command
+is written in the field, for you to add to. An earlier session is gone on with, and a model is
+chosen. False for a row that's only words, which leaves the key to the field.
+"""
+slash_pick!(p::AgentPane, row; fill::Bool=false) = begin
+  kind, x = row
+  if kind == :command
+    if fill || (x.own && x.name in ("resume", "model"))
+      field!(p, "/$(x.name) ")
+    elseif x.own
+      run_own!(p, x.name, "")
+    else
+      field!(p, "/$(x.name)")
+      send_words!(p)
+    end
+  elseif kind == :session
+    resume_session!(p, x)
+  elseif kind == :model
+    field!(p, "")
+    pane_model!(p, x.id)
+  else
+    return false
+  end
+  true
+end
+
+"""
+Run the command of Ladder's own called `name` in the pane `p`, with `rest`
+after it. `/new` and `/clear` end the session: agent mode's pane starts with
+nothing, and a session's file gets a new file beside it. `/resume` and
+`/model` take the first session or model that has the words after them, and
+with no words they list what to choose from.
+"""
+run_own!(p::AgentPane, name::AbstractString, rest::AbstractString) = begin
+  e = editor(p)
+  if name in ("new", "clear")
+    field!(p, "")
+    on_page(p) ? new_agent_session!(e, dirname(p.file)) : new_session!(p)
+  else
+    rows = isempty(rest) ? Any[] : slash_rows(p, "/$name $rest")
+    k = findfirst(r -> first(r) in (:session, :model), rows)
+    k === nothing ? field!(p, isempty(rest) ? "/$name " : "/$name $rest") : slash_pick!(p, rows[k])
+  end
+  nothing
+end
+
+"""
+Go on with the earlier session `x` in the pane `p`. What the pane showed
+goes, and what was said in that session shows in its place. A session's
+file then keeps that session. The agent must have done with what you said.
+"""
+resume_session!(p::AgentPane, x::EarlierSession) = begin
+  e = editor(p)
+  s = p.session
+  s === nothing && return nothing
+  if s.busy
+    p.error = "Stop $(s.agent) before you go on with another session."
+    redraw_in!(e, SOON)
+    return nothing
+  end
+  p.error = ""
+  field!(p, "")
+  empty!(p.open)
+  filter!(((k, _),) -> !(k isa Tuple && k[1] == :reply), p.parts)
+  p.scroll.offset, p.follow = 0px, true
+  resume!(s, x)
+  try
+    session!(p, e)
+  catch err
+    p.error = err isa ErrorException ? err.msg : sprint(showerror, err)
+  end
+  redraw_in!(e, SOON)
+  nothing
+end
+
+# Agent mode's panes are dark, and a session's file has the page's colours
+describe(m::SlashMenu) = with_pane_colours(!on_page(m.of)) do
+  p = m.of
+  e = editor(p)
+  n = length(m.rows)
+  m.over = clamp(m.over, 1, max(1, n))
+  # The row that the arrows are on is always one of those that show
+  m.top = clamp(m.top, max(1, m.over - SLASH_MOST + 1), m.over)
+  m.top = clamp(m.top, 1, max(1, n - SLASH_MOST + 1))
+  shown = min(SLASH_MOST, n - m.top + 1)
+  more = n > SLASH_MOST ? (Row(width(grow=grow), height(20px), Alignment.Center, padding(10px, 0px), name="More rows",
+                               Box(label("$(m.top)–$(m.top + shown - 1) of $n  ·  ↑↓ for the rest", 11px, color=colours.faint))),) : ()
+  Column(width(grow=grow), Alignment.Start, padding(4px), child_gap=1px, radius(10px), name="Commands",
+         background(colours.float), border(1px, :solid, colours.line), shadow(0px, 6px, 20px, RGBA(0, 0, 0, 0.35)),
+    (get!(() -> own!(m, SlashRow(menu=m, slot=k)), p.parts, (:slash_row, k)) for k in 1:shown)..., more...)
+end
+
+"The row of the list that the row `r` shows now, a kind and a thing, with its place in the list, or nothing"
+row_of(r::SlashRow) = (k = r.menu.top + r.slot - 1; k in eachindex(r.menu.rows) ? (k, r.menu.rows[k]) : nothing)
+
+describe(r::SlashRow) = begin
+  m = r.menu
+  p = m.of
+  e = editor(p)
+  found = row_of(r)
+  found === nothing && return Box(height(0px))
+  k, (kind, x) = found
+  rp = rect(pane_slot(p))
+  room = (rp === nothing ? 300px : rp.width) - 8px - 20px   # less the list's own room and the row's
+  face(colour, size=13px) = Face(SANS, "", size, colour, false)
+  parts = if kind in (:command, :hint)
+    name = "/" * x.name
+    left = room - measure(face(colours.ink), name) - 10px
+    hint = shortened(face(colours.faint, 12px), x.hint, max(0px, min(left, room * 0.4)))
+    left -= isempty(hint) ? 0px : measure(face(colours.faint, 12px), hint) + 10px
+    about = left > 40px ? shortened(face(colours.dim, 12px), x.about, left) : ""
+    (Box(label(name, 13px, color=colours.ink)),
+     (isempty(hint) ? () : (Box(label(hint, 12px, color=colours.faint)),))...,
+     (isempty(about) ? () : (Box(label(about, 12px, color=colours.dim)),))...)
+  elseif kind == :session
+    ago = ago_words(x.at)
+    left = room - measure(face(colours.faint, 12px), ago) - 12px
+    (Box(label(shortened(face(colours.ink), x.title, left), 13px, color=colours.ink)), Box(width(grow=grow)),
+     Box(label(ago, 12px, color=colours.faint)))
+  elseif kind == :model
+    now = pane_model(p, e)
+    (Box(label(x.name, 13px, color=colours.ink)), Box(width(grow=grow)),
+     (now == x.id || now == x.is ? (Icon("check", size=12px, color=colours.dim),) : ())...)
+  else
+    (Box(label(shortened(face(colours.dim), x, room), 13px, color=colours.dim)),)
+  end
+  picks = kind in (:command, :session, :model)
+  Row(width(grow=grow), height(SLASH_ROW), Alignment.Center, padding(10px, 0px), child_gap=10px, radius(6px), clip=true, name="Command row",
+      background(picks && m.over == k ? on_glass(0.1) : clear), parts...)
+end
+
+cursor(r::SlashRow) = (found = row_of(r); found !== nothing && first(found[2]) in (:command, :session, :model) ? :hand : :arrow)
+onmouse(r::SlashRow, ::MouseMove) = (found = row_of(r); found === nothing || r.menu.over == found[1] || (r.menu.over = found[1]; redraw_in!(editor(r.menu.of), SOON)); nothing)
+# A click takes the row, as Return does, and the field keeps the keyboard
+onkey(r::SlashRow, ev::KeyPress{Keys.mouse_left}) = begin
+  p = r.menu.of
+  found = row_of(r)
+  found === nothing || slash_pick!(p, found[2])
+  p.field === nothing || focus(p.field)
+  handled
 end
 
 # --- pictures that go with your words ---
@@ -41813,9 +42550,10 @@ end
 pane_tick!(p::AgentPane, e) = begin
   # The task that asks an agent for its models gets its turns too, till it's done
   isempty(MODELS_ASKING) || (yield(); redraw_in!(e, 0.1))
+  slash_tick!(p, e)
   s = p.session
   s === nothing && return nothing
-  if s.busy
+  if s.busy || s.loading || s.looking
     yield()
     redraw_in!(e, 0.05)
   end
@@ -41971,13 +42709,15 @@ pane_talk(p::AgentPane, e, room) = begin
   waits = s !== nothing && s.busy && (isempty(items) || !(last(items) isa AgentStep && last(items).state == :going) &&
                                                          !(last(items) isa AgentReply && !last(items).whole) &&
                                                          !(last(items) isa AgentWants && last(items).answer == :none))
-  waits && push!(rows, Row(height(24px), Alignment.Center, child_gap=8px,
+  loads = s !== nothing && s.loading
+  (waits || loads) && push!(rows, Row(height(24px), Alignment.Center, child_gap=8px,
                            Box(fixed(16px), height(16px), Alignment.Center, justify=Alignment.Center, Spinner(size=12px)),
-                           Box(label("Thinking", 13px * talk_zoom(e), color=colours.dim))))
+                           Box(label(loads ? "Opening the session" : "Thinking", 13px * talk_zoom(e), color=colours.dim))))
   isempty(p.error) || push!(rows, words_block(e, p.error, PICK_FAILED, room))
   isempty(rows) && return Column(width(grow=grow), Alignment.Start, padding(40px, PANE_X, 20px, PANE_LEFT), child_gap=6px, name="Talk",
     words_block(e, "Ask about this page, or say what to change in it.", colours.dim, room),
-    words_block(e, "What the agent says shows here as a page: tables, diagrams and charts, not a terminal's text.", colours.faint, room))
+    words_block(e, "What the agent says shows here as a page: tables, diagrams and charts, not a terminal's text.", colours.faint, room),
+    words_block(e, "Type / for commands, like /resume to go on with an earlier session.", colours.faint, room))
   Column(width(grow=grow), Alignment.Start, padding(on_page(p) ? 24px : 6px, PANE_X, 20px, PANE_LEFT), child_gap=10px, name="Talk", rows...)
 end
 
@@ -42736,7 +43476,7 @@ const TALK_SLIDE = 0.4   # seconds for the field of a session's file to slide fr
 describe(::TalkRoom) = Box(width(grow=grow), height(grow=grow))
 
 "True when nothing is said yet in the session of the pane `p`: the page shows the greeting, with the field under it in the middle of the page"
-said_nothing(p::AgentPane) = (s = p.session; isempty(p.error) && (s === nothing || (isempty(s.items) && !s.busy)))
+said_nothing(p::AgentPane) = (s = p.session; isempty(p.error) && (s === nothing || (isempty(s.items) && !s.busy && !s.loading)))
 
 """
 A session's file in the page: what you and the agent said in a column in
@@ -42799,7 +43539,8 @@ talk_greeting(p::AgentPane, e, room) = begin
     line(shortened(face, "In $(tilde(dir))", room), face.size, colours.dim),
     Box(height(10px)),
     line("Ask anything, or say what to do in this folder.", face.size, colours.dim),
-    line("What $who says shows here as a page: tables, diagrams and charts.", face.size, colours.faint))
+    line("What $who says shows here as a page: tables, diagrams and charts.", face.size, colours.faint),
+    line("Type / for commands, like /resume to go on with an earlier session.", face.size, colours.faint))
 end
 
 """

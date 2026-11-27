@@ -51,9 +51,15 @@ say() { printf '%s\n' "$1"; }
 done_() { say '{"type":"result","subtype":"success","is_error":false,"result":""}'; }
 # It's given Claude Code's options. A model like sonnet is claude-sonnet-5-5, and with none it's Opus.
 model=opus
-while [ $# -gt 0 ]; do [ "$1" = "--model" ] && model="$2"; shift; done
-say '{"type":"system","subtype":"init","session_id":"test-session","model":"claude-'"$model"'-5-5"}'
+session=test-session
+while [ $# -gt 0 ]; do [ "$1" = "--model" ] && model="$2"; [ "$1" = "--resume" ] && session="$2"; shift; done
+say '{"type":"system","subtype":"init","session_id":"'"$session"'","model":"claude-'"$model"'-5-5"}'
 while IFS= read -r line; do
+  # Ladder's first line asks what the program can do. Its answer lists Claude Code's commands.
+  case "$line" in *'"initialize"'*)
+    say '{"type":"control_response","response":{"subtype":"success","request_id":"ladder-start","response":{"commands":[{"name":"compact","description":"Free up context by summarizing the conversation so far","argumentHint":"<optional custom summarization instructions>"},{"name":"clear","description":"Start a new session with empty context","argumentHint":"[name]"},{"name":"context","description":"Show current context usage","argumentHint":""},{"name":"ladder:page","description":"(ladder) Show the user a page in Ladder.\nUse it for a plan.","argumentHint":""}]}}}'
+    continue ;;
+  esac
   printf '%s\n' "$line" >> "HEARD"
   case "$line" in
   *'"interrupt"'*)
@@ -187,16 +193,32 @@ while IFS= read -r line; do
   *'"outcome":"cancelled"'*) ;;
   *'"initialize"'*)
     answer "$id" '{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"agentInfo":{"name":"Antigravity ACP Server","version":"1.5.18"}}' ;;
+  *'"session/list"'*)
+    answer "$id" '{"sessions":[{"sessionId":"old-1","cwd":"DIR","title":"Paint prices","updatedAt":"2026-11-26T12:28:58Z"},{"sessionId":"far","cwd":"/somewhere/else","title":"Elsewhere","updatedAt":"2026-11-27T02:00:00Z"},{"sessionId":"old-2","cwd":"DIR","title":"Brush sizes","updatedAt":"2026-11-27T01:00:00.944933+00:00"},{"sessionId":"bad","cwd":"DIR","title":"A lost one","updatedAt":"2026-11-20T01:00:00Z"}]}' ;;
+  *'"session/load"'*)
+    case "$line" in
+    *'"sessionId":"bad"'*) say '{"jsonrpc":"2.0","error":{"code":-32002,"message":"Resource not found: bad"},"id":"'"$id"'"}' ;;
+    *)
+      sid=$(printf '%s' "$line" | sed -n 's/.*"sessionId":"\([^"]*\)".*/\1/p')
+      update '{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"<ladder>\nThe window shows the file /tmp/plan.md.\nNothing is selected.\n</ladder>\n\nWhat does paint cost?"}}'
+      update '{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":"Prices need a look."}}'
+      update '{"sessionUpdate":"tool_call","toolCallId":"call_9","name":"view_file","status":"completed","kind":"read","title":"prices.md","rawInput":{"AbsolutePath":"/tmp/prices.md"}}'
+      update '{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Paint costs **40**."}}'
+      update '{"sessionUpdate":"session_info_update","title":"Paint prices"}'
+      answer "$id" '{"models":{"currentModelId":"'"$model"'"}}' ;;
+    esac ;;
   *'"session/new"'*'"rules":'*)
     sid=grok-1
-    answer "$id" '{"sessionId":"grok-1","models":{"availableModels":[{"modelId":"grok-4.7","name":"Grok 4.7"},{"modelId":"grok-4.6","name":"Grok 4.6"}],"currentModelId":"grok-4.7"},"configOptions":[]}' ;;
+    answer "$id" '{"sessionId":"grok-1","models":{"availableModels":[{"modelId":"grok-4.7","name":"Grok 4.7"},{"modelId":"grok-4.6","name":"Grok 4.6"}],"currentModelId":"grok-4.7"},"configOptions":[]}'
+    update '{"sessionUpdate":"available_commands_update","availableCommands":[{"name":"context","description":"Show context window usage and session stats","input":null}]}' ;;
   *'"session/new"'*)
     sid=acp-1
-    answer "$id" '{"sessionId":"acp-1","models":{"availableModels":[{"modelId":"gemini-4-neon-low","name":"Gemini 4 Neon (Low)"}],"currentModelId":"'"$model"'"},"modes":{"currentModeId":"default"}}' ;;
+    answer "$id" '{"sessionId":"acp-1","models":{"availableModels":[{"modelId":"gemini-4-neon-low","name":"Gemini 4 Neon (Low)"}],"currentModelId":"'"$model"'"},"modes":{"currentModeId":"default"}}'
+    update '{"sessionUpdate":"available_commands_update","availableCommands":[{"name":"goal","description":"Run until the specified goal is completely finished.","input":{"hint":"<objective>"}},{"name":"compact","description":"Compact the conversation now.","input":null},{"name":"goal","description":"A skill with the same name","input":null}]}' ;;
   *'"session/resume"'*)
     case "$line" in
     *'"sessionId":"gone"'*) say '{"jsonrpc":"2.0","error":{"code":-32002,"message":"Resource not found: gone"},"id":"'"$id"'"}' ;;
-    *) sid=acp-1; answer "$id" '{"sessionId":"acp-1","models":{"currentModelId":"'"$model"'"}}' ;;
+    *) sid=$(printf '%s' "$line" | sed -n 's/.*"sessionId":"\([^"]*\)".*/\1/p'); answer "$id" '{"sessionId":"'"$sid"'","models":{"currentModelId":"'"$model"'"}}' ;;
     esac ;;
   *'"session/set_mode"'*) answer "$id" '{}' ;;
   *'"session/set_model"'*)
@@ -243,7 +265,7 @@ while IFS= read -r line; do
     esac ;;
   esac
 done
-""", "HEARD" => acp_heard))
+""", "HEARD" => acp_heard, "DIR" => dir))
 chmod(acp_agent, 0o755)
 K.ACP_COMMAND[] = Cmd([acp_agent])
 "The lines of JSON-RPC that Antigravity's stand-in has heard"
@@ -1224,6 +1246,232 @@ try
     @test e.buf.path == notes && e.buf.caret[1] == 41 && e.buf.lines[41] == "Note 20." && e.scroll.offset > 0px
     @test K.agent_mode(e)
     K.open!(e, page); frames(w, 3)
+  end
+
+  @testset "Words that start with a slash list the commands, Ladder's own and then the agent's, and the arrows, Tab and Return choose from them" begin
+    K.agent_mode(e) || (K.agent_mode!(e); frames(w, 3))
+    K.new_session!(pane); frames()
+    empty!(K.AGENT_COMMANDS)
+    menu = K.slash_menu(pane)
+    shows() = any(q -> q.key == K.SLASH_MENU, K.popups(w))
+    names() = [x.name for (_, x) in menu.rows]
+    K.focus(pane.field)
+    @test !shows() && pane.session === nothing
+    typed("/")
+    # The first slash starts Claude Code's program, which lists its commands. Ladder's own come first, and its /clear is the one that shows.
+    ok = until(() -> pane.session !== nothing && haskey(K.AGENT_COMMANDS, ("Claude", pane.session.dir)) && length(menu.rows) == 7)
+    @test ok && shows() && K.running(pane.session) && !pane.session.busy
+    @test names() == ["resume", "new", "clear", "model", "compact", "context", "ladder:page"]
+    @test all(((kind, x),) -> kind == :command && x.own == (x.name in ("resume", "new", "clear", "model")), menu.rows)
+    # A command's words are one line
+    @test menu.rows[7][2].about == "(ladder) Show the user a page in Ladder."
+    # The list is over the field, as wide as the field's slot
+    list, slot = only(q for q in K.popups(w) if q.key == K.SLASH_MENU).scene, K.rect(K.pane_slot(pane))
+    @test list.top + list.height <= slot.top && abs(K.num(list.width - slot.width)) < 1
+    @test any(r -> occursin("/compact", sprint(show, r.from)), flat(list))
+    # What you type after the slash leaves the commands that have it, those that start with it first
+    typed("co")
+    @test names() == ["compact", "context"] && menu.over == 1
+    press(Keys.down)
+    @test menu.over == 2 && pane.field.buf.lines == ["/co"]
+    press(Keys.down)
+    @test menu.over == 1
+    press(Keys.up)
+    @test menu.over == 2
+    # Tab writes the command in the field, with a space to add to. The list then shows that command alone.
+    press(Keys.tab)
+    @test pane.field.buf.lines == ["/context "] && w.focus === pane.field && pane.field.buf.caret == (1, 9)
+    @test menu.rows == Any[(:hint, menu.rows[1][2])] && menu.rows[1][2].name == "context"
+    # Return gives the agent the command as you typed it, with nothing of Ladder's before it
+    press(Keys.enter)
+    ok = until(() -> !pane.session.busy && !isempty(heard_lines()) && occursin("/context", last(heard_lines())))
+    @test ok && occursin("\"content\":\"/context\"", last(heard_lines())) && !occursin("<ladder>", last(heard_lines()))
+    @test items()[1] isa K.YouSaid && items()[1].words == "/context" && isempty(items()[1].about)
+    @test pane.field.buf.lines == [""] && !shows()
+    # Return on a row of the list runs that command
+    typed("/comp")
+    @test names() == ["compact"] && shows()
+    press(Keys.enter)
+    ok = until(() -> !pane.session.busy && occursin("/compact", last(heard_lines())))
+    @test ok && occursin("\"content\":\"/compact\"", last(heard_lines())) && pane.field.buf.lines == [""]
+    # Words that start with a slash and are no command go as other words do, with what the window shows
+    pane.field.buf.lines = ["/tmp/plan.md is which file?"]
+    frames()
+    @test !shows()
+    K.send_words!(pane)
+    ok = until(() -> !pane.session.busy && occursin("which file", last(heard_lines())))
+    @test ok && occursin("<ladder>", last(heard_lines()))
+    # A click on a row takes it, as Return does, and the field keeps the keyboard
+    typed("/cont")
+    row = only(r for r in flat(only(q for q in K.popups(w) if q.key == K.SLASH_MENU).scene) if hasproperty(r.from, :name) && r.from.name == "Command row")
+    n = length(heard_lines())
+    click(row.left + 30px, row.top + 10px)
+    ok = until(() -> !pane.session.busy && length(heard_lines()) > n)
+    @test ok && occursin("\"content\":\"/context\"", last(heard_lines())) && w.focus === pane.field
+    # /model and a space lists the models, and Return chooses one
+    typed("/model so")
+    @test [(kind, x.id) for (kind, x) in menu.rows] == [(:model, "sonnet")]
+    press(Keys.enter)
+    ok = until(() -> pane.session.running == "claude-sonnet-5-5")
+    @test ok && pane.session.model == "sonnet" && pane.field.buf.lines == [""]
+    K.pane_model!(pane, "opus")
+    until(() -> pane.session.running == "claude-opus-5-5")
+    # /new ends the session, as the + button does
+    s = pane.session
+    typed("/new")
+    press(Keys.enter)
+    ok = until(() -> !K.running(s))
+    @test ok && pane.session === nothing && pane.field.buf.lines == [""]
+    # An agent that works by turns has no earlier sessions to go on with
+    K.pane_agent!(pane, "Codex")
+    typed("/")
+    @test names() == ["new", "clear", "model"]
+    K.field!(pane, "")
+    K.pane_agent!(pane, "Claude")
+    frames()
+  end
+
+  @testset "/resume lists the earlier sessions of the folder, also those of a terminal, and goes on with the one that you choose" begin
+    # The files that Claude Code keeps for the folder: a session with a title, one with only its first words, and a program that ran once
+    kept = K.CLAUDE_SESSIONS[] = joinpath(dir, "claude-sessions")
+    mkpath(kept)
+    write(joinpath(kept, "aaaa-1111.jsonl"), join([
+      """{"type":"user","message":{"role":"user","content":"<ladder>\\nThe window shows the file /tmp/x.md.\\n</ladder>\\n\\nPaint the fence"},"uuid":"1"}""",
+      """{"type":"assistant","message":{"role":"assistant","content":[{"type":"thinking","thinking":"A fence."}]}}""",
+      """{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"u1","name":"Read","input":{"file_path":"/tmp/fence.md"}}]}}""",
+      """{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"u1","content":"x"}]}}""",
+      """{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"u2","name":"Bash","input":{"command":"paint","description":"Paint it"}}]}}""",
+      """{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"u2","content":"no","is_error":true}]}}""",
+      """{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"The fence is **painted**."}]}}""",
+      """{"type":"ai-title","aiTitle":"Fence \\"painting\\"","sessionId":"aaaa-1111"}""",
+      """{"type":"user","isSidechain":true,"message":{"role":"user","content":"Words to an agent that Claude started"}}""",
+      """{"type":"user","isMeta":true,"message":{"role":"user","content":"Words that Claude Code wrote"}}""",
+      """{"type":"user","message":{"role":"user","content":"<command-name>/compact</command-name>\\n<command-message>compact</command-message>\\n<command-args>keep the fence</command-args>"}}""",
+      """{"type":"user","message":{"role":"user","content":"<local-command-stdout>Compacted</local-command-stdout>"}}"""], "\n") * "\n")
+    write(joinpath(kept, "bbbb-2222.jsonl"), """{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Count the brushes\\nand the tins"}]}}\n""")
+    write(joinpath(kept, "cccc-3333.jsonl"), """{"type":"last-prompt","sessionId":"cccc-3333"}\n""")
+    run(`touch -t 202611200900 $(joinpath(kept, "bbbb-2222.jsonl"))`)
+    @test K.claude_title(joinpath(kept, "aaaa-1111.jsonl")) == "Fence \"painting\"" && K.claude_title(joinpath(kept, "cccc-3333.jsonl")) == ""
+    # What Ladder put round your words isn't your words
+    @test K.your_words("<ladder>\nThe file.\n</ladder>\n\n<changes>\nx\n</changes>\n\nHello\n\nThe pictures with these words are also in these files:\n/tmp/a.png") == "Hello"
+    @test K.your_words("<task-notification>done</task-notification>") == "" && K.your_words("A <b>bold</b> word") == "A <b>bold</b> word"
+    @test K.ago_words(1000.0, 1000.0 + 300) == "5 min ago" && K.ago_words(1000.0, 1000.0 + 7200) == "2 hr ago" && K.ago_words(1000.0, 1000.0 + 30 * 3600) == "yesterday"
+    @test K.iso_time("2026-11-27T01:00:00.944933+00:00") - K.iso_time("2026-11-26T12:28:58Z") == 12 * 3600 + 31 * 60 + 2
+    menu = K.slash_menu(pane)
+    K.new_session!(pane); frames()
+    K.focus(pane.field)
+    # Return on /resume writes it out with a space, which lists the sessions, the newest first
+    typed("/res")
+    press(Keys.enter)
+    frames()
+    @test pane.field.buf.lines == ["/resume "]
+    @test [(kind, x.id, x.title) for (kind, x) in menu.rows] == [(:session, "aaaa-1111", "Fence \"painting\""), (:session, "bbbb-2222", "Count the brushes")]
+    # The words after it leave the sessions whose titles have them
+    typed("BRUSH")
+    @test [x.id for (_, x) in menu.rows] == ["bbbb-2222"]
+    typed("x")
+    @test menu.rows == Any[(:note, "No earlier session has those words in its title.")]
+    press(Keys.enter)   # nothing to go on with, so the words stay
+    @test pane.field.buf.lines == ["/resume BRUSHx"] && isempty(pane.session.items)
+    K.field!(pane, "/resume fence")
+    frames()
+    was = pane.session.process
+    press(Keys.enter)
+    s = pane.session
+    # What was said in that session shows, without what an agent of Claude's was told, and without Ladder's own lines
+    @test s.id == "aaaa-1111" && pane.field.buf.lines == [""]
+    @test [typeof(i) for i in s.items] == [K.YouSaid, K.AgentStep, K.AgentStep, K.AgentReply, K.YouSaid]
+    @test s.items[1].words == "Paint the fence" && s.items[2].words == "Reading fence.md" && s.items[2].state == :done && s.items[3].state == :failed
+    @test s.items[4].text == "The fence is **painted**." && s.items[4].whole && s.items[5].words == "/compact keep the fence"
+    # Claude Code's program started again, with that session's name
+    @test K.running(s) && s.process !== was && "aaaa-1111" in K.session_options(s) && "--resume" in K.session_options(s)
+    frames(w, 3)
+    @test named("Reply") !== nothing
+    pane.field.buf.lines = ["And the gate"]
+    K.send_words!(pane)
+    ok = until(() -> !s.busy && last(s.items) isa K.AgentReply)
+    @test ok && s.id == "aaaa-1111" && occursin("And the gate", last(heard_lines())) && length(s.items) == 7
+    # The list no longer has the session that the pane goes on with
+    typed("/resume ")
+    @test [x.id for (_, x) in menu.rows] == ["bbbb-2222"]
+    K.field!(pane, "")
+    # A long session shows its newest part
+    long = Any[]
+    for k in 1:40
+      push!(long, K.YouSaid(words="Question $k"), K.AgentReply(text="Answer $k", whole=true))
+    end
+    part = K.recent_part(long)
+    @test part[1] isa K.SessionNote && part[2].words == "Question 11" && length(part) == 61 && K.recent_part(long[1:20]) === long[1:20] || length(K.recent_part(long[1:20])) == 20
+    K.new_session!(pane)
+    K.CLAUDE_SESSIONS[] = ""
+    frames()
+  end
+
+  @testset "Antigravity and Grok list their own commands and their earlier sessions, and say again what was said in the one that you choose" begin
+    K.pane_agent!(pane, "Antigravity")
+    frames()
+    menu = K.slash_menu(pane)
+    K.focus(pane.field)
+    typed("/")
+    ok = until(() -> pane.session !== nothing && length(menu.rows) == 6)
+    s = pane.session
+    # A name that the agent lists twice shows once
+    @test ok && [x.name for (_, x) in menu.rows] == ["resume", "new", "clear", "model", "goal", "compact"] && menu.rows[5][2].hint == "<objective>"
+    @test s.id == "acp-1" && !s.busy
+    typed("resume ")
+    ok = until(() -> s.earlier !== nothing && !s.looking && first(first(menu.rows)) == :session)
+    # Only the sessions of this folder, the newest first
+    @test ok && [(x.id, x.title) for (_, x) in menu.rows] == [("old-2", "Brush sizes"), ("old-1", "Paint prices"), ("bad", "A lost one")]
+    @test any(l -> occursin("\"method\":\"session/list\"", l) && occursin("\"cwd\":\"$(s.dir)\"", l), acp_lines())
+    press(Keys.down)
+    press(Keys.enter)
+    @test s.loading && pane.field.buf.lines == [""]
+    ok = until(() -> !s.loading && s.talk.ready)
+    # The same program loaded the session, and what was said in it shows: your words without Ladder's block, the step, the reply
+    @test ok && s.id == "old-1" && K.running(s) && !s.busy
+    @test [typeof(i) for i in s.items] == [K.YouSaid, K.AgentStep, K.AgentReply]
+    @test s.items[1].words == "What does paint cost?" && s.items[2].words == "Reading prices.md" && s.items[2].state == :done
+    @test s.items[3].text == "Paint costs **40**." && s.items[3].whole
+    said = acp_lines()
+    k = findlast(l -> occursin("\"method\":\"session/load\"", l), said)
+    @test k !== nothing && occursin("\"sessionId\":\"old-1\"", said[k]) && occursin("\"method\":\"session/set_mode\"", said[k+1]) && count(l -> occursin("\"method\":\"initialize\"", l), said[k:end]) == 0
+    # A command of the agent's goes as you typed it, to the session that was loaded
+    pane.field.buf.lines = ["/goal paint it all"]
+    K.send_words!(pane)
+    ok = until(() -> !s.busy)
+    asked = last(filter(l -> occursin("session/prompt", l), acp_lines()))
+    @test ok && occursin("\"text\":\"/goal paint it all\"", asked) && occursin("\"sessionId\":\"old-1\"", asked)
+    # A session that the agent can't open leaves the pane as it was, and says so
+    n = length(s.items)
+    typed("/resume lost")
+    ok = until(() -> !s.looking && first(first(menu.rows)) == :session)   # Ladder asks for the list again, as a session may have come since
+    @test ok && [x.id for (_, x) in menu.rows] == ["bad"]
+    press(Keys.enter)
+    ok = until(() -> !s.loading && s.talk.ready)
+    @test ok && s.id == "old-1" && length(s.items) == n + 1 && last(s.items) isa K.SessionNote && last(s.items).bad
+    @test last(s.items).words == "Antigravity couldn't open that session: Resource not found: bad"
+    # Grok's session keeps the rules that it was made with, so one of a terminal is told of Ladder with your next words
+    K.pane_agent!(pane, "Grok")
+    frames()
+    typed("/resume ")
+    ok = until(() -> pane.session !== nothing && pane.session.earlier !== nothing && !pane.session.looking && first(first(menu.rows)) == :session)
+    s = pane.session
+    @test ok && s.agent == "Grok"
+    press(Keys.enter)
+    ok = until(() -> !s.loading && s.talk.ready)
+    @test ok && s.id == "old-2" && s.unbriefed
+    pane.field.buf.lines = ["/context"]
+    K.send_words!(pane)
+    ok = until(() -> !s.busy)
+    @test ok && s.unbriefed && occursin("\"text\":\"/context\"", last(filter(l -> occursin("session/prompt", l), acp_lines())))
+    pane.field.buf.lines = ["Hello again"]
+    K.send_words!(pane)
+    ok = until(() -> !s.busy)
+    asked = last(filter(l -> occursin("session/prompt", l), acp_lines()))
+    @test ok && !s.unbriefed && occursin("<ladder-brief>\\nYou are in Ladder", asked) && occursin("Hello again", asked)
+    K.pane_agent!(pane, "Claude")
+    frames()
+    until(() -> !K.running(s))
   end
 
   @testset "Closing the window ends the agent's program" begin

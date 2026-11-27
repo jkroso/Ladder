@@ -30,8 +30,12 @@ if [ -f "LOST" ]; then
   say '{"type":"result","subtype":"error_during_execution","is_error":true}'
   exit 1
 fi
-say '{"type":"system","subtype":"init","session_id":"test-session"}'
+# Its session has the name that it's told to go on with, as Claude Code's has
+session=test-session
+for given in "$@"; do [ "$was" = "--resume" ] && session="$given"; was="$given"; done
+say '{"type":"system","subtype":"init","session_id":"'"$session"'"}'
 while IFS= read -r line; do
+  case "$line" in *'"initialize"'*) continue ;; esac   # Ladder's first line, which asks what the program can do
   printf '%s\n' "$line" >> "HEARD"
   case "$line" in
   *'a table'*)
@@ -542,6 +546,41 @@ try
     @test kind.open
     press(Keys.escape)
     @test !kind.open
+  end
+
+  @testset "The commands after a slash work in a session's file: /resume puts an earlier session in the file, and /new makes a new file" begin
+    kept = K.CLAUDE_SESSIONS[] = joinpath(dir, "claude-sessions")
+    mkpath(kept)
+    write(joinpath(kept, "aaaa-1111.jsonl"), """{"type":"user","message":{"role":"user","content":"Paint the fence"}}\n{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"It is **painted**."}]}}\n""")
+    K.new_agent_session!(e, dir)
+    frames(w, 4)
+    file = e.buf.path
+    p = e.nodes[(:chat, file)]
+    @test K.chat_shown(e) && w.focus === p.field
+    menu = K.slash_menu(p)
+    typed("/resume ")
+    # The list is over the field, which is in the middle of the page before anything is said
+    list, slot = only(q for q in K.popups(w) if q.key == K.SLASH_MENU).scene, K.rect(K.pane_slot(p))
+    @test [x.title for (_, x) in menu.rows] == ["Paint the fence"] && list.top + list.height <= slot.top && list.top > 0px
+    press(Keys.enter)
+    s = p.session
+    @test s.id == "aaaa-1111" && [typeof(i) for i in s.items] == [K.YouSaid, K.AgentReply] && K.running(s) && p.field.buf.lines == [""]
+    ok = until(() -> p.kept == s.version)
+    saved = K.read_talk(read(file, String))
+    # The file keeps that session now, and the agent goes on with it
+    @test ok && saved.id == "aaaa-1111" && saved.items[1].words == "Paint the fence" && saved.items[2].text == "It is **painted**."
+    @test "aaaa-1111" in K.session_options(s)
+    typed("And the gate")
+    press(Keys.enter)
+    ok = until(() -> !s.busy && last(s.items) isa K.AgentReply)
+    @test ok && s.id == "aaaa-1111" && length(s.items) == 4 && occursin("And the gate", last(heard_lines()))
+    # /new makes a new file for a new session beside this one, which stays
+    typed("/new")
+    press(Keys.enter)
+    frames(w, 4)
+    @test e.buf.path != file && K.chat_shown(e) && isfile(file) && isempty(K.read_talk(read(e.buf.path, String)).items)
+    @test K.read_talk(read(file, String)).id == "aaaa-1111"
+    K.CLAUDE_SESSIONS[] = ""
   end
 finally
   K.SESSION_COMMAND[] = nothing

@@ -32,6 +32,7 @@ write(agent, replace(raw"""
 for given in "$@"; do printf 'option %s\n' "$given" >> "HEARD"; done
 printf '%s\n' '{"type":"system","subtype":"init","session_id":"test-session","model":"claude-opus-5-5"}'
 while IFS= read -r line; do
+  case "$line" in *'"initialize"'*) continue ;; esac   # Ladder's first line, which asks what the program can do
   printf '%s\n' "$line" >> "HEARD"
   printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"Plain words."}]}}'
   printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":""}'
