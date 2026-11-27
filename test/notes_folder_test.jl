@@ -48,13 +48,13 @@ linked() = begin
   sort!([basename(k[2]) for k in keys(f.rows)])
 end
 "Forget what was read of the notes, as 2 seconds do"
-again() = (empty!(K.NOTE_WEBS); frames())
+again() = (empty!(K.NotesPages.NOTE_WEBS); frames())
 
 @testset "a folder with an .obsidian in it is a folder of notes, and so is each folder in it" begin
   @test K.directory(e) isa K.NotesDirectory
   @test K.object(e, joinpath(root, "plans")) isa K.NotesDirectory
   @test K.FS.get(K.FSPath(joinpath(dir, "plain"))) isa K.FS.Directory
-  @test K.notes_top(K.object(e, joinpath(root, "plans"))) == root
+  @test K.NotesPages.notes_top(K.object(e, joinpath(root, "plans"))) == root
 end
 
 @testset "the pages that link to a page are listed under its text" begin
@@ -94,11 +94,11 @@ end
 @testset "the line over the list says how many pages there are, and a click shows the folder's page" begin
   bar = e.nodes[:notes_bar]
   @test bar.root == root && rect(bar) !== nothing
-  @test K.pages_words(length(K.notes_web(root).notes)) == "4 pages"
+  @test K.NotesPages.pages_words(length(K.NotesPages.notes_web(root).notes)) == "4 pages"
   click(middle(bar))
   @test e.buf.path == root && e.folder == root
   v = e.nodes[(:notes, root)]
-  @test v isa K.NotesView && rect(v) !== nothing
+  @test v isa K.NotesPages.NotesView && rect(v) !== nothing
   @test sort!([basename(k[2]) for k in keys(v.rows) if k[1] == :latest]) == ["Alone.md", "Garden.md", "Home.md", "Ideas.md"]
   @test [k[2] for k in keys(v.rows) if k[1] == :wanted] == ["A trip"]
   @test [basename(k[2]) for k in keys(v.rows) if k[1] == :loose] == ["Alone.md"]   # it links to a page, and no page links to it

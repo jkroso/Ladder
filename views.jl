@@ -30,3 +30,6 @@ function page_fills end
 
 "True when a window that's opened on the folder `d` shows what `page_view` gives for it first"
 function page_first end
+
+"What shows under the text of the page `o`, which the directory `d` holds, in the editor `e`: a node, or nothing"
+function page_foot end
