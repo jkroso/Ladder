@@ -871,10 +871,10 @@ describe(v::DesignView) = begin
   scene = part!(() -> Scene(of=v), v, :scene)
   Stack(width(grow=grow), height(grow=grow), Alignment.Start,
     scene,
-    Column(width(grow=grow), height(grow=grow), padding(8px), child_gap=8px, Alignment.Start,
+    Column(width(grow=grow), height(grow=grow), padding(panel_gap(v)), child_gap=panel_gap(v), Alignment.Start,
       ribbon(v),
       said(v)...,
-      Row(width(grow=grow), height(grow=grow), Alignment.Start, child_gap=8px,
+      Row(width(grow=grow), height(grow=grow), Alignment.Start, child_gap=panel_gap(v),
         browser(v),
         Row(width(grow=grow), justify=Alignment.Center, section_chip(v)...),
         side(v)...),
@@ -887,7 +887,8 @@ end
 "The colour of a panel over the design: the theme's surface, a little see-through"
 panel_colour(t) = Ink.faded(t.surface, 0.97)
 
-panel_look(t) = (background(panel_colour(t)), radius(9px), border(1px, :solid, t.line), shadow(0, 3, 14, RGBA(0, 0, 0, dark(t) ? 0.35 : 0.12)))
+"How a panel over the design looks, with corners `round` that much: see `panel_round`"
+panel_look(t, round=9px) = (background(panel_colour(t)), radius(round), border(1px, :solid, t.line), shadow(0, 3, 14, RGBA(0, 0, 0, dark(t) ? 0.35 : 0.12)))
 
 "A small button with only an icon"
 icon_button(v, key, icon, tip; act, on=false, size=16px, off=false) = begin
@@ -992,7 +993,7 @@ more_menu(v::DesignView, g::Commands.Group, more, window) = begin
 end
 
 "How far the words and the buttons of the toolbar are from the left edge of the design: the room round the toolbar, its border, and the room in it"
-const RIBBON_INSET = 17px
+ribbon_inset(v) = panel_gap(v) + 1px + 8px
 
 """
 What the toolbar shows of the design's file, in the middle of its top row: the
@@ -1016,6 +1017,40 @@ over the toolbar while the sidebar is closed.
 """
 corner_room(v) = 0px
 
+"How tall the toolbar's top row is: as tall as its buttons"
+const RIBBON_ROW = 28px
+
+"""
+How far down from the design's top the middle of the window's own buttons is,
+when they're beside the toolbar's top row, or nothing when they aren't. With a
+number, the toolbar is higher, with less room over it and over its tabs, so
+that the middle of its top row is in line with the buttons, and the panels
+have less room round them too: see `panel_gap`. Here it's nothing.
+Ladder adds a method: in its window the design can go up to the window's top,
+where the close, minimise and zoom buttons are.
+"""
+button_line(v) = nothing
+
+"""
+How far apart the panels over the design are, and how far they are from its
+edges: 8px, or 5px beside the window's buttons (see `button_line`). There the
+toolbar is that near the design's top, so that its tabs are in line with the
+buttons, and the other gaps are as wide as that one.
+"""
+panel_gap(v) = button_line(v) === nothing ? 8px : 5px
+
+"""
+How round the corners of the window are, when the design goes into them, or
+nothing. With a number, each panel's corners have the same middle as the
+window's, so they're less round by the room between them: see `panel_round`.
+Here it's nothing. Ladder adds a method, for its window when it isn't full screen.
+"""
+window_round(v) = nothing
+
+"How round the corners of the panels over the design are: 9px, or with the window's corners' middle (see `window_round`)"
+panel_round(v) = (r = window_round(v); r === nothing ? 9px : max(r - panel_gap(v), 0px))
+
+
 "The part of the toolbar's top row that has the file's name or path in its middle, on the colour `ground`, and that moves the window"
 grip!(v::DesignView, ground) = begin
   g = part!(Grip, v, :grip)
@@ -1032,10 +1067,13 @@ ribbon(v::DesignView) = begin
   tab(name) = begin
     on = v.tab == name
     live = name == "Sketch"
+    # A tab is as tall as the row's buttons, with room over and under it, so that its middle is theirs. A Row
+    # doesn't move a child that's only 2px shorter than the others into its middle.
     press!(v, (:tab, name); act=e -> editing && !live ? nothing : (v.tab = name)) do hovered
-      Box(height(26px), padding(11px, 0px), radius(6px),
-          background(on ? (live ? colorant"rgb(42,150,80)" : t.select) : hovered && !editing ? t.hover : clear),
-        words(name, 12.5px, color=on && live ? colorant"white" : editing && !live ? Ink.faded(t.dim, 0.6) : t.text, weight=on ? "Semibold" : ""))
+      Box(padding(0px, 1px),
+        Box(height(26px), padding(11px, 0px), radius(6px),
+            background(on ? (live ? colorant"rgb(42,150,80)" : t.select) : hovered && !editing ? t.hover : clear),
+          words(name, 12.5px, color=on && live ? colorant"white" : editing && !live ? Ink.faded(t.dim, 0.6) : t.text, weight=on ? "Semibold" : "")))
     end
   end
   groups = last(Commands.TABS[findfirst(p -> p.first == v.tab, Commands.TABS)])
@@ -1048,9 +1086,12 @@ ribbon(v::DesignView) = begin
   doc = get(m.doc, "undo", 0) isa Number ? m.doc : JSON.Object()
   # The window's own buttons can lie over the left end of the top row, and then the tabs start after them.
   # The row's gap of 2px follows the room for them too.
-  corner = max(corner_room(v) - RIBBON_INSET - 2px, 0px)
+  corner = max(corner_room(v) - ribbon_inset(v) - 2px, 0px)
+  # Beside the window's buttons the room over the tabs is what puts their middle in line with the buttons' middle
+  line = button_line(v)
+  over = line === nothing ? 6px : max(line - panel_gap(v) - 1px - RIBBON_ROW / 2, 0px)
   card!(v, :ribbon) do
-    Column(width(grow=grow), panel_look(t)..., padding(8px, 6px), child_gap=6px, Alignment.Start,
+    Column(width(grow=grow), panel_look(t, panel_round(v))..., padding(over, 8px, 6px, 8px), child_gap=6px, Alignment.Start,
       Row(width(grow=grow), child_gap=2px,
         (corner > 0px ? (Box(width(corner), height(28px)),) : ())...,
         tab.(tabs)...,
@@ -1234,7 +1275,7 @@ browser(v::DesignView) = begin
   tall = min(room, length(rows) * num(ROW_H) + 8 + (isempty(bodies) && isempty(sketches) ? 30 : 0))
   scroll = get!(() -> Scroll(width(grow=grow), height(grow=grow)), v.parts, :browser_scroll)
   card!(v, :browser) do
-    Column(width(BROWSER_W), panel_look(t)..., Alignment.Start,
+    Column(width(BROWSER_W), panel_look(t, panel_round(v))..., Alignment.Start,
       Row(width(grow=grow), height(36px), padding(12px, 0px), border(1px, :solid, Ink.faded(t.line, 0.7))[:bottom],
         Box(words("Browser", 13px, weight="Semibold")), Box(width(grow=grow))),
       Box(width(grow=grow), height(px(tall)), Alignment.Start,
@@ -1577,7 +1618,7 @@ history(v::DesignView) = begin
   upto = something(findlast(<=(v.along + v.area[3]), xs), 0)
   shown = from > upto ? Any[] : Any[(from > 1 ? (Box(width(min=px(xs[from] - 4), preferred=px(xs[from] - 4))),) : ())..., shown[from:upto]...]
   card!(v, :history) do
-    Row(width(grow=grow), height(44px), panel_look(t)..., padding(12px, 0px), child_gap=10px,
+    Row(width(grow=grow), height(44px), panel_look(t, panel_round(v))..., padding(12px, 0px), child_gap=10px,
       Box(words("History", 13px, weight="Semibold")),
       Row(child_gap=0px,
         icon_button(v, :first, "skip-start-fill", "Roll back to the start"; act=e -> roll(0), size=13px),
@@ -1594,7 +1635,7 @@ views(v::DesignView) = begin
   t = theme(v)
   look(turn, tilt) = e -> (v.eye = Scenes.fit(Scenes.Eye(v.eye.target, turn, tilt, v.eye.distance, v.eye.wide), Scenes.box(showing(v)), (v.area[3], v.area[4])))
   card!(v, :views) do
-    Row(height(38px), panel_look(t)..., padding(6px, 0px), child_gap=2px,
+    Row(height(38px), panel_look(t, panel_round(v))..., padding(6px, 0px), child_gap=2px,
       icon_button(v, :fit, "fit", "Show all of the design"; act=e -> fit!(v)),
       icon_button(v, :home, "house", "The first view"; act=look(-35.0, 28.0)),
       Box(width(1px), height(20px), background(t.line)),
@@ -2629,7 +2670,7 @@ side_w(v::DesignView) = px(get(v.parts, :side_w, num(SIDE_W)))
 side_card(v::DesignView, key, icon, title, close, rows...; foot=(), wide=SIDE_W) = begin
   t = theme(v)
   card!(v, key) do
-    Column(width(wide), panel_look(t)..., clip=true, Alignment.Start,
+    Column(width(wide), panel_look(t, panel_round(v))..., clip=true, Alignment.Start,
       Row(width(grow=grow), height(40px), padding(0px, 6px, 0px, 12px), child_gap=8px, border(1px, :solid, Ink.faded(t.line, 0.7))[:bottom],
         Glyph(icon, size=17px), Box(words(title, 13.5px, weight="Semibold")), Box(width(grow=grow)),
         (close === nothing ? () : (icon_button(v, (key, :close), "x-lg", "Close"; act=close, size=12px),))...),

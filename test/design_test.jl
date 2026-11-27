@@ -103,10 +103,16 @@ else
     middle_x(r) = K.num(r.left + r.width / 2)
     middle_y(r) = K.num(r.top + r.height / 2)
     ribbon, grip, title = v.parts[:ribbon], v.parts[:grip], e.nodes[:title]
-    # The design goes up to the window's top. The toolbar is as far from it as from the page's left edge.
+    # The design goes up to the window's top. The toolbar is 5px from it, so that its tabs are in line with the window's
+    # buttons, which are in the middle of the top bar's height. Every panel is 5px from the edges and from the others, and
+    # its corners have the same middle as the window's corners, so they're 5px less round.
     @test K.crumb_in_page(e) && K.under_bar(e) == 0px
-    @test K.num(rect(v).top) == 0 && K.num(rect(ribbon).top) == 8
-    @test K.num(rect(ribbon).left) == K.num(K.page_span(e)[1]) + 8
+    @test K.num(rect(v).top) == 0 && K.num(rect(ribbon).top) == 5
+    @test V.panel_round(v) == K.WINDOW_ROUND - 5px
+    @test abs(middle_y(rect(v.parts[(:tab, "Model")])) - K.num(K.TOPBAR_H) / 2) <= 0.5
+    @test K.num(rect(ribbon).left) == K.num(K.page_span(e)[1]) + 5 && K.num(rect(ribbon).width) == K.num(K.page_span(e)[2]) - 10
+    browser = rect(v.parts[:browser])
+    @test K.num(browser.left) == K.num(rect(ribbon).left) && K.num(browser.top) == K.num(rect(ribbon).top + rect(ribbon).height) + 5
     # The top bar is only its left end, over the sidebar, so the design takes the clicks under the rest
     bar = rect(e.nodes[:topbar])
     @test K.num(bar.width) == K.num(K.side_w(e) + K.bar_corner(e))
@@ -115,6 +121,8 @@ else
     @test abs(middle_x(rect(title)) - middle_x(rect(grip))) <= 1
     @test K.num(rect(grip).left) > K.num(rect(v.parts[(:tab, "Inspect")]).left) && K.num(rect(grip).left + rect(grip).width) <= K.num(rect(v.parts[:undo]).left)
     @test e.nodes[:title_room] == rect(grip).width
+    # The tabs and the buttons of the top row have one middle
+    @test abs(middle_y(rect(v.parts[(:tab, "Model")])) - middle_y(rect(v.parts[:undo]))) <= 0.5
     @test !K.title_edited(e) && !K.page_edited(e)
     # The mouse over the name shows the path, in the toolbar's top row
     at((middle_x(rect(title)), middle_y(rect(title))))
@@ -147,6 +155,8 @@ else
     bar = rect(e.nodes[:topbar])
     @test K.side_w(e) == 0px && K.bar_corner(e) > 100px && K.num(bar.width) == K.num(K.bar_corner(e))
     @test K.num(rect(v.parts[(:tab, "Model")]).left) >= K.num(bar.left + bar.width) - 1
+    # The bar's button that shows the sidebar is in line with the tabs
+    @test abs(middle_y(rect(e.nodes[:panel])) - middle_y(rect(v.parts[(:tab, "Model")]))) <= 0.5
     shot("design-sidebar-closed.png")
     # A top bar that hides leaves no room there: it comes out over the toolbar, as it comes out over a page
     hiding = e.hide_bar
@@ -159,10 +169,14 @@ else
     sleep(0.3)
     frame(w); frame(w); frame(w)
     @test e.panel && K.bar_corner(e) == 0px
+    # Beside the sidebar too, the tabs are in line with the bar's buttons
+    @test K.num(rect(ribbon).top) == 5 && abs(middle_y(rect(v.parts[(:tab, "Model")])) - K.num(K.TOPBAR_H) / 2) <= 0.5
+    shot("design-sidebar-open.png")
     # In agent mode the design starts at the top of the page's card
     K.agent_mode!(e)
     frame(w); frame(w); frame(w)
     @test K.agent_shows(e) && K.num(rect(v).top) == K.num(K.PAGE_CARD_GAP) && K.num(rect(ribbon).top) == K.num(K.PAGE_CARD_GAP) + 8
+    @test V.panel_round(v) == 9px
     @test K.num(rect(e.nodes[:topbar]).width) <= K.num(K.page_card_span(e)[1])
     shot("design-agent-mode.png")
     K.agent_mode!(e)

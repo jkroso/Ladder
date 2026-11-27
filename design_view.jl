@@ -52,6 +52,7 @@
 @use "./file_view" exports...
 @use "./sheet_view" exports...
 @use "./run_code" exports...
+@use "./agent/window" WINDOW_ROUND
 
 export DesignFile, design_part, DesignField, FIELD_PAD, FIELD_ROOM, FIELD_BOX_COLS, follow_page!,
        field_outcome!, box_room, FIELD_H, design_key!, field_key, SHEET_OPEN, mend!, sheet_key, leave_design!,
@@ -529,6 +530,12 @@ Designs.file_part(v::Designs.DesignView, room, ground) = begin
   crumb_in_page(e) ? page_crumb(e, room, ground) : invoke(Designs.file_part, Tuple{Any,Any,Any}, v, room, ground)
 end
 Designs.corner_room(v::Designs.DesignView) = (e = editor(v); crumb_in_page(e) ? bar_corner(e) : 0px)
+# Where the design starts at the window's top, the toolbar's tabs are in line with the close, minimise and zoom buttons and the
+# top bar's buttons, in the middle of the bar's height. In agent mode the design is on the page's card, under them.
+Designs.button_line(v::Designs.DesignView) = (e = editor(v); crumb_in_page(e) && under_bar(e) == 0px ? TOPBAR_H / 2 : nothing)
+# There the panels go into the window's corners, so their corners have the same middle as the window's. A window that fills
+# a screen of its own has square corners.
+Designs.window_round(v::Designs.DesignView) = (e = editor(v); Designs.button_line(v) !== nothing && !e.full_screen ? WINDOW_ROUND : nothing)
 
 "End SolidCraft's program for the design at `path` when the window leaves it, unless the design has changes that aren't saved"
 leave_design!(e, path) = begin
