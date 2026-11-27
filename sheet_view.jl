@@ -131,16 +131,19 @@ spreadsheet(e::Editor, it::Item, g::Grid) = begin
     (v !== nothing && v.failed && at != (r, c)) || return rows(g.flows[r][c])
     [Box(padding(CELL_X, 0px), own!(node!(Document, e, :document), Trouble(message=v.text, size=size * 0.9)))]
   end
-  head = Row(width(grow=grow), height(g.head - 1px), Alignment.Start, line[:between], background(colours.head),
+  # Its corners are round, as a chart's are. The letters are the first of its rows, and the last row's number has a round corner.
+  n = length(g.rows) + 1
+  head = Row(width(grow=grow), height(g.head - 1px), Alignment.Start, line[:between], inner_round(1, n), background(colours.head),
     Box(fixed(g.left - 1px), height(grow=grow)),
     [Box(fixed(g.widths[c]), height(grow=grow), name(letters(c), at !== nothing && at[2] == c)) for c in eachindex(g.widths)]...)
-  body_rows = [Row(width(grow=grow), height(g.heights[r]), Alignment.Start, line[:between], background(colours.bg),
-                 Box(fixed(g.left - 1px), height(grow=grow), background(colours.head), name(string(r), at !== nothing && at[1] == r)),
+  body_rows = [Row(width(grow=grow), height(g.heights[r]), Alignment.Start, line[:between], inner_round(r + 1, n), background(colours.bg),
+                 Box(fixed(g.left - 1px), height(grow=grow), background(colours.head), radius(0px, 0px, 0px, inner_round(r + 1, n).bl),
+                     name(string(r), at !== nothing && at[1] == r)),
                  [Column(fixed(g.widths[c]), height(grow=grow), Alignment.Start, justify=Alignment.Center, cell(r, c)...)
                   for c in eachindex(g.widths)]...)
                for r in eachindex(g.rows)]
   Box(width(grow=grow), padding(0px, TABLE_GAP),
-    Column(width(grow=grow), Alignment.Start, line, name="Spreadsheet", head, body_rows...))
+    Column(width(grow=grow), Alignment.Start, line, radius(BLOCK_ROUND), name="Spreadsheet", head, body_rows...))
 end
 
 "Draw a line around the cell in row `r`, column `c` of a spreadsheet whose item has its top left corner at (x, y)"

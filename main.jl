@@ -6681,8 +6681,9 @@ end
 describe(e::Editor, it::Item, g::Grid) = begin
   isspread(g) && return spreadsheet(e, it, g)
   line = border(1px, :solid, colours.line; between=true)
-  table = Column(width(grow=grow), Alignment.Start, line, name="Table",
-    [Row(width(grow=grow), height(g.heights[r]), Alignment.Start, line[:between],
+  # Its corners are round, as a chart's are
+  table = Column(width(grow=grow), Alignment.Start, line, radius(BLOCK_ROUND), name="Table",
+    [Row(width(grow=grow), height(g.heights[r]), Alignment.Start, line[:between], inner_round(r, length(g.rows)),
          background(r == 1 ? colours.head : iseven(r) ? colours.bg : colours.stripe),
        [Column(fixed(g.widths[c]), height(grow=grow), Alignment.Start, justify=Alignment.Center, rows(g.flows[r][c])...)
         for c in eachindex(g.widths)]...)

@@ -31,7 +31,7 @@ export act!, keyboard_part, reread!, BlockKind, BLOCKS, block_name, block_icon, 
        block_names, block_places, block_lines, block_view, prepare_block!, measure_block!, block_item,
        block_layout, block_place, block_html, write_block!, block_tick!, before_save!, blocks_tick!,
        block_part!, part!, BlockButton, PlanButton, block_button!, block_look, block_bar, block_note,
-       css_colour, can_fill, filling, unfill!, full_block, before_fill!, fill_focus, full!, named
+       BLOCK_ROUND, inner_round, css_colour, can_fill, filling, unfill!, full_block, before_fill!, fill_focus, full!, named
 
 # Each kind of block decides these for its own parts, so this file only names them.
 
@@ -290,8 +290,17 @@ onkey(b::BlockButton, ev::KeyPress{Keys.mouse_left}) = begin
   b.off ? handled : act!(b.of, b.action, ev.window)
 end
 
+const BLOCK_ROUND = 8px   # how round the corners of a block are, and of a table
+
 "What a block's box looks like in the page: round corners and a thin line, as a schedule has"
-block_look() = (width(grow=grow), Alignment.Start, radius(8px), border(1px, :solid, colours.line), background(takeoff_back()))
+block_look() = (width(grow=grow), Alignment.Start, radius(BLOCK_ROUND), border(1px, :solid, colours.line), background(takeoff_back()))
+
+"""
+The corners of row `r` of the `n` rows in a box with round corners and a 1px
+line round it, like a table. The first row's top corners and the last row's
+bottom corners follow the inside of that line, so the row's colour stays in it.
+"""
+inner_round(r, n) = radius(r == 1 ? BLOCK_ROUND - 1px : 0px, r == n ? BLOCK_ROUND - 1px : 0px)
 
 "The row of buttons at the top of a block"
 block_bar(parts...) = Row(width(grow=grow), height(38px), padding(6px, 0px), child_gap=2px, Alignment.Center, background(colours.block), parts...)
