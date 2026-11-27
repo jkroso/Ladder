@@ -28,6 +28,12 @@ Which database should the app use?
 What should the button say?
 ```
 
+```ask
+How should the logo look?
+Size: 48px (16px to 96px)
+Colour: #e8632b
+```
+
 The end.
 """)
 
@@ -115,6 +121,35 @@ end
   sent = read(joinpath(K.Agent.folder(), "$(getpid()).sent"), String)
   # The agent reads the answers in the lines that changed
   @test occursin("-( ) SQLite", sent) && occursin("+(x) SQLite", sent) && occursin("+> Save it", sent)
-  @test !K.dirty(e.buf) && readlines(page)[end-3] == "> Save it"
+  saved = readlines(page)
+  @test !K.dirty(e.buf) && saved[findfirst(==("What should the button say?"), saved) + 1] == "> Save it"
   K.Agent.place[] = ""
+end
+
+@testset "a slider and a colour picker write what you set into the block" begin
+  v = ask(3)
+  @test [f.kind for f in v.data.fields] == [:slider, :colour] && K.Asks.asked(v.data) == "How should the logo look?"
+  slider, picker = K.ask_field(v, 1), K.ask_field(v, 2)
+  @test slider isa K.Slider && (slider.value, slider.min, slider.max, slider.step) == (48, 16, 96, 1)
+  @test picker isa K.ColorPicker && K.colour_hex(picker.color) == "#e8632b"
+  # A click at the slider's left end sets it to the least it goes to, and the block's line says so
+  r = rect(slider)
+  click((K.num(r.left) + 1, middle(r)[2]))
+  @test block(3) == ["How should the logo look?", "Size: 16px (16px to 96px)", "Colour: #e8632b"] && K.dirty(e.buf)
+  # A colour that's picked is written as its line writes one
+  picker.color = K.HSV(210, 0.8, 0.86); frames()
+  @test block(3)[3] == "Colour: " * K.colour_hex(picker.color) && block(3)[3] != "Colour: #e8632b"
+  html = K.page_html(e)
+  @test occursin("Size: <strong>16px</strong>", html) && occursin("<strong>$(K.colour_hex(picker.color))</strong>", html)
+  # ⌘Z puts the colour back, and the picker shows it
+  K.undo!(e.buf); frames()
+  @test block(3)[3] == "Colour: #e8632b" && K.colour_hex(picker.color) == "#e8632b"
+  # A line that's typed sets the slider
+  b = e.buf
+  i = findfirst(l -> startswith(l, "Size: "), b.lines)
+  K.edit!(b, (i, 6), (i, 8), "80")
+  b.caret = b.anchor = (1, 0)   # with the caret in its lines, the block shows its code
+  frames()
+  @test slider.value == 80 && block(3)[2] == "Size: 80px (16px to 96px)"
+  shot("ask values.png")
 end

@@ -357,6 +357,8 @@ end
 @use "github.com/jkroso/UI.jl/Interface/Semantic/TextInput" => TextInputs
 @use "github.com/jkroso/UI.jl/Interface/Semantic/Link" Link
 @use "github.com/jkroso/UI.jl/Interface/Semantic/RadioGroup" RadioGroup
+@use "github.com/jkroso/UI.jl/Interface/Semantic/Slider" Slider
+@use "github.com/jkroso/UI.jl/Interface/Semantic/ColorPicker" ColorPicker
 @use "github.com/jkroso/UI.jl/Interface/Semantic/ListTree" => Tree
 @use "github.com/jkroso/UI.jl/Interface/Semantic/STLViewer" STLViewer Mesh load! show!
 @use "github.com/jkroso/UI.jl/Interface/Semantic/Player" AudioPlayer VideoPlayer pause! card_bottom controls_show
@@ -376,7 +378,7 @@ end
 @use "github.com/jkroso/Units.jl" => Units
 @use "github.com/jkroso/Units.jl/Money" => Cash
 @use "./spreadsheet" SPREADSHEET Value spreadcells spreadtexts isformula letters answers moved
-@use "./merge" changes combine follow
+@use "./merge" changes combine follow unified
 @use "./agent" => Agent
 @use "./pasteboard" => Pasteboard
 @use "./takeoff" => Plans
@@ -441,7 +443,7 @@ Guard.LADDER[] = @__MODULE__
 @use "github.com/jkroso/UI.jl/Interface/draw" set_tool! window_tool draw_tool draw_tool_under tool_input tool_cursor invalidate_layout!
 @use "github.com/jkroso/URI.jl/FSPath" FSPath
 @use "github.com/jkroso/URI.jl/FS" => FS FSObject AbstractDirectory
-@use Colors: @colorant_str, RGBA, Colorant
+@use Colors: @colorant_str, RGBA, RGB, HSV, Colorant
 @use InteractiveUtils: clipboard
 @use InteractiveUtils: code_native, code_llvm
 @use Dates: Dates, Date, Day
@@ -778,8 +780,8 @@ page_site(path::AbstractString) = (at = web_address(path); isempty(at) && (at = 
 "True when the page shows no caret and no key changes it: after Escape, and all the time in a page that's never changed"
 caretless(b::Buffer) = b.reading || b.fixed
 
-"True when a click with no key held on a link of the page `b` opens the link: in a page that's never changed, and in a page from a web server"
-follows_links(b::Buffer) = b.fixed || in_browser(b.path)
+"True when a click with no key held on a link of the page `b` opens the link: in a page that's never changed, in a page from a web server, and in what an agent said"
+follows_links(b::Buffer) = b.fixed || in_browser(b.path) || is_reply(b.path)
 
 const stamp = Ref(0)
 
@@ -1013,16 +1015,9 @@ restore!(b::Buffer, (lines, caret, anchor, version, rest)) = begin
   b.typed = 0.0
 end
 
-"""
-True when a part of the page of `b` may change the page's text, like a number
-that you drag or a block that writes its lines: in a page that you can change,
-and in a reply of an agent, which no key changes.
-"""
-parts_change(b::Buffer) = !readonly(b) && (!b.fixed || is_reply(b.path))
-
-"Replace the text from `lo` to `hi` with `new`, and put the caret after it. With `part`, a part of the page makes the change, and not a key: see `parts_change`."
-edit!(b::Buffer, lo::Pos, hi::Pos, new::AbstractString; typing=false, part=false) = begin
-  (part ? !parts_change(b) : readonly(b) || b.fixed) && return b   # nothing changes a file that's only shown, an email, or a file that's read-only
+"Replace the text from `lo` to `hi` with `new`, and put the caret after it"
+edit!(b::Buffer, lo::Pos, hi::Pos, new::AbstractString; typing=false) = begin
+  (readonly(b) || b.fixed) && return b   # nothing changes a file that's only shown, an email, or a file that's read-only
   # No key types in the lines of a CSV file while its table shows. The table changes them with `table_edit!`.
   b.view == :file && return b
   replace_text!(b, lo, hi, new; typing)
@@ -1060,9 +1055,10 @@ True when the lines of `b` are what its file holds, so they can be written to
 it. The lines of a file that's only shown can be a part of the file, or its
 bytes. The lines of an email are the email as a page, which isn't what its file holds.
 A page from a web server is a file of the browser folder: ⌘S writes your changes
-there, and never to the server. See "the browser folder".
+there, and never to the server. See "the browser folder". What an agent said
+is in no file of its own: a session's file keeps it.
 """
-writes(b::Buffer) = !(isempty(b.path) || readonly(b) || b.fixed || Eml.isemail(b.path) || isremote(b.path))
+writes(b::Buffer) = !(isempty(b.path) || readonly(b) || b.fixed || Eml.isemail(b.path) || isremote(b.path) || is_reply(b.path))
 
 save!(b::Buffer) = begin
   writes(b) || return
@@ -3444,7 +3440,7 @@ write_block!(v, lang, new::Vector{String}; typing=false, reread::Bool=true) = be
   old = b.lines[i+1:t-1]
   new == old && return (reread ? reread!(v, new) : (v.lines = new; v))
   caret, anchor = b.caret, b.anchor
-  edit!(b, line_end(b, i), line_end(b, t - 1), isempty(new) ? "" : "\n" * join(new, "\n"); typing, part=true)
+  edit!(b, line_end(b, i), line_end(b, t - 1), isempty(new) ? "" : "\n" * join(new, "\n"); typing)
   by = length(new) - length(old)
   moved(p) = p[1] >= t ? (p[1] + by, p[2]) : p[1] > i ? (i, 0) : p
   b.caret, b.anchor = moved(caret), moved(anchor)
@@ -16943,10 +16939,12 @@ block_html(e, v::MapView) = map_html(e, v)
 # A code block in the language `ask` shows a question, the answers to choose
 # from, and a field to type in. ask.jl says how the block is written. A click
 # on an answer chooses it, and what you type in the field goes under the
-# answers. Both are written into the block's lines. So an agent that waits for
-# the page reads your answer in the lines that you changed. The block has no
-# button that sends them: the bell in the top bar sends the page, and so does
-# ⌘Return.
+# answers. A line like `Size: 48px (16px to 96px)` shows a slider, and a line
+# like `Colour: #e8632b` a colour picker. All of these are written into the
+# block's lines. So an agent that waits for the page reads your answer in the
+# lines that you changed. The block has no button that sends them: the bell in
+# the top bar sends the page, and so does ⌘Return. In what an agent said in a
+# session, your next words send them: see "what you change in a reply".
 
 const ASK = Asks.ASK
 push!(BLOCK_ICONS, "question-circle", "check")
@@ -16973,6 +16971,25 @@ ask_input(v::AskView) = block_part!(v, :input) do
             look=(_, text) -> Row(width(grow=grow), height(grow=grow), clip=true, text))
 end
 
+"The colour that a line of a question names, like #e8632b"
+colour_of(f::Asks.Field) = try parse(Colorant, f.colour) catch; colorant"black" end
+
+"A colour as a line writes it: # and its red, green and blue in hexadecimal, like #e8632b"
+colour_hex(c) = (rgb = convert(RGB, c); "#" * join(string(round(Int, 255 * clamp(x, 0, 1)), base=16, pad=2) for x in (rgb.r, rgb.g, rgb.b)))
+
+"The slider or the colour picker of the `i`th value that the question of `v` asks for"
+ask_field(v::AskView, i::Int) = begin
+  f = v.data.fields[i]
+  part = get(v.parts, (:field, i), nothing)
+  (f.kind == :slider ? part isa Slider : part isa ColorPicker) && return part
+  delete!(v.parts, (:field, i))
+  block_part!(v, (:field, i)) do
+    f.kind == :colour ? ColorPicker(color=convert(HSV, colour_of(f))) :
+      Slider(value=f.number, min=f.low, max=f.high, step=Asks.step(f),
+             format=x -> i <= length(v.data.fields) ? Asks.said(v.data.fields[i], x) : "")
+  end
+end
+
 reread!(v::AskView, lines) = begin
   lines == v.lines && return v
   v.lines = lines
@@ -16980,15 +16997,41 @@ reread!(v::AskView, lines) = begin
   # The field shows what the block says was typed, as it does after ⌘Z takes some of it back
   i = ask_input(v)
   i.text == v.data.note || (i.text = v.data.note; i.anchor = i.cursor = length(i.text))
+  # So does each slider and colour picker
+  for (k, f) in enumerate(v.data.fields)
+    part = ask_field(v, k)
+    if f.kind == :slider
+      part.min, part.max, part.step = f.low, f.high, Asks.step(f)
+      part.value == f.number || (part.value = f.number)
+    else
+      colour_hex(part.color) == colour_hex(colour_of(f)) || (part.color = convert(HSV, colour_of(f)))
+    end
+  end
   v
 end
 
-"What happens to a question in each frame, before the page is laid out: what was typed in its field is written into its block"
+"""
+What happens to a question in each frame, before the page is laid out: what
+was typed in its field, where its sliders are set and the colours that were
+picked are written into its block
+"""
 block_tick!(v::AskView) = begin
+  q = v.data
+  changed = false
   text = ask_input(v).text
-  text == v.data.note && return v
-  v.data.note = text
-  write_block!(v, ASK, Asks.written(v.data), typing=true)
+  text == q.note || (q.note = text; changed = true)
+  for (i, f) in enumerate(q.fields)
+    part = ask_field(v, i)
+    if f.kind == :slider
+      was = f.number
+      Asks.set!(f, part.value)
+      changed |= f.number != was
+    else
+      picked = colour_hex(part.color)
+      picked == colour_hex(colour_of(f)) || (f.colour = picked; changed = true)
+    end
+  end
+  changed ? write_block!(v, ASK, Asks.written(q), typing=true) : v
 end
 
 """
@@ -17031,7 +17074,7 @@ describe(v::AskView) = begin
   q = v.data
   input = ask_input(v)
   input.color = colours.ink
-  input.placeholder = isempty(q.options) ? "Type your answer" : "Add a note"
+  input.placeholder = isempty(q.options) && isempty(q.fields) ? "Type your answer" : "Add a note"
   w = window_of(v)
   typing = w !== nothing && w.focus === input
   with_theme(component_theme(e.zoom)) do
@@ -17040,11 +17083,24 @@ describe(v::AskView) = begin
         Box(padding(0px, 1px), Icon("question-circle", size=16px, color=Asks.answered(q) ? colours.string : colours.accent)),
         beside_mark(18px, Text(isempty(q.words) ? "A question with no words yet" : Asks.asked(q), size=15px, family=SANS,
                                subfamily="Semibold", color=isempty(q.words) ? colours.dim : colours.ink, wrap=WrapMode.words))),
+      (ask_field_row(v, i) for i in eachindex(q.fields))...,
       (isempty(q.options) ? () : (Column(width(grow=grow), Alignment.Start, child_gap=2px,
         [block_part!(() -> AskOption(of=v, i=i), v, (:option, i)) for i in eachindex(q.options)]...),))...,
       Box(width(grow=grow), height(30px), padding(9px, 0px), radius(6px), border(1px, :solid, typing ? colours.accent : colours.line),
           background(colours.bg), input))
   end
+end
+
+const ASK_NAME_W = 110px   # of the name beside a slider
+
+"A value that a question asks for: its name, with a slider beside it, or a colour picker under it"
+ask_field_row(v::AskView, i::Int) = begin
+  f = v.data.fields[i]
+  name = Text(f.name, size=13.5px, family=SANS, color=colours.ink, wrap=WrapMode.words)
+  f.kind == :slider ?
+    Row(width(grow=grow), padding(4px, 6px), child_gap=12px, Alignment.Center, name="Slider",
+      Box(fixed(ASK_NAME_W), name), Box(width(grow=grow), ask_field(v, i))) :
+    Column(width(grow=grow), padding(4px, 6px), child_gap=8px, Alignment.Start, name="Colour", Box(name), ask_field(v, i))
 end
 
 # Return in the field gives the keyboard back to the page
@@ -17054,7 +17110,10 @@ onkey(v::AskView, ev::KeyPress{Keys.enter}) = unmodified(ev) ? (focus(editor(v))
 ask_html(e, v::AskView) = begin
   q = v.data
   rows = ["<li>$(o.chosen ? "☑" : "☐") $(o.chosen ? "<strong>$(escape(o.text))</strong>" : escape(o.text))</li>" for o in q.options]
-  "<p><strong>$(escape(Asks.asked(q)))</strong></p>\n" * (isempty(rows) ? "" : "<ul style=\"list-style: none; padding-left: 0.5em\">\n" * join(rows, "\n") * "\n</ul>\n") *
+  values = [f.kind == :slider ? "<li>$(escape(f.name)): <strong>$(escape(Asks.said(f)))</strong></li>" :
+            "<li>$(escape(f.name)): <span style=\"display: inline-block; width: 0.9em; height: 0.9em; vertical-align: middle; background: $(colour_hex(colour_of(f)))\"></span> <strong>$(escape(f.colour))</strong></li>"
+            for f in q.fields]
+  "<p><strong>$(escape(Asks.asked(q)))</strong></p>\n" * (isempty(values) ? "" : "<ul>\n" * join(values, "\n") * "\n</ul>\n") * (isempty(rows) ? "" : "<ul style=\"list-style: none; padding-left: 0.5em\">\n" * join(rows, "\n") * "\n</ul>\n") *
   (isempty(strip(q.note)) ? "" : "<blockquote>$(escape(q.note))</blockquote>")
 end
 
@@ -25391,7 +25450,7 @@ what the row comes to. Nothing when the place has no such number.
 """
 scrub_at(e, pos) = begin
   b = e.buf
-  (isempty(e.layout) || !parts_change(b) || b.view != :markdown) && return nothing
+  (isempty(e.layout) || readonly(b) || b.fixed || b.view != :markdown) && return nothing
   dx, dy = pos[1] - e.origin[1], pos[2] - e.origin[2]
   (dy >= 0px && pos[2] >= above_page(e)) || return nothing
   it = e.layout[item_under(e, dx, dy)]
@@ -25430,7 +25489,7 @@ so that it reads as a number to take hold of. The page's text is at `ui`.
 """
 underline_scrubs(ctx, e, ui) = begin
   b = e.buf
-  (!parts_change(b) || b.view != :markdown) && return
+  (readonly(b) || b.fixed || b.view != :markdown) && return
   for it in e.layout[e.shown]
     f = it.content
     (f isa Flow && !f.raw && occursin(INLINE, b.lines[it.first])) || continue
@@ -25777,7 +25836,7 @@ scrub_to!(e, pos) = begin
   (steps == s.steps || !(1 <= s.line <= length(b.lines))) && return e
   new = nudged(s.text, steps)
   caret, anchor = b.caret, b.anchor
-  edit!(b, (s.line, s.lo), (s.line, s.hi), new, typing=true, part=true)
+  edit!(b, (s.line, s.lo), (s.line, s.hi), new, typing=true)
   by = length(new) - (s.hi - s.lo)
   kept(p) = p[1] == s.line && p[2] >= s.hi ? (p[1], p[2] + by) : p
   b.caret, b.anchor = kept(caret), kept(anchor)
@@ -28525,7 +28584,7 @@ with their text.
 tick_item!(b::Buffer, i::Int, done::Bool) = begin
   new, z = Repeats.tick(b.lines, i, done; today=calendar_today())
   caret, anchor = b.caret, b.anchor
-  edit!(b, (i, 0), line_end(b, z), join(new, "\n"), part=true)
+  edit!(b, (i, 0), line_end(b, z), join(new, "\n"))
   grow = length(new) - (z - i + 1)
   # A line after the item moves down or up with the line that went in or out. One that went takes it to the item's last line.
   keep((l, c)) = l > z ? (l + grow, c) : l < i + length(new) ? (l, min(c, length(b.lines[l]))) : line_end(b, i + length(new) - 1)
@@ -29601,7 +29660,13 @@ drag!(e, pos) = begin
   touch!(e)
 end
 
-onkey(d::Document, ev::KeyPress{Keys.mouse_left}) = press!(editor(d), ev.window.mouse)
+onkey(d::Document, ev::KeyPress{Keys.mouse_left}) = begin
+  e = editor(d)
+  done = press!(e, ev.window.mouse)
+  # In what an agent said, once it's all said, the click puts the caret there. The pane under it would give the keyboard to the words that you type.
+  part = agent_part_of(e)
+  part !== nothing && part[2] == :reply && !e.buf.fixed ? handled : done
+end
 onkey(p::Page, ev::KeyPress{Keys.mouse_left}) = press!(editor(p), ev.window.mouse)
 onmouse(d::Document, ev::MouseMove) = begin
   e = editor(d)
@@ -48785,18 +48850,24 @@ is_reply(path::AbstractString) = endswith(path, REPLY_NAME) && basename(path) ==
 
 # --- what a session holds ---
 
-"Words that you gave the agent. `about` is what the window showed then, like the heading that the caret was under. `pictures` are the files of the pictures that went with them."
+"Words that you gave the agent. `about` is what the window showed then, like the heading that the caret was under. `pictures` are the files of the pictures that went with them, and `changed` is how many of the agent's replies you had changed."
 @def mutable struct YouSaid
   words::String = ""
   about::String = ""
   pictures::Vector{String} = String[]
+  changed::Int = 0
 end
 
-"What the agent said, as Markdown. `whole` is false while its words still come, and `n` goes up with each change to them."
+"""
+What the agent said, as Markdown. `whole` is false while its words still
+come, and `n` goes up with each change to them. `saw` is what the agent last
+saw of it, when you changed it since: see "what you change in a reply".
+"""
 @def mutable struct AgentReply
   text::String = ""
   whole::Bool = false
   n::Int = 0
+  saw::Union{Nothing,String} = nothing
 end
 
 "A step that the agent took with a tool, like reading a file. `words` say what it does, and `state` is :going, :done or :failed."
@@ -48863,7 +48934,7 @@ end
 const SESSION_COMMAND = Ref{Any}(nothing)
 
 "What every session is told of how Ladder shows the agent's words"
-const BRIEF_SHOWS = "Ladder draws what you say as a page, not as a terminal's text: Markdown with headings, lists, tables, to-do boxes, maths, `mermaid` diagrams and `chart` blocks. So answer as a short page, and use a table, a diagram or a chart where it says a thing better than words. A chart is a `chart` code block: a line `kind: bars`, `kind: lines` or `kind: pie`, an empty line, then rows with ` | ` between the cells, and the names of the columns in the first row. Ladder draws these kinds of Mermaid diagram and no others: flowchart, sequenceDiagram, stateDiagram-v2, classDiagram, pie, mindmap, erDiagram, gantt and timeline. Your answers can also have the parts of a page that run code, and they work as they do in a page. A sum in a line of text is a `!` and then Julia code between backticks, like !`area = 4m * 2.5m`: Ladder shows what it comes to, the user can drag a number in it, like the 4m, and each sum that uses its name follows. A number can have a unit of Units.jl, like m, kg, hr or USD. Write 70% as 0.7. A `sheet` block is a list of rows, each a name, `=`, and a number or a sum, like `Width = 4m`. A `ui` block holds Julia code that makes one of UI.jl's components, like `ProgressBar(value=0.7)`, and shows it. A block in a language that a Julia file of the folder you started in defines, like `progress` for progress.jl, shows what that file makes. A `julia` block shows as code and doesn't run. If you have a skill for Ladder's pages, it says more about what a page can show."
+const BRIEF_SHOWS = "Ladder draws what you say as a page, not as a terminal's text: Markdown with headings, lists, tables, to-do boxes, maths, `mermaid` diagrams and `chart` blocks. So answer as a short page, and use a table, a diagram or a chart where it says a thing better than words. A chart is a `chart` code block: a line `kind: bars`, `kind: lines` or `kind: pie`, an empty line, then rows with ` | ` between the cells, and the names of the columns in the first row. Ladder draws these kinds of Mermaid diagram and no others: flowchart, sequenceDiagram, stateDiagram-v2, classDiagram, pie, mindmap, erDiagram, gantt and timeline. Your answers can also have the parts of a page that run code, and they work as they do in a page. A sum in a line of text is a `!` and then Julia code between backticks, like !`area = 4m * 2.5m`: Ladder shows what it comes to, the user can drag a number in it, like the 4m, and each sum that uses its name follows. A number can have a unit of Units.jl, like m, kg, hr or USD. Write 70% as 0.7. A `sheet` block is a list of rows, each a name, `=`, and a number or a sum, like `Width = 4m`. A `ui` block holds Julia code that makes one of UI.jl's components, like `ProgressBar(value=0.7)`, and shows it. A block in a language that a Julia file of the folder you started in defines, like `progress` for progress.jl, shows what that file makes. A `julia` block shows as code and doesn't run. To ask the user a question, write an `ask` block: the question on its first lines, then `( ) answer` for each answer when the user picks one, or `[ ] answer` when they can pick many. In an `ask` block, a line like `Size: 48px (16px to 96px)` is a slider, and a line like `Colour: #e8632b` is a colour to pick. The user can change what you said: type in it, drag a number, choose an answer, move a slider or pick a colour. Ladder writes each change into your words. The user's next message then starts with what they changed since you last saw it, between <changes> and </changes>: a diff of each reply that changed, from what you last saw to what it says now. A message can be only that block, when the user sent their changes with no words. If you have a skill for Ladder's pages, it says more about what a page can show."
 
 """
 What the agent is told of where it is, on top of what it's always told: that
@@ -48989,8 +49060,8 @@ tell!(s::AgentSession, o) = begin
 end
 
 "Give the agent of the session `s` the words `words`. `about` is what the window shows, and `told` says it to the agent."
-say!(s::AgentSession, words, about="", told=""; pictures=String[]) = begin
-  push!(s.items, YouSaid(words=String(words), about=String(about), pictures=copy(pictures)))
+say!(s::AgentSession, words, about="", told=""; pictures=String[], changed=0) = begin
+  push!(s.items, YouSaid(words=String(words), about=String(about), pictures=copy(pictures), changed=changed))
   content = join(filter(!isempty, [String(told), String(words), isempty(pictures) ? "" : pictures_note(s, pictures)]), "\n\n")
   s.sent = content
   if speaks_acp(s)
@@ -50178,6 +50249,8 @@ end
 "Put the words of the reply `it` in its editor `sub`, when they changed since it last showed them"
 show_reply!(sub, it::AgentReply) = begin
   sub.nodes[:reply] = it
+  # What the agent still says can't be changed, as its next words would take the place of the change
+  sub.buf.fixed = !it.whole
   get(sub.nodes, :shown, -1) == it.n && return sub
   b = sub.buf
   b.lines = String.(split(rstrip(it.text), '\n'))
@@ -50709,7 +50782,8 @@ send_words!(p::AgentPane) = begin
   e = editor(p)
   words = String(strip(join(p.field.buf.lines, "\n")))
   pictures = filter(isfile, attached(p))
-  isempty(words) && isempty(pictures) && return nothing
+  edited = p.session === nothing ? AgentReply[] : changed_replies(p.session)
+  isempty(words) && isempty(pictures) && isempty(edited) && return nothing
   b = e.buf
   s = try
     writes(b) && (dirty(b) || !isfile(b.path)) && save!(b)
@@ -50721,7 +50795,10 @@ send_words!(p::AgentPane) = begin
   end
   p.error = ""
   about, told = pane_context(p, e)
-  say!(s, words, about, told; pictures=pictures)
+  changes = changes_told(s)
+  say!(s, words, about, join(filter(!isempty, [told, changes]), "\n\n"); pictures=pictures, changed=length(edited))
+  # The agent knows what each reply says now
+  foreach(it -> it isa AgentReply && (it.saw = nothing), s.items)
   p.follow = true
   # A new field takes the keyboard, when the old one had it
   w = window_of(e)
@@ -50910,7 +50987,8 @@ end
 What happens in each frame to the reply `sub` of the pane `p`, as to a page:
 a number that you drag in it changes, its sums run again, and its blocks
 write their lines. Once the agent has said the whole reply, what you changed
-in it is the reply, so a session's file keeps it.
+in it is the reply, so a session's file keeps it. The reply keeps what the
+agent saw of it, for your next words to say what changed.
 """
 reply_tick!(p::AgentPane, sub) = begin
   blocks_tick!(sub)
@@ -50919,9 +50997,54 @@ reply_tick!(p::AgentPane, sub) = begin
   it, s = get(sub.nodes, :reply, nothing), p.session
   if it isa AgentReply && it.whole && s !== nothing && get(sub.nodes, :shown, -1) == it.n
     text = join(sub.buf.lines, "\n")
-    text == rstrip(it.text) || (it.text = text; s.version += 1)
+    if text != rstrip(it.text)
+      it.saw === nothing && (it.saw = String(rstrip(it.text)))
+      it.text = text
+      s.version += 1
+    end
   end
   sub
+end
+
+# --- what you change in a reply ---
+#
+# Once the agent has said all of a reply, the reply is a page that you can
+# change: type in it, drag a number, choose an answer of an `ask` block, move
+# its slider or pick its colour. The reply keeps what the agent last saw of
+# it. Your next words to the agent start with what you changed in each reply
+# since then, as a diff, between <changes> and </changes>. With nothing
+# typed, the send button sends only the changes. So the agent can ask a
+# question with a slider or a colour picker, and read your answer.
+
+"True when you changed the reply `it` since the agent last saw it"
+reply_changed(it::AgentReply) = it.saw !== nothing && it.saw != rstrip(it.text)
+
+"The replies of the session `s` that you changed since the agent last saw them"
+changed_replies(s::AgentSession) = AgentReply[it for it in s.items if it isa AgentReply && reply_changed(it)]
+
+"""
+What the agent of the session `s` is told of the replies that you changed:
+for each, its place among the agent's replies, how it started, and a diff
+from what the agent last saw to what it says now. "" when you changed none.
+"""
+changes_told(s::AgentSession) = begin
+  replies = [it for it in s.items if it isa AgentReply]
+  told = String[]
+  for (k, it) in enumerate(replies)
+    reply_changed(it) || continue
+    was, now = split(it.saw, '\n'), split(rstrip(it.text), '\n')
+    start = first(String(strip(first(was))), 80)
+    push!(told, "Your reply $k of the $(length(replies)) in this session, which started \"$start\":\n" * rstrip(unified(was, now)))
+  end
+  isempty(told) ? "" : "<changes>\n" * join(told, "\n\n") * "\n</changes>"
+end
+
+"The tooltip of the send button of the pane `p`: it says what goes with your words"
+send_tip(p::AgentPane) = begin
+  more = String[]
+  isempty(first(pane_context(p, editor(p)))) || push!(more, "context")
+  p.session === nothing || isempty(changed_replies(p.session)) || push!(more, "your changes")
+  (isempty(more) ? "Send" : "Send with " * join(more, " and ")) * "  ⏎"
 end
 
 "Keep the newest words of the pane `p` in sight, until you scroll up from them. Back at the end, it follows them again."
@@ -51031,14 +51154,20 @@ talk_row(p::AgentPane, e, it::YouSaid, room) = begin
   pictures = isempty(it.pictures) ? () :
     (Row(Alignment.End, child_gap=8px, padding(2px, 0px, 2px, 0px), name="Your pictures", (small_picture(path, PICTURE_TALL * talk_zoom(e)) for path in it.pictures)...),)
   words = isempty(it.words) ? () : (Box(padding(13px, 8px), radius(12px), background(on_glass(0.09)), words_block(e, it.words, colours.ink, inside; size=REPLY_SIZE)),)
+  changes = it.changed == 0 ? () :
+    (Row(height(18px), Alignment.Center, child_gap=5px, name="Your changes", Icon("pencil", size=11px, color=colours.faint),
+         Box(label("Your changes to $(it.changed == 1 ? "a reply" : "$(it.changed) replies")", 11.5px * talk_zoom(e), color=colours.faint))),)
   Column(width(grow=grow), Alignment.End, child_gap=3px, padding(6px, 0px, 2px, 0px), name="You said",
-    about..., pictures..., words...)
+    about..., changes..., pictures..., words...)
 end
 
 "What the agent said, as a page of Ladder's as wide as `room`"
 talk_row(p::AgentPane, e, it::AgentReply, room) = begin
   sub = get!(() -> reply_editor(p, e, p.session.dir), p.parts, (:reply, objectid(it)))
   show_reply!(sub, it)
+  # It shows a caret only while it has the keyboard, as a part of another page does
+  w = window_of(e)
+  (w !== nothing && w.focus === sub) || (sub.buf.reading = true)
   pane_style!(sub, e; own=talk_on_page[])
   pane_layout!(sub, room)
   tall = isempty(sub.layout) ? 0px : lowest(sub, sub.layout)
@@ -51236,7 +51365,7 @@ name, and whether text is selected. The open part lies over your words and
 moves none of them. It shuts when the mouse leaves.
 """
 send_button(p::AgentPane, e, over::Bool) = begin
-  ready = p.field.buf.lines != [""]
+  ready = p.field.buf.lines != [""] || (p.session !== nothing && !isempty(changed_replies(p.session)))
   about = over ? first(pane_context(p, e)) : ""
   # Whether it's open, since when, and the words in it, which stay while it shuts
   kept = get(p.parts, :send_open, (false, 0.0, ""))
@@ -51282,7 +51411,7 @@ end
 # A tooltip in the pane is put by the button's rectangle
 onmouse(b::PaneButton, ev::MouseMove) = begin
   # The send button shows what goes with your words while the mouse is on it, so its tooltip says that they go together
-  tip = b.action == :send ? (isempty(first(pane_context(b.of, editor(b.of)))) ? "Send  ⏎" : "Send with context  ⏎") :
+  tip = b.action == :send ? send_tip(b.of) :
         b.action == :stop ? "Stop the agent. What it changed so far stays." :
         b.action == :new ? "End this session, and start a new one" : b.action == :agent ? "Choose the agent" :
         b.action == :model ? "Choose the model" :
@@ -51616,9 +51745,10 @@ talk_part(it::YouSaid) = begin
   about = Dict{String,Any}()
   isempty(it.about) || (about["about"] = it.about)
   isempty(it.pictures) || (about["pictures"] = it.pictures)
+  it.changed == 0 || (about["changed"] = it.changed)
   (talk_mark("you", isempty(about) ? nothing : about), it.words)
 end
-talk_part(it::AgentReply) = (talk_mark("agent"), rstrip(it.text))
+talk_part(it::AgentReply) = (talk_mark("agent", reply_changed(it) ? Dict("saw" => it.saw) : nothing), rstrip(it.text))
 talk_part(it::AgentStep) = (talk_mark("step", Dict("tool" => it.tool, "state" => String(it.state))), it.words)
 talk_part(it::AgentWants) = (talk_mark("asked", Dict("tool" => it.tool, "answer" => String(it.answer), "detail" => it.detail)), it.words)
 talk_part(it::SessionNote) = (talk_mark("note", it.bad ? Dict("bad" => true) : nothing), it.words)
@@ -51660,9 +51790,12 @@ read_talk(text::AbstractString) = begin
       haskey(AGENTS_RENAMED, agent) && ((agent, id, model) = (AGENTS_RENAMED[agent], "", ""))
     elseif kind == "you"
       pictures = json_field(about, "pictures")
-      push!(items, YouSaid(words=words, about=said("about"), pictures=pictures isa AbstractVector ? String[p for p in pictures if p isa AbstractString] : String[]))
+      n = json_field(about, "changed")
+      push!(items, YouSaid(words=words, about=said("about"), pictures=pictures isa AbstractVector ? String[p for p in pictures if p isa AbstractString] : String[],
+                           changed=n isa JSONNumber ? something(tryparse(Int, n.text), 0) : 0))
     elseif kind == "agent"
-      push!(items, AgentReply(text=words, whole=true, n=1))
+      saw = json_field(about, "saw")
+      push!(items, AgentReply(text=words, whole=true, n=1, saw=saw isa AbstractString ? String(saw) : nothing))
     elseif kind == "step"
       push!(items, AgentStep(id="kept-$(length(items))", tool=said("tool"), words=words, state=said("state") == "failed" ? :failed : :done))
     elseif kind == "asked"

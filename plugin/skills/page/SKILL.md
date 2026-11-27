@@ -46,6 +46,7 @@ How to read it:
 - It lists only the user's changes. A change that you made to the file is not in it.
 - A box that changed from `[ ]` to `[x]` is a choice that the user made. So is an answer of an `ask` block that changed from `( )` to `(x)`.
 - A new line that starts with `>` in an `ask` block is what the user typed as their answer.
+- A new value in a slider's line or a colour's line of an `ask` block, like `Size: 64px (16px to 96px)`, is what the user set.
 - `[accepted]` or `[rejected]` at the end of an `@@` line of a `changes` block is the user's choice for that change. Ladder has already made each accepted change in its file.
 - Two new lines that start with `#` at the end of a `changes` block are the user's comment on one line of the diff. The first starts with `# Comment on change 2, line 3:` and has that line of the diff after it. The second has the user's words.
 - A new line that talks to you, like the question above, is a note. Do what it asks, or answer it, and then take the note out of the page.
@@ -100,7 +101,7 @@ Exit code 3 means that Ladder is not installed, or that it is too old to send a 
 | A task that comes back, like every week | A task that ends with `every day`, `every 2 weeks`, `every month`, `every Monday`, `every weekday`, `weekly` and the like, after its day or before it: `- [ ] Test the smoke alarms 2026-12-01 every 3 months`. When the user ticks it, Ladder adds the next one under it. A limit after those words ends it: `for 3 days`, `for 6 months`, `4 times` or `once`. |
 | A comment on some words, in the margin | `{==the words==}{>>the comment<<}`. The words get a highlighter's colour, and the comment shows as a card at the right of the text. |
 | A note that the page hides | `%%the note%%` in a line, or lines between a line of `%%` and another. |
-| A question with answers to choose | An `ask` code block. See below. |
+| A question with answers to choose, or a number or a colour for the user to set | An `ask` code block. See below. |
 | Changes to a file, to accept or reject | A `changes` code block. See below. |
 | Numbers as bars, lines or a pie | A `chart` code block. See below. |
 | The page's tasks as cards in columns | A `board` code block. See below. |
@@ -313,6 +314,17 @@ Which queue should the price checks use?
 ````
 
 The user clicks an answer, and Ladder writes `(x)` or `[x]` in its line. What they type goes in a line that starts with `>`. Use one block for each question. An older Ladder shows the block as code, and the user can still type an `x` between the brackets.
+
+A question can also ask for a value that the user sets. A line with a name, a number and its range in brackets is a slider. A line with a name and a colour in hexadecimal is a colour picker. When the user moves the slider or picks a colour, Ladder writes the new value in the line, in the same form. A slider's number has as many digits after the point as the line's numbers have, so write `0.50 (0 to 1)` for steps of 0.01.
+
+````
+```ask
+How should the logo look?
+Size: 48px (16px to 96px)
+Opacity: 0.8 (0 to 1)
+Colour: #e8632b
+```
+````
 
 ### Changes to accept or reject
 

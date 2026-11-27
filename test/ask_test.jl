@@ -36,3 +36,25 @@ end
   A.choose!(q, 3)
   @test !A.answered(q) && A.written(q)[end] == "[ ] Keep a copy on this Mac"
 end
+
+@testset "values to set: a slider and a colour" begin
+  lines = ["How should the logo look?", "Size: 48px (16px to 96px)", "- Opacity: 0.50 (0 to 1)", "Gap: 12 mm (0 to 40 mm)", "Colour: #E8632B",
+           "( ) Round", "(x) Square", "Note: see (a to b)", "Odd: 5 (9 to 2)"]
+  q = A.question(lines)
+  @test [(f.name, f.kind) for f in q.fields] == [("Size", :slider), ("Opacity", :slider), ("Gap", :slider), ("Colour", :colour)]
+  size, opacity, gap, colour = q.fields
+  @test (size.number, size.low, size.high, A.step(size), A.said(size)) == (48, 16, 96, 1, "48px")
+  @test (opacity.number, A.step(opacity), A.shown(opacity)) == (0.5, 0.01, "0.50") && A.said(gap) == "12 mm" && colour.colour == "#E8632B"
+  # Words that only look like a value are words of the question: a range with no number, and one that goes down
+  @test q.words == ["How should the logo look?", "Note: see (a to b)", "Odd: 5 (9 to 2)"] && length(q.options) == 2
+  # Each line stays where it was, as it was written, with its new value
+  @test A.written(q) == ["How should the logo look?", "Size: 48px (16px to 96px)", "- Opacity: 0.50 (0 to 1)", "Gap: 12 mm (0 to 40 mm)", "Colour: #E8632B",
+                         "( ) Round", "(x) Square", "Note: see (a to b)", "Odd: 5 (9 to 2)"]
+  A.set!(size, 63.6); A.set!(opacity, 2); A.set!(gap, 7.2); colour.colour = "#2a6fdb"
+  @test A.written(q)[2:5] == ["Size: 64px (16px to 96px)", "- Opacity: 1.00 (0 to 1)", "Gap: 7 mm (0 to 40 mm)", "Colour: #2a6fdb"]
+  @test A.written(A.question(A.written(q))) == A.written(q)
+  # What's typed goes where it was, or at the end
+  q.note = "Keep it simple"
+  @test A.written(q)[end] == "> Keep it simple"
+  @test A.written(A.question(["Size: 3 (0 to 9)", "> Small", "( ) Yes"])) == ["Size: 3 (0 to 9)", "> Small", "( ) Yes"]
+end

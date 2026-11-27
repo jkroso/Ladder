@@ -448,11 +448,76 @@ try
     @test occursin("!`l = 18m`", it.text)
     ok = until(() -> occursin("!`l = 18m`", read(said, String)))
     @test ok
-    # No key changes what the agent said, even while it has the keyboard
+    # While the reply shows no caret, a key changes nothing, even with the keyboard. A click puts a caret there: see the next test.
     K.focus(sub)
     @test w.focus === sub
     ontype(w, Typed('x', w)); press(Keys.backspace)
     @test occursin("!`l = 18m`", sub.buf.lines[1]) && sub.buf.lines == split(rstrip(it.text), '\n')
+  end
+
+  @testset "You can change what the agent said, and your next words tell it what changed" begin
+    folder = joinpath(dir, "changes")
+    mkpath(folder)
+    said = joinpath(folder, "Changes.chat")
+    s = K.AgentSession(agent="Claude", dir=folder)
+    push!(s.items, K.YouSaid(words="How should the logo look?"), K.AgentReply(text="""
+      Pick what you like.
+
+      ```ask
+      How should the logo look?
+      Size: 48px (16px to 96px)
+      Colour: #e8632b
+      ```""", whole=true, n=1))
+    write(said, K.talk_text(s))
+    K.open!(e, said)
+    frames(w, 4)
+    p = e.nodes[(:chat, said)]
+    it = p.session.items[2]
+    sub = p.parts[(:reply, objectid(it))]
+    @test !sub.buf.fixed && sub.buf.reading && !K.writes(sub.buf)
+    @test occursin("<changes>", K.session_brief(p.session)) && occursin("Colour: #e8632b", K.session_brief(p.session))
+    # A click on the words puts the caret there, and what you type changes them
+    line = K.item(sub, 1)
+    vl = first(line.content.lines)
+    spot = (sub.origin[1] + 1px, sub.origin[2] + line.top + line.content.above + vl.top + vl.high / 2)
+    w.mouse = typeof(w.mouse)(spot...); onmouse(w, MouseMove(w.mouse, w)); frames(w, 1)
+    w.keys |= Keys.mouse_left; onkey(w, KeyPress{Keys.mouse_left}(0, w)); frames(w, 1)
+    w.keys ⊻= Keys.mouse_left; onkey(w, KeyRelease{Keys.mouse_left}(0, w)); frames(w, 2)
+    @test w.focus === sub && !sub.buf.reading && sub.buf.caret == (1, 0)
+    typed("Please ")
+    @test sub.buf.lines[1] == "Please Pick what you like." && w.focus === sub
+    # The slider and the colour picker of its question write what you set into its lines
+    v = sub.nodes[(:block, K.ASK, sub.buf.path, 1)]
+    K.ask_field(v, 1).value = 64.0
+    K.ask_field(v, 2).color = K.HSV(210, 0.8, 0.86)
+    frames(w, 2)
+    colour = K.colour_hex(K.ask_field(v, 2).color)
+    @test sub.buf.lines[5:6] == ["Size: 64px (16px to 96px)", "Colour: $colour"]
+    # The reply is what you changed it to, and keeps what the agent saw, as the file does
+    @test K.reply_changed(it) && startswith(it.text, "Please Pick") && startswith(it.saw, "Pick what you like.")
+    ok = until(() -> occursin("\"saw\"", read(said, String)))
+    kept = K.read_talk(read(said, String)).items[2]
+    @test ok && kept.saw == it.saw && kept.text == it.text
+    # With nothing typed, the send button sends your changes
+    @test K.send_tip(p) == "Send with your changes  ⏎"
+    K.focus(p.field)
+    before = length(heard_lines())
+    press(Keys.enter)
+    ok = until(() -> !p.session.busy)
+    @test ok && length(heard_lines()) == before + 1
+    told = heard_lines()[end]
+    @test occursin("<changes>", told) && occursin("Your reply 1 of the 1 in this session", told)
+    @test occursin("-Pick what you like.", told) && occursin("+Please Pick what you like.", told)
+    @test occursin("-Size: 48px (16px to 96px)", told) && occursin("+Size: 64px (16px to 96px)", told) && occursin("+Colour: $colour", told)
+    you = p.session.items[3]
+    @test you isa K.YouSaid && you.words == "" && you.changed == 1
+    frames(w, 3)
+    @test named("Your changes") !== nothing
+    # The agent knows the reply as it is now, so there's nothing more to send
+    @test it.saw === nothing && !K.reply_changed(it) && K.send_tip(p) == "Send  ⏎"
+    ok = until(() -> p.kept == p.session.version)
+    kept = K.read_talk(read(said, String))
+    @test ok && kept.items[2].saw === nothing && kept.items[3].changed == 1
   end
 
   @testset "A chart in what the agent says shows its buttons while the mouse is on it, as on a page, and a click on one opens its list" begin
