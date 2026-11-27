@@ -394,8 +394,8 @@ The table above is the high reading, where the owner sells every token. For the 
 
 | | Costs, counted today | Rent, counted today | Net present value (rent) |
 |---|---|---|---|
-| In orbit | !`orbit_now` | !`rent_now_orbit = let d = float(fade * 1yr), a = float(fail * 1yr), g = float(ageing), ρ = log(1 + float(discount)), r = float(rent_drop * 1yr); yrs = float(sun) * 0.05 * sum(exp(-(ρ + r) * t) * min(exp(-d * t), g == 0 ? exp(-a * t) : exp(-a / log(1 + g) * ((1 + g)^t - 1))) for t in 0.025:0.05:2000); convert(USD, b200_rack_rent * yrs * yr) end` | !`npv_rent_orbit = rent_now_orbit - orbit_now` |
-| On the ground | !`ground_cost_now` | !`rent_now_ground = let a = float(fail * 1yr), g = float(ageing), ρ = log(1 + float(discount)), r = float(rent_drop * 1yr), L = 2 * float(ground_life / 1yr); n = max(1, round(Int, L / 0.05)); dt = L / n; yrs = float(uptime) * dt * sum(let t = (i - 0.5) * dt; exp(-(ρ + r) * t) * (g == 0 ? exp(-a * t) : exp(-a / log(1 + g) * ((1 + g)^t - 1))) end for i in 1:n); convert(USD, b200_rack_rent * yrs * yr) end` | !`npv_rent_ground = rent_now_ground - ground_cost_now` |
+| In orbit | !`orbit_now` | !`rent_now_orbit = convert(USD, b200_rack_rent * years_now * yr)` | !`npv_rent_orbit = rent_now_orbit - orbit_now` |
+| On the ground | !`ground_cost_now` | !`rent_now_ground = convert(USD, b200_rack_rent * ground_years_now * yr)` | !`npv_rent_ground = rent_now_ground - ground_cost_now` |
 
 ```chart
 kind: bars
