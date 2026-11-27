@@ -887,8 +887,8 @@ end
 "The colour of a panel over the design: the theme's surface, a little see-through"
 panel_colour(t) = Ink.faded(t.surface, 0.97)
 
-"How a panel over the design looks, with corners `round` that much: see `panel_round`"
-panel_look(t, round=9px) = (background(panel_colour(t)), radius(round), border(1px, :solid, t.line), shadow(0, 3, 14, RGBA(0, 0, 0, dark(t) ? 0.35 : 0.12)))
+"How a panel over the design looks, with corners `round` that much, or with four numbers, each corner from the top left: see `panel_round`"
+panel_look(t, round=9px) = (background(panel_colour(t)), round isa Tuple ? radius(round...) : radius(round), border(1px, :solid, t.line), shadow(0, 3, 14, RGBA(0, 0, 0, dark(t) ? 0.35 : 0.12)))
 
 "A small button with only an icon"
 icon_button(v, key, icon, tip; act, on=false, size=16px, off=false) = begin
@@ -992,8 +992,20 @@ more_menu(v::DesignView, g::Commands.Group, more, window) = begin
         anchor=something(under, window.mouse), width=230px, t=theme(v))
 end
 
-"How far the words and the buttons of the toolbar are from the left edge of the design: the room round the toolbar, its border, and the room in it"
-ribbon_inset(v) = panel_gap(v) + 1px + 8px
+"How far the toolbar's tabs are from the left edge of the design: the room round the toolbar, its border, and the room in it"
+ribbon_inset(v) = panel_gap(v) + 1px + tab_room(v)
+
+"""
+How far the toolbar's tabs are from its border: from its top, from its left,
+and the last button from its right. Where the panels are near the edges of
+the window (see `panel_gap`), it's 3px, as far from the left as from the top,
+and a tab's corners have the same middle as the toolbar's: see `tab_round`.
+Elsewhere it's 7px from the top and 8px from the sides.
+"""
+tab_room(v) = panel_gap(v) == 5px ? 3px : 8px
+
+"How round a tab's corners are: as round as the toolbar's top left corner less the room between them, or 6px"
+tab_round(v) = panel_gap(v) == 5px ? max(corner_round(v, 1) - tab_room(v), 2px) : 6px
 
 """
 What the toolbar shows of the design's file, in the middle of its top row: the
@@ -1033,22 +1045,28 @@ button_line(v) = nothing
 
 """
 How far apart the panels over the design are, and how far they are from its
-edges: 8px, or 5px beside the window's buttons (see `button_line`). There the
-toolbar is that near the design's top, so that its tabs are in line with the
-buttons, and the other gaps are as wide as that one.
+edges: 8px, or 5px beside the window's buttons (see `button_line`) or in
+round corners (see `edge_rounds`). Beside the buttons the toolbar is that near
+the design's top, so that its tabs are in line with them, and the other gaps
+are as wide as that one.
 """
-panel_gap(v) = button_line(v) === nothing ? 8px : 5px
+panel_gap(v) = button_line(v) === nothing && edge_rounds(v) === nothing ? 8px : 5px
 
 """
-How round the corners of the window are, when the design goes into them, or
-nothing. With a number, each panel's corners have the same middle as the
-window's, so they're less round by the room between them: see `panel_round`.
-Here it's nothing. Ladder adds a method, for its window when it isn't full screen.
+How round the four corners of what the design fills are, when the panels go
+into them: `(top left, top right, bottom right, bottom left)`, or nothing. With
+them, a panel's corner that's in one of those corners has the same middle as
+that corner, so it's less round by the room between them: see `corner_round`.
+Here it's nothing. Ladder adds a method: the design fills its window, whose
+corners macOS rounds, or in agent mode the page's card.
 """
-window_round(v) = nothing
+edge_rounds(v) = nothing
 
-"How round the corners of the panels over the design are: 9px, or with the window's corners' middle (see `window_round`)"
-panel_round(v) = (r = window_round(v); r === nothing ? 9px : max(r - panel_gap(v), 0px))
+"How round a panel's corner is that's in the corner `i` of what the design fills: 1 is the top left, then round to 4, the bottom left"
+corner_round(v, i) = (r = edge_rounds(v); r === nothing ? 9px : max(r[i] - panel_gap(v), 0px))
+
+"How round the other corners of the panels over the design are: as round as the roundest panel's corner in a corner, or 9px"
+panel_round(v) = edge_rounds(v) === nothing ? 9px : maximum(i -> corner_round(v, i), 1:4)
 
 
 "The part of the toolbar's top row that has the file's name or path in its middle, on the colour `ground`, and that moves the window"
@@ -1071,7 +1089,7 @@ ribbon(v::DesignView) = begin
     # doesn't move a child that's only 2px shorter than the others into its middle.
     press!(v, (:tab, name); act=e -> editing && !live ? nothing : (v.tab = name)) do hovered
       Box(padding(0px, 1px),
-        Box(height(26px), padding(11px, 0px), radius(6px),
+        Box(height(26px), padding(11px, 0px), radius(tab_round(v)),
             background(on ? (live ? colorant"rgb(42,150,80)" : t.select) : hovered && !editing ? t.hover : clear),
           words(name, 12.5px, color=on && live ? colorant"white" : editing && !live ? Ink.faded(t.dim, 0.6) : t.text, weight=on ? "Semibold" : "")))
     end
@@ -1087,12 +1105,16 @@ ribbon(v::DesignView) = begin
   # The window's own buttons can lie over the left end of the top row, and then the tabs start after them.
   # The row's gap of 2px follows the room for them too.
   corner = max(corner_room(v) - ribbon_inset(v) - 2px, 0px)
-  # Beside the window's buttons the room over the tabs is what puts their middle in line with the buttons' middle
+  # The room over the top row: a tab, which is 2px shorter than the row, has 1px more. Beside the window's buttons it's
+  # what puts the row's middle in line with the buttons' middle.
   line = button_line(v)
-  over = line === nothing ? 6px : max(line - panel_gap(v) - 1px - RIBBON_ROW / 2, 0px)
+  side = tab_room(v)
+  over = line === nothing ? (side == 3px ? 2px : 6px) : max(line - panel_gap(v) - 1px - RIBBON_ROW / 2, 0px)
   card!(v, :ribbon) do
-    Column(width(grow=grow), panel_look(t, panel_round(v))..., padding(over, 8px, 6px, 8px), child_gap=6px, Alignment.Start,
-      Row(width(grow=grow), child_gap=2px,
+    # Its top corners are in the top corners of what the design fills
+    Column(width(grow=grow), panel_look(t, (corner_round(v, 1), corner_round(v, 2), panel_round(v), panel_round(v)))...,
+           padding(over, 0px, 6px, 0px), child_gap=6px, Alignment.Start,
+      Row(width(grow=grow), padding(0px, side, 0px, side), child_gap=2px,
         (corner > 0px ? (Box(width(corner), height(28px)),) : ())...,
         tab.(tabs)...,
         grip!(v, panel_colour(t)),
@@ -1100,7 +1122,7 @@ ribbon(v::DesignView) = begin
         icon_button(v, :undo, "arrow-counterclockwise", "Undo (⌘Z)"; act=e -> undo!(v), off=get(doc, "undo", 0) == 0),
         icon_button(v, :redo, "arrow-clockwise", "Redo (⇧⌘Z)"; act=e -> redo!(v), off=Designs.redoable(m) == 0),
         icon_button(v, :save, "save", "Save (⌘S)"; act=e -> save!(v), off=!Designs.edited(m))),
-      Row(width(grow=grow), Alignment.Start, child_gap=8px, clip_x=true, shown...))
+      Row(width(grow=grow), padding(0px, 8px, 0px, 8px), Alignment.Start, child_gap=8px, clip_x=true, shown...))
   end
 end
 
@@ -1618,7 +1640,9 @@ history(v::DesignView) = begin
   upto = something(findlast(<=(v.along + v.area[3]), xs), 0)
   shown = from > upto ? Any[] : Any[(from > 1 ? (Box(width(min=px(xs[from] - 4), preferred=px(xs[from] - 4))),) : ())..., shown[from:upto]...]
   card!(v, :history) do
-    Row(width(grow=grow), height(44px), panel_look(t, panel_round(v))..., padding(12px, 0px), child_gap=10px,
+    # Its bottom corners are in the bottom corners of what the design fills
+    Row(width(grow=grow), height(44px), panel_look(t, (panel_round(v), panel_round(v), corner_round(v, 3), corner_round(v, 4)))...,
+        padding(12px, 0px), child_gap=10px,
       Box(words("History", 13px, weight="Semibold")),
       Row(child_gap=0px,
         icon_button(v, :first, "skip-start-fill", "Roll back to the start"; act=e -> roll(0), size=13px),

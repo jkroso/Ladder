@@ -121,6 +121,10 @@ else
     @test abs(middle_x(rect(title)) - middle_x(rect(grip))) <= 1
     @test K.num(rect(grip).left) > K.num(rect(v.parts[(:tab, "Inspect")]).left) && K.num(rect(grip).left + rect(grip).width) <= K.num(rect(v.parts[:undo]).left)
     @test e.nodes[:title_room] == rect(grip).width
+    # A tab's pill is 3px under the toolbar's border: 1px under the top of its place, which is as tall as the buttons
+    # beside it. Its corners have the same middle as the toolbar's corner.
+    @test K.num(rect(v.parts[(:tab, "Model")]).top + 1px - rect(ribbon).top) == 4
+    @test V.tab_round(v) == V.corner_round(v, 1) - 3px
     # The tabs and the buttons of the top row have one middle
     @test abs(middle_y(rect(v.parts[(:tab, "Model")])) - middle_y(rect(v.parts[:undo]))) <= 0.5
     @test !K.title_edited(e) && !K.page_edited(e)
@@ -162,21 +166,26 @@ else
     hiding = e.hide_bar
     e.hide_bar = :always
     frame(w); frame(w)
-    @test K.bar_corner(e) == 0px && K.num(rect(v.parts[(:tab, "Model")]).left) == K.num(rect(ribbon).left) + 9   # its border and its room
+    @test K.bar_corner(e) == 0px && K.num(rect(v.parts[(:tab, "Model")]).left) == K.num(rect(ribbon).left) + 4   # its border and its room
     e.hide_bar = hiding
     frame(w); frame(w)
     K.toggle_panel!(e)
     sleep(0.3)
     frame(w); frame(w); frame(w)
     @test e.panel && K.bar_corner(e) == 0px
+    # Beside the sidebar, the first tab is as far from the toolbar's left edge as from its top
+    @test K.num(rect(v.parts[(:tab, "Model")]).left - rect(ribbon).left) == 4
     # Beside the sidebar too, the tabs are in line with the bar's buttons
     @test K.num(rect(ribbon).top) == 5 && abs(middle_y(rect(v.parts[(:tab, "Model")])) - K.num(K.TOPBAR_H) / 2) <= 0.5
     shot("design-sidebar-open.png")
     # In agent mode the design starts at the top of the page's card
     K.agent_mode!(e)
     frame(w); frame(w); frame(w)
-    @test K.agent_shows(e) && K.num(rect(v).top) == K.num(K.PAGE_CARD_GAP) && K.num(rect(ribbon).top) == K.num(K.PAGE_CARD_GAP) + 8
-    @test V.panel_round(v) == 9px
+    # The panels are 5px from the card's edges and from each other, as they're from the window's, and a panel's corner in a
+    # corner of the card has the same middle as the card's corner
+    @test K.agent_shows(e) && K.num(rect(v).top) == K.num(K.PAGE_CARD_GAP) && K.num(rect(ribbon).top) == K.num(K.PAGE_CARD_GAP) + 5
+    left, right = K.page_card_round(e)
+    @test V.corner_round(v, 1) == left - 5px && V.corner_round(v, 2) == max(right - 5px, 0px) && V.corner_round(v, 3) == V.corner_round(v, 2)
     @test K.num(rect(e.nodes[:topbar]).width) <= K.num(K.page_card_span(e)[1])
     shot("design-agent-mode.png")
     K.agent_mode!(e)
