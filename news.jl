@@ -1,4 +1,4 @@
-# The facts of a folder of news, apart from the window that shows it. main.jl
+# The facts of a folder of news, apart from the window that shows it. news_page.jl
 # draws the folder as the front page of a newspaper, and starts the agents.
 #
 # A folder of news has a page called `Interests.md`, which says the kinds of
@@ -88,7 +88,7 @@ const AGENTS = (:daily, :asked, :off)
   agents::Symbol = :daily
   ran::Dict{String,DateTime} = Dict{String,DateTime}()
   seen::Dict{String,DateTime} = Dict{String,DateTime}()   # the posts of feeds that are in the paper, by their ids, and when Ladder wrote each
-  companion::Bool = true   # Ladder starts a reading companion when you open a folder of news: see main.jl
+  companion::Bool = true   # Ladder starts a reading companion when you open a folder of news: see news_page.jl
 end
 
 "What the file of settings held when it was last read or written: when it changed, its path, and what it holds"

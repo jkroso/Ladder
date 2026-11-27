@@ -40,7 +40,7 @@ export editor, page_object, object, list_files!, go_folder!, open!, open_folder!
        right_panel, side_part, each_selection!, nofile, scrub_tick!, end_companions!, eased, omni_arc, tabs,
        preferred_agent!, inline_tick!, unused, is_companion, outline, companion_pane, screen_room,
        palette_click!, show_window!, shown_parts, window!, paper_window, todo_box, go_chip!, palette_chips,
-       palette, under_palette, startup_page, command_focus, copied!, mark_chips, mark_preview
+       palette, under_palette, startup_page, command_focus, copied!, mark_chips, mark_preview, text_width
 
 "The editor of the window that `node`, a part of a page, is part of"
 function editor end
@@ -878,3 +878,6 @@ function mark_chips end
 
 "While the window shows a row of the list, a line round the thing of that row, as for a place that Find Uses found"
 function mark_preview end
+
+"How wide the page's text is in the window"
+function text_width end

@@ -9,7 +9,7 @@
 #     - https://simonwillison.net/atom/everything/
 #
 # Ladder gets each feed while the front page shows (see "the feeds of a folder
-# of news" in main.jl), and writes each new post as an article of the paper, by
+# of news" in news_page.jl), and writes each new post as an article of the paper, by
 # the post's author, as if the author wrote for the paper. A feed with no
 # heading over it has a section of its own: the feed's name. An address in
 # code, like `https://example.com/feed.xml`, is an example, and no feed.

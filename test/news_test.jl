@@ -1,7 +1,7 @@
 # Tests for a folder of news: the pages that say what news you want, the
 # agents that write the articles, the front page that shows them, an
-# article's page, and the articles that go when they're too old. See "a folder
-# of news" in main.jl, and news.jl. Run them with
+# article's page, and the articles that go when they're too old. See
+# news_page.jl and news.jl. Run them with
 # `KIP_FROZEN=1 julia -O0 --project=. test/news_test.jl`. They use a folder of
 # their own, never ~/News, and a script in place of the agent, so no agent
 # runs. With `LADDER_SHOTS` set to a folder, they save pictures there.
