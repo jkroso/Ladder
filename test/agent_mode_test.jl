@@ -128,7 +128,7 @@ K.AGENT_MODELS["Antigravity"] = K.antigravity_list("""
   """)
 
 # An agent that works by turns: it's started for each thing that you say, with the agent's name, the session's name and your words.
-# It prints the lines that Grok, Antigravity and Codex print, as their real programs printed them on 26 and 27 November 2026 (Codex: as its source says).
+# It prints the lines that Grok and Codex print, as Grok's real program printed them on 26 November 2026 (Codex: as its source says).
 const turns = joinpath(dir, "turns.txt")
 const turner = joinpath(dir, "turn-agent")
 write(turner, replace(raw"""
@@ -139,9 +139,6 @@ say() { printf '%s\n' "$1"; }
 case "$words" in
 *'fail please'*) echo "warning: something small" >&2; echo "Error: no key for $agent" >&2; echo "at line 3" >&2; exit 1 ;;
 *'go slow'*) exec sleep 30 ;;
-*'bad model please'*)
-  say '{"event":"result","result":{"conversation_id":"","status":"ERROR","response":"","error":"invalid model selection: model x is not recognized\nAvailable models:\n  Gemini 4 Neon (High)"}}'
-  echo 'error: invalid model selection (--model "x" --effort ""): model x is not recognized' >&2; exit 1 ;;
 esac
 case "$agent" in
 Grok)
@@ -155,18 +152,6 @@ Grok)
   say '{"type":"text","data":"It has paint."}'
   say '{"type":"usage","usage":{"input_tokens":1}}'
   say '{"type":"end","stopReason":"end_turn","sessionId":"sess-Grok"}' ;;
-Antigravity)
-  step() { printf '{"event":"step_update","step_update":{"conversation_id":"sess-Antigravity","step_index":%s}}\n' "$1"; }
-  say '{"event":"init","conversation_id":"sess-Antigravity","init":{"model":"gemini-4-neon-low","cwd":"/tmp","tools":["read_file"],"permission_mode":"accept-edits"}}'
-  step '0,"state":"DONE","step_type":"user_input"'
-  step '1,"state":"ACTIVE","step_type":"agent_response","text_delta":"I will read"'
-  step '1,"state":"DONE","step_type":"agent_response","text_delta":" it.","duration_seconds":4.0,"usage":{"input_tokens":1}'
-  step '2,"state":"ACTIVE","step_type":"tool","tool_name":"read_file","tool_info":{"name":"read_file","parameters":{"Path":"/tmp/plan.md"}}'
-  step '2,"state":"DONE","step_type":"tool","tool_name":"read_file","duration_seconds":0.02,"tool_info":{"name":"read_file","parameters":{"Path":"/tmp/plan.md"},"output":"1 lines, 12 bytes"}'
-  step '3,"state":"DONE","step_type":"agent_response","duration_seconds":3.1'
-  step '4,"state":"ACTIVE","step_type":"agent_response","text_delta":"It has"'
-  step '4,"state":"DONE","step_type":"agent_response","text_delta":" paint.\n"'
-  say '{"event":"result","result":{"conversation_id":"sess-Antigravity","status":"SUCCESS","response":"I will read it.It has paint.\n","num_turns":1}}' ;;
 *)
   say '{"type":"thread.started","thread_id":"sess-Codex"}'
   say '{"type":"turn.started"}'
@@ -178,6 +163,76 @@ Antigravity)
 esac
 """, "TURNS" => turns))
 chmod(turner, 0o755)
+
+# Antigravity's program for a session, `agy acp`: it reads the lines of JSON-RPC that Ladder writes, writes each down, and
+# answers by what they hold, with lines like those that `agy acp` 1.5.18 printed on 27 November 2026
+const acp_heard = joinpath(dir, "acp-heard.txt")
+const acp_agent = joinpath(dir, "acp-agent")
+write(acp_agent, replace(raw"""
+#!/bin/sh
+say() { printf '%s\n' "$1"; }
+answer() { say '{"jsonrpc":"2.0","result":'"$2"',"id":"'"$1"'"}'; }
+update() { say '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"'"$sid"'","update":'"$1"'}}'; }
+run() { printf '{"sessionUpdate":"%s","toolCallId":"call_2","name":"run_command","status":"%s","kind":"execute","title":"make paint","rawInput":{"CommandLine":"make paint","toolSummary":"Make the paint"}}' "$1" "$2"; }
+model=gemini-4-neon-low
+sid=""
+prompt=""
+while IFS= read -r line; do
+  printf '%s\n' "$line" >> "HEARD"
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":"\(ladder-[0-9]*\)".*/\1/p')
+  case "$line" in
+  *'"optionId":"allow"'*)
+    update "$(run tool_call_update completed)"
+    update '{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"It ran."}}'
+    answer "$prompt" '{"stopReason":"end_turn"}' ;;
+  *'"optionId":"deny"'*)
+    update "$(run tool_call_update failed)"
+    update '{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"I left it."}}'
+    answer "$prompt" '{"stopReason":"end_turn"}' ;;
+  *'"outcome":"cancelled"'*) ;;
+  *'"initialize"'*)
+    answer "$id" '{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"agentInfo":{"name":"Antigravity ACP Server","version":"1.5.18"}}' ;;
+  *'"session/new"'*)
+    sid=acp-1
+    answer "$id" '{"sessionId":"acp-1","models":{"availableModels":[{"modelId":"gemini-4-neon-low","name":"Gemini 4 Neon (Low)"}],"currentModelId":"'"$model"'"},"modes":{"currentModeId":"default"}}' ;;
+  *'"session/resume"'*)
+    case "$line" in
+    *'"sessionId":"gone"'*) say '{"jsonrpc":"2.0","error":{"code":-32002,"message":"Resource not found: gone"},"id":"'"$id"'"}' ;;
+    *) sid=acp-1; answer "$id" '{"sessionId":"acp-1","models":{"currentModelId":"'"$model"'"}}' ;;
+    esac ;;
+  *'"session/set_mode"'*) answer "$id" '{}' ;;
+  *'"session/set_model"'*)
+    case "$line" in
+    *'"modelId":"bad-model"'*) say '{"jsonrpc":"2.0","error":{"code":-32602,"message":"invalid model selection: model bad-model is not recognized\nAvailable models:\n  Gemini 4 Neon (High)"},"id":"'"$id"'"}' ;;
+    *) model=$(printf '%s' "$line" | sed -n 's/.*"modelId":"\([^"]*\)".*/\1/p'); answer "$id" '{}' ;;
+    esac ;;
+  *'"session/cancel"'*) answer "$prompt" '{"stopReason":"cancelled"}' ;;
+  *'"session/prompt"'*)
+    prompt=$id
+    case "$line" in
+    *'run it'*)
+      update "$(run tool_call in_progress)"
+      update "$(run tool_call_update pending)"
+      say '{"jsonrpc":"2.0","method":"session/request_permission","params":{"sessionId":"'"$sid"'","toolCall":'"$(run tool_call pending)"',"options":[{"optionId":"allow","name":"Allow","kind":"allow_once"},{"optionId":"deny","name":"Deny","kind":"reject_once"}]},"id":"7"}' ;;
+    *'go slow'*)
+      update '{"sessionUpdate":"tool_call","toolCallId":"call_3","name":"view_file","status":"in_progress","kind":"read","title":"notes.md","rawInput":{"AbsolutePath":"/tmp/notes.md"}}' ;;
+    *)
+      update '{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":"The plan needs reading."}}'
+      update '{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"I will read"}}'
+      update '{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":" it."}}'
+      update '{"sessionUpdate":"tool_call","toolCallId":"call_1","name":"view_file","status":"in_progress","kind":"read","title":"plan.md","rawInput":{"AbsolutePath":"/tmp/plan.md"}}'
+      update '{"sessionUpdate":"tool_call_update","toolCallId":"call_1","name":"view_file","status":"completed","kind":"read","title":"plan.md","rawInput":{"AbsolutePath":"/tmp/plan.md"}}'
+      update '{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"It has paint."}}'
+      update '{"sessionUpdate":"usage_update","used":12679,"size":1048576}'
+      answer "$id" '{"stopReason":"end_turn","usage":{"inputTokens":1}}' ;;
+    esac ;;
+  esac
+done
+""", "HEARD" => acp_heard))
+chmod(acp_agent, 0o755)
+K.ACP_COMMAND[] = Cmd([acp_agent])
+"The lines of JSON-RPC that Antigravity's stand-in has heard"
+acp_lines() = isfile(acp_heard) ? readlines(acp_heard) : String[]
 
 const e = K.build_editor(page)
 const w = Window(e, size=(900px, 700px))
@@ -641,7 +696,7 @@ try
     @test ok && pane.session === nothing && named("Reply") === nothing
   end
 
-  @testset "A click on the agent's name lists the agents, and Grok, Antigravity and Codex work by turns" begin
+  @testset "A click on the agent's name lists the agents, and Grok and Codex work by turns" begin
     name = named("Agent name")
     @test name !== nothing && name.top + name.height <= K.TOPBAR_H
     click(name.left + 10px, name.top + 10px)
@@ -679,7 +734,7 @@ try
     e.remember = false
     frames()
     K.TURN_COMMAND[] = Cmd([turner])
-    for (agent, step) in (("Grok", "Reading plan.md"), ("Antigravity", "Reading plan.md"), ("Codex", "Running cat plan.md"))
+    for (agent, step) in (("Grok", "Reading plan.md"), ("Codex", "Running cat plan.md"))
       K.pane_agent!(pane, agent)
       frames()
       @test e.ai == agent && pane.session === nothing && K.pane_agent(pane, e) == agent
@@ -690,8 +745,7 @@ try
       ok = until(() -> !s.busy && !K.running(s))
       its = items()
       @test ok && [typeof(i) for i in its] == [K.YouSaid, K.AgentReply, K.AgentStep, K.AgentReply]
-      # Antigravity ends what it says with a new line
-      @test its[2].text == "I will read it." && its[2].whole && rstrip(its[4].text) == "It has paint." && its[4].whole
+      @test its[2].text == "I will read it." && its[2].whole && its[4].text == "It has paint." && its[4].whole
       @test its[3].words == step && its[3].state == :done
       @test s.id == "sess-$agent"
       # The second turn names the session, so the agent goes on with it. No program runs between turns, and the pane says so.
@@ -729,6 +783,96 @@ try
     frames()
     @test e.ai == "Claude" && pane.session === nothing
     K.TURN_COMMAND[] = nothing
+  end
+
+  @testset "Antigravity's program stays for the session, and asks before a command, which Allow or Refuse answers" begin
+    K.agent_mode(e) || (K.agent_mode!(e); frames(w, 3))
+    K.pane_agent!(pane, "Antigravity")
+    frames()
+    @test e.ai == "Antigravity" && pane.session === nothing
+    pane.field.buf.lines = ["Read the plan"]
+    K.send_words!(pane)
+    s = pane.session
+    @test !s.turns && K.running(s) && s.busy
+    ok = until(() -> !s.busy)
+    its = items()
+    @test ok && [typeof(i) for i in its] == [K.YouSaid, K.AgentReply, K.AgentStep, K.AgentReply]
+    @test its[2].text == "I will read it." && its[2].whole && its[4].text == "It has paint." && its[4].whole
+    @test its[3].words == "Reading plan.md" && its[3].state == :done
+    # The program stays, with its session, and the agent says which model it works with
+    @test K.running(s) && s.id == "acp-1" && s.running == "gemini-4-neon-low"
+    # Ladder said what it can do, asked for a session in the folder with what it says of itself, and for the accept-edits mode
+    said = acp_lines()
+    @test occursin("\"method\":\"initialize\"", said[1]) && occursin("\"terminal\":false", said[1])
+    @test occursin("\"method\":\"session/new\"", said[2]) && occursin("\"cwd\":\"$(s.dir)\"", said[2]) && occursin("\"append\":\"You are in Ladder", said[2])
+    @test occursin("\"method\":\"session/set_mode\"", said[3]) && occursin("\"modeId\":\"accept-edits\"", said[3])
+    @test occursin("\"method\":\"session/prompt\"", said[4]) && occursin("\"sessionId\":\"acp-1\"", said[4]) && occursin("Read the plan", said[4])
+    # A command that its settings make it ask for shows Allow and Refuse, and Allow lets it run
+    pane.field.buf.lines = ["Please run it"]
+    K.send_words!(pane)
+    ok = until(() -> last(items()) isa K.AgentWants)
+    @test ok
+    wants, step = last(items()), items()[end-1]
+    @test step isa K.AgentStep && step.words == "Running make paint" && step.state == :going
+    @test wants.tool == "Bash" && wants.detail == "make paint" && wants.words == "running make paint" && wants.answer == :none
+    frames(w, 3)
+    @test named("Agent asks") !== nothing
+    allow = named("Allow")
+    click(allow.left + allow.width / 2, allow.top + allow.height / 2)
+    @test wants.answer == :allowed
+    ok = until(() -> !s.busy)
+    @test ok && step.state == :done && last(items()).text == "It ran."
+    @test any(l -> occursin("\"id\":\"7\"", l) && occursin("\"optionId\":\"allow\"", l), acp_lines())
+    # Refuse says no, and the step fails
+    pane.field.buf.lines = ["Now run it again"]
+    K.send_words!(pane)
+    ok = until(() -> last(items()) isa K.AgentWants)
+    frames(w, 3)
+    refuse = named("Refuse")
+    click(refuse.left + refuse.width / 2, refuse.top + refuse.height / 2)
+    ok = until(() -> !s.busy)
+    @test ok && any(l -> occursin("\"optionId\":\"deny\"", l), acp_lines()) && last(items()).text == "I left it." && items()[findlast(it -> it isa K.AgentStep, items())].state == :failed
+    # What you say while the agent works waits for it. Stop cancels the turn, and what waited never goes.
+    pane.field.buf.lines = ["go slow"]
+    K.send_words!(pane)
+    pane.field.buf.lines = ["Later words"]
+    K.send_words!(pane)
+    ok = until(() -> last(items()) isa K.AgentStep)
+    @test ok && s.busy && length(s.talk.held) == 1 && last(items()).words == "Reading notes.md"
+    K.stop!(s)
+    ok = until(() -> !s.busy)
+    @test ok && occursin("\"method\":\"session/cancel\"", last(acp_lines())) && isempty(s.talk.held)
+    @test last(items()) isa K.SessionNote && last(items()).words == "You stopped Antigravity." && !last(items()).bad
+    @test !any(l -> occursin("Later words", l), acp_lines()) && K.running(s)
+    # Stop while the agent asks cancels what it asked
+    pane.field.buf.lines = ["Please run it"]
+    K.send_words!(pane)
+    ok = until(() -> last(items()) isa K.AgentWants)
+    wants = last(items())
+    K.stop!(s)
+    ok = ok && until(() -> !s.busy)
+    @test ok && wants.answer == :gone && any(l -> occursin("\"id\":\"7\"", l) && occursin("\"outcome\":\"cancelled\"", l), acp_lines())
+    # A program that starts again goes on with the session of its name
+    K.close!(s)
+    ok = until(() -> !K.running(s))
+    pane.field.buf.lines = ["Read the plan again"]
+    K.send_words!(pane)
+    ok = ok && until(() -> !s.busy && last(items()) isa K.AgentReply)
+    @test ok && pane.session === s && any(l -> occursin("\"method\":\"session/resume\"", l) && occursin("\"sessionId\":\"acp-1\"", l), acp_lines())
+    # When the agent hasn't got that session any more, a new one starts, and gets your words
+    K.close!(s)
+    ok = until(() -> !K.running(s))
+    s.id = "gone"
+    pane.field.buf.lines = ["Read the plan once more"]
+    K.send_words!(pane)
+    ok = ok && until(() -> !s.busy && last(items()) isa K.AgentReply)
+    notes = [it.words for it in items() if it isa K.SessionNote]
+    @test ok && s.id == "acp-1" && last(notes) == "Antigravity doesn't have this session any more, so a new one starts here. It doesn't know what was said before."
+    @test occursin("Read the plan once more", last(filter(l -> occursin("session/prompt", l), acp_lines())))
+    K.pane_agent!(pane, "Claude")
+    frames()
+    ok = until(() -> !K.running(s))
+    @test ok && e.ai == "Claude" && pane.session === nothing
   end
 
   @testset "The model's button shows the agent's model, and its menu changes it, also while the agent's program runs" begin
@@ -807,17 +951,16 @@ try
     K.stop!(s)
     ok = until(() -> !s.busy)
     @test ok && [it.words for it in items()[end-1:end]] == ["The model is now Opus 5.5.", "You stopped Claude."]
-    # An agent that works by turns gets the model with its next turn
-    K.TURN_COMMAND[] = Cmd([turner])
+    # Antigravity says which model its session has
     K.pane_agent!(pane, "Antigravity")
     frames()
     @test K.model_words(pane, e) == "Default"
     pane.field.buf.lines = ["Read the plan"]
     K.send_words!(pane)
     g = pane.session
-    ok = until(() -> !g.busy && !K.running(g))
-    @test ok && g.running == "gemini-4-neon-low" && K.model_words(pane, e) == "Gemini 4 Neon (Low)"
-    @test !("--model" in K.turn_options(g))
+    ok = until(() -> !g.busy)
+    @test ok && K.running(g) && g.running == "gemini-4-neon-low" && K.model_words(pane, e) == "Gemini 4 Neon (Low)"
+    @test !any(l -> occursin("session/set_model", l), acp_lines())
     # Antigravity's menu has a row for each model, with a button for each of its efforts, from the least to the most
     model_click()
     button = named("Model")
@@ -839,7 +982,10 @@ try
     high = only(x for x in flat(rows()[1]) if hasproperty(x.from, :from) && x.from.from isa K.EffortButton && x.from.from.effort == "High")
     click(high.left + 5px, high.top + 5px)
     @test !any(p -> p.key == K.MODEL_MENU, K.popups(w))
-    @test g.model == "gemini-4-neon-high" && K.model_words(pane, e) == "Gemini 4 Neon (High)" && last(g.items).words == "The model is now Gemini 4 Neon (High)."
+    # Its program changes the model while it runs, and the session says when it has
+    ok = until(() -> g.running == "gemini-4-neon-high")
+    @test ok && g.model == "gemini-4-neon-high" && K.model_words(pane, e) == "Gemini 4 Neon (High)" && last(g.items).words == "The model is now Gemini 4 Neon (High)."
+    @test occursin("\"modelId\":\"gemini-4-neon-high\"", last(acp_lines()))
     # A click on a model's name keeps the effort, and Medium is for a model that hasn't that effort
     model_click()
     carbon = rows()[2]
@@ -847,16 +993,23 @@ try
     @test g.model == "gemini-4-carbon-high"
     @test K.row_choice("Antigravity", K.model_rows(K.agent_models("Antigravity").listed)[4].second, "gemini-4-neon-xhigh").id == "gemini-3.8-flash-low"
     @test K.row_choice("Antigravity", K.model_rows(K.agent_models("Antigravity").listed)[1].second, "gemini-4-carbon-high").id == "gemini-4-neon-high"
-    options = K.turn_options(g)
-    @test options[findfirst(==("--model"), options) + 1] == "gemini-4-carbon-high" && findfirst(==("--model"), options) < findfirst(==("--conversation"), options)
-    @test options[findfirst(==("--conversation"), options) + 1] == "sess-Antigravity" && options[end] == "-p"
-    # A model that Antigravity hasn't got: what it says went wrong shows once, as its first line
-    pane.field.buf.lines = ["bad model please"]
+    ok = until(() -> g.running == "gemini-4-carbon-high")
+    @test ok && occursin("\"modelId\":\"gemini-4-carbon-high\"", last(acp_lines()))
+    # A model that Antigravity hasn't got: the model before stays, and the session says why with the first line of what the agent said
     n = length(g.items)
+    K.pane_model!(pane, "bad-model")
+    ok = until(() -> length(g.items) == n + 1)
+    @test ok && g.model == "gemini-4-carbon-high" && g.running == "gemini-4-carbon-high" && K.chosen_model("Antigravity") == "gemini-4-carbon-high"
+    @test last(g.items) isa K.SessionNote && last(g.items).bad
+    @test last(g.items).words == "Antigravity didn't change its model to Bad Model: invalid model selection: model bad-model is not recognized"
+    # A new program starts with the model that you chose
+    K.close!(g)
+    ok = until(() -> !K.running(g))
+    pane.field.buf.lines = ["Read the plan"]
     K.send_words!(pane)
-    ok = until(() -> !g.busy && !K.running(g))
-    @test ok && length(g.items) == n + 2 && last(g.items) isa K.SessionNote && last(g.items).bad
-    @test last(g.items).words == "invalid model selection: model x is not recognized"
+    ok = ok && until(() -> !g.busy)
+    started = acp_lines()[findlast(l -> occursin("session/resume", l), acp_lines()):end]
+    @test ok && occursin("\"modelId\":\"gemini-4-carbon-high\"", started[3]) && occursin("session/prompt", started[4])
     for (agent, model) in (("Grok", "grok-4.6"), ("Codex", "gpt-5.4-mini"))
       t = K.AgentSession(agent=agent, model=model, id="sess", turns=true)
       options = K.turn_options(t)
@@ -873,7 +1026,6 @@ try
     K.load_settings!(e)
     @test K.MODELS_CHOSEN[] == Dict("Claude" => "opus", "Antigravity" => "gemini-4-neon-high")
     e.remember = false
-    K.TURN_COMMAND[] = nothing
     K.pane_agent!(pane, "Claude")
     empty!(K.MODELS_CHOSEN[])
     frames()
@@ -985,5 +1137,6 @@ try
 finally
   K.SESSION_COMMAND[] = nothing
   K.TURN_COMMAND[] = nothing
+  K.ACP_COMMAND[] = nothing
   pane.session === nothing || K.close!(pane.session)
 end

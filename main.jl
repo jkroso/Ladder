@@ -48854,6 +48854,7 @@ program has stopped. `busy` is true while the agent works on what you said.
   running::String = ""         # the model that the agent says it works with now, by its full name, or "" before it says
   was_model::String = ""       # the model before the change that Ladder asked Claude Code for, which comes back if Claude Code says no
   later::Any = nothing         # a note on a new model, with whether it's bad, to show when the agent has done: see `model_note!`
+  talk::Any = nothing          # Ladder's talk with Antigravity's program: see `AcpTalk`
 end
 
 "A command that a test puts in the place of the agent's: a program that reads and prints the same lines of JSON. Nothing means the agent that Settings chose."
@@ -48882,8 +48883,10 @@ The command that starts the program of the session `s`: Claude Code, which
 reads and prints lines of JSON. It asks Ladder before anything that your
 settings make it ask for, and it changes the session's page without asking.
 When the session has a name, it goes on with the session of that name.
+Antigravity's is `agy acp`: see "Antigravity, which asks you before a step".
 """
 session_command(s::AgentSession) = begin
+  speaks_acp(s) && return ACP_COMMAND[] === nothing ? kind_command(agent_kind(s.agent), ["acp"]) : ACP_COMMAND[]
   SESSION_COMMAND[] === nothing || return `$(SESSION_COMMAND[]) $(session_options(s))`
   kind_command(agent_kind(s.agent), session_options(s))
 end
@@ -48916,6 +48919,7 @@ start!(s::AgentSession, command::Cmd) = begin
   close(err.in)
   close(to.out)
   s.process, s.to, s.closing = process, to, false
+  speaks_acp(s) && acp_start!(s)
   wrong = @async read(err, String)
   @async begin
     for line in eachline(out)
@@ -48987,7 +48991,9 @@ say!(s::AgentSession, words, about="", told=""; pictures=String[]) = begin
   push!(s.items, YouSaid(words=String(words), about=String(about), pictures=copy(pictures)))
   content = join(filter(!isempty, [String(told), String(words), isempty(pictures) ? "" : pictures_note(s, pictures)]), "\n\n")
   s.sent = content
-  if !s.turns
+  if speaks_acp(s)
+    acp_prompt!(s, acp_message(content, pictures))
+  elseif !s.turns
     tell!(s, user_message(content, pictures))
   elseif s.busy
     push!(s.queue, content)   # the agent's program takes one thing at a time
@@ -49051,6 +49057,8 @@ stop!(s::AgentSession) = begin
     s.stopped = true
     empty!(s.queue)
     running(s) && try kill(s.process) catch end
+  elseif speaks_acp(s)
+    acp_stop!(s)
   else
     tell!(s, Dict("type" => "control_request", "request_id" => "ladder-$(s.asked += 1)", "request" => Dict("subtype" => "interrupt")))
   end
@@ -49061,21 +49069,29 @@ end
 answer!(s::AgentSession, it::AgentWants, allow::Bool) = begin
   it.answer == :none || return s
   it.answer = allow ? :allowed : :refused
-  said = allow ? Dict("behavior" => "allow", "updatedInput" => it.input) : Dict("behavior" => "deny", "message" => "The user refused this in Ladder.")
-  tell!(s, Dict("type" => "control_response", "response" => Dict("subtype" => "success", "request_id" => it.id, "response" => said)))
+  if speaks_acp(s)
+    acp_choose!(s, it, allow ? "allow_once" : "reject_once")
+  else
+    said = allow ? Dict("behavior" => "allow", "updatedInput" => it.input) : Dict("behavior" => "deny", "message" => "The user refused this in Ladder.")
+    tell!(s, Dict("type" => "control_response", "response" => Dict("subtype" => "success", "request_id" => it.id, "response" => said)))
+  end
   s.version += 1
   s
 end
 
 """
 Make the model `id` the one that the agent of the session `s` works with.
-Claude Code's program changes its model while it runs, and says when it
-has: see `take_line!`. Any other agent, and a program that has stopped,
-gets the model when it starts again, with your next words.
+The programs of Claude Code and Antigravity change their model while they
+run, and say when they have: see `take_line!` and `acp_answer!`. Any other
+agent, and a program that has stopped, gets the model when it starts again,
+with your next words. So does Antigravity's program while it starts.
 """
 model!(s::AgentSession, id::AbstractString) = begin
   id = String(id)
-  if !s.turns && running(s)
+  if speaks_acp(s) && running(s) && s.talk !== nothing && s.talk.ready && !isempty(id)
+    was, s.model = s.model, id
+    acp_call!(s, "session/set_model", Dict("sessionId" => s.id, "modelId" => id), (:model, id, was))
+  elseif !s.turns && !speaks_acp(s) && running(s)
     s.was_model = s.model
     s.model = id
     request = Dict{String,Any}("subtype" => "set_model")
@@ -49126,6 +49142,8 @@ with a `type`:
 take_line!(s::AgentSession, line::AbstractString) = begin
   o = agent_json(line)
   o === nothing && return s
+  # Antigravity's program prints lines of JSON-RPC
+  speaks_acp(s) && (acp_line!(s, o); s.version += 1; return s)
   kind = json_field(o, "type")
   # What an agent that this one started says to it is theirs. This session shows only the step that started it.
   json_field(o, "parent_tool_use_id") === nothing || return s
@@ -49265,10 +49283,286 @@ tool_icon(name::AbstractString) =
   name in ("Grep", "Glob") ? "search" : name == "List" ? "folder" : name == "Bash" ? "terminal" : name in ("WebSearch", "WebFetch") ? "globe" :
   name in ("Task", "Agent") ? "robot" : name == "TodoWrite" ? "list-task" : "gear"
 
+# --- Antigravity, which asks you before a step ---
+#
+# Antigravity's program `agy acp` stays for a whole session, as Claude
+# Code's does. It speaks the Agent Client Protocol (ACP), which editors like
+# Zed speak with their agents: lines of JSON-RPC both ways. Ladder asks it
+# for a new session, or for the one of the session's name, and gives it your
+# words with `session/prompt`. The agent tells Ladder each piece of its words
+# and each step with `session/update`. Before a step that its settings make
+# it ask for, like a shell command, it sends `session/request_permission`,
+# and the pane shows Allow and Refuse. Ladder ran `agy -p` before, which has
+# no one to ask, so Antigravity refused each such step. The session is in
+# Antigravity's accept-edits mode: it changes files in the session's folder
+# without asking, and asks before anything else that its settings don't allow.
+
+"A command that a test puts in the place of `agy acp`: a program that reads and prints the same lines of JSON-RPC"
+const ACP_COMMAND = Ref{Any}(nothing)
+
+"""
+What Ladder keeps of its talk with the ACP program of a session: the number
+of its last request, what each request that has no answer yet is for,
+whether the program has the session, so that your words can go to it, and
+what you said that waits for that, or for the end of the turn under way.
+"""
+@def mutable struct AcpTalk
+  n::Int = 0
+  calls::Dict{String,Any} = Dict{String,Any}()
+  ready::Bool = false
+  held::Vector{Any} = Any[]
+end
+
+"True when the agent of the session `s` speaks ACP: Antigravity does"
+speaks_acp(s::AgentSession) = agent_kind(s.agent).name == "Antigravity"
+
+"True when the agent called `name` works by turns: see \"an agent that works by turns\". The programs of Claude Code and Antigravity stay for the session."
+by_turns(name::AbstractString) = !(agent_kind(name).name in ("Claude", "Antigravity"))
+
+"Send the ACP program of the session `s` the request `method` with `params`. `what` says what the answer is for: see `acp_answer!`."
+acp_call!(s::AgentSession, method, params, what) = begin
+  t = s.talk
+  id = "ladder-$(t.n += 1)"
+  t.calls[id] = what
+  tell!(s, Dict("jsonrpc" => "2.0", "id" => id, "method" => method, "params" => params))
+  id
+end
+
+"Answer the request `id` of the ACP program of the session `s` with `result`"
+acp_reply!(s::AgentSession, id, result) = tell!(s, Dict("jsonrpc" => "2.0", "id" => id, "result" => result))
+
+"Start the talk with the ACP program that was just started for the session `s`. Ladder reads no files and runs no terminal for the agent: the agent does those itself."
+acp_start!(s::AgentSession) = begin
+  s.talk = AcpTalk()
+  acp_call!(s, "initialize", Dict("protocolVersion" => 1,
+    "clientCapabilities" => Dict("fs" => Dict("readTextFile" => false, "writeTextFile" => false), "terminal" => false)), :start)
+  s
+end
+
+"""
+Ask the ACP program of the session `s` for the session of its name, or for
+a new one. What Ladder says of itself goes in the agent's instructions, as
+`--append-system-prompt` does for Claude Code.
+"""
+acp_session!(s::AgentSession) = begin
+  params = Dict{String,Any}("cwd" => s.dir, "mcpServers" => Any[],
+                            "_meta" => Dict("antigravity" => Dict("systemPrompt" => Dict("append" => session_brief(s)))))
+  isempty(s.id) && return acp_call!(s, "session/new", params, :new)
+  params["sessionId"] = s.id
+  acp_call!(s, "session/resume", params, :resume)
+end
+
+"The program of the session `s` has the session: what you said meanwhile goes to the agent"
+acp_ready!(s::AgentSession) = begin
+  s.talk.ready = true
+  isempty(s.talk.held) || acp_prompt!(s, popfirst!(s.talk.held))
+  s
+end
+
+"The ACP program of the session `s` couldn't start the session. The program ends, the session says why, and your next words start it again."
+acp_failed!(s::AgentSession, words) = (note!(s, words, true); close!(s))
+
+"""
+Give the agent of the session `s` what you said: `message`, the parts of a
+message. It waits while the program gets the session, or while the agent
+works on what you said before.
+"""
+acp_prompt!(s::AgentSession, message) = begin
+  t = s.talk
+  t === nothing && return s
+  (t.ready && !(:prompt in values(t.calls))) || (push!(t.held, message); return s)
+  acp_call!(s, "session/prompt", Dict("sessionId" => s.id, "prompt" => message), :prompt)
+  s
+end
+
+"The message for the ACP program with `content`, the text, and before it each of `pictures` that can be read, for the agent to see"
+acp_message(content, pictures=String[]) = begin
+  shown = Any[]
+  for path in pictures
+    b = picture_block(path)
+    b === nothing || push!(shown, Dict("type" => "image", "mimeType" => b["source"]["media_type"], "data" => b["source"]["data"]))
+  end
+  Any[shown..., Dict("type" => "text", "text" => content)]
+end
+
+"""
+Stop what the agent of the session `s` does: the turn under way, and what
+you said after it. Each request of the agent's that has no answer is
+cancelled, as ACP asks. The agent then ends the turn with `cancelled`.
+"""
+acp_stop!(s::AgentSession) = begin
+  t = s.talk
+  t === nothing && return s
+  empty!(t.held)
+  for it in s.items
+    it isa AgentWants && it.answer == :none && (acp_choose!(s, it, "cancelled"); it.answer = :gone)
+  end
+  if :prompt in values(t.calls)
+    tell!(s, Dict("jsonrpc" => "2.0", "method" => "session/cancel", "params" => Dict("sessionId" => s.id)))
+  else
+    # The program was still getting the session, so no turn was under way
+    settle!(s)
+    note!(s, "You stopped $(s.agent).")
+  end
+  s
+end
+
+"""
+Take a line that the ACP program of the session `s` printed, read as JSON:
+an answer to a request of Ladder's, an update, or a request of the agent's.
+Ladder said that it reads no files and has no terminal, so the agent asks
+only for leave to take a step. Another request gets an error, as one with
+no answer would hold the agent up.
+"""
+acp_line!(s::AgentSession, o) = begin
+  method, id = json_field(o, "method"), json_field(o, "id")
+  if method === nothing
+    id isa String && acp_answer!(s, pop!(s.talk.calls, id, nothing), json_field(o, "result"), json_field(o, "error"))
+  elseif method == "session/update"
+    acp_update!(s, json_field(json_field(o, "params"), "update"))
+  elseif method == "session/request_permission"
+    acp_asks!(s, id, json_field(o, "params"))
+  elseif id !== nothing
+    tell!(s, Dict("jsonrpc" => "2.0", "id" => id, "error" => Dict("code" => -32601, "message" => "Ladder doesn't do $method.")))
+  end
+  s
+end
+
+"""
+Take the answer of the ACP program of the session `s` to a request of
+Ladder's: `result` when the program did it, or `error`. `what` says what
+the request was for. Starting takes a request for each step, and each
+answer sends the next: the session, its mode, its model, and then what you
+said meanwhile. The answer to what you said ends the turn.
+"""
+acp_answer!(s::AgentSession, what, result, error) = begin
+  why = error === nothing ? "" : opening_line(fault_words(error, "it didn't say why."))
+  if what == :start
+    error === nothing ? acp_session!(s) : acp_failed!(s, "$(s.agent) didn't start: $why")
+  elseif what == :resume && error !== nothing
+    # The agent no longer has the session of that name, like one of another Mac. A new one starts, and gets the words that wait.
+    s.id = ""
+    note!(s, "$(s.agent) doesn't have this session any more, so a new one starts here. It doesn't know what was said before.")
+    acp_session!(s)
+  elseif what in (:new, :resume)
+    error === nothing || return acp_failed!(s, "$(s.agent) couldn't start a session: $why")
+    id = json_field(result, "sessionId")
+    id isa String && (s.id = id)
+    model = json_field(json_field(result, "models"), "currentModelId")
+    model isa String && (s.running = model)
+    acp_call!(s, "session/set_mode", Dict("sessionId" => s.id, "modeId" => "accept-edits"), :mode)
+  elseif what == :mode
+    error === nothing || note!(s, "$(s.agent) didn't take its accept-edits mode, so it can ask before each change: $why", true)
+    isempty(s.model) || s.model == s.running ? acp_ready!(s) :
+      acp_call!(s, "session/set_model", Dict("sessionId" => s.id, "modelId" => s.model), (:model, s.model, nothing))
+  elseif what isa Tuple && first(what) == :model
+    _, asked, was = what
+    if error === nothing
+      s.running = asked
+      was === nothing || isempty(s.items) || model_note!(s, "The model is now $(model_name(s.agent, asked)).")
+    else
+      # The model before stays, and a new session starts with it
+      back = something(was, "")
+      chosen_model(s.agent) == asked && (MODELS_CHOSEN[][s.agent] = back)
+      s.model == asked && (s.model = back)
+      model_note!(s, "$(s.agent) didn't change its model to $(model_name(s.agent, asked)): $why", true)
+    end
+    was === nothing && acp_ready!(s)
+  elseif what == :prompt
+    settle!(s)
+    stop = json_field(result, "stopReason")
+    if error !== nothing
+      note!(s, why, true)
+    elseif stop == "cancelled"
+      note!(s, "You stopped $(s.agent).")
+    elseif stop isa String && stop != "end_turn"
+      note!(s, "$(s.agent) stopped: $(replace(stop, '_' => ' ')).", true)
+    end
+    isempty(s.talk.held) || (acp_prompt!(s, popfirst!(s.talk.held)); s.busy = true)
+  end
+  s
+end
+
+"""
+Take an update of the ACP program of the session `s`: a piece of the
+agent's words, or a step with a tool, which starts, changes or ends. The
+pane doesn't show the agent's thoughts, its plan, its title for the session
+or how much of its context it has used.
+"""
+acp_update!(s::AgentSession, u) = begin
+  kind = json_field(u, "sessionUpdate")
+  if kind == "agent_message_chunk"
+    words = json_field(json_field(u, "content"), "text")
+    words isa String && more_words!(s, words)
+  elseif kind in ("tool_call", "tool_call_update")
+    acp_step!(s, u)
+  end
+  s
+end
+
+"The tool of the step that `u` tells of, by Claude Code's name where it has one, which `tool_words` and `tool_icon` know"
+acp_tool(u) = (name = something(json_field(u, "name"), json_field(u, "title"), Some(nothing)); name isa String ? get(TOOL_NAMES, name, name) : "a tool")
+
+"""
+The step of the session `s` that the update `u` tells of. Its first update
+makes it, and each can say what the tool is given and whether it's done.
+The agent's name for a step is its own in the session, so it needs no
+turn's number, as the names of an agent that works by turns do.
+"""
+acp_step!(s::AgentSession, u) = begin
+  id = json_field(u, "toolCallId")
+  id isa String || return nothing
+  step = step_of(s, id)
+  if step === nothing
+    end_words!(s)
+    step = AgentStep(id=id, tool=acp_tool(u))
+    push!(s.items, step)
+  end
+  input = json_field(u, "rawInput")
+  (input !== nothing || isempty(step.words)) && (step.words = tool_words(step.tool, antigravity_input(input)))
+  state = json_field(u, "status")
+  state == "completed" ? (step.state = :done) : state == "failed" && (step.state = :failed)
+  step
+end
+
+"""
+The agent of the session `s` asks before a step, with the request `id` of
+its program. The pane shows what the step does, with Allow and Refuse.
+`params` has the step and the answers that the agent takes, which the
+request keeps for `acp_choose!`.
+"""
+acp_asks!(s::AgentSession, id, params) = begin
+  call = json_field(params, "toolCall")
+  tool = acp_tool(call)
+  input = antigravity_input(json_field(call, "rawInput"))
+  command = json_field(input, "command")
+  push!(s.items, AgentWants(id=id isa String ? id : sprint(write_json, id), tool=tool, input=(id, json_field(params, "options")),
+                            words=lowercasefirst(tool_words(tool, input)), detail=tool == "Bash" && command isa String ? command : ""))
+  s
+end
+
+"""
+Answer the request of the agent of the session `s` that `it` shows, with
+the answer of the kind `kind` that the request offers, like allow_once, or
+else one like it, such as allow_always. With neither, it's cancelled.
+"""
+acp_choose!(s::AgentSession, it::AgentWants, kind) = begin
+  it.input isa Tuple || return s
+  id, options = it.input
+  options isa AbstractVector || (options = Any[])
+  like = first(split(kind, '_')) * "_"
+  k = something(findfirst(o -> json_field(o, "kind") == kind, options),
+                findfirst(o -> (x = json_field(o, "kind"); x isa String && startswith(x, like)), options), Some(nothing))
+  outcome = k === nothing ? Dict("outcome" => "cancelled") : Dict("outcome" => "selected", "optionId" => json_field(options[k], "optionId"))
+  acp_reply!(s, id, Dict("outcome" => outcome))
+  s
+end
+
 # --- an agent that works by turns ---
 #
-# Claude Code's program stays for a whole session. The programs of
-# Antigravity, Codex and Grok do one thing and end. So a session with one of them starts
+# Claude Code's program stays for a whole session, and so does
+# Antigravity's: see "Antigravity, which asks you before a step". The
+# programs of Codex and Grok do one thing and end. So a session with one of them starts
 # its program again for each thing that you say, with the name that the
 # agent gave the session, and the agent goes on from where it was. Each
 # prints lines of JSON while it works, in a form of its own, and Ladder shows
@@ -49308,7 +49602,6 @@ turn_options(s::AgentSession) = begin
   again = !isempty(s.id)
   model = isempty(s.model) ? String[] : ["-m", s.model]   # Grok and Codex take -m for the model
   name == "Grok" ? ["--output-format", "streaming-json", "--rules", session_brief(s), model..., (again ? ["-r", s.id] : String[])..., "--permission-mode", "acceptEdits", "-p"] :
-  name == "Antigravity" ? ["--output-format", "stream-json", (isempty(s.model) ? String[] : ["--model", s.model])..., (again ? ["--conversation", s.id] : String[])..., "--mode", "accept-edits", "-p"] :
   ["exec", "--json", "--sandbox", "workspace-write", "--skip-git-repo-check", model..., (again ? ["resume", s.id] : String[])...]
 end
 
@@ -49371,7 +49664,7 @@ turn_ended!(s::AgentSession, wrong) = begin
   elseif !success(s.process)
     said = fault_line(wrong)
     empty!(s.queue)
-    # Antigravity says what went wrong in its last line too, and that's in the session already
+    # An agent that said what went wrong in its last line has it in the session already
     told = !isempty(s.items) && last(s.items) isa SessionNote && last(s.items).bad
     told || note!(s, isempty(said) ? "$(s.agent) stopped before it had done." : "$(s.agent) stopped: $said", true)
   end
@@ -49413,17 +49706,17 @@ turn_step(s::AgentSession, id::AbstractString) = "$(s.asked)/$id"
 
 """
 Take a line that the program of a turn of the session `s` printed: JSON with
-a `type`, or an `event` as Antigravity prints, in the form of the session's
-agent. A notice before the JSON on a line is left out.
+a `type`, in the form of the session's agent. A notice before the JSON on a
+line is left out.
 """
 turn_line!(s::AgentSession, line::AbstractString) = begin
   at = findfirst('{', line)
   at === nothing && return s
   o = agent_json(SubString(line, at))
   o === nothing && return s
-  kind = something(json_field(o, "type"), json_field(o, "event"), Some(nothing))
+  kind = json_field(o, "type")
   kind isa String || return s
-  s.agent == "Grok" ? grok_line!(s, o, kind) : s.agent == "Antigravity" ? antigravity_line!(s, o, kind) : codex_line!(s, o, kind)
+  s.agent == "Grok" ? grok_line!(s, o, kind) : codex_line!(s, o, kind)
   s.version += 1
   s
 end
@@ -49457,34 +49750,6 @@ grok_line!(s::AgentSession, o, kind) = begin
     why isa String && !(why in ("end_turn", "cancelled")) && !s.stopped && note!(s, "$(s.agent) stopped: $(replace(why, '_' => ' ')).", true)
   elseif kind == "error"
     note!(s, fault_words(o, "$(s.agent) couldn't do that."), true)
-  end
-  s
-end
-
-# Antigravity prints `init` with the conversation's name and model, a `step_update` each time a step starts, grows or ends, and
-# `result`. A step is the agent's words, with `text_delta` for each piece of them, or a tool. Each step has its number in the turn.
-antigravity_line!(s::AgentSession, o, kind) = begin
-  if kind == "init"
-    id, model = json_field(o, "conversation_id"), json_field(json_field(o, "init"), "model")
-    id isa String && !isempty(id) && (s.id = id)
-    model isa String && !isempty(model) && (s.running = model)
-  elseif kind == "step_update"
-    u = json_field(o, "step_update")
-    what, state, n = json_field(u, "step_type"), json_field(u, "state"), json_field(u, "step_index")
-    if what == "agent_response"
-      words = json_field(u, "text_delta")
-      words isa String && more_words!(s, words)
-      state == "DONE" && end_words!(s)
-    elseif what == "tool"
-      id = "step-$n"
-      tool = json_field(u, "tool_info")
-      tool_step!(s, id, json_field(u, "tool_name"), antigravity_input(json_field(tool, "parameters")))
-      state == "DONE" ? step_ended!(s, id, true) : state in ("ERROR", "FAILED", "CANCELED", "CANCELLED") && step_ended!(s, id, false)
-    end
-  elseif kind == "result"
-    r = json_field(o, "result")
-    settle!(s)
-    json_field(r, "status") == "SUCCESS" || s.stopped || note!(s, opening_line(fault_words(r, "$(s.agent) couldn't do that.")), true)
   end
   s
 end
@@ -49949,7 +50214,7 @@ session!(p::AgentPane, e) = begin
     top = repo_of(e)
     dir = !isempty(top) ? top : onmac ? (isdir(b.path) ? b.path : dirname(b.path)) : isempty(e.folder) ? homedir() : e.folder
     agent = pane_agent(p, e)
-    s = AgentSession(agent=agent, dir=dir, page=writes(b) ? truepath(b.path) : "", turns=agent_kind(e.ai).name != "Claude", model=chosen_model(agent))
+    s = AgentSession(agent=agent, dir=dir, page=writes(b) ? truepath(b.path) : "", turns=by_turns(agent), model=chosen_model(agent))
   end
   # An agent that works by turns has no program between turns: `say!` starts one
   s.turns || running(s) || start!(s, session_command(s))
@@ -51431,7 +51696,7 @@ load_talk!(p::AgentPane, e) = begin
   s = p.session
   if s === nothing
     agent = !isempty(kept.agent) ? kept.agent : SESSION_COMMAND[] === nothing ? agent_kind(e.ai).name : e.ai
-    s = p.session = AgentSession(agent=agent, dir=dirname(abspath(p.file)), file=p.file, turns=agent_kind(agent).name != "Claude", model=chosen_model(agent))
+    s = p.session = AgentSession(agent=agent, dir=dirname(abspath(p.file)), file=p.file, turns=by_turns(agent), model=chosen_model(agent))
   end
   s.id, s.items = kept.id, kept.items
   # The model that the session worked with goes on with it. A file with none has the model that you chose last.
