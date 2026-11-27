@@ -1,6 +1,6 @@
 # Tests for a page of Markdown from a web server, which a window shows as a
-# browser shows a page of HTML: see "a page from a web server" in main.jl and
-# remote.jl. Run them with `julia -O0 --project=. test/remote_page_test.jl`.
+# browser shows a page of HTML: see "a page from a web server" in remote_page.jl
+# and remote.jl. Run them with `julia -O0 --project=. test/remote_page_test.jl`.
 # A function of the tests stands in for `curl`, so they use no network, and
 # another stands in for the browser. The window isn't on the screen.
 
@@ -15,7 +15,7 @@ const px = K.px
 
 const dir = mktempdir()
 K.SETTINGS_FILE[] = joinpath(dir, "settings")
-# Each page from the web goes in the browser folder, which is the test's own: see "the browser folder" in main.jl
+# Each page from the web goes in the browser folder, which is the test's own: see "the browser folder" in remote_page.jl
 K.BROWSER_FOLDER[] = joinpath(dir, "Browser")
 "The web address of the page that the window shows, or of the file at `path` of the browser folder"
 address(path=e.buf.path) = K.web_address(path)
@@ -568,7 +568,7 @@ end
   @test K.go_back!(e) && e.buf.path == mine
 end
 
-# Somebody else wrote an email too, so the same rule holds for it: see `foreign` in main.jl
+# Somebody else wrote an email too, so the same rule holds for it: see `foreign` in buffer.jl
 @testset "an email runs no code either" begin
   ran1, ran2 = joinpath(dir, "ran-sum"), joinpath(dir, "ran-block")
   eml = joinpath(dir, "note.eml")
@@ -605,7 +605,7 @@ end
   end
 end
 
-# A site that you trust runs the code of its pages with no sandbox, as a page of the Mac does: see `sandboxed` in main.jl
+# A site that you trust runs the code of its pages with no sandbox, as a page of the Mac does: see `sandboxed` in buffer.jl
 @testset "a site that you trust runs its pages' code with no sandbox" begin
   site = "https://sums.example.com"
   page!("$site/page.md", """
@@ -654,7 +654,7 @@ end
 end
 
 # A `view` block of a page from a site that you trust names a file beside the page's address. Ladder gets the file,
-# and the block shows a copy of it on the Mac: see `view_copy` in main.jl
+# and the block shows a copy of it on the Mac: see `view_copy` in view_block.jl
 @testset "a view of a page from a site that you trust shows the file beside the page" begin
   site = "https://views.example.com"
   page!("$site/a/page.md", """
@@ -712,7 +712,7 @@ end
 end
 
 # You can change a page from a web server, as a page of your own: it's a file of the browser folder. ⌘S writes your
-# changes there, and never to the server. A click on a link still opens it. See "the browser folder" in main.jl.
+# changes there, and never to the server. A click on a link still opens it. See "the browser folder" in remote_page.jl.
 @testset "you can change a page from a server, and it stays as you changed it" begin
   url = "https://example.com/notes.md"
   first = SITE[url].text

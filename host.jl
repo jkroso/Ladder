@@ -42,7 +42,8 @@ export editor, page_object, object, list_files!, go_folder!, open!, open_folder!
        preferred_agent!, inline_tick!, unused, is_companion, outline, companion_pane, screen_room,
        palette_click!, show_window!, shown_parts, window!, paper_window, todo_box, go_chip!, palette_chips,
        palette, under_palette, startup_page, command_focus, copied!, mark_chips, mark_preview, text_width,
-       code_module!, page_value, page_code, show_opened!, toast!, untoast!, site_code_changed!
+       code_module!, page_value, page_code, show_opened!, toast!, untoast!, site_code_changed!,
+       go_heading!, known_lang, reset_module!
 
 "The editor of the window that `node`, a part of a page, is part of"
 function editor end
@@ -913,3 +914,12 @@ function untoast! end
 
 "Run the code of each page of `site` that a window shows again, from the start, in a new module: after you trust the site, put it back in the sandbox, or let its code do something more."
 function site_code_changed! end
+
+"Show the page at `path` with its heading `name` near the top of the window."
+function go_heading! end
+
+"True when Ladder itself says what a code block in the language `lang` shows"
+function known_lang end
+
+"Give the file that the window `e` shows a new, empty module for its code, in place of the one it had."
+function reset_module! end

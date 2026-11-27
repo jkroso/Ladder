@@ -1,5 +1,5 @@
 # Gets a page of Markdown from a web server, for a window to show. See "a page
-# from a web server" in main.jl.
+# from a web server" in remote_page.jl.
 #
 #     c = ask("https://example.com/notes.md")   # start to get it: nothing here waits
 #     a = landed(c)                              # nothing while it's on its way, then an Answer

@@ -1,8 +1,8 @@
 # Tests for the browser folder, which keeps each page and file that Ladder gets
-# from the web at its place on its site: see "the browser folder" in main.jl,
-# and remote.jl. Run them with `julia -O0 --project=. test/browser_folder_test.jl`.
-# A function of the tests stands in for `curl`, so they use no network. The
-# window isn't on the screen.
+# from the web at its place on its site: see "the browser folder" in
+# remote_page.jl, and remote.jl. Run them with
+# `julia -O0 --project=. test/browser_folder_test.jl`. A function of the tests
+# stands in for `curl`, so they use no network. The window isn't on the screen.
 
 @use Test: @test, @testset
 @use "../main" => K

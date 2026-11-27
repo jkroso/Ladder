@@ -1,6 +1,6 @@
 # Tests for the sandbox of a page from a web server, whose site you don't
 # trust: its code runs, but each call that could harm the Mac stops and asks
-# you. See "the sandbox" in main.jl and guard.jl. Run them with
+# you. See "the sandbox" in sandbox.jl and guard.jl. Run them with
 # `julia -O0 --project=. test/sandbox_page_test.jl`. A function of the tests
 # stands in for `curl`, so they use no network, and the window isn't on the
 # screen.

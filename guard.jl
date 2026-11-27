@@ -1,5 +1,5 @@
 # The sandbox that the code of a page from a web server runs in, while you
-# don't trust its site. See "the sandbox" in main.jl.
+# don't trust its site. See "the sandbox" in sandbox.jl.
 #
 #     c = Context(Site("https://example.com", folder, answer), m)
 #     Guard.run(c, ex)          # run the page's code `ex` in its module m
