@@ -14,7 +14,8 @@ export drop!, dragging, click_twice!, settle!, answer!, commit!, stop_asking!, f
        more_words, name_row!, own_button, stop_choosing!, theme!, turn!, works_here, step!, locked, asks,
        add_to_favourites!, page_covers, remove_from_favourites!, choices_for, put_back!, runs_at_once,
        sidenote, worded, matter_view, on_own_page, table_view, web_kind, table_item, page_side, side_name,
-       page_back!, wide_words, chip_click, chip_kind, chip_start, look!, look_of, put_look!, shown_at
+       page_back!, wide_words, chip_click, chip_kind, chip_start, look!, look_of, put_look!, shown_at, drag!,
+       hint, head_in_charge
 
 "A drag on the part `v` ended: what moved is written down"
 function drop! end
@@ -276,3 +277,12 @@ function put_look! end
 
 "Where the thing `x` that a chip has shows in the window of `e`, for a line round it, or nothing"
 function shown_at end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function drag! end
+
+"The first shortcut of the command `name` with two spaces before it, to end a tooltip with, or nothing when the command has no keys"
+function hint end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function head_in_charge end

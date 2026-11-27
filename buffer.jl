@@ -36,7 +36,7 @@ export look, table_text, in_browser, web_address, copied_from, julia_own, is_rep
        unchanged, line_end, FOLDER_PAGE, page_key, unescaped, bytes_page, STEP, FILE_VIEWS, JULIA, LIVE,
        TEXT_READ, text_file, SCHEDULE, FILTER, CODE_RUNS, LOAD, FOLDER_PAGES, TIMELOG, HTMLS, TERM_CARETS,
        TERM_PASTS, VIEW_BLOCK, PAGE_MODULES, table_reads, CHART, SAVE, RUN_WAIT, LAST_RUN, fetches,
-       MATTER_TITLES, MATTER_CARDS
+       MATTER_TITLES, MATTER_CARDS, PAGE_MEDIA
 
 # A kind of page or of file decides these, so this file only names them. The
 # file that knows the kind gives each its methods.
@@ -650,3 +650,10 @@ isn't in it: `f(e, rows)` gives a node, or nothing to leave the card. `rows`
 are the front matter's keys, each as its line, the key and what it's set to.
 """
 const MATTER_CARDS = Dict{Symbol,Any}()
+
+# A file that a page makes goes in a folder called .media beside the page: a
+# picture that's pasted, a recording, a copy of a temporary file. Only the page
+# that made it has a use for it, so it stays out of the list of the page's
+# folder. The Finder and the sidebar leave out a name that starts with a dot
+# until you ask for the hidden files.
+const PAGE_MEDIA = ".media"

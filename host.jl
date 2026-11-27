@@ -35,7 +35,8 @@ export editor, page_object, object, list_files!, go_folder!, open!, open_folder!
        copy_text!, renamer, move!, toggle_right!, right_w, open_palette!, lens_shapes, theirs, change_diff,
        kind_command, right_opened, in_focus, right_view, agent_kind, page_module, detail_view, type_brief,
        line_rect, declared, detail_wide, sandbox, made_workspace, coloured, code_place, show_method!,
-       settled_line, code_blocks, text_lines, show_code!
+       settled_line, code_blocks, text_lines, show_code!, select_all!, add_block!, sources_tick!,
+       from_pick_tick!, page_media, marking, page_span, table_html, isword, places, run!
 
 "The editor of the window that `node`, a part of a page, is part of"
 function editor end
@@ -735,3 +736,36 @@ function text_lines end
 
 "True while Ladder is built into an app (see app/bundle.jl)"
 function show_code! end
+
+"What `select_all!` gives"
+function select_all! end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function add_block! end
+
+"The list of the block `v`, in each frame"
+function sources_tick! end
+
+"When a file has been clicked in the file picker of `v`, it's where the rows of `v` come from, as a path from the page's folder"
+function from_pick_tick! end
+
+"The folder for the files that the pages of the folder `dir` make"
+function page_media end
+
+"True while the bars beside the agent's changes stay on the page that's showing"
+function marking end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function page_span end
+
+"The line `text` as HTML when it holds only a CSV file"
+function table_html end
+
+"What `isword` gives"
+function isword end
+
+"The columns of each place in `line` that has `text`"
+function places end
+
+"Run the command called `name` in the window `w` of `e`"
+function run! end

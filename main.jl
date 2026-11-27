@@ -9216,13 +9216,6 @@ paste!(e) = begin
   put_files!(e, paths, settle(b, b.caret))
 end
 
-# A file that a page makes goes in a folder called .media beside the page: a
-# picture that's pasted, a recording, a copy of a temporary file. Only the page
-# that made it has a use for it, so it stays out of the list of the page's
-# folder. The Finder and the sidebar leave out a name that starts with a dot
-# until you ask for the hidden files.
-const PAGE_MEDIA = ".media"
-
 "The folder for the files that the pages of the folder `dir` make. It's made if it isn't there."
 page_media(dir) = begin
   media = joinpath(dir, PAGE_MEDIA)
@@ -18817,7 +18810,7 @@ find_key!(e, w, K, command) = begin
   elseif command == :find
     i = find_input(e)
     i.anchor, i.cursor = 0, length(i.text)
-  elseif command in (:find_next, :find_last) || (command !== nothing && COMMANDS[command].kind == :window)
+  elseif command in (:find_next, :find_last) || (command !== nothing && command_kind(command) == :window)
     run!(e, w, command)
   end
   nothing
@@ -30052,7 +30045,7 @@ field_key(f::DesignField, e, w, K, command) = begin
   # ⌘Z takes back the design's last change when the field has nothing of its own to take back
   command == :undo && isempty(b.undo) && return nothing
   command == :redo && isempty(b.redo) && return nothing
-  COMMANDS[command].kind == :window || command in (:commands, :find, :find_next, :find_last, :plain, :slides, :forward) ? nothing : :text
+  command_kind(command) == :window || command in (:commands, :find, :find_next, :find_last, :plain, :slides, :forward) ? nothing : :text
 end
 
 Designs.text_of(f::DesignField) = join(f.sub.buf.lines, '\n')
@@ -30243,7 +30236,7 @@ sheet_key(s::DesignSheet, e, w, K, command) = begin
   # ⌘Z takes back the design's last change when the sheet has nothing of its own to take back
   command == :undo && isempty(b.undo) && return nothing
   command == :redo && isempty(b.redo) && return nothing
-  COMMANDS[command].kind == :window || command in (:commands, :find, :find_next, :find_last, :plain, :slides, :forward) ? nothing : :text
+  command_kind(command) == :window || command in (:commands, :find, :find_next, :find_last, :plain, :slides, :forward) ? nothing : :text
 end
 
 Designs.text_of(s::DesignSheet) = join(s.sub.buf.lines, '\n')
