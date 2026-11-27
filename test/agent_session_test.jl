@@ -562,6 +562,34 @@ try
     @test slider.value < 20 && sub.buf.lines[3] == "Size: $(round(Int, slider.value))px (16px to 96px)"
   end
 
+  @testset "A command that the agent asks to run wraps onto more lines, so each of its characters shows" begin
+    face = K.Face(K.codefont(), K.codestyle(), 12px, K.colours.ink, false)
+    one = K.measure(face, "0")
+    @test K.code_wrapped("", face, 10one) == [""]
+    @test K.code_wrapped("ab   cd", face, 10.5one) == ["ab   cd"]                  # spaces stay as they are
+    @test K.code_wrapped("aaa bbb ccc", face, 8.5one) == ["aaa bbb ", "ccc"]       # after the last space that fits
+    @test K.code_wrapped("abcdefghij", face, 4.5one) == ["abcd", "efgh", "ij"]    # between two characters
+    @test K.code_wrapped("  aaa bbb", face, 6.5one) == ["  aaa ", "  bbb"]         # at the indent of the line
+    # In a session's card
+    folder = joinpath(dir, "asks")
+    mkpath(folder)
+    said = joinpath(folder, "Asks.chat")
+    long = "git log -p -n 5 -- pages/space-data-centres.md && " * join(("some/long/path/number-$i.md" for i in 1:8), " ") * " " * repeat("x", 150)
+    s = K.AgentSession(agent="Claude", dir=folder)
+    push!(s.items, K.YouSaid(words="Look"), K.AgentWants(id="r1", tool="Bash", words="run git", detail="  $long\nsecond line", answer=:allowed))
+    write(said, K.talk_text(s))
+    K.open!(e, said)
+    frames(w, 4)
+    box = named("Agent asks to run")
+    lines = box === nothing ? [] : [r for r in flat(box) if hasproperty(r.from, :content)]
+    @test length(lines) > 3
+    @test all(r -> box.left <= r.left && r.left + r.width <= box.left + box.width, lines)
+    # Its lines put together are the command, once the indent is off the lines that a break made
+    words = [r.from.content for r in lines]
+    @test words[end] == "second line"
+    @test join([k == 1 ? l : chopprefix(l, "  ") for (k, l) in enumerate(words[1:end-1])]) == "  $long"
+  end
+
   @testset "The commands after a slash work in a session's file: /resume puts an earlier session in the file, and /new makes a new file" begin
     kept = K.CLAUDE_SESSIONS[] = joinpath(dir, "claude-sessions")
     mkpath(kept)

@@ -24024,15 +24024,48 @@ talk_row(p::AgentPane, e, it::AgentReply, room) = begin
   Box(width(grow=grow), height(tall), Alignment.Start, name="Reply", node!(Document, sub, :document))
 end
 
+"""
+The line of code `line` broken into lines no wider than `room` in `face`, with
+each of its characters, spaces too. A line breaks after its last space that
+fits, or between two characters when no space fits. A line that a break makes
+starts at the indent of `line`, when the indent takes half of `room` or less.
+"""
+code_wrapped(line::AbstractString, face::Face, room) = begin
+  chars = collect(replace(line, '\t' => "    "))
+  sizes = Dict{Char,Any}()
+  wide(c) = get!(() -> measure(face, string(c)), sizes, c)
+  lead = something(findfirst(!isspace, chars), 1) - 1
+  pad = sum(wide, chars[1:lead], init=0px) <= room / 2 ? String(chars[1:lead]) : ""
+  out = String[]
+  # Where this line starts in `chars`, how wide it is so far, its last space after a word, and whether a word has started in it
+  from, x, gap, word = 1, 0px, 0, false
+  for (i, c) in pairs(chars)
+    if i > from && x + wide(c) > room
+      cut = gap > 0 ? gap : i - 1
+      push!(out, (isempty(out) ? "" : pad) * String(chars[from:cut]))
+      from, gap, word = cut + 1, 0, cut < i - 1   # after the last space, the rest of a word goes on to the new line
+      x = sum(wide, pad, init=0px) + sum(wide, chars[from:i-1], init=0px)
+    end
+    x += wide(c)
+    c == ' ' && word && (gap = i)
+    isspace(c) || (word = true)
+  end
+  push!(out, (isempty(out) ? "" : pad) * String(chars[from:end]))
+end
+
 "Something that the agent asks to do, with the buttons that allow it and refuse it, and then what you answered"
 talk_row(p::AgentPane, e, it::AgentWants, room) = begin
   inside = room - 26px
   ends = it.answer == :none ? Row(Alignment.Center, child_gap=8px, pane_button(p, :allow, it), pane_button(p, :refuse, it)) :
     Box(label(it.answer == :allowed ? "You allowed it." : it.answer == :refused ? "You refused it." : "It wasn't answered.", 12px * talk_zoom(e), color=colours.dim))
-  detail = isempty(it.detail) ? () :
-    (Box(width(grow=grow), padding(8px, 6px), radius(6px), background(on_glass(0.06)), clip=true,
-       Column(Alignment.Start, [Row(height(17px), Alignment.Center, Text(String(l), size=12px * talk_zoom(e), family=codefont(), subfamily=codestyle(), color=colours.ink, wrap=WrapMode.none))
-                                for l in first(split(it.detail, '\n'), 6)]...)),)
+  # The command or code wraps onto more lines, so each of its characters shows
+  size = 12px * talk_zoom(e)
+  face = Face(codefont(), codestyle(), size, colours.ink, false)
+  lines = isempty(it.detail) ? String[] : [l for line in first(split(it.detail, '\n'), 6) for l in code_wrapped(line, face, inside - 16px)]
+  detail = isempty(lines) ? () :
+    (Box(width(grow=grow), padding(8px, 6px), radius(6px), Alignment.Start, background(on_glass(0.06)), clip=true, name="Agent asks to run",
+       Column(Alignment.Start, [Row(height(17px * talk_zoom(e)), Alignment.Center, Text(l, size=size, family=codefont(), subfamily=codestyle(), color=colours.ink, wrap=WrapMode.none))
+                                for l in lines]...)),)
   Column(width(grow=grow), Alignment.Start, padding(13px, 11px), radius(10px), child_gap=9px, name="Agent asks",
          background(on_glass(0.05)), border(1px, :solid, on_glass(0.14)),
     words_block(e, "$(p.session.agent) asks to do this: $(it.words)", colours.ink, inside),
