@@ -7,6 +7,11 @@
 # the design's steps along the bottom, and at the right the form of the
 # command that's being filled in.
 #
+# The toolbar's top row has the tabs, the file's name in its middle, and the
+# buttons that undo, redo and save. A drag of the room round the name moves
+# the window. In Ladder the design goes up to the top of the window, and the
+# name is the file's path that the top bar would show.
+#
 # The browser lists the origin, the bodies, the sketches and the construction
 # planes. The eye at the end of a line shows or hides what the line names, and
 # the eye of a folder does that for everything in it. The origin's point,
@@ -81,6 +86,7 @@
 @use "github.com/jkroso/UI.jl/Interface/abstract" SemanticUI WrapMode describe focus theme handled window_of scale reuse!
 @use "github.com/jkroso/UI.jl/Interface/draw" draw cursor rect redraw_in! MouseScroll Pinch onpinch ishovered popup! close_popup! show_tooltip! hide_tooltip! hittest
 @use "github.com/jkroso/UI.jl/Interface/image" register_image has_image
+@use "github.com/jkroso/UI.jl/Interface/window" drag_window!
 @use "github.com/jkroso/UI.jl/Interface/Semantic/TextInput" TextInput
 @use "github.com/jkroso/UI.jl/Interface/Semantic/TextInput" => TextInputs
 @use Colors: Colorant, RGBA, RGB, @colorant_str, red, green, blue
@@ -153,6 +159,18 @@ onkey(::Card, ::KeyPress{Keys.mouse_left}) = handled
 onkey(::Card, ::KeyPress{Keys.mouse_right}) = handled
 onkey(::Card, ::KeyRelease{Keys.mouse_left}) = handled
 onmouse(::Card, ::MouseMove) = handled
+
+"""
+The part of the toolbar's top row between its tabs and its buttons, with the
+file's name, or its path, in the middle. A drag of it moves the window, as a
+drag of the toolbar of a Mac window does.
+"""
+@def mutable struct Grip <: SemanticUI
+  inside::Any = nothing
+end
+describe(g::Grip) = Box(width(grow=grow), height(28px), g.inside)
+onkey(g::Grip, ::KeyPress{Keys.mouse_left}) = (w = window_of(g); w === nothing || drag_window!(w); handled)
+onkey(::Grip, ::KeyRelease{Keys.mouse_left}) = handled
 
 # --- menus ---------------------------------------------------------------------------
 
@@ -812,6 +830,7 @@ describe(v::DesignView) = begin
   if !isempty(m.problem)
     picture = saved_picture(v)
     return Column(width(grow=grow), height(grow=grow), padding(40px), child_gap=18px, background(t.surface),
+      grip!(v, t.surface),   # the file's name, which is in the toolbar when there is one
       (picture === nothing ? () : (Image(picture, width(max=420px)),))...,
       Box(width(max=460px), Text(m.problem, size=13px, color=t.dim)))
   end
@@ -865,7 +884,10 @@ end
 
 # --- the look of the panels ----------------------------------------------------------
 
-panel_look(t) = (background(Ink.faded(t.surface, 0.97)), radius(9px), border(1px, :solid, t.line), shadow(0, 3, 14, RGBA(0, 0, 0, dark(t) ? 0.35 : 0.12)))
+"The colour of a panel over the design: the theme's surface, a little see-through"
+panel_colour(t) = Ink.faded(t.surface, 0.97)
+
+panel_look(t) = (background(panel_colour(t)), radius(9px), border(1px, :solid, t.line), shadow(0, 3, 14, RGBA(0, 0, 0, dark(t) ? 0.35 : 0.12)))
 
 "A small button with only an icon"
 icon_button(v, key, icon, tip; act, on=false, size=16px, off=false) = begin
@@ -969,6 +991,39 @@ more_menu(v::DesignView, g::Commands.Group, more, window) = begin
         anchor=something(under, window.mouse), width=230px, t=theme(v))
 end
 
+"How far the words and the buttons of the toolbar are from the left edge of the design: the room round the toolbar, its border, and the room in it"
+const RIBBON_INSET = 17px
+
+"""
+What the toolbar shows of the design's file, in the middle of its top row: the
+file's name, with "— edited" while the design has changes that aren't saved.
+It has `room` at most, which is how wide its place was when it was last drawn,
+and it lies on the colour `ground`. Ladder adds a method that gives the file's
+path, as its top bar has it: in Ladder the design goes up to the top of the
+window, in the place of the bar's middle.
+"""
+file_part(v, room, ground) = begin
+  m, t = v.model, theme(v)
+  name = String(get(m.doc, "name", splitext(basename(v.path))[1]))
+  words(Designs.edited(m) ? name * " — edited" : name, 12px, color=t.dim)
+end
+
+"""
+How far from the design's left edge the window's own buttons reach, over the
+top of the toolbar. The tabs start after them. Here there are none. Ladder
+adds a method that gives the room of the left end of its top bar, which lies
+over the toolbar while the sidebar is closed.
+"""
+corner_room(v) = 0px
+
+"The part of the toolbar's top row that has the file's name or path in its middle, on the colour `ground`, and that moves the window"
+grip!(v::DesignView, ground) = begin
+  g = part!(Grip, v, :grip)
+  r = rect(g)
+  g.inside = file_part(v, r === nothing ? 10_000px : r.width, ground)
+  g
+end
+
 ribbon(v::DesignView) = begin
   t = theme(v)
   m = v.model
@@ -990,15 +1045,17 @@ ribbon(v::DesignView) = begin
     i > 1 && push!(shown, Box(width(1px), height(66px), background(Ink.faded(t.line, 0.8))))
     push!(shown, group(v, g))
   end
-  name = String(get(m.doc, "name", splitext(basename(v.path))[1]))
   doc = get(m.doc, "undo", 0) isa Number ? m.doc : JSON.Object()
+  # The window's own buttons can lie over the left end of the top row, and then the tabs start after them.
+  # The row's gap of 2px follows the room for them too.
+  corner = max(corner_room(v) - RIBBON_INSET - 2px, 0px)
   card!(v, :ribbon) do
     Column(width(grow=grow), panel_look(t)..., padding(8px, 6px), child_gap=6px, Alignment.Start,
       Row(width(grow=grow), child_gap=2px,
+        (corner > 0px ? (Box(width(corner), height(28px)),) : ())...,
         tab.(tabs)...,
-        Box(width(grow=grow)),
+        grip!(v, panel_colour(t)),
         (Designs.busy(m) && !m.trying ? (Box(padding(8px, 0px), words("Working…", 11.5px, color=t.dim)),) : ())...,
-        Box(padding(8px, 0px), words(Designs.edited(m) ? name * " — edited" : name, 12px, color=t.dim)),
         icon_button(v, :undo, "arrow-counterclockwise", "Undo (⌘Z)"; act=e -> undo!(v), off=get(doc, "undo", 0) == 0),
         icon_button(v, :redo, "arrow-clockwise", "Redo (⇧⌘Z)"; act=e -> redo!(v), off=Designs.redoable(m) == 0),
         icon_button(v, :save, "save", "Save (⌘S)"; act=e -> save!(v), off=!Designs.edited(m))),

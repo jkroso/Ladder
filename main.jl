@@ -649,8 +649,9 @@ end
 # from the startup page gives a kind of folder its own way in the sidebar with
 # a method for the folder's type, as it does for a component of a page. The
 # page asks too: `page_view` gives what it shows for a file or a folder of a
-# kind, `page_fills` says whether that's as wide as the window, and
-# `page_covers` says whether it covers the page's whole space, as a desktop does.
+# kind, `page_fills` says whether that's as wide as the window,
+# `page_covers` says whether it covers the page's whole space, as a desktop does,
+# and `crumb_in_page` whether it goes up to the window's top with the file's path in it.
 # And the window asks: `window_view` makes all of it, `side_menu` a side menu
 # in the sidebar's place and `bread_crumb` the middle of the top bar. See "the whole window".
 #
@@ -777,6 +778,19 @@ covers the page so, with its wallpaper.
 page_covers(e, o) = false
 
 """
+True when what `page_view` gives for `o` runs up to the top of the window, and
+shows the file's path itself, as a SolidCraft design does in its toolbar. The
+top bar then has only its left end, with its buttons, over the sidebar. The
+page has the rest of the bar's room, and shows the path that the bar would
+have with `page_crumb`. Only a page that covers the page's space has it: see
+`page_covers`.
+"""
+crumb_in_page(e, o) = false
+
+"True when what `page_view` gives for `o` has changes that aren't in its file. The name of the file says \"— edited\" then."
+page_edited(e, o) = false
+
+"""
 What shows in a panel at the right of the window, beside what `page_view`
 gives for `o`: a node, or nothing for no panel. The page of a repository has
 git's panel there. The panel runs from the top of the window to the bottom, as
@@ -862,13 +876,46 @@ page_cover(e) = begin
   end
 end
 
+"True when the page that shows runs up to the top of the window, with the file's path in it: see `crumb_in_page(e, o)`"
+crumb_in_page(e) = (o = page_object(e); o !== nothing && !filled(e) && page_covers(e, o) && crumb_in_page(e, o))
+
+"""
+How much room the page leaves at its top for the top bar. A page that shows
+the file's path itself leaves none: it starts at the top of the window, or in
+agent mode at the top of the page's card.
+"""
+under_bar(e) = crumb_in_page(e) ? (agent_shows(e) ? PAGE_CARD_GAP : 0px) : above_page(e)
+
+"""
+The path of the file, for a page that shows the path itself (see
+`crumb_in_page`): what `bread_crumb` gives, which is the file's name that
+opens into its path, as the top bar has it. It has `room` at most, and it lies
+on the colour `ground`, which a pinned path has under it too.
+"""
+page_crumb(e, room, ground) = begin
+  e.nodes[:title_room] = room
+  e.nodes[:title_ground] = ground
+  bread_crumb(e, window_object(e))
+end
+
+"""
+How far past the sidebar's edge the left end of the top bar reaches over the
+page: the room of the Mac's close, minimise and zoom buttons and of the bar's
+own buttons, while the sidebar is too narrow for them. A page that shows the
+path itself leaves this room at its top left. A bar that hides takes none.
+"""
+bar_corner(e) = hides_bar(e) ? 0px : get(e.nodes, :bar_past_side, 0px)
+
+"True when the page that shows has changes that aren't in its file: see `page_edited(e, o)`"
+page_edited(e) = (o = page_object(e); o !== nothing && page_edited(e, o))
+
 "How wide and how tall the page's space in the window is: beside the sidebar, and under the top bar"
 page_room(e) = begin
   w, h = window_size(e)
   # In agent mode, the page is on a card between the two panes
-  agent_shows(e) && return (page_span(e)[2], max(h - above_page(e) - PAGE_CARD_GAP, 1px))
+  agent_shows(e) && return (page_span(e)[2], max(h - under_bar(e) - PAGE_CARD_GAP, 1px))
   side = lowered(e) === nothing ? side_w(e) : 0px
-  (max(w - side, 1px), max(h - above_page(e), 1px))
+  (max(w - side, 1px), max(h - under_bar(e), 1px))
 end
 
 """
@@ -6970,9 +7017,11 @@ bar_back(e) = begin
   tint = bar_tint(e)
   hides = hides_bar(e)
   (hides || tint !== nothing) || return ()
+  inpage = crumb_in_page(e)
   if agent_shows(e)
-    # Under a bar that doesn't hide is the top of the page's card, which has the web page's colour: see `describe(c::PageCard)`
-    hides || return ()
+    # Under a bar that doesn't hide is the top of the page's card, which has the web page's colour: see `describe(c::PageCard)`.
+    # Over a page that shows the path itself the bar has no middle, so it lies only on the agent's pane.
+    (hides && !inpage) || return ()
     # In agent mode only the page's card has a colour of its own, so the bar lies on that
     left, wide = page_card_span(e)
     paper, rule = tint === nothing ? (colours.bg, colours.line) : (tint, tint_colours!(tint).line)
@@ -6990,6 +7039,10 @@ bar_back(e) = begin
     return (Row(width(grow=grow), height(TOPBAR_H), Alignment.Start, offset_y=bar_top(e),
               Box(fixed(side), height(grow=grow)), Box(width(grow=grow), height(grow=grow), background(tint)), Box(fixed(right), height(grow=grow))),)
   end
+  # Over a page that shows the path itself the bar is only its left end: over the sidebar, and as far past it as its buttons reach
+  inpage && return (Row(fixed(side_w(e) + get(e.nodes, :bar_past_side, 0px)), height(TOPBAR_H), Alignment.Start, offset_y=bar_top(e),
+                        background(colours.bg), line[:bottom],
+                      (side > 0px ? (Box(fixed(side), height(grow=grow), background(colours.panel), line[:right]),) : ())...),)
   middle = tint === nothing ? () : (background(tint), border(1px, :solid, tint_colours!(tint).line)[:bottom])
   (Row(width(grow=grow), height(TOPBAR_H), Alignment.Start, offset_y=bar_top(e), background(colours.bg), line[:bottom],
      (side > 0px ? (Box(fixed(side), height(grow=grow), background(colours.panel), line[:right]),) : ())...,
@@ -8803,15 +8856,19 @@ bar_row(t::TopBar, inks=(nothing, nothing, nothing)) = begin
   over = max(need, room)
   # Ladder's own name is in the middle of the bar, so the left end is as wide as the right. A kind of folder's own
   # path has all the room from the buttons over the sidebar, so it can start at the page's left edge.
-  crumb = bread_crumb(e, window_object(e))
-  own = !(crumb isa Title)
-  left = own ? max(need - room, 0px) :
-               max(150px * (1 - showing), need - room, min(side, wide - room - side - TITLE_ROOM))
+  # A page that shows the path itself, as a SolidCraft design does in its toolbar, runs up to the window's top. The
+  # bar then has only its left end, so that the page has the room of the bar's middle and its right end.
+  inpage = crumb_in_page(e)
+  crumb = inpage ? nothing : bread_crumb(e, window_object(e))
+  own = !inpage && !(crumb isa Title)
+  left = own || inpage ? max(need - room, 0px) :
+                         max(150px * (1 - showing), need - room, min(side, wide - room - side - TITLE_ROOM))
+  e.nodes[:bar_past_side] = left   # the page that shows the path leaves this room at its top left: see `bar_corner`
   # The slider never pushes the right end out of a narrow window, so the ladder stays under the mouse. The words
   # before the slider lose their start then: see `said_part`.
   side = min(side, max(side - grown, wide - room - left))
   beside > 0px && (side = max(side, min(left, wide - room - left)))
-  e.nodes[:title_room] = wide - room - left - side   # the name is cut short to fit in it
+  inpage || (e.nodes[:title_room] = wide - room - left - side)   # the name is cut short to fit in it. In the page, the page says how much room it has.
   # The path that Ladder's own name opens into goes when a kind of folder shows something else there
   own && (w = window_of(e); w !== nothing && any(p -> p.key == :title_trail, popups(w)) && close_popup!(w, :title_trail))
   # The top bar lies over the top of the sidebar. The file's name is in the
@@ -8822,14 +8879,17 @@ bar_row(t::TopBar, inks=(nothing, nothing, nothing)) = begin
   # Each part is described and drawn with its own colours. With none but the page's, the bar needs no marks.
   marked = any(!isnothing, inks)
   mark(p) = marked ? (ColourMark(palette=p),) : ()
+  start = with_colours(inks[1]) do
+    Row(fixed(left + room), height(grow=grow),
+      # The close, minimise and zoom buttons sit over the first 84px. In full screen they're hidden, and the buttons slide left.
+      Row(fixed(over), height(grow=grow), padding(0px, 8px, 0px, mac_buttons_room(e)), child_gap=2px,
+        buttons..., (dark ? (Box(fixed(before_head), height(grow=grow)), pane_head(agent_pane(e), e)...) : (Box(width(grow=grow)),))..., arrows...))   # in agent mode, the heading of the agent's pane
+  end
+  # Over a page that shows the path itself, the bar ends with its left end. The page under the rest takes the clicks there.
+  inpage && return Row(fixed(left + room), height(TOPBAR_H), name="TopBar", offset_y=bar_top(e), mark(inks[1])..., start, mark(nothing)...)
   Row(width(grow=grow), height(TOPBAR_H), name="TopBar", offset_y=bar_top(e),
     mark(inks[1])...,
-    with_colours(inks[1]) do
-      Row(fixed(left + room), height(grow=grow),
-        # The close, minimise and zoom buttons sit over the first 84px. In full screen they're hidden, and the buttons slide left.
-        Row(fixed(over), height(grow=grow), padding(0px, 8px, 0px, mac_buttons_room(e)), child_gap=2px,
-          buttons..., (dark ? (Box(fixed(before_head), height(grow=grow)), pane_head(agent_pane(e), e)...) : (Box(width(grow=grow)),))..., arrows...))   # in agent mode, the heading of the agent's pane
-    end,
+    start,
     mark(inks[2])...,
     with_colours(() -> Box(width(grow=grow), height(grow=grow), clip=true, crumb), inks[2]),
     mark(inks[3])...,
@@ -9013,8 +9073,7 @@ describe(t::Title) = begin
     return Box(width(wide), height(22px), padding(5px, 0px), radius(4px), Alignment.Start, background(colours.bg),
                border(1px, :solid, colours.accent), renamer(e))
   end
-  # A page whose parts of other pages were changed there is edited too, since ⌘S saves them with it
-  edited = dirty(b) || any(dirty, shown_buffers(e))
+  edited = title_edited(e)
   # A name that's too long for its room in the bar ends in …, so that its start still shows
   room = get(e.nodes, :title_room, 10_000px) - (edited ? 70px : 16px)
   named = bar_name(e)
@@ -9058,6 +9117,14 @@ A page from a web server has the last name of its address, like `City` or
 `notes.md`, as the path shows it, and the path starts with the server's name.
 """
 bar_name(e) = something(page_title(e), (at = web_address(e.buf.path); isempty(at) ? name(e.buf) : Remote.trail(at)[end][1]))
+
+"""
+True when the file's name says "— edited", in the top bar and in its path: the
+file has changes that aren't saved. A page whose parts of other pages were
+changed there is edited too, since ⌘S saves them with it, and so is a page of
+a kind that has changes of its own, like a SolidCraft design.
+"""
+title_edited(e) = (b = e.buf; dirty(b) || any(dirty, shown_buffers(e)) || page_edited(e))
 
 onkey(t::Title, ::KeyPress{Keys.mouse_right}) = begin
   e = editor(t)
@@ -9154,9 +9221,11 @@ const TT_MARK = 14px    # how big a heading's mark is in the path, like H2
 """
 True when a click on the file's name pinned the path open, so it stays when
 the mouse leaves it. It's a setting: each window has the path pinned, and it
-stays pinned the next time the app opens.
+stays pinned the next time the app opens. A page that shows the path itself,
+like a SolidCraft design in its toolbar, has little room for it, so there the
+path shows only while the mouse is over the name: see `crumb_in_page`.
 """
-trail_pinned(e) = e.pinned
+trail_pinned(e) = e.pinned && !crumb_in_page(e)
 
 "How wide each name of `steps` is in the top bar. The file's name is a little bolder."
 title_widths(steps) = [measure(Face(SANS, i == length(steps) ? "Medium" : "", 13px, colours.ink, false), n) + 2TT_PAD
@@ -9331,8 +9400,15 @@ title_trail!(e, t) = begin
   nothing
 end
 
-"Where the file's name is in the top bar: the left edge and the width of its node, the room in it before the name, and how far the bar has slid"
-title_place(e, t) = (r = rect(t); r === nothing ? nothing : (r.left, r.width, get(e.nodes, :title_lead, 0px), bar_top(e)))
+"""
+Where the file's name is in the top bar, or in a page that shows the path
+itself: the left edge, the top and the width of its node, the room in it
+before the name, how far the bar has slid, and whether the name says "— edited"
+"""
+title_place(e, t) = (r = rect(t); r === nothing ? nothing : (r.left, r.top, r.width, get(e.nodes, :title_lead, 0px), bar_top(e), title_edited(e)))
+
+"How wide \"— edited\" is after the file's name in the path, with the room after it, or 0px when the file has no changes"
+edited_wide(e) = title_edited(e) ? measure(Face(SANS, "", 13px, colours.ink, false), "— edited") + TT_PAD : 0px
 
 "Put the path to `path` over the top bar, with the file's name where the bar shows it"
 show_title_trail!(e, t, w, path) = begin
@@ -9344,24 +9420,30 @@ show_title_trail!(e, t, w, path) = begin
   wide = window_size(e)[1]
   # The Mac draws its close, minimise and zoom buttons over the window, so the path starts after them
   start = mac_buttons_room(e) + 4px
+  # In a page that shows the path itself, like a design's toolbar, the path has the room that the page gives the name
+  inpage = crumb_in_page(e)
+  room = inpage ? min(get(e.nodes, :title_room, wide), wide - 8px - start) : wide - 8px - start
   all = trail_steps(path)
   all[end] = (bar_name(e), path)   # the file's name as the bar shows it
   parts = focus_parts(e)
-  shown = title_steps(all, wide - 8px - start - trail_parts_wide(e, parts))
+  more = trail_parts_wide(e, parts) + edited_wide(e)   # what follows the file's name
+  shown = title_steps(all, room - more)
   v = get!(() -> own!(t, TitleTrail()), e.nodes, :title_trail)
   v.path == path || (empty!(v.crumbs); empty!(v.arrows))
   # A pinned path is in the middle of the bar. After a click unpins it, it stays there until it closes, so the name doesn't move from under the mouse.
   v.centred = trail_pinned(e) || (v.centred && any(p -> p.key == :title_trail, popups(w)))
   v.path, v.steps, v.size, v.parts, v.title_at = path, shown, window_size(e), parts, title_place(e, t)
   widths = title_widths(shown)
-  total = title_wide(shown) + trail_parts_wide(e, parts)
+  total = title_wide(shown) + more
   # How far the file's name is from the path's left edge
   before = sum(widths[1:end-1], init=0px) + TT_ARROW * (length(shown) - 1) + TT_EDGE + 1px + TT_PAD
   # The name is in the middle of its room in the bar, with the headings after it and as much room before it, so the middle of the name's node is the bar's
   x = v.centred ? r.left + r.width / 2 - total / 2 : r.left + get(e.nodes, :title_lead, 0px) - before
+  # In the page, the name is in the middle of its room, and the path stays in that room, so it lies over nothing else of the page
+  inpage && (lo = r.left + r.width / 2 - room / 2; x = clamp(x, lo, max(lo, lo + room - total)))
   x = clamp(x, start, max(start, wide - 8px - total))
-  popup!(w, v, anchor=(x, bar_top(e) + (TOPBAR_H - TT_H) / 2), placement=:below, gap=0px, width=total, key=:title_trail,
-         modal=false, theme=menu_theme())
+  top = inpage ? r.top + (r.height - TT_H) / 2 : bar_top(e) + (TOPBAR_H - TT_H) / 2
+  popup!(w, v, anchor=(x, top), placement=:below, gap=0px, width=total, key=:title_trail, modal=false, theme=menu_theme())
   nothing
 end
 
@@ -9391,6 +9473,9 @@ trail_view(v::TitleTrail) = begin
       push!(parts, c)
     end
   end
+  # A file with changes that aren't saved says so after its name, as the name in the bar does
+  title_edited(e) && push!(parts, Box(height(grow=grow), padding(0px, TT_PAD, 0px, 0px), Alignment.Center, justify=Alignment.Center,
+                                      label("— edited", 13px, color=colours.faint)))
   # A folder that the page shows has a › after its name, which lists what's in it
   if folder_arrow(e) && n > 0 && !isempty(v.steps[n][2])
     at = v.steps[n][2]
@@ -9410,8 +9495,11 @@ trail_view(v::TitleTrail) = begin
   # border is clear, so that its names stay where they are.
   pinned = trail_pinned(e)
   Row(width(grow=grow), height(TT_H), padding(TT_EDGE, 1px), radius(7px), Alignment.Center, name="Path",
-      background(colours.bg), border(1px, :solid, pinned ? clear : colours.line), (pinned ? () : (lifted,))..., parts...)
+      background(trail_ground(e)), border(1px, :solid, pinned ? clear : colours.line), (pinned ? () : (lifted,))..., parts...)
 end
+
+"What the path lies on: the page's colour, as the bar has, or in a page that shows the path itself, the colour of its place there (see `page_crumb`)"
+trail_ground(e) = crumb_in_page(e) ? get(e.nodes, :title_ground, colours.bg) : colours.bg
 
 # A name is shaded only while the mouse is over it, so a pinned path doesn't look as if its file were chosen
 describe(c::TitleCrumb) =
@@ -9486,7 +9574,12 @@ end
 onkey(a::PartArrow, ev::KeyPress{Keys.mouse_left}) = open_title_search!(editor(a), ev.window, a)
 cursor(::TitleArrow) = :hand
 
-onkey(c::TitleCrumb, ev::KeyPress{Keys.mouse_left}) = (c.last ? pin_trail!(editor(c)) : title_go!(editor(c), ev.window, c.path); handled)
+# A click on the file's name pins the path. In a page that shows the path itself the path is never pinned, so there it does nothing.
+onkey(c::TitleCrumb, ev::KeyPress{Keys.mouse_left}) = begin
+  e = editor(c)
+  c.last ? (crumb_in_page(e) || pin_trail!(e)) : title_go!(e, ev.window, c.path)
+  handled
+end
 
 "Pin the path in the top bar open, or let it close again when the mouse leaves it, in each window, and keep that in the settings"
 pin_trail!(e) = (e.pinned = !e.pinned; save_settings!(e); nothing)
@@ -14424,7 +14517,7 @@ window_body(e) = agent_shows(e) ? agent_body(e) : Row(width(grow=grow), height(g
   # The lines of a block that fill the window take the sidebar's room too
   (side_w(e) > 0px && lowered(e) === nothing && !as_app(e) ? (side_part(e),) : ())...,
   Column(width(grow=grow), height(grow=grow), Alignment.Start,
-    Box(width(grow=grow), height(above_page(e))),   # under the top bar
+    Box(width(grow=grow), height(under_bar(e))),   # under the top bar
     node!(Page, e, :page)),
   right_panel(e)...)
 

@@ -96,6 +96,80 @@ else
     shot("design-1-open.png")
   end
 
+  @testset "the toolbar is at the top of the window, with the file's path in it" begin
+    v = view()
+    within(a, b) = a.left >= b.left - 0.5px && a.top >= b.top - 0.5px &&
+                   a.left + a.width <= b.left + b.width + 0.5px && a.top + a.height <= b.top + b.height + 0.5px
+    middle_x(r) = K.num(r.left + r.width / 2)
+    middle_y(r) = K.num(r.top + r.height / 2)
+    ribbon, grip, title = v.parts[:ribbon], v.parts[:grip], e.nodes[:title]
+    # The design goes up to the window's top. The toolbar is as far from it as from the page's left edge.
+    @test K.crumb_in_page(e) && K.under_bar(e) == 0px
+    @test K.num(rect(v).top) == 0 && K.num(rect(ribbon).top) == 8
+    @test K.num(rect(ribbon).left) == K.num(K.page_span(e)[1]) + 8
+    # The top bar is only its left end, over the sidebar, so the design takes the clicks under the rest
+    bar = rect(e.nodes[:topbar])
+    @test K.num(bar.width) == K.num(K.side_w(e) + K.bar_corner(e))
+    # The file's name is in the middle of the toolbar's top row, between the tabs and the buttons
+    @test title.parent === e && within(rect(title), rect(grip)) && within(rect(grip), rect(ribbon))
+    @test abs(middle_x(rect(title)) - middle_x(rect(grip))) <= 1
+    @test K.num(rect(grip).left) > K.num(rect(v.parts[(:tab, "Inspect")]).left) && K.num(rect(grip).left + rect(grip).width) <= K.num(rect(v.parts[:undo]).left)
+    @test e.nodes[:title_room] == rect(grip).width
+    @test !K.title_edited(e) && !K.page_edited(e)
+    # The mouse over the name shows the path, in the toolbar's top row
+    at((middle_x(rect(title)), middle_y(rect(title))))
+    sleep(K.TT_WAIT + 0.05)
+    frame(w); frame(w); frame(w)
+    trail = only(p for p in popups(w) if p.key == :title_trail).content
+    @test within(rect(trail), rect(ribbon)) && abs(middle_y(rect(trail)) - middle_y(rect(title))) <= 1
+    @test last(trail.steps)[2] == file
+    # The path stays in the name's room, on the toolbar's colour
+    @test within(rect(trail), rect(grip)) && K.trail_ground(e) == V.panel_colour(V.theme(v))
+    shot("design-path-hover.png")
+    # The toolbar has little room, so the path shows only while the mouse is over it, though the bar's path is pinned.
+    # A click on the file's name doesn't pin it there. Nor does it change the setting, which pins the bar's path.
+    settings = K.SETTINGS_FILE[]
+    K.SETTINGS_FILE[] = joinpath(dir, "settings")
+    e.pinned = true
+    frame(w)
+    @test !K.trail_pinned(e)
+    click(only(c for c in values(trail.crumbs) if c.last))
+    @test e.pinned && !isfile(K.SETTINGS_FILE[])
+    at((middle_x(rect(v)), middle_y(rect(v))))
+    frame(w); frame(w)
+    @test !any(p -> p.key == :title_trail, popups(w))
+    e.pinned = false
+    K.SETTINGS_FILE[] = settings
+    # With the sidebar closed, the bar's buttons lie over the toolbar's top left, and the tabs start after them
+    e.panel && K.toggle_panel!(e)
+    sleep(0.3)
+    frame(w); frame(w); frame(w)
+    bar = rect(e.nodes[:topbar])
+    @test K.side_w(e) == 0px && K.bar_corner(e) > 100px && K.num(bar.width) == K.num(K.bar_corner(e))
+    @test K.num(rect(v.parts[(:tab, "Model")]).left) >= K.num(bar.left + bar.width) - 1
+    shot("design-sidebar-closed.png")
+    # A top bar that hides leaves no room there: it comes out over the toolbar, as it comes out over a page
+    hiding = e.hide_bar
+    e.hide_bar = :always
+    frame(w); frame(w)
+    @test K.bar_corner(e) == 0px && K.num(rect(v.parts[(:tab, "Model")]).left) == K.num(rect(ribbon).left) + 9   # its border and its room
+    e.hide_bar = hiding
+    frame(w); frame(w)
+    K.toggle_panel!(e)
+    sleep(0.3)
+    frame(w); frame(w); frame(w)
+    @test e.panel && K.bar_corner(e) == 0px
+    # In agent mode the design starts at the top of the page's card
+    K.agent_mode!(e)
+    frame(w); frame(w); frame(w)
+    @test K.agent_shows(e) && K.num(rect(v).top) == K.num(K.PAGE_CARD_GAP) && K.num(rect(ribbon).top) == K.num(K.PAGE_CARD_GAP) + 8
+    @test K.num(rect(e.nodes[:topbar]).width) <= K.num(K.page_card_span(e)[1])
+    shot("design-agent-mode.png")
+    K.agent_mode!(e)
+    frame(w); frame(w); frame(w)
+    @test !K.agent_shows(e) && K.num(rect(v).top) == 0
+  end
+
   @testset "a button's tip is in the page's font, which has ⌘" begin
     # The tip is made when the mouse moves, where no theme is set. In UI.jl's own font, Helvetica, ⌘ was a box.
     at(rect_middle(view().parts[:undo]))
@@ -149,6 +223,7 @@ else
     @test length(v.model.shapes[1].flat) == 7     # the round is one more face, and it's curved
     @test count(!, v.model.shapes[1].flat) == 1
     @test Models.edited(v.model)
+    @test K.title_edited(e)                       # the file's name in the toolbar says "— edited"
     shot("design-2-fillet.png")
     # ⌘Z takes it back
     key(Keys.z, Keys.cmd)

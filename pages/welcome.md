@@ -675,7 +675,7 @@ A design takes numbers from your page too. The two holes in the bracket's base a
 
 To change the design, move the mouse over the block and click the second button beside its top right corner. The window goes to the file, where the design has its editor, and ⌘⌥← comes back to this page. When you save a change there, this block shows the changed design.
 
-In the editor, the design fills the window. A toolbar is at the top, a browser is at the left, and the history of the design's steps is along the bottom.
+In the editor, the design fills the window. A toolbar is at the top, a browser is at the left, and the history of the design's steps is along the bottom. The toolbar goes up to the window's top, in the place of the top bar, and has the file's name in its middle, which opens into its path as the top bar's name does. Drag the room round the name to move the window.
 
 - **The view.** The mouse works as it does in Fusion 360. Drag with the middle button to move the design, and hold ⇧ too to turn it. Roll the wheel, or pinch, to bring it nearer, towards the mouse. Hold ⇧ and roll the wheel to turn it. Hold ⇧ and click the middle button on the design, and a turn goes round that point until you click the middle button twice. Two clicks of the middle button show all of the design. On a trackpad, two fingers bring the design nearer, as the wheel does, and turn it with ⇧ held. A drag with the left button still turns the design, and with ⇧ held moves it. The three balls at the top right show the design's axes. Click one to look along that axis.
 - **Selecting.** The mouse lights the face or the edge that it's over. Click to select it, and hold ⇧ to select one more.

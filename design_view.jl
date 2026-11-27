@@ -519,6 +519,16 @@ end
 page_view(e, o::DesignFile) = design_part(e, string(o.path))
 page_fills(e, ::DesignFile) = true
 page_covers(e, ::DesignFile) = true
+crumb_in_page(e, ::DesignFile) = true
+page_edited(e, o::DesignFile) = (v = get(e.nodes, (:design, string(o.path)), nothing); v isa Designs.DesignView && Designs.edited(v))
+
+# The design goes up to the top of the window, in the place of the top bar's middle. So its toolbar has the
+# file's path that the bar would show, and leaves room at its left for the bar's buttons while the sidebar is closed.
+Designs.file_part(v::Designs.DesignView, room, ground) = begin
+  e = editor(v)
+  crumb_in_page(e) ? page_crumb(e, room, ground) : invoke(Designs.file_part, Tuple{Any,Any,Any}, v, room, ground)
+end
+Designs.corner_room(v::Designs.DesignView) = (e = editor(v); crumb_in_page(e) ? bar_corner(e) : 0px)
 
 "End SolidCraft's program for the design at `path` when the window leaves it, unless the design has changes that aren't saved"
 leave_design!(e, path) = begin

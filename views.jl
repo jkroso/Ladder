@@ -7,7 +7,8 @@
 #     page_view(e, d::DownloadsDirectory) = ...   # the page of the Downloads folder
 #     entry_icon(o::TrashDirectory) = "trash"     # its icon in the sidebar
 
-export entries, entry_icon, entry_name, entry_marks, folder_view, page_view, page_fills, page_first, page_foot
+export entries, entry_icon, entry_name, entry_marks, folder_view, page_view, page_fills, page_first, page_foot, crumb_in_page,
+       page_edited
 
 "What the sidebar of the editor `e` lists of the directory `d`"
 function entries end
@@ -29,6 +30,12 @@ function page_view end
 
 "True when what `page_view` gives for the object `o` is as wide as the window has room for"
 function page_fills end
+
+"True when what `page_view` gives for the object `o` runs up to the top of the window and shows the file's path itself"
+function crumb_in_page end
+
+"True when what `page_view` gives for the object `o` has changes that aren't in its file, as a SolidCraft design can have"
+function page_edited end
 
 "True when a window that's opened on the folder `d` shows what `page_view` gives for it first"
 function page_first end

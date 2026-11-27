@@ -370,10 +370,11 @@ end
 describe(c::PageCard) = begin
   e = editor(c)
   # The top of the card is under the top bar. Over a web page it has the page's colour, as the bar's middle has.
+  # A page that shows the file's path itself, like a SolidCraft design, starts at the card's top: see `under_bar`.
   tint = bar_tint(e)
   left, right = page_card_round(e)
   Column(fixed(page_card_wide(e)), height(grow=grow), Alignment.Start, radius(left, right, right, left), background(colours.bg), clip=true, name="Page card",
-    Box(width(grow=grow), height(above_page(e) - PAGE_CARD_GAP), (tint === nothing ? () : (background(tint),))...),
+    Box(width(grow=grow), height(under_bar(e) - PAGE_CARD_GAP), (tint === nothing ? () : (background(tint),))...),
     node!(Page, e, :page))
 end
 

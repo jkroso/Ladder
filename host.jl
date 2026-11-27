@@ -9,7 +9,8 @@
 #     open_folder!(e, "/Users/sam")  # show it in the page
 
 export editor, page_object, object, list_files!, go_folder!, open!, open_folder!, show_path!, show_beside!,
-       free_path, folder_kind, page_top, trash!, file_act!, show_in_finder, above_page, touch!, show_line!,
+       free_path, folder_kind, page_top, trash!, file_act!, show_in_finder, above_page, under_bar, page_crumb, bar_corner,
+       touch!, show_line!,
        page_day, save_settings!, rerun!, page_room, page_tables, named_table, layout!, command_of,
        click_page!, text_object, say_result!, lowered, rewrap!, reload_changed!, loaded_module, fillable,
        diagram_html, outcome_face, julia_code, calendar_today, marked, term_page, chat_page, scroll_page!,
@@ -90,6 +91,15 @@ function show_in_finder end
 
 "How much room the top bar of the editor `e` keeps at the top of the window, over the page"
 function above_page end
+
+"How much room the page of the editor `e` leaves at its top for the top bar: none when the page shows the file's path itself"
+function under_bar end
+
+"The path of the file, for a page of the editor `e` that shows the path itself, in `room` at most, on the colour `ground`"
+function page_crumb end
+
+"How far past the sidebar's edge the left end of the top bar of the editor `e` reaches over the page, with its buttons"
+function bar_corner end
 
 "The caret of the editor `e` moved or its text changed, so show the caret"
 function touch! end
