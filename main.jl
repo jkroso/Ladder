@@ -1295,7 +1295,6 @@ end
 # chooses its kind, and another ticks the columns that it draws. The mouse
 # over a bar, a dot or a slice says its number.
 
-const CHART = Charts.CHART
 const PLOT_H = 260px   # how tall bars and lines are
 const PIE_H = 220px    # and a pie
 "The colour at place `k` of a chart. Past the eighth, the colours come round again darker, then lighter: see `Charts.shade`."
@@ -2562,7 +2561,6 @@ end
 # with the name that the block gives, a button on that line asks for the key
 # and keeps it in the Keychain.
 
-const SAVE = Saves.SAVE
 push!(BLOCK_ICONS, "save", "cloud-arrow-up", "arrow-right", "key", "check2", "exclamation-circle")
 
 reread!(v::SaveView, lines) = begin
@@ -2802,9 +2800,6 @@ keep_key(name, key) = begin
   end
   success(pipeline(`security find-generic-password -s $name`, stdout=devnull, stderr=devnull))
 end
-
-"What keeps a key in the Keychain. A test puts its own function here, so that it leaves the Keychain alone."
-const KEY_KEEPER = Ref{Function}(keep_key)
 
 "Ask for the key called `name`, in a panel that hides what you type. It gives the key, or nothing if you cancel."
 key_panel(name) = with_pool() do
@@ -3905,16 +3900,6 @@ const SOURCE_MENU = :source_menu   # the key of the list of where a block's rows
   of::Any = nothing   # the block's view
 end
 
-"The list of where a block's rows can come from, while it shows: its rows, the one picked, and the words typed in its field"
-@def mutable struct SourceChooser <: SemanticUI
-  of::Any = nothing          # the block's view
-  asking::Any = nothing      # :source while the list shows
-  rows::Vector{Any} = Any[]
-  pick::Int = 1
-  typed::String = ""
-  parts::Dict{Any,Any} = Dict{Any,Any}()   # its field and its rows, kept between frames
-end
-
 "What a table with no heading over it is called: the name of the page's file"
 headless_name(e) = isempty(e.buf.path) ? "Untitled" : title(e.buf.path)
 
@@ -4227,46 +4212,6 @@ const FIND_BUDGET = 0.3   # seconds that one look at the folder can take
 const FIND_BAR = 440px     # the room that the top of a list needs to show its field and its buttons in one row
 const FIND_MENU = :find_choices   # the key of the list that a button at the top opens
 push!(BLOCK_ICONS, "search", "file-earmark-text", "folder", "code-slash")
-
-"What a `find` block shows: the lines of a folder's pages that match"
-@def mutable struct SearchView <: SemanticUI
-  n::Int = 0                               # its place among the page's lists
-  first::Int = 0                           # the lines of its block, when the page was last laid out
-  last::Int = 0
-  data::Searches.Query = Searches.Query()
-  lines::Vector{String} = String[]         # the lines that `data` was read from
-  shown::Any = nothing                     # what the list was last worked out for, and what it found
-  kept::Vector{Searches.Match} = Searches.Match[]   # the items whose box was clicked here. They stay in the list.
-  pages::Dict{String,Any} = Dict{String,Any}()      # what was found in each page, and the mark of the page's text then
-  parts::Dict{Any,Any} = Dict{Any,Any}()   # its rows, kept between frames
-  asking::Any = nothing                    # what the list that floats under a button chooses: :kind or :folder, or nothing when none shows
-  rows::Vector{Any} = Any[]                # the rows of that list that have the words in its field
-  pick::Int = 1                            # the row of them that Return takes
-  typed::String = ""                       # the words in its field when the rows were last worked out
-  back::Bool = false                       # the field for the words to find had the keyboard when it opened, and gets it back
-end
-
-"""
-A button at the top of a list that shows what the list asks for now. A click
-opens a list of the others. One chooses the kind of thing that the list is
-of, and one chooses the folder that it looks in.
-"""
-@def mutable struct SearchChoice <: SemanticUI
-  of::Any = nothing     # the list
-  what::Symbol = :kind  # :kind or :folder
-end
-"The list that floats under such a button, with a field that searches it. It's the takeoff's list of units, with other rows."
-@def mutable struct ChoiceMenu <: SemanticUI
-  of::Any = nothing        # the list that it changes
-  button::Any = nothing    # the button that it's under
-  side::Symbol = :bottom   # the side of the button that it's on
-  pick::Int = 0            # the row that was picked when it was last drawn. A row that the keys pick is brought in sight.
-end
-"A row of that list: a kind of thing to list, or a folder"
-@def mutable struct ChoiceRow <: SemanticUI
-  of::Any = nothing
-  k::Int = 0
-end
 
 "The name of a page, over the lines of that page in the list"
 @def mutable struct SearchPage <: SemanticUI

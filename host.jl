@@ -25,7 +25,9 @@ export editor, page_object, object, list_files!, go_folder!, open!, open_folder!
        write_blocks!, item_room, item_under, gallery_buttons, gallery_edges, go_view!, view_name, side_w,
        look_key, player, show_crumb!, video_wide, textview, bytes, model, terminal, html_page, scrolled,
        design, kept!, text!, make_default!, fill_what, fill_wide, preview, zoomed_node, zoom_for, held_room,
-       square_button, enter, bar_bottom
+       square_button, enter, bar_bottom, chart_path, chart_sources, isfilterable, filter_file, filter_write!,
+       filter_table, filter_subset, key_panel, error_words, file_start, server_said, keep_key, table_file,
+       choice_matches, toggle_source!, tick_item!
 
 "The editor of the window that `node`, a part of a page, is part of"
 function editor end
@@ -473,3 +475,51 @@ function enter end
 
 "How far down the window the top bar reaches now"
 function bar_bottom end
+
+"The CSV file that the `from` of a chart names, or nothing when it names a heading or several tables"
+function chart_path end
+
+"The tables that the `from` of the chart `c` names, with commas between them"
+function chart_sources end
+
+"True when the file at `path` is one that a filter reads"
+function isfilterable end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function filter_file end
+
+"Write `f` as the lines of the filter `v`"
+function filter_write! end
+
+"What a filter shows of `d`, its rows"
+function filter_table end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function filter_subset end
+
+"Ask for the key called `name`, in a panel that hides what you type"
+function key_panel end
+
+"What went wrong, in words, for an error that Julia gives"
+function error_words end
+
+"The first `most` bytes of the file at `path`, as text, or \"\" when it isn't there"
+function file_start end
+
+"What a server said with an answer that says no"
+function server_said end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function keep_key end
+
+"The CSV file that the line `text` holds, if it holds only that, and the words of its link"
+function table_file end
+
+"True when the row `r` has every one of the words in `typed`"
+function choice_matches end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function toggle_source! end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function tick_item! end

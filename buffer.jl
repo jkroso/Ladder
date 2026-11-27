@@ -23,6 +23,8 @@
 @use "./schedule" => Schedules
 @use "./filter" => Filters
 @use "./timelog" => Timelogs
+@use "./chart" => Charts
+@use "./save" => Saves
 
 export look, table_text, in_browser, web_address, copied_from, julia_own, is_reply, web_site, site_runs,
        inspread, insheet, shared_lang, shown_only!, sandbox_only!, Pos, Buffer, readonly, protected, isremote,
@@ -33,7 +35,7 @@ export look, table_text, in_browser, web_address, copied_from, julia_own, is_rep
        MOST_TEXT, MOST_PAGE, reading, HEX, HEX_BYTES, HEX_CHARS, BITS, BITS_ROW, BITS_CHARS, same_text,
        unchanged, line_end, FOLDER_PAGE, page_key, unescaped, bytes_page, STEP, FILE_VIEWS, JULIA, LIVE,
        TEXT_READ, text_file, SCHEDULE, FILTER, CODE_RUNS, LOAD, FOLDER_PAGES, TIMELOG, HTMLS, TERM_CARETS,
-       TERM_PASTS, VIEW_BLOCK, PAGE_MODULES, table_reads
+       TERM_PASTS, VIEW_BLOCK, PAGE_MODULES, table_reads, CHART, SAVE
 
 # A kind of page or of file decides these, so this file only names them. The
 # file that knows the kind gives each its methods.
@@ -618,3 +620,7 @@ const PAGE_MODULES = Dict{String,Module}()
 
 # How many times a CSV file has been read. What's worked out from a file's table is worked out again when this changes.
 const table_reads = Ref(0)
+
+const CHART = Charts.CHART
+
+const SAVE = Saves.SAVE

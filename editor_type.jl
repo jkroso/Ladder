@@ -22,6 +22,7 @@
 @use "./filter" => Filters
 @use "./save" => Saves
 @use "./gallery" => Galleries
+@use "./find" => Searches
 
 export Item, Live, Grid, isspread, Glide, Editor, TopBar, Sidebar, Page, Document, Backdrop, FinderInput,
        ToolButton, TableButton, Mode, Levels, Stop, JuliaCode, Title, CheckCount, ReadOnly, SendButton,
@@ -29,7 +30,7 @@ export Item, Live, Grid, isspread, Glide, Editor, TopBar, Sidebar, Page, Documen
        FileRow, FileLabel, Entry, EntryLabel, Shown, docdir, item, hosted, top_editor, button, FileView,
        Sheet, FileEntry, Crumb, Breadcrumb, FileText, Pages, ChartView, FilterRows, FilterView, SaveView,
        GalleryView, TermSettings, TERM_SETTINGS, ViewBlock, ItemClock, PlainLine, Rect, TranscriptButton,
-       FileCheck, DesignSheet, FolderPage
+       FileCheck, DesignSheet, FolderPage, SourceChooser, SearchView, SearchChoice, ChoiceMenu, ChoiceRow
 
 # --- what a window holds ---------------------------------------------------------
 
@@ -525,4 +526,56 @@ end
 "What the page shows of a folder that has no page of its own: its name, and the table of what's in it"
 @def mutable struct FolderPage <: SemanticUI
   path::String = ""
+end
+
+"The list of where a block's rows can come from, while it shows: its rows, the one picked, and the words typed in its field"
+@def mutable struct SourceChooser <: SemanticUI
+  of::Any = nothing          # the block's view
+  asking::Any = nothing      # :source while the list shows
+  rows::Vector{Any} = Any[]
+  pick::Int = 1
+  typed::String = ""
+  parts::Dict{Any,Any} = Dict{Any,Any}()   # its field and its rows, kept between frames
+end
+
+"What a `find` block shows: the lines of a folder's pages that match"
+@def mutable struct SearchView <: SemanticUI
+  n::Int = 0                               # its place among the page's lists
+  first::Int = 0                           # the lines of its block, when the page was last laid out
+  last::Int = 0
+  data::Searches.Query = Searches.Query()
+  lines::Vector{String} = String[]         # the lines that `data` was read from
+  shown::Any = nothing                     # what the list was last worked out for, and what it found
+  kept::Vector{Searches.Match} = Searches.Match[]   # the items whose box was clicked here. They stay in the list.
+  pages::Dict{String,Any} = Dict{String,Any}()      # what was found in each page, and the mark of the page's text then
+  parts::Dict{Any,Any} = Dict{Any,Any}()   # its rows, kept between frames
+  asking::Any = nothing                    # what the list that floats under a button chooses: :kind or :folder, or nothing when none shows
+  rows::Vector{Any} = Any[]                # the rows of that list that have the words in its field
+  pick::Int = 1                            # the row of them that Return takes
+  typed::String = ""                       # the words in its field when the rows were last worked out
+  back::Bool = false                       # the field for the words to find had the keyboard when it opened, and gets it back
+end
+
+"""
+A button at the top of a list that shows what the list asks for now. A click
+opens a list of the others. One chooses the kind of thing that the list is
+of, and one chooses the folder that it looks in.
+"""
+@def mutable struct SearchChoice <: SemanticUI
+  of::Any = nothing     # the list
+  what::Symbol = :kind  # :kind or :folder
+end
+
+"The list that floats under such a button, with a field that searches it. It's the takeoff's list of units, with other rows."
+@def mutable struct ChoiceMenu <: SemanticUI
+  of::Any = nothing        # the list that it changes
+  button::Any = nothing    # the button that it's under
+  side::Symbol = :bottom   # the side of the button that it's on
+  pick::Int = 0            # the row that was picked when it was last drawn. A row that the keys pick is brought in sight.
+end
+
+"A row of that list: a kind of thing to list, or a folder"
+@def mutable struct ChoiceRow <: SemanticUI
+  of::Any = nothing
+  k::Int = 0
 end
