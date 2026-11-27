@@ -100,6 +100,23 @@ named(name, ed=e) = (k = findfirst(r -> hasproperty(r.from, :name) && r.from.nam
 heard_lines() = isfile(heard) ? readlines(heard) : String[]
 const chat = joinpath(dir, "Claude.chat")
 pane() = e.nodes[(:chat, chat)]
+"The editor of what the agent said in a new session's file in `folder`, whose reply is `text`"
+reply_shown(folder, text) = begin
+  mkpath(folder)
+  said = joinpath(folder, "Shown $(length(readdir(folder))).chat")
+  s = K.AgentSession(agent="Claude", dir=folder)
+  push!(s.items, K.YouSaid(words="Show me"), K.AgentReply(text=text, whole=true, n=1))
+  write(said, K.talk_text(s))
+  K.open!(e, said)
+  frames(w, 4)
+  p = e.nodes[(:chat, said)]
+  p.parts[(:reply, objectid(p.session.items[2]))]
+end
+"Move the mouse to `pos` in the window"
+mouse_to(pos) = (w.mouse = typeof(w.mouse)(pos...); onmouse(w, MouseMove(w.mouse, w)); frames(w, 2))
+"Click where the mouse is"
+click_here() = (w.keys |= Keys.mouse_left; onkey(w, KeyPress{Keys.mouse_left}(0, w)); frames(w, 1);
+                w.keys ⊻= Keys.mouse_left; onkey(w, KeyRelease{Keys.mouse_left}(0, w)); frames(w, 2))
 
 try
   @testset "The file's text keeps what was said, whatever the words hold" begin
@@ -436,6 +453,29 @@ try
     @test w.focus === sub
     ontype(w, Typed('x', w)); press(Keys.backspace)
     @test occursin("!`l = 18m`", sub.buf.lines[1]) && sub.buf.lines == split(rstrip(it.text), '\n')
+  end
+
+  @testset "A chart in what the agent says shows its buttons while the mouse is on it, as on a page, and a click on one opens its list" begin
+    sub = reply_shown(joinpath(dir, "chart"), """
+      | Chip | Rent |
+      |---|---|
+      | H100 | 4.4 |
+      | B200 | 9.8 |
+
+      ```chart
+      title: Rent
+      ```""")
+    v = sub.nodes[(:block, K.CHART, sub.buf.path, 1)]
+    r = K.rect(v)
+    mouse_to((r.left + r.width / 2, r.top + r.height / 2))
+    @test K.chart_buttons_shown(v) && K.hittest(w) isa K.PlotArea
+    kind = v.parts[:kind]
+    r = K.rect(kind)
+    mouse_to((r.left + r.width / 2, r.top + r.height / 2))
+    click_here()
+    @test kind.open
+    press(Keys.escape)
+    @test !kind.open
   end
 finally
   K.SESSION_COMMAND[] = nothing

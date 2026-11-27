@@ -27863,8 +27863,10 @@ describe(e::Editor, it::Item, g::Grid) = begin
 end
 
 describe(e::Editor, it::Item, l::Live) = begin
-  # In a part of this page that another page shows, a live block is only shown: a cover over it takes its clicks
-  inner = hosted(e) === nothing || l.node isa Transclusion ? geometry(l.node) :
+  # In a part of this page that another page shows, a live block is only shown: a cover over it takes its clicks.
+  # What an agent says is shown by the window's page too, but its blocks take the mouse as a page's do: a chart shows its
+  # buttons while the mouse is on it.
+  inner = hosted(e) === nothing || l.node isa Transclusion || is_reply(e.buf.path) ? geometry(l.node) :
     Stack(width(grow=grow), Alignment.Start, geometry(l.node), live_cover(e, it))
   Box(width(grow=grow), height(l.tall), Alignment.Start, padding(0px, LIVE_GAP), inner)
 end
