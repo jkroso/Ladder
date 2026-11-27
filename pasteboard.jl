@@ -8,6 +8,18 @@
 #
 # Each takes a clipboard to read, which is the Mac's own unless you give
 # another. This file only works on macOS.
+#
+# A paste reads the clipboard some time after the key is pressed, and the
+# clipboard can change in that time. An app that takes dictation puts its
+# words on the clipboard, presses ⌘V, and half a second later puts back what
+# the clipboard held before. The first paste in Ladder waits longer than that
+# while Julia compiles the code that pastes, so it got the old thing, like a
+# screenshot, and not the words. So the key that pastes reads the clipboard at
+# once, with `hold!`, and what it read is what's pasted:
+#
+#     hold!()      # read the clipboard now
+#     text()       # the text that it held then, whatever it holds by now
+#     release!()   # read the clipboard as it is again
 
 @use "github.com/jkroso/UI.jl/Interface/objc" libobjc cls sel msg nsstring jstring with_pool
 
@@ -31,13 +43,15 @@ private_board() = (Base.Libc.Libdl.dlopen(AppKit); msg(cls("NSPasteboard"), "pas
 howmany(x::Object, name) = ccall((:objc_msgSend, libobjc), UInt, (Object, Object), x, sel(name))
 
 "The text that the clipboard holds, or \"\""
-text(pb::Object=board()) = begin
+text() = (h = HELD[]; h === nothing ? text(board()) : h.text)
+text(pb::Object) = begin
   Sys.isapple() || return ""
   with_pool(() -> jstring(msg(pb, "stringForType:", nsstring("public.utf8-plain-text"))))
 end
 
 "The files and folders that the clipboard holds, as paths: what ⌘C in the Finder copies"
-files(pb::Object=board()) = begin
+files() = (h = HELD[]; h === nothing ? files(board()) : copy(h.files))
+files(pb::Object) = begin
   out = String[]
   Sys.isapple() || return out
   with_pool() do
@@ -60,7 +74,8 @@ files(pb::Object=board()) = begin
 end
 
 "The text of the vCard that the clipboard holds, or \"\": what ⌘C copies in the Contacts app"
-vcard(pb::Object=board()) = begin
+vcard() = changed_since_held() ? "" : vcard(board())
+vcard(pb::Object) = begin
   Sys.isapple() || return ""
   with_pool() do
     data = msg(pb, "dataForType:", nsstring("public.vcard"))
@@ -92,7 +107,8 @@ The picture, sound, video or PDF that the clipboard holds as data: the end of
 the name of a file of its kind, like "png", and its bytes. Nothing if it holds
 none. A screenshot that's copied is one of these.
 """
-media(pb::Object=board()) = begin
+media() = (h = HELD[]; h === nothing ? media(board()) : h.read ? h.media : changed_since_held() ? nothing : media(board()))
+media(pb::Object) = begin
   Sys.isapple() || return nothing
   with_pool() do
     for (kind, ext) in KINDS
@@ -109,3 +125,69 @@ media(pb::Object=board()) = begin
     nothing
   end
 end
+
+# --- what the clipboard held when a key was pressed ---------------------------------
+
+"""
+What the clipboard held at one moment: its files, its text, and its picture
+or other media. `count` is the number that macOS gives the clipboard, which
+goes up each time the clipboard changes. The media is read only when the
+clipboard has no file and no text but an address, since that's when a paste
+takes it, and `read` says whether it was.
+"""
+struct Held
+  count::Int
+  files::Vector{String}
+  text::String
+  read::Bool
+  media::Union{Nothing,Tuple{String,Vector{UInt8}}}
+end
+
+"What the clipboard held when `hold!` read it, until `release!`. Nothing at any other time."
+const HELD = Ref{Union{Nothing,Held}}(nothing)
+
+"The number that macOS gives the clipboard `pb`, which goes up each time the clipboard changes"
+changes(pb::Object=board()) = Sys.isapple() ? ccall((:objc_msgSend, libobjc), Int, (Object, Object), pb, sel("changeCount")) : 0
+
+"True when the clipboard has changed since `hold!` read it"
+changed_since_held() = (h = HELD[]; h !== nothing && changes() != h.count)
+
+"What the clipboard `pb` holds now"
+now(pb::Object=board()) = begin
+  count, paths, words = changes(pb), files(pb), text(pb)
+  # A picture that's copied from a web page comes with its address as text, and the picture is what a paste takes
+  read = isempty(paths) && (isempty(strip(words)) || occursin(r"^\s*\w+://\S+\s*$", words))
+  Held(count, paths, words, read, read ? media(pb) : nothing)
+end
+
+"""
+Read the clipboard now, and keep what it holds until `release!`. Until then,
+`files`, `text` and `media` give what the clipboard held at this moment,
+whatever another app has put on it since. The key that pastes calls this as
+soon as it's pressed, before any code that Julia has yet to compile. True
+when this call read the clipboard, and false when an earlier one still keeps
+what it read: only the call that got true calls `release!`.
+"""
+hold!() = begin
+  HELD[] === nothing || return false
+  HELD[] = now()
+  true
+end
+
+"Stop keeping what `hold!` read, so the clipboard is read as it is again"
+release!() = (HELD[] = nothing)
+
+"Call `f` between a `hold!` and its `release!`"
+held(f) = begin
+  mine = hold!()
+  try
+    f()
+  finally
+    mine && release!()
+  end
+end
+
+# Julia compiles these now, not at the first paste, when the clipboard has little time before it changes
+precompile(hold!, ())
+precompile(release!, ())
+precompile(now, (Object,))

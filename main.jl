@@ -10644,13 +10644,38 @@ end
 What a key does. The key bindings say which command it runs. Return, esc and
 Space have no command: what they do depends on where the caret is.
 """
-onkey(e::Editor, ev::KeyPress{K}) where K = begin
+# Julia compiles a function once for each type that it's called with, and each key's press has
+# a type of its own. So the press gives its key on as a value, and the long function that says
+# what a key does is compiled once, for the first key that's pressed. Before that, each key
+# waited at its first press: ⌘V for more than a second.
+onkey(e::Editor, ev::KeyPress{K}) where K = pressed!(e, ev.window, K)
+
+"The key `K` was pressed in the window `w` while `e` or a part of it had the keyboard"
+pressed!(e::Editor, w, K) = begin
   # A key that the sidebar's tree took, like Return on a heading, comes here next. It isn't for the text.
   pop!(e.nodes, :chose, false) && return
-  w = ev.window
   # The first key of a shortcut of two, like ⌃X, does nothing but wait for the second
   command, select = command!(e, w, K)
   command == :wait && return
+  command == :paste || return key_does!(e, w, K, command, select)
+  # The key that pastes reads the clipboard now. An app that takes dictation puts its words there, presses
+  # the key, and half a second later puts back what was there before. The first paste waits longer than
+  # that for Julia to compile it, and it got that older thing, like a screenshot.
+  mine = Pasteboard.hold!()
+  try
+    key_does!(e, w, K, command, select)
+  finally
+    mine && Pasteboard.release!()
+  end
+end
+
+"""
+Do what the key `K` does in the window `w` of `e`, where `command` is the
+command that the key runs, or nothing: see `command!`. It's compiled once for
+a key with a command and a key with none, so the first key that's pressed
+compiles it for them all.
+"""
+key_does!(e::Editor, w, K, @nospecialize(command), select) = begin
   # In a part of another page, a key for the window is the window's page's, and esc goes back to that page
   (hosted(e) === nothing || agent_part_of(e) !== nothing) || !part_key!(e, w, K, command, select) || return handled
   # In the text of a request in place, Return gives the request to the agent and esc takes the field away

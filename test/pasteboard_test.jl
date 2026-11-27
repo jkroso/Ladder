@@ -53,6 +53,53 @@ end
   @test P.vcard(pb) == card && P.text(pb) == "Émile Zola"
 end
 
+@testset "what the clipboard held when a key was pressed" begin
+  P.other[] = pb
+  try
+    # An app that takes dictation puts its words there, presses ⌘V, and puts a picture back before the paste reads
+    clear(); put_text("public.utf8-plain-text", "dictated words")
+    P.held() do
+      clear(); put_data("public.png", PNG)
+      @test P.text() == "dictated words" && isempty(P.files()) && P.media() === nothing && P.vcard() == ""
+      # A second `held` inside the first reads nothing again
+      P.held(() -> @test P.text() == "dictated words")
+      @test P.HELD[] !== nothing
+    end
+    # After it, the clipboard is read as it is now
+    @test P.HELD[] === nothing && P.text() == "" && P.media() == ("png", PNG)
+    # A picture is kept too, and so is one that came with its address
+    P.held() do
+      clear(); put_text("public.utf8-plain-text", "later words")
+      @test P.media() == ("png", PNG) && P.text() == ""
+    end
+    clear(); put_text("public.utf8-plain-text", "https://example.com/a.png"); put_data("public.png", PNG)
+    P.held() do
+      clear()
+      @test P.media() == ("png", PNG) && P.text() == "https://example.com/a.png"
+    end
+    # While the clipboard stays as it was, what `held` didn't read is read from it
+    card = "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Alan Kay\r\nEND:VCARD\r\n"
+    clear(); put_data("public.vcard", Vector{UInt8}(card)); put_text("public.utf8-plain-text", "Alan Kay"); put_data("public.png", PNG)
+    P.held() do
+      @test P.vcard() == card && P.text() == "Alan Kay" && P.media() == ("png", PNG)
+      clear()
+      @test P.vcard() == "" && P.text() == "Alan Kay" && P.media() === nothing
+    end
+    # An error in the function leaves nothing held
+    clear(); put_text("public.utf8-plain-text", "words")
+    @test try P.held(() -> error("stop")) catch; true end
+    @test P.HELD[] === nothing
+    # `hold!` says whether it read the clipboard, and only that call's `release!` is due
+    @test P.hold!() && !P.hold!() && P.text() == "words"
+    clear()
+    @test P.text() == "words"
+    P.release!()
+    @test P.HELD[] === nothing && P.text() == ""
+  finally
+    P.other[] = C_NULL
+  end
+end
+
 @testset "files that were copied in the Finder" begin
   dir = mktempdir()
   file = joinpath(dir, "clip one.mp4")

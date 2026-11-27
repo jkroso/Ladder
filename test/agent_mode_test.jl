@@ -1188,6 +1188,13 @@ try
       put("public.utf8-plain-text", " in it?")
       press(Keys.v, Keys.cmd)
       @test pane.field.buf.lines == [notes * " in it?"] && length(K.attached(pane)) == 1
+      # An app that takes dictation puts its words on the clipboard, presses ⌘V, and soon puts back what the clipboard
+      # held before, like a screenshot. The words go in, though the paste reads the clipboard after the picture is back.
+      paste = K.COMMANDS[:paste]
+      K.COMMANDS[:paste] = K.Command(:paste, "Paste", :edit, "cmd+v", (e, w, s) -> (put("public.png", read(shot)); paste.run(e, w, s)))
+      put("public.utf8-plain-text", " Yes.")
+      try press(Keys.v, Keys.cmd) finally K.COMMANDS[:paste] = paste end
+      @test pane.field.buf.lines == [notes * " in it? Yes."] && length(K.attached(pane)) == 1
       # A picture that's dropped anywhere on the agent's pane goes with the words too, and the words take the keyboard
       dropped = joinpath(dir, "dropped.png"); cp(shot, dropped)
       K.focus(e); frames()
