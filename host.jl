@@ -11,7 +11,9 @@
 export editor, page_object, object, list_files!, go_folder!, open!, open_folder!, show_path!, show_beside!,
        free_path, folder_kind, page_top, trash!, file_act!, show_in_finder, above_page, touch!, show_line!,
        page_day, save_settings!, rerun!, page_room, page_tables, named_table, layout!, command_of,
-       click_page!, text_object, say_result!, lowered, rewrap!, reload_changed!, loaded_module, fillable
+       click_page!, text_object, say_result!, lowered, rewrap!, reload_changed!, loaded_module, fillable,
+       diagram_html, outcome_face, julia_code, calendar_today, marked, term_page, chat_page, scroll_page!,
+       keep_talk!, follow_host!, celltext, lowest, component, unscaled, command_kind, pinch_open
 
 "The editor of the window that `node`, a part of a page, is part of"
 function editor end
@@ -114,3 +116,51 @@ function loaded_module end
 
 "`content`, a part of the page that `owner` shows, with a button beside it that makes `what` fill the window"
 function fillable end
+
+"The `mermaid` code block from line `s` to line `t` as HTML"
+function diagram_html end
+
+"The font of what code came to, which is the font of the code, at `size` and in the colour `ink`"
+function outcome_face end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function julia_code end
+
+"The day that counts as today: the real one, unless a test names another"
+function calendar_today end
+
+"True while the mouse is on a thing called `name`, in any part of the page"
+function marked end
+
+"True when the page shows a terminal's file at one of its levels"
+function term_page end
+
+"True when the page shows a session's file at one of its levels"
+function chat_page end
+
+"Scroll the page by `by`, as far as it goes"
+function scroll_page! end
+
+"Write the session of the pane `p` to its file, when the file doesn't have all of it yet"
+function keep_talk! end
+
+"Give the editor of a part the choices of the editor of the page that shows it"
+function follow_host! end
+
+"The text of a cell as the table shows it"
+function celltext end
+
+"How far down the page the lowest of `items` ends"
+function lowest end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function component end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function unscaled end
+
+"What kind of command the command `name` is"
+function command_kind end
+
+"A pinch outwards on a picture, a diagram, a page or a sketch in the page makes it fill the window"
+function pinch_open end

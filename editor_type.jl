@@ -19,7 +19,7 @@
 export Item, Live, Grid, isspread, Glide, Editor, TopBar, Sidebar, Page, Document, Backdrop, FinderInput,
        ToolButton, TableButton, Mode, Levels, Stop, JuliaCode, Title, CheckCount, ReadOnly, SendButton,
        Paragraph, Heading, List, Quote, CodeBlock, Table, Rule, LiveBlock, SheetBlock, Trouble, Block,
-       FileRow, FileLabel, Entry, EntryLabel, Shown, docdir, item, hosted, top_editor, button
+       FileRow, FileLabel, Entry, EntryLabel, Shown, docdir, item, hosted, top_editor, button, FileView
 
 # --- what a window holds ---------------------------------------------------------
 
@@ -282,3 +282,11 @@ hosted(e) = get(e.nodes, :host, nothing)
 top_editor(e) = (h = hosted(e); h === nothing ? e : top_editor(h))
 
 button(e, action, icon) = node!(() -> ToolButton(icon=icon, action=action), e, action)
+
+"What the page shows for a file that doesn't show as text: a viewer of its kind, or words that say it's a binary file"
+@def mutable struct FileView <: SemanticUI
+  path::String = ""
+  viewer::Any = nothing   # the STLViewer, the player or the Pages of the file, kept from one frame to the next
+  table::Any = nothing    # the FileSheet of a CSV file: its table, and what's chosen for it
+  button::Any = nothing   # the HexButton of a binary file
+end

@@ -17,7 +17,7 @@
 @use "./merge" changes combine follow
 @use "./eml" => Eml
 @use "./remote" => Remote
-@use "./folder_page" MARKDOWN
+@use "./folder_page" MARKDOWN ZIPS
 @use "./look" exports...
 @use "./flow" exports...
 
@@ -28,7 +28,8 @@ export look, table_text, in_browser, web_address, copied_from, julia_own, is_rep
        dirty, name, selecting, selection, head, rest, excerpt, others, keep_others!, clash, snapshot,
        restore!, edit!, replace_text!, undo!, redo!, writes, save!, crlf, ismarkdown, CODE_FILES, iscode,
        MOST_TEXT, MOST_PAGE, reading, HEX, HEX_BYTES, HEX_CHARS, BITS, BITS_ROW, BITS_CHARS, same_text,
-       unchanged, line_end, FOLDER_PAGE, page_key, unescaped
+       unchanged, line_end, FOLDER_PAGE, page_key, unescaped, bytes_page, STEP, FILE_VIEWS, JULIA, LIVE,
+       TEXT_READ, text_file
 
 # A kind of page or of file decides these, so this file only names them. The
 # file that knows the kind gives each its methods.
@@ -550,3 +551,33 @@ page_key(path::AbstractString) = isremote(path) ? String(path) : isfile(path) ? 
 
 "The path that a link wrote with `escaped`"
 unescaped(path) = replace(path, "%20" => ' ', "%28" => '(', "%29" => ')')
+
+"True when the page shows a file's bytes, in hexadecimal or as bits. Each line keeps its columns, so the lines never wrap."
+bytes_page(b::Buffer) = b.view in (:hex, :bits)
+
+const STEP = "  "   # one step of indentation
+
+const FILE_VIEWS = (:bits, :hex, :text, :file)   # the ways that a file with levels shows, from the lowest level
+
+const JULIA = ("julia", "jl")   # the names of the language whose code blocks run
+
+const LIVE = "ui"
+
+"Whether each file that was asked about is text, with when the file was last read then. Only the last few are kept."
+const TEXT_READ = Dict{String,Tuple{Float64,Bool}}()
+
+"""
+True when the file at `path` is text, so it can show as its text. A file is
+read once to find out, and again after the page reads it again. A zip isn't
+text: what shows for it is the list of its files.
+"""
+text_file(path) = begin
+  lowercase(splitext(path)[2]) in ZIPS && return false
+  at = get(READ, path, 0.0)
+  kept = get(TEXT_READ, path, nothing)
+  kept !== nothing && kept[1] == at && return kept[2]
+  found = isfile(path) && (try reading(path, tidy=false) !== nothing catch; false end)
+  length(TEXT_READ) >= 16 && empty!(TEXT_READ)
+  TEXT_READ[path] = (at, found)
+  found
+end

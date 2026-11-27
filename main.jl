@@ -1932,7 +1932,6 @@ block_names(::Type{SheetBlock}, lines) = Tuple{String,String}[row for row in par
 # UI.jl's components, like Slider and STLViewer, the parts of a layout, like
 # Column and px, a file path as fs"notes.md" and a colour as colorant"tomato".
 
-const LIVE = "ui"
 "The modules whose names a live block can use with no line that loads them"
 const USUAL = ("github.com/jkroso/UI.jl/Interface/Semantic", "github.com/jkroso/UI.jl/Interface/Geometric")
 
@@ -2683,7 +2682,6 @@ end
 
 # --- a CSV file as a table --------------------------------------------------------------------
 
-const ROW_H = 24px
 const MOST_COLUMNS = 40
 
 "The rows of a CSV file that a breadcrumb previews, and how wide each column is"
@@ -3010,25 +3008,6 @@ text_look(path) = begin
          about=more ? "First $(bytes(MOST_PAGE)) of $(bytes(filesize(path)))" : "")
 end
 
-"Whether each file that was asked about is text, with when the file was last read then. Only the last few are kept."
-const TEXT_READ = Dict{String,Tuple{Float64,Bool}}()
-
-"""
-True when the file at `path` is text, so it can show as its text. A file is
-read once to find out, and again after the page reads it again. A zip isn't
-text: what shows for it is the list of its files.
-"""
-text_file(path) = begin
-  lowercase(splitext(path)[2]) in ZIPS && return false
-  at = get(READ, path, 0.0)
-  kept = get(TEXT_READ, path, nothing)
-  kept !== nothing && kept[1] == at && return kept[2]
-  found = isfile(path) && (try reading(path, tidy=false) !== nothing catch; false end)
-  length(TEXT_READ) >= 16 && empty!(TEXT_READ)
-  TEXT_READ[path] = (at, found)
-  found
-end
-
 """
 The ways that the file of `b` can show, from its lowest level to its highest,
 or () for a page and for a file with one way to show. A file of text shows as
@@ -3076,9 +3055,6 @@ bitlines(path) = begin
       String([0x20 <= x < 0x7f ? Char(x) : '.' for x in row])
   end
 end
-
-"True when the page shows a file's bytes, in hexadecimal or as bits. Each line keeps its columns, so the lines never wrap."
-bytes_page(b::Buffer) = b.view in (:hex, :bits)
 
 "What the top bar says of the bits of the file at `path`: how many of its bytes show, when not all do"
 bits_about(path) = filesize(path) > MOST_BITS ? "First $(bytes(MOST_BITS)) of $(bytes(filesize(path)))" : ""
@@ -3832,15 +3808,6 @@ numbers(e) = numbered(e.buf) && e.numbers
 "How much room the numbers of the page's lines take beside the text, with the gap between them. A page with no numbers takes none."
 gutter(e) = numbers(e) ? measure(number_face(e), "0") * max(2, ndigits(length(e.buf.lines))) + NUMBER_GAP : 0px
 
-const capitals = Dict{Tuple{String,String,Float32},px}()
-
-"How tall a capital letter of `face` is"
-capital(face::Face) = get!(capitals, (face.family, face.style, Float32(num(face.size)))) do
-  metrics = Ref{Skia.sk_font_metrics_t}()
-  Skia.sk_font_get_metrics(skia_font(face.family, face.size, face.style).raw, metrics)
-  px(metrics[].capHeight)
-end
-
 "Write the number of each line on screen beside the line. The page's text starts at `left`, and its first line is at `top`."
 draw_numbers(ctx, e, left, top) = begin
   b = e.buf
@@ -4158,14 +4125,6 @@ spare_flows!(e) = begin
   empty!(e.flows)
   foreach(p -> e.flows[p.first] = p.second, kept)
   e
-end
-
-"What the page shows for a file that doesn't show as text: a viewer of its kind, or words that say it's a binary file"
-@def mutable struct FileView <: SemanticUI
-  path::String = ""
-  viewer::Any = nothing   # the STLViewer, the player or the Pages of the file, kept from one frame to the next
-  table::Any = nothing    # the FileSheet of a CSV file: its table, and what's chosen for it
-  button::Any = nothing   # the HexButton of a binary file
 end
 
 "The button under the words that say a file is binary. A click shows the file's bytes."
@@ -5460,7 +5419,7 @@ cell_key!(f::CellField, e, w, K, command) = begin
     stop_edit!(v, keep=false)
     return nothing
   end
-  (command in CELL_COMMANDS || COMMANDS[command].kind in (:type, :move)) && return :text
+  (command in CELL_COMMANDS || command_kind(command) in (:type, :move)) && return :text
   stop_edit!(v)
   nothing
 end
@@ -5474,7 +5433,7 @@ the window goes on to them.
 cell_key!(f::MenuField, e, w, K, command) = begin
   command === nothing && return :text
   command in (:undo, :redo) && return isempty(command == :undo ? e.buf.undo : e.buf.redo) ? handled : :text
-  (command in CELL_COMMANDS || COMMANDS[command].kind in (:type, :move)) ? :text : nothing
+  (command in CELL_COMMANDS || command_kind(command) in (:type, :move)) ? :text : nothing
 end
 
 "The menu items that change a column, in their order"
@@ -22714,9 +22673,6 @@ reload!(v::FileBlock) = begin
   v
 end
 
-"The function called `name` of the module `from`, or nothing if the module has none"
-named(from, name::Symbol) = Base.invokelatest(isdefined, from, name) ? Base.invokelatest(getglobal, from, name) : nothing
-
 """
 The lines of the block of `v` as what the block made writes them now. It's
 nothing when the file has no function `written` for what was made.
@@ -25778,7 +25734,6 @@ newline!(e, ::Type{CodeBlock}) = begin
   type!(e, "\n" * match(r"^ *", before).match * (opens(before, line.lang) ? indentation(e, CodeBlock) : ""))
 end
 
-const STEP = "  "   # one step of indentation
 const OPENERS = r"^\s*(function|if|elseif|else|for|while|let|try|catch|finally|struct|mutable struct|module|macro|quote)\b"
 
 "True when a line of code that ends with `text` opens a block, so the next line goes further in"
@@ -27332,6 +27287,9 @@ const COMMAND_GROUPS = with_added([
 "Each command, by its name"
 const COMMANDS = Dict{Symbol,Command}(c.name => c for (_, cs) in COMMAND_GROUPS for c in cs)
 
+"What kind of command the command `name` is: :type, :move, :edit, :look or :window"
+command_kind(name::Symbol) = COMMANDS[name].kind
+
 """
 The bundles of key bindings, in the order that the key bindings page offers
 them. Each lists only the commands whose shortcuts are different from the
@@ -27782,9 +27740,6 @@ end
 # the page shows it as a table. A Markdown file goes in where it's
 # dropped as a link to it. Any other file, and a folder, goes in there as a
 # path that shows as a breadcrumb: !`fs"path"`.
-
-"`path` as the text names it: from the folder of the document when it's in that folder, and whole when it isn't"
-named(e, path) = (dir = docdir(e); startswith(path, dir * "/") ? relpath(path, dir) : path)
 
 "`path` as a link writes it. A space or a bracket would end the link early, so each is written as its code."
 escaped(path) = replace(path, ' ' => "%20", '(' => "%28", ')' => "%29")
@@ -28723,7 +28678,6 @@ mode_part(e) = e.buf.view == :markdown || !isempty(file_views(e.buf)) || julia_f
 # page. A part gets levels of its own with a method of each of the three
 # functions.
 
-const FILE_VIEWS = (:bits, :hex, :text, :file)   # the ways that a file with levels shows, from the lowest level
 const FILE_LEVELS = ("the file's bits", "the file's bytes in hexadecimal", "the file's text")   # and the tree or the table over them
 const PAGE_LEVELS = ("the symbols of the part with the caret", "the graphics that the symbols make")
 const BLOCK_LEVELS = ("the symbols that make this", "the graphics that the symbols make")
@@ -36804,7 +36758,6 @@ end
 # A box stays while its code is as it was when it ran. It goes when you change
 # that code, and Escape takes every box off the page.
 
-const JULIA = ("julia", "jl")   # the names of the language whose code blocks run
 const OUTCOME_GAP = 14px        # between the end of a line of code and the box of what it came to
 const OUTCOME_LINES = 30        # the most lines of a value that Julia writes
 const OUTCOME_COLS = 100        # and the most characters of each

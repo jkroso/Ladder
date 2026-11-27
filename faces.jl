@@ -12,7 +12,7 @@
 @use "github.com/jkroso/UI.jl/Interface/Geometric"...
 @use "github.com/jkroso/UI.jl/Interface/Specific"...
 @use "github.com/jkroso/UI.jl/Interface/abstract" SemanticUI GeometricUI WrapMode light describe detach! inputs Theme
-@use "github.com/jkroso/UI.jl/Interface/fonts" weight_of weight_name isitalic installed_faces
+@use "github.com/jkroso/UI.jl/Interface/fonts" weight_of weight_name isitalic installed_faces skia_font
 @use "github.com/jkroso/UI.jl/Interface/Semantic/Icon" Icon
 @use "./html" NOTE
 @use "./markdown" Kind Line Span spans words isdone MATTER TOML_MATTER opens_callout
@@ -35,7 +35,7 @@ export note_mark, equation, ticked_then, evaluate, keep_value!, TEXT_SIZE, body,
        callout_colour, callout_name, callout_tint, CalloutMark, CALLOUT_GAP, icon_size, wide, callout_mark,
        INLINE, inline_lines, ordinal, sums_run, sums_shown, made, fit, INLINE_W, inline, LONGEST_VALUE, said,
        SYMBOLS, symbols!, codeblock, code_size, CELL_LANG, geometry, SITE_FONT, NEWS_TYPE, NEWS_HEADINGS,
-       markup_shows, component_theme, SHEET_FILE, SHEET_FONT, SHEET_WEIGHT
+       markup_shows, component_theme, SHEET_FILE, SHEET_FONT, SHEET_WEIGHT, capitals, capital
 
 # The kinds of block and of mark decide these, so this file only names them.
 
@@ -623,3 +623,12 @@ const SHEET_FILE = something(findfirst(isfile, joinpath.((joinpath(homedir(), "L
 const SHEET_FONT = isempty(SHEET_FILE) ? MONO : "Source Code Pro"
 
 const SHEET_WEIGHT = isempty(SHEET_FILE) ? "" : "ExtraLight"
+
+const capitals = Dict{Tuple{String,String,Float32},px}()
+
+"How tall a capital letter of `face` is"
+capital(face::Face) = get!(capitals, (face.family, face.style, Float32(num(face.size)))) do
+  metrics = Ref{Skia.sk_font_metrics_t}()
+  Skia.sk_font_get_metrics(skia_font(face.family, face.size, face.style).raw, metrics)
+  px(metrics[].capHeight)
+end

@@ -6,8 +6,10 @@
 #     drop!(v::CalendarView) = ...   # calendar_view.jl
 #     drop!(v::TakeoffView) = ...    # main.jl
 
-export drop!, dragging, click_twice!, settle!, answer!, commit!, stop_asking!, full_room, row_at, vertical, beside,
-       diff_wide, beside!, found!, on_paper, show_place!
+export drop!, dragging, click_twice!, settle!, answer!, commit!, stop_asking!, full_room, row_at, vertical,
+       beside, diff_wide, beside!, found!, on_paper, show_place!, ask!, button!, field, fit!, fit_zoom,
+       moved!, order_words, page!, say!, table_head, toolbar, callee, extent, julia_file, level, level!,
+       levels, type_name, add_row!, field_text, hold!, keep!, narrowed, tip, caret, pointed, press!
 
 "A drag on the part `v` ended: what moved is written down"
 function drop! end
@@ -56,3 +58,84 @@ function on_paper end
 
 "Move the part `v`, if it must, so that all of `card` shows"
 function show_place! end
+
+"Show the text field for `what`, with `text` in it and selected"
+function ask! end
+
+"The button of `v` that's kept under `key`, with what it does and shows now"
+function button! end
+
+"The text field in a box, where the thing that it changes was"
+function field end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function fit! end
+
+"How many px to a point fits the whole page in the view, with white round it"
+function fit_zoom end
+
+"Note that the view moved just now, and keep the page in it"
+function moved! end
+
+"What the two orders of a column are called"
+function order_words end
+
+"Go on by `by` pages"
+function page! end
+
+"A sentence at the foot of the block"
+function say! end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function table_head end
+
+"The buttons over the part `v`"
+function toolbar end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function callee end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function extent end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function julia_file end
+
+"The level that `node` shows at"
+function level end
+
+"Show `node` at level `i` of `levels(node)`"
+function level! end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function levels end
+
+"A type as Julia writes it, with no module's name in front of a type of the module `m`"
+function type_name end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function add_row! end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function field_text end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function hold! end
+
+"Keep only the rows that have `words` in column `column`"
+function keep! end
+
+"True when column `c` of `s` shows only some rows"
+function narrowed end
+
+"What the mouse over a formula says"
+function tip end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function caret end
+
+"The name of the thing that the mouse is on in `part`, or nothing"
+function pointed end
+
+"True while Ladder is built into an app (see app/bundle.jl)"
+function press! end

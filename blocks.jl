@@ -26,12 +26,12 @@
 @use "./faces" exports...
 @use "./rich" exports...
 
-export act!, keyboard_part, reread!, BlockKind, BLOCKS, block_name, block_icon, block_make,
-       block_insert, block_is_code, block_safe, block_outline_inside, block_outline, block_table_kind,
-       block_tables!, block_names, block_places, block_lines, block_view, prepare_block!, measure_block!,
-       block_item, block_layout, block_place, block_html, write_block!, block_tick!, before_save!,
-       blocks_tick!, block_part!, part!, BlockButton, PlanButton, block_button!, block_look, block_bar,
-       block_note, css_colour, can_fill, filling, unfill!, full_block, before_fill!, fill_focus, full!
+export act!, keyboard_part, reread!, BlockKind, BLOCKS, block_name, block_icon, block_make, block_insert,
+       block_is_code, block_safe, block_outline_inside, block_outline, block_table_kind, block_tables!,
+       block_names, block_places, block_lines, block_view, prepare_block!, measure_block!, block_item,
+       block_layout, block_place, block_html, write_block!, block_tick!, before_save!, blocks_tick!,
+       block_part!, part!, BlockButton, PlanButton, block_button!, block_look, block_bar, block_note,
+       css_colour, can_fill, filling, unfill!, full_block, before_fill!, fill_focus, full!, named
 
 # Each kind of block decides these for its own parts, so this file only names them.
 
@@ -341,3 +341,9 @@ full!(v, on::Bool) = begin
   target === nothing || focus(target)
   handled
 end
+
+"The function called `name` of the module `from`, or nothing if the module has none"
+named(from, name::Symbol) = Base.invokelatest(isdefined, from, name) ? Base.invokelatest(getglobal, from, name) : nothing
+
+"`path` as the text names it: from the folder of the document when it's in that folder, and whole when it isn't"
+named(e, path) = (dir = docdir(e); startswith(path, dir * "/") ? relpath(path, dir) : path)
