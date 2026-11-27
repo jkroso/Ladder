@@ -11,6 +11,7 @@
 @use "github.com/jkroso/UI.jl/Interface/draw" frame rect popups
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
 @use GeometryBasics: Vec2
+@use "./drive" drive middle
 const px = K.px
 
 const dir = mktempdir()
@@ -26,16 +27,9 @@ const code = file("sums.jl", "1 + 1\n")
 
 const e = K.build_editor(page)
 const w = Window(e, size=(1000px, 800px))
-frames(n=2) = foreach(_ -> frame(w), 1:n)
+const (; frames, at, press, release, click, shot) = drive(w, pressed=1)
 frames()
-shot(name) = haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], name), w)
 
-at((x, y)) = (w.mouse = typeof(w.mouse)(px(x), px(y)); onmouse(w, MouseMove(Vec2{px}(px(x), px(y)), w)); frames(1))
-press(place) = (at(place); w.keys |= Keys.mouse_left; onkey(w, KeyPress{Keys.mouse_left}(0, w)); frames(1))
-release() = (w.keys ⊻= Keys.mouse_left; onkey(w, KeyRelease{Keys.mouse_left}(0, w)); frames())
-click(place) = (press(place); release())
-middle(r) = (K.num(r.left + r.width / 2), K.num(r.top + r.height / 2))
-middle(r::Tuple) = (K.num(r[1] + r[3] / 2), K.num(r[2] + r[4] / 2))
 "Where a rectangle is, as numbers that a later frame doesn't change"
 place(r) = (r.left, r.top, r.width, r.height)
 "Press ⌘E"

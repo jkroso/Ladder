@@ -12,6 +12,7 @@
 @use "github.com/jkroso/UI.jl/Interface/objc" libobjc sel msg nsstring
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
 @use GeometryBasics: Vec2
+@use "./drive" drive
 const px = K.px
 
 # ⌘V reads a clipboard that only this test uses, and ⌘C in a window that isn't on the screen writes to none
@@ -104,10 +105,9 @@ end
 
 const e = K.build_editor(home)
 const w = Window(e, size=(1000px, 900px))
-frames(n=2) = foreach(_ -> frame(w), 1:n)
+const (; frames, typed, key, shot) = drive(w)
 frames()
 K.focus(e)
-shot(name) = haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], name), w)
 
 "The line of the page that holds `text`"
 line(text) = findfirst(l -> occursin(text, l), e.buf.lines)
@@ -124,8 +124,6 @@ click((x, y), held...) = begin
   foreach(h -> w.keys ⊻= h, held)
   frames()
 end
-key(k, held...) = (foreach(h -> w.keys |= h, held); onkey(w, KeyPress{k}(0, w)); foreach(h -> w.keys ⊻= h, held); frames())
-typed(s) = (foreach(c -> ontype(w, Typed(c, w)), s); frames())
 "The place in the window of column `col` of line `i` of the page that a part shows. In a table, it's in the first cell of the row."
 spot(v, i, col=0) = begin
   sub = v.sub

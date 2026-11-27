@@ -11,6 +11,7 @@
 @use "github.com/jkroso/UI.jl/Interface/draw" frame rect draw scene
 @use Skia
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
+@use "./drive" drive
 const px = K.px
 
 const dir = mktempdir()
@@ -29,23 +30,16 @@ write(notes, "# Notes\n\n```julia\n$LONG\n```\n")
 const e = K.build_editor(file)
 const w = Window(e, size=(1000px, 700px))
 const Vec2 = typeof(w.mouse)   # a place in the window, or a move of two fingers
-frames(n=2) = foreach(_ -> frame(w), 1:n)
+const (; frames, typed, key) = drive(w)
 frames()
 K.focus(e)
 
 caret!(line, col=0) = (e.buf.caret = e.buf.anchor = (line, col); K.touch!(e); frames())
-key(k, held...) = begin
-  foreach(h -> w.keys |= h, held)
-  onkey(w, KeyPress{k}(0, w))
-  foreach(h -> w.keys ⊻= h, held)
-  frames()
-end
 long() = K.item(e, 2).content
 mouse!(x, y) = (w.mouse = Vec2(px(x), px(y)); frames(1))
 # The part of the window that the page's text is drawn in: the box that cuts off what's past its left and right
 clipper(r=rect(e.nodes[:page])) = r.from isa K.Container && r.from.clip_x ? r : (for c in r.children; (c isa K.ConcreteRect && (f = clipper(c)) !== nothing) && return f end; nothing)
 swipe(dx, dy=0) = (onscroll(w, Vec2(px(dx), px(dy))); frames())
-typed(s) = (foreach(c -> ontype(w, Typed(c, w)), s); frames())
 
 "The colour of each pixel of the window, as it draws, one pixel for each point. `pixels[x, y]` is the one at (x, y)."
 pixels() = begin

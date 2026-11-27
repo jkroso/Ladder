@@ -11,6 +11,7 @@
 @use "github.com/jkroso/UI.jl/Interface/draw" frame rect
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
 @use GeometryBasics: Vec2
+@use "./drive" drive middle
 const px = K.px
 
 const dir = mktempdir()
@@ -59,18 +60,12 @@ The end.
 
 const e = K.build_editor(page)
 const w = Window(e, size=(1000px, 1100px))
-frames(n=2) = foreach(_ -> frame(w), 1:n)
+const (; frames, at, press, shot) = drive(w)
 frames()
-shot(name) = haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], name), w)
 
-at((x, y)) = (w.mouse = typeof(w.mouse)(px(x), px(y)); onmouse(w, MouseMove(Vec2{px}(px(x), px(y)), w)); frames(1))
-press(place) = (at(place); w.keys |= Keys.mouse_left; onkey(w, KeyPress{Keys.mouse_left}(0, w)))
 release() = (w.keys ⊻= Keys.mouse_left; onkey(w, KeyRelease{Keys.mouse_left}(0, w)); frames(3))
 click(place) = (press(place); release())
 key(k) = (onkey(w, KeyPress{k}(0, w)); frames(3))
-"The middle of a node, or of a block button's rectangle"
-middle(node) = (r = rect(node); (K.num(r.left + r.width / 2), K.num(r.top + r.height / 2)))
-middle(r::Tuple) = (K.num(r[1] + r[3] / 2), K.num(r[2] + r[4] / 2))
 view(lang, n) = e.nodes[(:block, lang, page, n)]
 block(lang, n) = (s = K.block_lines(e.buf, lang, n); e.buf.lines[s[1]+1:s[2]-1])
 "Scroll the page until the top of the `n`th block in `lang` is near the top of the window, and it has been laid out and drawn"

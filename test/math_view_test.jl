@@ -9,6 +9,7 @@
 @use "github.com/jkroso/UI.jl/Interface/draw" frame rect
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
 @use GeometryBasics: Vec2
+@use "./drive" drive
 const M, px = K.Maths, K.px
 
 const dir = mktempdir()
@@ -44,14 +45,12 @@ Last line.
 
 const e = K.build_editor(page)
 const w = Window(e, size=(1000px, 900px))
-frames(n=2) = foreach(_ -> frame(w), 1:n)
+const (; frames, key, shot) = drive(w)
 frames()
 K.focus(e)
-shot(name) = haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], name), w)
 line(text) = findfirst(startswith(text), e.buf.lines)
 "The formulas in line `i`, as the pieces of its line that show them"
 formulas(i) = [seg for vl in K.item(e, i).content.lines for seg in vl.segs if seg.node !== nothing && seg.node.node isa K.Equation]
-key(k, held=Keys(0)) = (w.keys = held; onkey(w, KeyPress{k}(0, w)); w.keys = Keys(0); frames())
 caret!(p) = (e.buf.caret = e.buf.anchor = p; K.touch!(e); frames())
 
 const roots = line("The roots")

@@ -11,6 +11,7 @@
 @use "github.com/jkroso/MiniFB.jl" Window KeyPress KeyRelease MouseMove Keys onkey onmouse
 @use "github.com/jkroso/UI.jl/Interface/draw" frame rect
 @use GeometryBasics: Vec2
+@use "./drive" drive middle
 const px = K.px
 
 const dir = mktempdir()
@@ -22,24 +23,16 @@ write(joinpath(dir, "page.md"), "# A page\n\n```ui\nnotes_count()\n```\n")
 
 const e = K.build_editor(joinpath(notes, "one.md"))
 const w = Window(e, size=(1000px, 700px))
-frames(n=2) = foreach(_ -> frame(w), 1:n)
+const (; frames, at, click) = drive(w)
 frames()
 K.focus(e)
 
-at((x, y)) = (w.mouse = typeof(w.mouse)(px(x), px(y)); onmouse(w, MouseMove(Vec2{px}(px(x), px(y)), w)); frames(1))
-click(place) = begin
-  at(place)
-  w.keys |= Keys.mouse_left; onkey(w, KeyPress{Keys.mouse_left}(0, w))
-  w.keys ⊻= Keys.mouse_left; onkey(w, KeyRelease{Keys.mouse_left}(0, w))
-  frames()
-end
 press(key, mods...) = begin
   foreach(k -> (w.keys |= k), mods)
   onkey(w, KeyPress{key}(0, w)); onkey(w, KeyRelease{key}(0, w))
   foreach(k -> (w.keys ⊻= k), mods)
   frames()
 end
-middle(r) = (K.num(r[1] + r[3] / 2), K.num(r[2] + r[4] / 2))
 "Each Text in the layout `node`, in the order they read"
 texts(node, out=String[]) = begin
   node isa K.Text ? push!(out, node.content) : node isa K.GeometricUI && foreach(n -> texts(n, out), node.children)

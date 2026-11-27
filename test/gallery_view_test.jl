@@ -12,6 +12,7 @@
 @use "github.com/jkroso/UI.jl/Interface/testing" pixels
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
 @use GeometryBasics: Vec2
+@use "./drive" drive middle
 const px = K.px
 const G = K.Galleries
 
@@ -136,7 +137,7 @@ write(long, "# Many\n\n```gallery\nin: many\nsize: small\n```\n\nThe end.\n")
 
 const e = K.build_editor(page)
 const w = Window(e, size=(1000px, 900px))
-frames(n=2) = foreach(_ -> frame(w), 1:n)
+const (; frames, at, press, release, click, key, shot) = drive(w)
 "Draw frames until the galleries of the page have the small pictures that they show"
 settle() = for _ in 1:400
   frames(1)
@@ -146,14 +147,7 @@ settle()
 gallery(n, path=page) = e.nodes[(:block, K.GALLERY, path, n)]
 const v = gallery(1)
 const shots = get(ENV, "LADDER_SHOTS", "")
-shot(name) = isempty(shots) || save_png(joinpath(shots, name), w)
 
-at((x, y)) = (w.mouse = typeof(w.mouse)(px(x), px(y)); onmouse(w, MouseMove(Vec2{px}(px(x), px(y)), w)); frames(1))
-press(place) = (at(place); w.keys |= Keys.mouse_left; onkey(w, KeyPress{Keys.mouse_left}(0, w)))
-release() = (w.keys ⊻= Keys.mouse_left; onkey(w, KeyRelease{Keys.mouse_left}(0, w)); frames())
-click(place) = (press(place); release())
-key(k) = (onkey(w, KeyPress{k}(0, w)); frames())
-middle(r) = (K.num(r.left + r.width / 2), K.num(r.top + r.height / 2))
 block(n=1) = (s = K.block_lines(e.buf, K.GALLERY, n); e.buf.lines[s[1]+1:s[2]-1])
 thumb(i, of=v) = of.parts[(:thumb, i)]
 names(of=v) = [p.name for p in K.found!(of).items]

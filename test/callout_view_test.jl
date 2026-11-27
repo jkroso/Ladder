@@ -9,6 +9,7 @@
 @use "github.com/jkroso/MiniFB.jl" Window KeyPress KeyRelease MouseMove Keys onkey onmouse Typed ontype
 @use "github.com/jkroso/UI.jl/Interface/draw" frame rect
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
+@use "./drive" drive
 const px = K.px
 
 const dir = mktempdir()
@@ -40,15 +41,13 @@ Last line.
 
 const e = K.build_editor(page)
 const w = Window(e, size=(900px, 820px))
-frames(n=2) = foreach(_ -> frame(w), 1:n)
+const (; frames, key, shot) = drive(w)
 frames()
 K.focus(e)
-shot(name) = haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], name), w)
 line(text) = findfirst(startswith(text), e.buf.lines)
 segs(i) = [seg for vl in K.item(e, i).content.lines for seg in vl.segs]
 "The mark that shows in place of what starts line `i`, or nothing"
 mark(i) = (found = [s.node.node for s in segs(i) if s.node !== nothing && s.node.node isa K.CalloutMark]; isempty(found) ? nothing : only(found))
-key(k, held=Keys(0)) = (w.keys = held; onkey(w, KeyPress{k}(0, w)); w.keys = Keys(0); frames())
 type(s) = (foreach(c -> ontype(e, Typed(c, w)), s); frames())
 caret!(p) = (e.buf.caret = e.buf.anchor = p; K.touch!(e); frames())
 

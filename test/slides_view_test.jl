@@ -9,6 +9,7 @@
 @use "github.com/jkroso/UI.jl/Interface/draw" frame rect popups
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
 @use GeometryBasics: Vec2
+@use "./drive" drive
 const px = K.px
 
 const dir = mktempdir()
@@ -70,25 +71,11 @@ write(joinpath(dir, "other.md"), "# Another page\n\nWith words.\n")
 
 const e = K.build_editor(page)
 const w = K.window!(e, size=(1000px, 800px))
-frames(n=2) = foreach(_ -> frame(w), 1:n)
+const (; frames, at, click, key) = drive(w)
 e.panel = true   # the sidebar shows
 frames(3)
 shot(name, win=w) = haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], name), win)
 
-"Press the key `k` with the keys `held` down"
-key(k, held...) = begin
-  foreach(h -> w.keys |= h, held)
-  onkey(w, KeyPress{k}(0, w))
-  foreach(h -> w.keys ⊻= h, held)
-  frames()
-end
-at((x, y)) = (w.mouse = typeof(w.mouse)(px(x), px(y)); onmouse(w, MouseMove(Vec2{px}(px(x), px(y)), w)); frames(1))
-click(place) = begin
-  at(place)
-  w.keys |= Keys.mouse_left; onkey(w, KeyPress{Keys.mouse_left}(0, w))
-  w.keys ⊻= Keys.mouse_left; onkey(w, KeyRelease{Keys.mouse_left}(0, w))
-  frames()
-end
 caret!(line, col=0) = (e.buf.caret = e.buf.anchor = (line, col); K.touch!(e); frames())
 line_of(text) = findfirst(==(text), e.buf.lines)
 show() = K.slideshow(e)

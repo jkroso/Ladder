@@ -10,6 +10,7 @@
 @use GeometryBasics: Vec2
 @use "github.com/jkroso/UI.jl/Interface/draw" frame rect
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
+@use "./drive" drive middle
 const px = K.px
 
 # Every run has come back when a frame ends
@@ -84,13 +85,9 @@ The end.
 
 const e = K.build_editor(page)
 const w = Window(e, size=(1000px, 2000px))
-frames(n=3) = foreach(_ -> frame(w), 1:n)
+const (; frames, at, click, shot) = drive(w, frames=3)
 frames()
 block(n) = e.nodes[(:block, K.RESULT, page, n)]
-shot(name) = haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], name), w)
-at((x, y)) = (w.mouse = typeof(w.mouse)(px(x), px(y)); onmouse(w, MouseMove(Vec2{px}(px(x), px(y)), w)); frames(1))
-click(place) = (at(place); w.keys |= Keys.mouse_left; onkey(w, KeyPress{Keys.mouse_left}(0, w)); w.keys ⊻= Keys.mouse_left; onkey(w, KeyRelease{Keys.mouse_left}(0, w)); frames())
-middle(r) = (K.num(r.left + r.width / 2), K.num(r.top + r.height / 2))
 "The Fillable of the `n`th block, with its buttons, which show while the mouse is over the block"
 over(n) = (at(middle(rect(block(n)))); K.fills(e)[objectid(block(n))])
 "The module that the file `shape.jl` runs in"

@@ -15,6 +15,7 @@ cp(joinpath(@__DIR__, "centient_fake.jl"), joinpath(dir, "mcp_server.jl"))
 ENV["CENTIENT_SIDECAR"] = dir
 
 @use "../main" => K
+@use "./drive" drive
 const P, px = K.Plans, K.px
 
 # The example plan is of a house 16 m by 10 m, at 1:100. `house` gives the point of the page that's
@@ -46,21 +47,15 @@ The end.
 
 const e = K.build_editor(page)
 const w = Window(e, size=(1000px, 1300px))
-frames(n=2) = foreach(_ -> frame(w), 1:n)
+const (; frames, at, press, release, click, typed, key) = drive(w, moved=0)
 frames()
 const v = only(node for node in values(e.nodes) if node isa K.TakeoffView)
 # The tests click at places that they work out, so corners don't snap to the plan's lines until the tests of that
 v.snap = false
 
-at((x, y)) = (w.mouse = typeof(w.mouse)(px(x), px(y)); onmouse(w, MouseMove(Vec2{px}(px(x), px(y)), w)))
-press(place) = (at(place); w.keys |= Keys.mouse_left; onkey(w, KeyPress{Keys.mouse_left}(0, w)))
-release() = (w.keys ⊻= Keys.mouse_left; onkey(w, KeyRelease{Keys.mouse_left}(0, w)); frames())
-click(place) = (press(place); release())
 "Click a place on the plan. A wait before it keeps it from being the second click of two."
 plan_click(x, y) = (sleep(0.4); click(K.window_point(v, house(x, y))))
-key(k) = (onkey(w, KeyPress{k}(0, w)); frames())
 command(k) = (w.keys |= Keys.cmd; key(k); w.keys ⊻= Keys.cmd)
-typed(s) = (foreach(c -> ontype(w, Typed(c, w)), s); frames())
 "The middle of a part of the takeoff, by the key that it's kept under"
 part(key) = (r = rect(v.parts[key]); (K.num(r.left + r.width / 2), K.num(r.top + r.height / 2)))
 button(key) = click(part((:button, key)))

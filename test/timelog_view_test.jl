@@ -12,6 +12,7 @@
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
 @use GeometryBasics: Vec2
 @use Dates: DateTime, Second, Minute
+@use "./drive" drive middle
 const px = K.px
 const T = K.Timelogs
 
@@ -49,18 +50,11 @@ The end.
 
 const e = K.build_editor(page)
 const w = Window(e, size=(1000px, 1300px))
-frames(n=2) = foreach(_ -> frame(w), 1:n)
+const (; frames, at, press, release, click, typed, shot) = drive(w)
 frames()
 log(n=1) = e.nodes[(:block, K.TIMELOG, page, n)]
-shot(name) = haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], name), w)
 
-at((x, y)) = (w.mouse = typeof(w.mouse)(px(x), px(y)); onmouse(w, MouseMove(Vec2{px}(px(x), px(y)), w)); frames(1))
-press(place) = (at(place); w.keys |= Keys.mouse_left; onkey(w, KeyPress{Keys.mouse_left}(0, w)))
-release() = (w.keys ⊻= Keys.mouse_left; onkey(w, KeyRelease{Keys.mouse_left}(0, w)); frames())
-click(place) = (press(place); release())
-typed(s) = (foreach(c -> ontype(w, Typed(c, w)), s); frames())
 key(k) = (onkey(w, KeyPress{k}(0, w)); onkey(w, KeyRelease{k}(0, w)); frames())
-middle(r) = (K.num(r.left + r.width / 2), K.num(r.top + r.height / 2))
 block(n=1) = (s = K.block_lines(e.buf, K.TIMELOG, n); e.buf.lines[s[1]+1:s[2]-1])
 button(n=1) = log(n).parts[(:button, :clock)]
 cell(i, part, n=1) = log(n).parts[(:cell, i, part)]

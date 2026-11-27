@@ -17,6 +17,7 @@
 @use "github.com/jkroso/UI.jl/Interface/testing" pixels
 @use GeometryBasics: Vec2
 @use Base64: base64decode
+@use "./drive" drive middle
 const px = K.px
 const M = K.Maps
 
@@ -40,20 +41,15 @@ The end.
 
 const e = K.build_editor(page)
 const w = Window(e, size=(1000px, 900px))
-frames(n=2) = foreach(_ -> frame(w), 1:n)
+const (; frames, at, press, key, shot) = drive(w)
 frames()
 K.focus(e)
 view(n=1) = e.nodes[(:block, K.MAP, page, n)]
-shot(name, window=w) = haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], name), window)
 
-at((x, y)) = (w.mouse = typeof(w.mouse)(px(x), px(y)); onmouse(w, MouseMove(Vec2{px}(px(x), px(y)), w)); frames(1))
-press(place) = (at(place); w.keys |= Keys.mouse_left; onkey(w, KeyPress{Keys.mouse_left}(0, w)))
 release(n=2) = (w.keys ⊻= Keys.mouse_left; onkey(w, KeyRelease{Keys.mouse_left}(0, w)); frames(n))
 click(place) = (press(place); release())
 "Press the mouse at one place, move it to another by way of the place between, and let go"
 drag(from, to) = (press(from); at((from .+ to) ./ 2); at(to); release())
-key(k, held=Keys(0)) = (w.keys = held; onkey(w, KeyPress{k}(0, w)); w.keys = Keys(0); frames())
-middle(r) = (K.num(r.left + r.width / 2), K.num(r.top + r.height / 2))
 button(name, n=1) = click(middle(rect(view(n).parts[(:button, name)])))
 block(n=1) = (s = K.block_lines(e.buf, K.MAP, n); e.buf.lines[s[1]+1:s[2]-1])
 wide() = round(Int, K.num(e.width))

@@ -16,6 +16,7 @@
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
 @use "github.com/jkroso/UI.jl/Interface/testing" pixels
 @use GeometryBasics: Vec2
+@use "./drive" drive middle
 const px = K.px
 const W = K.Webpages
 
@@ -45,17 +46,11 @@ const tall_email = email("A long one", """<body style="margin:0"><div style="hei
 
 const e = K.build_editor(quote_email)
 const w = Window(e, size=(1000px, 900px))
-frames(n=2) = foreach(_ -> frame(w), 1:n)
+const (; frames, at, press, release, click, shot) = drive(w)
 e.plain && K.level!(e)   # the page starts at the high level, whatever the test before this one left
 frames(3)
 K.focus(e)
-shot(name, window=w) = haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], name), window)
 
-at((x, y)) = (w.mouse = typeof(w.mouse)(px(x), px(y)); onmouse(w, MouseMove(Vec2{px}(px(x), px(y)), w)); frames(1))
-press(place) = (at(place); w.keys |= Keys.mouse_left; onkey(w, KeyPress{Keys.mouse_left}(0, w)))
-release(n=2) = (w.keys ⊻= Keys.mouse_left; onkey(w, KeyRelease{Keys.mouse_left}(0, w)); frames(n))
-click(place) = (press(place); release())
-middle(r) = (K.num(r.left + r.width / 2), K.num(r.top + r.height / 2))
 "Draw frames until `done()` is true, for 10 seconds at most"
 until(done) = (t = time(); while !done() && time() - t < 10; sleep(0.02); frames(1); end; done())
 "Show the email at `path` in the window"

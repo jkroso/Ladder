@@ -13,6 +13,7 @@
 @use "github.com/jkroso/MiniFB.jl" Window KeyPress Keys onkey Typed ontype
 @use "github.com/jkroso/UI.jl/Interface/draw" frame
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
+@use "./drive" drive
 const px = K.px
 
 "The text of each span of `text` that is highlit, and of each that is a comment"
@@ -102,13 +103,11 @@ Last line, with `==code==` and `%%code%%`.
 
 const e = K.build_editor(page)
 const w = Window(e, size=(900px, 600px))
-frames(n=2) = foreach(_ -> frame(w), 1:n)
+const (; frames, key, shot) = drive(w)
 frames()
 K.focus(e)
-shot(name) = haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], name), w)
 line(text) = findfirst(startswith(text), e.buf.lines)
 segs(i) = [seg for vl in K.item(e, i).content.lines for seg in vl.segs]
-key(k, held=Keys(0)) = (w.keys = held; onkey(w, KeyPress{k}(0, w)); w.keys = Keys(0); frames())
 caret!(p) = (e.buf.caret = e.buf.anchor = p; K.touch!(e); frames())
 const bright, before, opens, closes, after, lone, last_line =
   line("Some"), line("Before"), line("%%"), line("Hidden line two") + 1, line("Zorblatixen"), line("%% A line"), line("Last")

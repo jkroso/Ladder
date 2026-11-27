@@ -11,6 +11,7 @@
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
 @use "github.com/jkroso/UI.jl/Interface/testing" pixels
 @use GeometryBasics: Vec2
+@use "./drive" drive middle
 const px = K.px
 
 # The files beside the document are on the Mac, so what stands in for `curl` gets nothing
@@ -74,18 +75,13 @@ The end.
 
 const e = K.build_editor(page)
 const w = Window(e, size=(1000px, 2600px))
-frames(n=3) = foreach(_ -> frame(w), 1:n)
+const (; frames, at, press, release, shot) = drive(w, frames=3)
 frames()
 view(n) = e.nodes[(:block, K.VIEW_BLOCK, page, n)]
-shot(name) = haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], name), w)
 
-at((x, y)) = (w.mouse = typeof(w.mouse)(px(x), px(y)); onmouse(w, MouseMove(Vec2{px}(px(x), px(y)), w)); frames(1))
-press(place) = (at(place); w.keys |= Keys.mouse_left; onkey(w, KeyPress{Keys.mouse_left}(0, w)))
-release() = (w.keys ⊻= Keys.mouse_left; onkey(w, KeyRelease{Keys.mouse_left}(0, w)); frames())
 click(place) = (press(place); release())
 "A click at `place` with the key `held` down"
 click(place, held) = (was = w.keys; w.keys |= held; click(place); w.keys = was)
-middle(r) = (K.num(r.left + r.width / 2), K.num(r.top + r.height / 2))
 "The button beside the top right corner of the `n`th view, which shows while the mouse is over the view"
 go_button(n) = (at(middle(rect(view(n)))); K.fills(e)[objectid(view(n))].button)
 "Go back to the document, as ⌘⌥← does, and let it lay its blocks out again"

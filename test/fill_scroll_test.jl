@@ -9,6 +9,7 @@
 @use "github.com/jkroso/MiniFB.jl" Window MouseMove onmouse onscroll
 @use "github.com/jkroso/UI.jl/Interface/draw" frame rect
 @use GeometryBasics: Vec2
+@use "./drive" drive middle
 const px = K.px
 
 const dir = mktempdir()
@@ -29,14 +30,12 @@ $(join(fill(words, 40), "\n\n"))
 
 const e = K.build_editor(page)
 const w = Window(e, size=(900px, 700px))
-frames(n=2) = foreach(_ -> frame(w), 1:n)
+const (; frames, at) = drive(w, moved=2)
 frames()
 # The caret is at the end of the page, so the view shows as a view and not as its lines
 e.buf.caret = e.buf.anchor = (length(e.buf.lines), 0)
 frames()
 
-at((x, y)) = (w.mouse = typeof(w.mouse)(px(x), px(y)); onmouse(w, MouseMove(Vec2{px}(px(x), px(y)), w)); frames())
-middle(r) = (K.num(r.left) + K.num(r.width) / 2, K.num(r.top) + K.num(r.height) / 2)
 const f = only(f for f in values(K.fills(e)) if f.parent isa K.ViewBlock)
 "How far the top of the first button beside the view is from the top of the view"
 gap() = K.num(rect(f.expand).top) - K.num(rect(f).top)

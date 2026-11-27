@@ -13,8 +13,9 @@
 #     key(Keys.s, Keys.cmd)         # ⌘S
 #     shot("after")                 # after.png, in the folder LADDER_SHOTS names, if it names one
 #
-# Each one draws 2 frames after it, except a mouse move, which draws 1.
-# `drive(w, frames=3)` draws 3, and `drive(w, moved=2)` draws 2 after a move.
+# Each one draws 2 frames after it, except a mouse move, which draws 1, and a
+# mouse press, which draws none. `drive(w, frames=3)` draws 3, `drive(w, moved=2)`
+# draws 2 after a move, and `drive(w, pressed=1)` draws 1 after a press.
 # With `latest=true`, each frame runs in Julia's newest world, for a test
 # whose page defines functions while it runs.
 #
@@ -40,10 +41,10 @@ middle(n::SemanticUI) = middle(rect(n))
 middle(r::Tuple) = (num(r[1] + r[3] / 2), num(r[2] + r[4] / 2))
 
 "The functions that drive the window `w`: see the top of this file"
-drive(w; frames=2, moved=1, latest=false) = begin
+drive(w; frames=2, moved=1, pressed=0, latest=false) = begin
   draw_frames(n=frames) = foreach(_ -> latest ? Base.invokelatest(frame, w) : frame(w), 1:n)
   at((x, y)) = (w.mouse = typeof(w.mouse)(px(x), px(y)); onmouse(w, MouseMove(Vec2{px}(px(x), px(y)), w)); draw_frames(moved))
-  press(place) = (at(place); w.keys |= Keys.mouse_left; onkey(w, KeyPress{Keys.mouse_left}(0, w)))
+  press(place) = (at(place); w.keys |= Keys.mouse_left; onkey(w, KeyPress{Keys.mouse_left}(0, w)); draw_frames(pressed))
   release() = (w.keys ⊻= Keys.mouse_left; onkey(w, KeyRelease{Keys.mouse_left}(0, w)); draw_frames())
   click(place) = (press(place); release())
   typed(s) = (foreach(c -> ontype(w, Typed(c, w)), s); draw_frames())

@@ -7,6 +7,7 @@
 @use "github.com/jkroso/MiniFB.jl" Window KeyPress Keys onkey Typed ontype
 @use "github.com/jkroso/UI.jl/Interface/draw" frame
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
+@use "./drive" drive
 const px = K.px
 
 const dir = mktempdir()
@@ -37,7 +38,7 @@ write(page, TEXT)
 const e = K.build_editor(page)
 const w = Window(e, size=(1000px, 800px))
 const b = e.buf
-frames(n=2) = foreach(_ -> frame(w), 1:n)
+const (; frames, typed, key) = drive(w)
 frames()
 
 "Put the text back as it was, with the caret at `line` and `col`"
@@ -49,13 +50,6 @@ fresh!(line=CODE, col=0) = begin
   b.caret = b.anchor = (line, col)
   frames()
 end
-key(k, held...) = begin
-  foreach(h -> w.keys |= h, held)
-  onkey(w, KeyPress{k}(0, w))
-  foreach(h -> w.keys ⊻= h, held)
-  frames()
-end
-typed(s) = (foreach(c -> ontype(w, Typed(c, w)), s); frames())
 "The lines of the box that shows, as text, or nothing when no box shows"
 lines() = begin
   found = K.call_shown(e)

@@ -9,6 +9,7 @@
 @use "github.com/jkroso/MiniFB.jl" Window KeyPress KeyRelease MouseMove Keys onkey onmouse
 @use "github.com/jkroso/UI.jl/Interface/draw" frame cursor
 @use GeometryBasics: Vec2
+@use "./drive" drive
 const px = K.px
 
 @testset "the one number of a piece of code" begin
@@ -45,11 +46,8 @@ The end.
 
 const e = K.build_editor(page)
 const w = Window(e, size=(1000px, 700px))
-frames(n=2) = foreach(_ -> frame(w), 1:n)
+const (; frames, at, press, release) = drive(w, pressed=1)
 frames()
-at((x, y)) = (w.mouse = typeof(w.mouse)(px(x), px(y)); onmouse(w, MouseMove(Vec2{px}(px(x), px(y)), w)); frames(1))
-press(place) = (at(place); w.keys |= Keys.mouse_left; onkey(w, KeyPress{Keys.mouse_left}(0, w)); frames(1))
-release() = (w.keys ⊻= Keys.mouse_left; onkey(w, KeyRelease{Keys.mouse_left}(0, w)); frames())
 const prose = findfirst(l -> startswith(l, "A wall"), e.buf.lines)
 text() = e.buf.lines[prose]
 said(code) = K.made(e, code, 1)[1]

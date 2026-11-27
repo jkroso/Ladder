@@ -11,6 +11,7 @@
 @use "github.com/jkroso/UI.jl/Interface/draw" frame rect clipboard clipboard!
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
 @use GeometryBasics: Vec2
+@use "./drive" drive
 const px = K.px
 const Terms = K.Terms
 const Screens = Terms.Screens
@@ -27,17 +28,14 @@ write(notes, "# Notes\n\nSome words.\n\n```view\nkept.vt\n```\n")
 
 const e = K.build_editor(fresh)
 const w = Window(e, size=(900px, 560px))
-frames(n=3) = foreach(_ -> frame(w), 1:n)
+const (; frames, at, press, shot) = drive(w, frames=3, pressed=1)
 frames()
-shot(name) = haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], name), w)
 
 "The terminal of the file at `path`, and the text that it shows"
 view(path=e.buf.path) = e.nodes[(:term, path)]
 words(path=e.buf.path) = Screens.words(view(path).term)
 "Draw frames until `done()` is true, for no more than `seconds`. The shell's output comes on another thread."
 until(done; seconds=10) = (t = time(); while !done() && time() - t < seconds; sleep(0.02); frames(1); end; frames(1); done())
-at((x, y)) = (w.mouse = typeof(w.mouse)(px(x), px(y)); onmouse(w, MouseMove(Vec2{px}(px(x), px(y)), w)); frames(1))
-press(place) = (at(place); w.keys |= Keys.mouse_left; onkey(w, KeyPress{Keys.mouse_left}(0, w)); frames(1))
 release() = (w.keys ⊻= Keys.mouse_left; onkey(w, KeyRelease{Keys.mouse_left}(0, w)); frames(1))
 click(place) = (press(place); release())
 "Press and let go of the key `k`, with the keys `held` down meanwhile"

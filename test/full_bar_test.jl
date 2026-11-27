@@ -10,6 +10,7 @@
 @use "github.com/jkroso/MiniFB.jl" Window KeyPress Keys onkey
 @use "github.com/jkroso/UI.jl/Interface/draw" frame rect
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
+@use "./drive" drive
 const px = K.px
 
 const dir = mktempdir()
@@ -33,14 +34,12 @@ write(joinpath(dir, "other.md"), "# Another page\n")
 
 const e = K.build_editor(page)
 const w = Window(e, size=(1000px, 900px))
-frames(n=2) = foreach(_ -> frame(w), 1:n)
+const (; frames, key, shot) = drive(w)
 e.panel = true   # the sidebar shows
 # The window showed another file before, so the arrow that goes back has a file to go to
 K.open!(e, joinpath(dir, "other.md")); K.open!(e, page)
 frames(3)
 const v = K.block_view(e, K.SCHEDULE, 1)
-shot(name) = haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], name), w)
-key(k) = (onkey(w, KeyPress{k}(0, w)); frames())
 
 "The buttons of the top bar, as what each one does"
 buttons(node=K.describe(e.nodes[:topbar]), out=Symbol[]) = begin

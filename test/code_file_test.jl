@@ -8,6 +8,7 @@ K.RUN_WAIT[] = Inf   # the code runs in a thread of its own, and each result is 
 @use "github.com/jkroso/MiniFB.jl" Window KeyPress Keys onkey Typed ontype
 @use "github.com/jkroso/UI.jl/Interface/draw" frame rect
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
+@use "./drive" drive
 const px = K.px
 
 const dir = mktempdir()
@@ -31,18 +32,11 @@ write(joinpath(dir, "bytes.jl"), UInt8[0x6a, 0x00, 0x01, 0x02, 0xff, 0x0a])
 
 const e = K.build_editor(file)
 const w = Window(e, size=(1000px, 800px))
-frames(n=2) = foreach(_ -> frame(w), 1:n)
+const (; frames, typed, key) = drive(w)
 frames()
 K.focus(e)
 
 caret!(line, col=0) = (e.buf.caret = e.buf.anchor = (line, col); frames())
-key(k, held...) = begin
-  foreach(h -> w.keys |= h, held)
-  onkey(w, KeyPress{k}(0, w))
-  foreach(h -> w.keys ⊻= h, held)
-  frames()
-end
-typed(s) = (foreach(c -> ontype(w, Typed(c, w)), s); frames())
 outcome(line) = (k = findfirst(o -> o.last == line, K.outcomes(e)); k === nothing ? nothing : K.outcomes(e)[k])
 
 const shots = get(ENV, "CODE_FILE_SHOTS", "")
