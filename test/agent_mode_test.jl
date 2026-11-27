@@ -462,6 +462,8 @@ try
     @test abs(K.num(slot.left + slot.width - (send.left + send.width / 2) - slot.height / 2)) < 0.5
     typed("Make a table")
     @test pane.field.buf.lines == ["Make a table"]
+    # The words are laid out as wide as the box that shows them, less part of a pixel, so the box doesn't cut off the end of a full line
+    @test 0px <= named("Typed words").width - pane.field.width < 1px
     sleep(2K.SEND_GROWS); frames()
     @test named("About") === nothing && named("Agent foot").height == foot.height
     # With the mouse on the button, it opens to the left over the words, to show what goes with them. Nothing else moves.

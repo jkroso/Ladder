@@ -24036,22 +24036,33 @@ pane_foot(p::AgentPane, e, room) = begin
   pane_style!(sub, e)
   line = REPLY_SIZE * talk_zoom(e) * 1.5
   slot = on_page(p)
-  # The slot's round ends take a little more room from the words than square corners would. The model's button takes none: it lies over the words.
-  inside = max(40px, pane_wide(p, e) - 2PANE_X - 4px - SEND_ROOM - max(0px, line - 18px))
-  pane_layout!(sub, inside)
-  tall = min(isempty(sub.layout) ? line : lowest(sub, sub.layout), 9line)
   # The field is a slot: with one line of words its ends are half circles, and more lines keep ends as round.
   # Its button has the same middle as the round end at the foot, which is the middle of the last line.
+  sides(one) = begin
+    ends = (max(one + 8px, 28px) + 14px) / 2   # one line of words, the room over and under it, and the border
+    (ends, max(6px, ends - 15px), max(14px, ends - 5px))   # the ends, and the room at the right and the left of the words
+  end
+  # The words are as wide as the slot leaves them: less the room at each side of the slot, its border, its ends, the send
+  # button and the gap before it. The model's button takes none: it lies over the words. It's a whole number of pixels,
+  # as a box a hair narrower than its words would grow the pane by that hair.
+  room_for(one) = begin
+    _, right, left = sides(one)
+    max(40px, px(floor(num(pane_wide(p, e) - 2(PANE_X - 4px) - 2px - left - right - SEND_ROOM))))
+  end
+  # The ends come from the first line as it was last laid out. When it's laid out at another height, the words go again.
+  pane_layout!(sub, room_for(one_line(sub, line)))
   one = one_line(sub, line)
-  ends = (max(one + 8px, 28px) + 14px) / 2   # one line of words, the room over and under it, and the border
-  right, left = max(6px, ends - 15px), max(14px, ends - 5px)
+  inside = room_for(one)
+  sub.width == inside || pane_layout!(sub, inside)
+  tall = min(isempty(sub.layout) ? line : lowest(sub, sub.layout), 9line)
+  ends, right, left = sides(one)
   drop = max(0px, ends - 21px)   # 21px: the button's half, the room under the words, and the border
   # Pictures that go with the words are over them, in the slot
   pictures = isempty(attached(p)) ? () : (Box(width(grow=grow), height(PICTURE_TALL * talk_zoom(e) + 8px), Alignment.Start, padding(4px, 4px, 4px, 0px), attached_row(p, e)),)   # top, right, bottom, left
   above = isempty(pictures) ? 0px : PICTURE_TALL * talk_zoom(e) + 8px
   # The button's box is as tall as the words' box. A Row leaves a child where it is when the alignment would move it 1.5px or less.
   over = max(above + tall + 8px, 28px + drop) - 28px - drop
-  doc = Box(width(grow=grow), height(tall), Alignment.Start, clip=true, node!(Document, sub, :document))
+  doc = Box(width(grow=grow), height(tall), Alignment.Start, clip=true, name="Typed words", node!(Document, sub, :document))
   who = pane_agent(p, e)
   # The model's button shows only while the mouse is over the slot, or while its menu is open.
   # While the mouse is on the send button, that opens over where the model's button would be.
