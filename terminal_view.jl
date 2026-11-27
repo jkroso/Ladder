@@ -23,6 +23,12 @@
 # Terminal page of the settings has the rest: the caret's shape and whether
 # it blinks, whether what the mouse selects is copied, whether ⌥ is a Meta
 # key, what a program's bell does, and how many lines a terminal keeps.
+#
+# A program in the terminal can say which command starts it again, as an agent
+# does with the name of its session. When Ladder closes while that program
+# runs, the terminal starts a shell the next time its file shows, and runs the
+# command there: term/resume.jl has the rules. The records of this are with
+# Ladder's own files, never in the terminal's file.
 
 @use GLFW
 @use "github.com/jkroso/MiniFB.jl"... onfiledrop onscroll
@@ -106,7 +112,7 @@ read_term_setting!(name, value) = begin
   if name == "caret" || name == "bell"
     c = Symbol(value)
     c in (name == "caret" ? TERM_CARETS : TERM_BELLS) && setfield!(s, Symbol(name), c)
-  elseif name in ("blink", "copies", "meta")
+  elseif name in ("blink", "copies", "meta", "again")
     setfield!(s, Symbol(name), value == "true")
   elseif name == "most"
     n = tryparse(Int, value)
@@ -122,7 +128,7 @@ term_look!(v, e) = begin
   v.select = UInt32(round(Int, 255convert(RGBA{Float64}, colours.select).alpha)) << 24 | term_colour(colours.select)
   v.palette = term_palette()
   s = TERM_SETTINGS
-  v.caret, v.blink, v.copies, v.meta, v.bell, v.most = s.caret, s.blink, s.copies, s.meta, s.bell, s.most
+  v.caret, v.blink, v.copies, v.meta, v.bell, v.most, v.again = s.caret, s.blink, s.copies, s.meta, s.bell, s.most, s.again
   v
 end
 
@@ -170,6 +176,7 @@ term_tick!(e) = begin
     else
       delete!(e.nodes, (:term, v.path))
       Base.filter!(o -> o !== v, terminals(e))
+      Terms.forget!(v)   # and nothing that ran in it starts again
       v.path = ""   # the file has gone, so nothing writes it again
       Terms.close!(v)
     end

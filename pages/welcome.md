@@ -1223,7 +1223,7 @@ export PATH="$HOME/Library/Application Support/Ladder/bin:$PATH"
 
 A file whose name ends in `.vt` is a terminal. Open one, and a shell runs in the window, in the folder that the file is in. To make one, right-click a folder in the sidebar and choose New Terminal. Or press ⌘⇧T, which makes one in the folder of the file that shows.
 
-The file keeps what the terminal shows: its text, with its colours. So when you open the file again, you see what the terminal last showed. No shell runs then until you press Return. Kero keeps each of its sessions in a file of this kind, and Ladder shows those files too.
+The file keeps what the terminal shows: its text, with its colours. So when you open the file again, you see what the terminal last showed. No shell runs then until you press Return, unless a program starts again: see below. Kero keeps each of its sessions in a file of this kind, and Ladder shows those files too.
 
 - **Keys.** While a shell runs, the keys are the shell's. Keys with ⌘ are still Ladder's, but four of them are the terminal's. ⌘C copies the text that's selected, and ⌘V pastes. ⌘A selects everything. ⌘K forgets the lines above the cursor's line.
 - **Going back.** The wheel goes back through the lines that scrolled away. So do ⇧PageUp and ⇧PageDown.
@@ -1231,7 +1231,8 @@ The file keeps what the terminal shows: its text, with its colours. So when you 
 - **Programs that fill the terminal**, like vim, work as they do in a terminal app. A program that asks for the mouse gets the clicks and the wheel. Hold ⇧ to select text there.
 - **The shell runs on** while the window shows other files. It ends when you type `exit`, and when the window closes.
 - **Levels.** ⌘E shows the file's text, with the codes that colour it.
-- **Settings.** The [Terminal](settings/terminal.md) page of the settings has the shape of the caret and whether it blinks. It can also make selecting copy the text, make ⌥ the Meta key, change what the bell does, and set how many lines a terminal keeps.
+- **Programs that start again.** Some programs tell the terminal which command starts them again. An agent gives the command that opens the same session. If Ladder closes while such a program runs, the terminal starts a shell the next time you open its file, and runs the command there. A program that you ended yourself doesn't start again.
+- **Settings.** The [Terminal](settings/terminal.md) page of the settings has the shape of the caret and whether it blinks. It can also make selecting copy the text, make ⌥ the Meta key, change what the bell does, set how many lines a terminal keeps, and turn off starting programs again.
 
 A `view` block shows the last lines of a terminal's file. It starts no shell:
 

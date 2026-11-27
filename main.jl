@@ -1267,7 +1267,8 @@ sandbox(e) = get!(e.nodes, :sandbox) do
   Core.eval(m, :(const code_guide! = $(n -> guide!(e, Int(n)))))
   # ... and the terminal's: the caret's shape, "block", "bar" or "underline", and whether it blinks; whether what the
   # mouse selects is copied; whether ⌥ is a Meta key; what a program's bell does, "flash", "sound" or "none"; and
-  # how many lines of the past a terminal keeps. See "a terminal's file".
+  # how many lines of the past a terminal keeps; and whether a program that said how to start again does so when
+  # Ladder opens again. See "a terminal's file".
   Core.eval(m, :(const term_caret = $(() -> (reads!(e, :terminal); String(TERM_SETTINGS.caret)))))
   Core.eval(m, :(const term_caret! = $(name -> term_setting!(e, :caret, term_choice(TERM_CARETS, name)))))
   Core.eval(m, :(const term_blink = $(() -> (reads!(e, :terminal); TERM_SETTINGS.blink))))
@@ -1327,6 +1328,8 @@ end
 
 # --- one thing in many parts of the page -------------------------------------------------------
 #
+  Core.eval(m, :(const term_again = $(() -> (reads!(e, :terminal); TERM_SETTINGS.again))))
+  Core.eval(m, :(const term_again! = $(on -> term_setting!(e, :again, Bool(on)))))
 # One thing can show in many parts of a page. A to-do item is a line of the
 # text, a card of a board, a bar of a schedule, a thing of a calendar's day
 # and the rows of a time log. A row of a table is a bar of a chart. While the

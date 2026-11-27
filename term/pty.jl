@@ -31,6 +31,7 @@ const MOST_WAITING = 4_000_000   # bytes that a program can have written before 
 
 mutable struct Shell
   fd::Cint
+  tty::String                      # the name of the terminal's device, as the program has it
   io::Base.TTY
   process::Base.Process
   got::Vector{UInt8}               # what the program wrote and nothing took yet
@@ -52,7 +53,9 @@ const BECOME = "exec <\"\$0\" >\"\$0\" 2>&1; stty rows \"\$1\" cols \"\$2\"; shi
 # that an agent started has NO_COLOR, and a program like Claude Code then shows no colour at all.
 const NOT_OURS = ("NO_COLOR", "FORCE_COLOR", "CLICOLOR", "CLICOLOR_FORCE", "COLORFGBG", "TERM_PROGRAM_VERSION", "TERM_SESSION_ID",
                   "TERMINFO", "WINDOWID", "COLUMNS", "LINES", "CI", "CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_SESSION_ID",
-                  "CLAUDE_CODE_CHILD_NOTES_DIR", "CLAUDE_CODE_SSE_PORT", "AI_AGENT")
+                  "CLAUDE_CODE_CHILD_NOTES_DIR", "CLAUDE_CODE_SSE_PORT", "AI_AGENT",
+                  # The secret of the terminal that Ladder was started in, which is that terminal's alone: see resume.jl
+                  "OSC7577_TOKEN")
 const NOT_OURS_STARTS = ("GHOSTTY_", "ITERM_", "KITTY_", "WEZTERM_", "ALACRITTY_", "VTE_", "TMUX")
 
 """
@@ -120,7 +123,7 @@ start(command::Vector{String}=shell(); dir=homedir(), rows=24, cols=80, env=(), 
     close(io)
     rethrow()
   end
-  s = Shell(fd, io, process, UInt8[], ReentrantLock(), Channel{Vector{UInt8}}(Inf), wake, false)
+  s = Shell(fd, name, io, process, UInt8[], ReentrantLock(), Channel{Vector{UInt8}}(Inf), wake, false)
   Threads.@spawn read_all!(s)
   Threads.@spawn write_all!(s)
   # The reading ends when the last program that has the terminal lets go of it. A shell can end and leave one behind,
@@ -182,6 +185,28 @@ or an editor, and false while the shell waits for a command. The program that
 has the terminal's foreground is another than the shell then.
 """
 busy(s::Shell) = !s.ended && alive(s) && (group = ccall(:tcgetpgrp, Cint, (Cint,), s.fd); group > 0 && group != getpid(s.process))
+
+"The number of the program that was started. A shell keeps it for as long as it runs."
+pid(s::Shell) = Int(getpid(s.process))
+
+"The number of the terminal's device. macOS says it of each program that the terminal controls."
+device(s::Shell) = try UInt32(stat(s.tty).rdev & 0xffffffff) catch; typemax(UInt32) end
+
+# Where a terminal's settings keep "a line is read whole", and the bit that says so
+const LINE_FLAGS, WHOLE_LINES = Sys.isapple() ? (24, 0x100) : (12, 0x2)
+
+"""
+True while the shell waits at its prompt for a line. A shell that lets you
+edit the line reads each key as it comes, and while its settings run, the
+terminal still gives a line only when it's whole. So this is false while the
+shell starts, and while a program of its settings asks a question.
+"""
+reading(s::Shell) = begin
+  (s.ended || !alive(s) || busy(s)) && return false
+  settings = zeros(UInt8, 256)
+  ccall(:tcgetattr, Cint, (Cint, Ptr{UInt8}), s.fd, settings) == 0 || return false
+  settings[LINE_FLAGS+1:LINE_FLAGS+4] |> flags -> reinterpret(UInt32, flags)[1] & WHOLE_LINES == 0
+end
 
 "True when the program has ended and all that it wrote has been taken"
 done(s::Shell) = !alive(s) && @lock(s.lock, isempty(s.got))

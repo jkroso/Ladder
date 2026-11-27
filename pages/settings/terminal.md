@@ -61,3 +61,19 @@ RadioGroup(labels=["1,000", "10,000", "50,000"], selected=something(findfirst(==
 This is how many lines a terminal keeps after they go off the top. Scroll up, or press ⇧PageUp, to read them again. When the terminal has more, it forgets the oldest. The terminal's file keeps the same lines, so they're there when you open the file again.
 
 In a wide window each line takes about 2 KB of memory, so 50,000 lines can take 100 MB for each terminal.
+
+## Programs that start again
+
+```ui
+Checkbox(label="Start a program again when Ladder opens again", checked=term_again(), onchange=box -> term_again!(box.checked))
+```
+
+Some programs tell the terminal which command starts them again. An agent says the command that opens the same session, and an editor says the command that opens the same files. With this on, Ladder keeps that command. If Ladder closes while the program runs, the terminal starts a shell the next time you open its file, and runs the command there.
+
+A program that you end yourself doesn't start again. Nor does any program when you end the shell with `exit`.
+
+Only a program that runs in the terminal can give a command. Text that only shows there can't, like a file that you print or what a server sends over `ssh`. Ladder keeps the commands with its own files, where only you can read them, and never in the terminal's file.
+
+With this off, Ladder keeps no command, and a terminal's file opens with no shell until you press Return.
+
+Programs give the command with the [Program Resume Protocol](https://www.superlogical.com/rex/docs/build/program-resume).

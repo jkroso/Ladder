@@ -17,6 +17,10 @@ const Terms = K.Terms
 const Screens = Terms.Screens
 
 Terms.USUAL[] = ["/bin/sh"]
+# Your shell's settings can name a file for its history, and /bin/sh would add what these tests type to it
+ENV["HISTFILE"] = joinpath(mktempdir(), "history")
+# What programs say of how to start them again is kept here, and not with your own Ladder's files
+Terms.Resumes.STORE[] = joinpath(realpath(mktempdir()), "resume")
 
 const dir = realpath(mktempdir())
 const fresh = joinpath(dir, "fresh.vt")
@@ -436,4 +440,119 @@ end
   ok = until(() -> !any(Terms.Ptys.alive, shells))
   @test ok
   @test occursin("more-14", read(kept, String))
+end
+
+@testset "a program that said how to start again does so when Ladder opens again" begin
+  R = Terms.Resumes
+  work = joinpath(dir, "again.vt")
+  log = joinpath(dir, "ran.log")
+  wrap = joinpath(dir, "wrap")   # it says how to start it again, and then becomes the program that it was asked for
+  write(work, "")
+  cp(joinpath(@__DIR__, "resume-wrap"), wrap)
+  "A new window on the terminal's file, as when Ladder opens: the editor, the window, what drives it, and the terminal"
+  opened() = begin
+    e2 = K.build_editor(work)
+    w2 = Window(e2, size=(900px, 560px))
+    d = drive(w2, frames=3, pressed=1)
+    d.frames()
+    (e2, w2, d, e2.nodes[(:term, work)])
+  end
+  till(d, done; seconds=10) = (t = time(); while !done() && time() - t < seconds; sleep(0.02); d.frames(1); end; d.frames(1); done())
+  enter(w2, d, line) = (foreach(c -> ontype(w2, Typed(c, w2)), line); d.key(Keys.enter))
+  ran() = isfile(log) ? readlines(log) : String[]
+  odd = "\$(echo no); a  b"   # a word that a shell would run, if the terminal made a command's text of it
+
+  e2, w2, d, v = opened()
+  @test Terms.running(v) && length(v.token) >= 22 && isempty(v.records)
+  ok = till(d, () -> occursin("\$", Screens.words(v.term)))
+  @test ok
+  enter(w2, d, "$wrap sh -c 'echo \"\$1\" >> $log; exec sleep 30' x '$odd'")
+  ok = till(d, () -> length(v.records) == 1 && length(ran()) == 1)
+  @test ok
+  @test ran() == [odd]
+  kept_one = only(R.kept(work))
+  @test kept_one.argv == [wrap, "sh", "-c", "echo \"\$1\" >> $log; exec sleep 30", "x", odd] && kept_one.cwd == dir
+  first_pid = only(v.records).pid
+
+  # Ladder closes while the program runs. What it said stays with Ladder's files, and isn't in the terminal's file.
+  K.onclose(e2, w2)
+  @test !Terms.running(v) && length(R.kept(work)) == 1
+  @test !occursin("7577", read(work, String))
+  ok = till(d, () -> !R.runs(kept_one))
+  @test ok
+
+  # Ladder opens again: the terminal starts a shell at once, and the program is back, with each word as it was
+  e3, w3, d3, v3 = opened()
+  @test Terms.running(v3) && v3.token != v.token
+  ok = till(d3, () -> length(v3.records) == 1 && length(ran()) == 2)
+  @test ok
+  @test ran() == [odd, odd]
+  @test only(v3.records).pid != first_pid && Terms.busy(v3)
+  @test !occursin("again ", Screens.words(v3.term))                # the line that the terminal typed is off the screen
+  @test !any(endswith(".run"), readdir(R.STORE[]))                 # and the file of the command's words is read and gone
+  d3.shot("terminal-again.png")
+
+  # You end the program yourself: a moment later nothing is kept, so it doesn't start again
+  d3.key(Keys.c, Keys.ctrl)
+  ok = till(d3, () -> isempty(v3.records) && isempty(R.kept(work)), seconds=R.GRACE + 8)
+  @test ok
+  K.onclose(e3, w3)
+  e4, w4, d4, v4 = opened()
+  @test !Terms.running(v4) && occursin("Press Return to start a shell", Terms.hint(v4))
+
+  # The shell ends with `exit` while a program that spoke still runs: that program doesn't start again
+  d4.key(Keys.enter)
+  ok = till(d4, () -> Terms.running(v4) && Terms.Ptys.reading(v4.shell))
+  @test ok
+  enter(w4, d4, "$wrap sleep 4 &")
+  ok = till(d4, () -> length(v4.records) == 1 && length(R.kept(work)) == 1)
+  @test ok
+  enter(w4, d4, "exit")
+  ok = till(d4, () -> !Terms.running(v4))
+  @test ok
+  @test isempty(v4.records) && isempty(R.kept(work))
+
+  # With the setting off, a shell gets no secret, so no program can speak
+  K.TERM_SETTINGS.again = false
+  d4.frames(1)
+  d4.key(Keys.enter)
+  @test Terms.running(v4) && v4.token == ""
+  enter(w4, d4, "echo \"token:[\$OSC7577_TOKEN]\"")
+  ok = till(d4, () -> occursin("token:[]", Screens.words(v4.term)))
+  @test ok
+  K.TERM_SETTINGS.again = true
+  K.onclose(e4, w4)
+
+  # zsh keeps the line that the terminal types out of its history, and still reads your own settings
+  work = joinpath(dir, "zsh.vt")
+  write(work, "")
+  own = joinpath(dir, "zsh settings")
+  mkpath(own)
+  history = joinpath(own, "history")
+  write(joinpath(own, ".zshenv"), "LADDER_TEST_OWN=read\n")
+  write(joinpath(own, ".zshrc"), "HISTFILE='$history'\nHISTSIZE=100\nSAVEHIST=100\nsetopt inc_append_history\nPS1='zsh> '\n")
+  Terms.USUAL[] = ["/bin/zsh"]
+  withenv("ZDOTDIR" => own) do
+    e5, w5, d5, v5 = opened()
+    ok = till(d5, () -> Terms.Ptys.reading(v5.shell))
+    @test ok
+    enter(w5, d5, "$wrap sleep 30")
+    ok = till(d5, () -> length(v5.records) == 1)
+    @test ok
+    K.onclose(e5, w5)
+    e6, w6, d6, v6 = opened()
+    ok = till(d6, () -> length(v6.records) == 1 && Terms.busy(v6))
+    @test ok
+    @test !occursin("again ", Screens.words(v6.term))
+    d6.key(Keys.c, Keys.ctrl)
+    ok = till(d6, () -> Terms.Ptys.reading(v6.shell))
+    @test ok
+    enter(w6, d6, "echo \"own:[\$ZDOTDIR] [\$LADDER_TEST_OWN] [\$LADDER_AGAIN\$LADDER_ZDOTDIR]\"")
+    ok = till(d6, () -> occursin("own:[$own] [read] []", replace(Screens.words(v6.term), "\n" => "")))
+    @test ok
+    said = read(history, String)
+    @test occursin("sleep 30", said) && occursin("echo", said) && !occursin("again", said)
+    K.onclose(e6, w6)
+  end
+  Terms.USUAL[] = ["/bin/sh"]
 end

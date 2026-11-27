@@ -5,6 +5,15 @@
 @use Test: @test, @testset
 @use "../term/screen" => T
 @use "../term/pty" => P
+@use "../term/resume" => R
+@use SHA: sha256
+@use Base64: base64encode
+
+# A program that says how to start it again, in the code of term/resume.jl, and then becomes the program that it was
+# asked for
+const WRAP = joinpath(@__DIR__, "resume-wrap")
+# Your shell's settings can name a file for its history, and /bin/sh would add what these tests type to it
+ENV["HISTFILE"] = joinpath(mktempdir(), "history")
 
 "The text of line `r` of the screen, without the blanks at its end"
 row(t, r) = rstrip(T.words(t, t.lines[r]))
@@ -362,4 +371,209 @@ until(done; seconds=10) = (t = time(); while !done() && time() - t < seconds; sl
   P.stop!(s)
   ok = until(() -> !P.alive(s))
   @test ok
+end
+
+# --- programs that start again: term/resume.jl ----------------------------------------------
+
+const TOKEN = "dummy-token-replace-me"
+const NOW = 1795543200
+b64(words) = base64encode(words)
+"A report with the sum that the token gives it"
+signed(body, token=TOKEN) = body * ":mac=" * bytes2hex(sha256(body * ":" * token))
+"What the terminal makes of the report `body` at the time NOW"
+report(body; kw...) = R.read_report(body, TOKEN; now=NOW, kw...)
+
+@testset "a program says how to start it again" begin
+  # The sum is the SHA-256 of the body, a colon and the token: this one is worked out with `shasum`
+  r = report("pid=74877:time=1795543200:clear=1:mac=c30603369f98fef581a4098be889175b0c74f0641e49f8b25f4326cb38f97c93")
+  @test r isa R.Report && r.clear && r.pid == 74877 && r.time == NOW && isempty(r.argv)
+  r = report(signed("pid=74877:time=1795543200:argv=$(b64("nvim")),$(b64("-S")),$(b64("/Users/sam/.local/state/nvim/a b.vim")):cwd=$(b64("/Users/sam/My Files"))"))
+  @test r isa R.Report && !r.clear
+  @test r.argv == ["nvim", "-S", "/Users/sam/.local/state/nvim/a b.vim"] && r.cwd == "/Users/sam/My Files"
+  # The = signs at the end of base64 can be left out, a word can be empty, and a key that isn't known is passed over
+  r = report(signed("pid=5:time=1795543210:argv=bnZpbQ,,LVM:later=x.y_z"))
+  @test r isa R.Report && r.argv == ["nvim", "", "-S"] && r.cwd == ""
+  @test report(signed("pid=5:time=1795543200:argv=bnZpbQ:need=cwd,argv")) isa R.Report
+
+  # A report that can't be believed changes nothing: a wrong sum, no sum, a sum that isn't last, another time than now
+  good = "pid=74877:time=1795543200:argv=bnZpbQ"
+  @test report(signed(good)) isa R.Report
+  @test report(signed(good, "another-token-0123456789")) === nothing
+  @test report(good) === nothing
+  @test report(replace(signed(good), ":argv=" => ":argv=x")) === nothing
+  @test report(signed("pid=74877:time=1795543200") * ":argv=bnZpbQ") === nothing
+  @test report(signed(good) * "\n") === nothing
+  @test report("?") === nothing
+  @test report(signed("pid=74877:time=1795540000:argv=bnZpbQ")) === nothing
+  @test report(signed("pid=74877:time=1795543200:argv=bnZpbQ"), now=NOW + 61) === nothing
+  @test report(signed("pid=74877:time=1795543200:argv=bnZpbQ"), now=NOW - 60) isa R.Report
+  @test report(signed("pid=74877:argv=bnZpbQ")) === nothing
+  @test report(signed("pid=74877:time=99999999999999999999999:argv=bnZpbQ")) === nothing
+  @test R.read_report(signed(good), "") === nothing
+  # One that's older than the last that was taken from the same program
+  @test report(signed(good), heard=Dict(74877 => NOW + 1)) === nothing
+  @test report(signed(good), heard=Dict(74877 => NOW, 5 => NOW + 9)) isa R.Report
+
+  # A report with the right sum that's still no good says that the program's command changed: its record goes
+  no(body) = (r = report(signed(body)); r isa R.Rejected ? r.pid : :taken)
+  @test no("pid=7:time=1795543200:argv=$(b64("./run.sh"))") == 7          # a path that isn't whole
+  @test no("pid=7:time=1795543200:argv=$(b64("bin/run"))") == 7
+  @test no("pid=7:time=1795543200:argv=$(b64("-rf"))") == 7                # a name that a shell reads as an option
+  @test no("pid=7:time=1795543200:argv=") == 7
+  @test no("pid=7:time=1795543200:argv=,bnZpbQ") == 7                      # no program
+  @test no("pid=7:time=1795543200:argv=bnZpbQ:clear=1") == 7               # both
+  @test no("pid=7:time=1795543200") == 7                                   # neither
+  @test no("pid=7:time=1795543200:clear=2") == 7
+  @test no("pid=7:time=1795543200:argv=bnZpbQ:cwd=$(b64("My Files"))") == 7
+  @test no("pid=7:time=1795543200:argv=bnZpbQ:cwd=") == 7
+  @test no("pid=7:time=1795543200:argv=bnZpbQ:need=later") == 7            # a key that this terminal doesn't know
+  @test no("pid=7:time=1795543200:argv=bnZpbQ:need=") == 7
+  @test no("pid=7:time=1795543200:argv=bnZpbQ:argv=bnZpbQ") == 7           # a key twice
+  @test no("pid=7:time=1795543200:argv=bnZpbQ:mac=00") == 7
+  @test no("pid=7:time=1795543200:argv=bnZpbQ:Key=1") == 7
+  @test no("pid=7:time=1795543200:argv=bnZpbQ:") == 7
+  @test no("pid=7:time=1795543200:argv=bnZpbQ:x") == 7
+  @test no("pid=7:time=1795543200:argv=$(b64("vim")),$(b64("a\nb"))") == 7     # a new line can't be said
+  @test no("pid=7:time=1795543200:argv=$(b64("vim")),$(b64("a\u009bb"))") == 7
+  @test no("pid=7:time=1795543200:argv=$(b64("vim")),$(base64encode(UInt8[0xff, 0xfe]))") == 7   # not text
+  @test no("pid=7:time=1795543200:argv=bnZpb") == 7                        # not base64
+  @test no("pid=7:time=1795543200:argv=bnZpbQ=") == 7                      # = signs that are wrong
+  @test no("pid=7:time=1795543200:argv=bnZpbQ==") == :taken
+  # With no program that it can be for, nothing goes
+  @test no("time=1795543200:argv=bnZpbQ") === nothing
+  @test no("pid=0:time=1795543200:argv=bnZpbQ") === nothing
+  @test no("pid=99999999999:time=1795543200:argv=bnZpbQ") === nothing
+
+  # The terminal's reader collects what programs say, whole, for the app to check. A saved file has no program.
+  body = signed(good)
+  t = fed("a\e]7577;$body\e\\b\e]7577;$body\ac")
+  @test t.reports == [body, body] && row(t, 1) == "abc"
+  @test isempty(T.restore!(T.Terminal(5, 20), Vector{UInt8}("x\e]7577;$body\e\\y")).reports)
+  # One that's too long to hold loses its end, and so its sum
+  long = signed("pid=7:time=1795543200:argv=" * join(fill("bnZpbQ", 700), ','))
+  @test report(long) isa R.Report
+  @test report(only(fed("\e]7577;$long\e\\").reports)) === nothing
+  @test 22 <= length(R.token()) <= 64 && R.token() != R.token() && all(c -> isletter(c) || isdigit(c) || c in "_-", R.token())
+end
+
+@testset "the records of a terminal are kept where only the person reads them" begin
+  was = R.STORE[]
+  R.STORE[] = joinpath(realpath(mktempdir()), "resume")
+  dir = realpath(mktempdir())
+  path = joinpath(dir, "work.vt")
+  write(path, "")
+  record(pid, time, argv; cwd=dir, named=false, above=Int[]) = R.Record(pid, 100, time, argv, cwd, named, above, 0.0)
+  odd = ["sh", "-c", "printf '%s|' \"\$@\"; pwd", "x", "\$(reboot)", "a; b", "", "  two  ", "é\\n"]
+  @test isempty(R.kept(path)) && R.waiting(path) === nothing
+  R.keep!(path, [record(30, 5, ["nvim", "-S", "a b"], named=true), record(31, 9, odd, above=[30, 20]), record(32, 7, ["/bin/ls"], cwd="")])
+  got = R.kept(path)
+  @test [(r.pid, r.began, r.time, r.argv, r.cwd, r.named, r.above) for r in got] ==
+        [(30, 100, 5, ["nvim", "-S", "a b"], dir, true, Int[]), (31, 100, 9, odd, dir, false, [30, 20]), (32, 100, 7, ["/bin/ls"], "", false, Int[])]
+  file = R.record_file(path)
+  @test stat(file).mode & 0o077 == 0 && stat(R.STORE[]).mode & 0o077 == 0
+  @test !occursin("nvim", read(file, String)) && dirname(file) != dir
+  # A program that another one started stands back for it. Of the rest, the one that spoke last starts again.
+  @test R.waiting(path).pid == 32
+  @test R.choose(got[1:2]).pid == 30
+  # A file of records that others can read or write is taken away, and so is one with a line that's no record
+  chmod(file, 0o644)
+  @test isempty(R.kept(path)) && !isfile(file)
+  R.keep!(path, [record(30, 5, ["nvim"])])
+  write(file, read(file, String) * "pid=31 began=1 time=2 named=0 above= cwd= argv=$(b64("./run"))\n")
+  chmod(file, 0o600)
+  @test isempty(R.kept(path)) && !isfile(file)
+  # The records of another terminal's file aren't this one's
+  R.keep!(path, [record(30, 5, ["nvim"])])
+  cp(file, R.record_file(joinpath(dir, "other.vt")))
+  @test isempty(R.kept(joinpath(dir, "other.vt")))
+  # With no record left, the file goes
+  R.keep!(path, R.Record[])
+  @test !isfile(file)
+  # A program that named its folder doesn't start again when the folder is gone
+  gone = joinpath(dir, "gone")
+  R.keep!(path, [record(30, 5, ["nvim"], cwd=gone, named=true)])
+  @test R.waiting(path) === nothing && !isfile(file)
+  R.keep!(path, [record(30, 5, ["nvim"], cwd=gone)])
+  @test R.waiting(path).pid == 30
+
+  # What the shell is to run is a fixed line. The command's words are in a file, and each comes to the program as it is.
+  line = R.prepare(record(31, 9, odd))
+  m = match(r"^ (\S+) ([0-9a-f]{8})$", line)
+  @test m !== nothing
+  # The line says how many lines of the screen it takes after the prompt, so that the shell's side can take them all off
+  @test R.typed(line, 1, 200) == "$line 1\r" && R.typed(line, 150, 200) == "$line 2\r"
+  @test R.typed(" x 12345678", 9, 20) == " x 12345678 2\r" && R.typed(" x 12345678", 8, 20) == " x 12345678 1\r"
+  run_file = joinpath(R.STORE[], m[2] * ".run")
+  @test isfile(run_file) && stat(run_file).mode & 0o077 == 0
+  said = read(Cmd(`/bin/sh -c $(line * " 3")`, dir=homedir()), String)
+  @test said == "\e[3A\r\e[J\$(reboot)|a; b||  two  |é\\n|$dir\n"
+  @test !isfile(run_file)                                        # it's read once
+  @test read(`/bin/sh -c $line`, String) == ""                   # so a second time runs nothing
+  @test R.shell_word(joinpath(homedir(), "Library", "Application Support", "Ladder", "resume", "again")) == "~/Library/Application\\ Support/Ladder/resume/again"
+  @test R.shell_word("/tmp/it's \$here") == "/tmp/it\\'s\\ \\\$here" && R.shell_word("/tmp/a\nb") === nothing
+
+  # Records of terminals whose files are gone are taken away, once
+  R.keep!(path, [record(30, 5, ["nvim"])])
+  lost = joinpath(dir, "lost.vt")
+  write(lost, "")
+  R.keep!(lost, [record(30, 5, ["nvim"])])
+  rm(lost)
+  R.tidied[] = false
+  @test R.waiting(path).pid == 30
+  @test !isfile(R.record_file(lost)) && isfile(file)
+  R.STORE[] = was
+end
+
+@testset "a program in a shell is heard, and only there" begin
+  was = R.STORE[]
+  R.STORE[] = joinpath(realpath(mktempdir()), "resume")
+  dir = realpath(mktempdir())
+  # A program that says how to start it again, and then becomes the program that it was asked for
+  wrap = joinpath(dir, "wrap")
+  cp(WRAP, wrap)
+  token = R.token()
+  s = P.start(["/bin/sh"], dir=dir, rows=10, cols=120, env=(R.TOKEN_NAME => token,))
+  t = T.Terminal(10, 120)
+  read!() = (T.feed!(t, take!(s)); T.words(t))
+  ok = until(() -> occursin("\$", read!()) && P.reading(s))
+  @test ok                                # the shell waits at its prompt
+  records, heard = R.Record[], Dict{Int,Int}()
+  hear!() = any([R.hear!(records, heard, body, token; tty=P.device(s), top=P.pid(s)) for body in splice!(t.reports, 1:length(t.reports))])
+  P.send!(s, "$wrap sleep 30\r")
+  ok = until(() -> (read!(); !isempty(t.reports)))
+  @test ok
+  @test !P.reading(s)                     # a program has the terminal now
+  body = only(t.reports)
+  # Text with another terminal's secret, or for a program of another terminal, makes no record
+  @test !R.hear!(records, heard, body, R.token(); tty=P.device(s), top=P.pid(s))
+  mine = "pid=$(getpid()):time=$(round(Int, time())):argv=bnZpbQ"
+  @test !R.hear!(records, heard, signed(mine, token), token; tty=P.device(s), top=P.pid(s)) && isempty(records)
+  @test hear!()
+  r = only(records)
+  @test r.argv == [wrap, "sleep", "30"] && r.cwd == dir && !r.named
+  @test r.above == [P.pid(s)] && R.runs(r) && r.pid != P.pid(s)
+  # The same report again is taken, but an older one isn't
+  @test R.hear!(records, heard, body, token; tty=P.device(s), top=P.pid(s)) && length(records) == 1
+  heard[r.pid] += 5
+  @test !R.hear!(records, heard, body, token; tty=P.device(s), top=P.pid(s))
+  heard[r.pid] -= 5
+  # A report that's no good takes the program's record away
+  bad = "pid=$(r.pid):time=$(round(Int, time())):argv=$(b64("./relative"))"
+  @test R.hear!(records, heard, signed(bad, token), token; tty=P.device(s), top=P.pid(s)) && isempty(records)
+  @test R.hear!(records, heard, body, token; tty=P.device(s), top=P.pid(s))
+  # The program ends: its record stays for a moment, and then goes
+  P.send!(s, "\x03")
+  ok = until(() -> !R.runs(only(records)))
+  @test ok
+  @test !R.ended!(records) && only(records).gone > 0
+  @test R.ended!(records, now=time() + R.GRACE + 1) && isempty(records)
+  # A program says that it has no command any more
+  P.send!(s, "$wrap sleep 30\r")
+  ok = until(() -> (read!(); !isempty(t.reports)))
+  @test ok
+  @test hear!() && length(records) == 1
+  clear = "pid=$(only(records).pid):time=$(round(Int, time()) + 1):clear=1"
+  @test R.hear!(records, heard, signed(clear, token), token; tty=P.device(s), top=P.pid(s)) && isempty(records)
+  P.stop!(s)
+  R.STORE[] = was
 end

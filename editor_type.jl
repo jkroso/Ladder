@@ -464,6 +464,7 @@ of the settings changes them, and the file of the settings keeps them.
   meta::Bool = false       # ⌥ with a key sends ESC and the key, and not the Mac's character
   bell::Symbol = :flash    # what a program's bell does: one of TERM_BELLS
   most::Int = 10_000       # how many lines of the past a terminal keeps: one of TERM_PASTS
+  again::Bool = true       # a program that said how to start again does so when Ladder opens again: see term/resume.jl
 end
 
 const TERM_SETTINGS = TermSettings()

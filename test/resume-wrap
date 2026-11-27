@@ -1,0 +1,19 @@
+#!/bin/sh
+# Run a program so that the terminal starts it again when the terminal's app opens again:
+#
+#     test/resume-wrap ssh devbox
+#
+# This tells the terminal the command, with the code of the Program Resume Protocol (see term/resume.jl), and then
+# becomes the program. The command that it gives is its own, so it tells the new terminal too when it starts again.
+# The tests use it, and you can use it to try a terminal of Ladder by hand. Start it by its whole path.
+[ -n "$OSC7577_TOKEN" ] || exec "$@"   # a terminal that doesn't know the protocol
+words=""
+for word in "$0" "$@"; do
+  words="$words${words:+,}$(printf %s "$word" | base64 | tr -d '\n')"
+done
+body="pid=$$:time=$(date +%s):argv=$words"
+# The secret goes to shasum on its input, never in a command's words, where `ps` would show it
+sum=$(printf '%s:%s' "$body" "$OSC7577_TOKEN" | shasum -a 256 | cut -c1-64)
+printf '\033]7577;%s:mac=%s\033\\' "$body" "$sum" > /dev/tty
+unset OSC7577_TOKEN   # the program's own programs can't speak for it
+exec "$@"

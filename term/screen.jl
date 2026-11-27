@@ -128,6 +128,7 @@ const STRING = 4    # words for the terminal that this one doesn't read, until E
   title::String = ""
   folder::String = ""             # the folder that the shell says it's in
   bells::Int = 0
+  reports::Vector{String} = String[]   # what programs said of how to start them again, for the app to read: see resume.jl
   # The colours that the terminal's own text and back have, for a program that asks
   ink::UInt32 = 0x00000000
   paper::UInt32 = 0x00ffffff
@@ -847,6 +848,9 @@ osc!(t::Terminal, ending) = begin
     c = code == "11" ? t.paper : t.ink
     part(shift) = string((c >> shift) & 0xff, base=16, pad=2)^2
     reply!(t, "\e]$code;rgb:$(part(16))/$(part(8))/$(part(0))$ending")
+  elseif code == "7577"
+    # A program says how to start it again. A saved file has no program, so what it says is left out.
+    t.answering && length(t.reports) < 64 && push!(t.reports, rest)
   end
   nothing
 end

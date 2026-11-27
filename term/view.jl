@@ -33,6 +33,12 @@
 # while the program asks for none of its own; whether a selection is copied as
 # the mouse makes it; whether ⌥ is a Meta key, which sends ESC before the key;
 # what the program's bell does; and how many lines of the past are kept.
+#
+# A program can say which command starts it again, as an agent does with the
+# name of its session: resume.jl has the code that it says it with. The view
+# keeps that with the app's files. When the app closes while the program runs,
+# the view starts a shell the next time it shows, and runs the command there.
+# The setting `again` turns this off.
 
 @use "github.com/jkroso/Prospects.jl" @def
 @use "github.com/jkroso/MiniFB.jl" onkey onmouse ontype onscroll KeyPress KeyRelease MouseMove Typed Keys flt
@@ -48,6 +54,7 @@
 @use "./screen" => Screens
 @use "./screen" Terminal Cell Line feed! answers! saved restore! settle!
 @use "./pty" => Ptys
+@use "./resume" => Resumes
 
 const PAD = 10.0          # px between the edges of the view and its cells
 const WHEEL = 30.0        # px that one step of the wheel scrolls
@@ -59,6 +66,8 @@ const READ_FOR = 0.008    # seconds of a frame that go to reading what a program
 const MOST_UNREAD = 1_000_000   # bytes that wait to be read before more is taken from the program, which then waits too
 const FLASH = 0.15        # seconds that the view flashes for when the program rings its bell
 const BLINK = 0.5         # seconds that a caret that blinks is lit, and then dark
+const SLOW_SHELL = 10.0   # seconds after which a command is typed to a shell that never said it's at its prompt
+const LOOK_AGAIN = 0.25   # seconds between two looks at whether the programs that said how to start again still run
 
 "What makes the Mac's alert sound, for a bell. A test puts its own here."
 const ALERT = Ref{Any}(() -> Sys.isapple() && ccall((:NSBeep, "/System/Library/Frameworks/AppKit.framework/AppKit"), Cvoid, ()))
@@ -93,6 +102,7 @@ const LIGHT = UInt32[0x24292e, 0xc82829, 0x4d7a00, 0xa67400, 0x4271ae, 0x8959a8,
   meta::Bool = false              # ⌥ with a key sends ESC and the key, as a Meta key does, and not the Mac's character
   bell::Symbol = :flash           # what the program's bell does: :flash the view, play the Mac's alert :sound, or :none
   most::Int = 10_000              # how many lines of the past are kept
+  again::Bool = true              # a program that said how to start again does so when the view shows after the app closed
   wake::Any = () -> nothing
   shown::Bool = false             # only show the file: no program starts, and the keys do nothing
   term::Any = nothing             # the Terminal
@@ -118,6 +128,14 @@ const LIGHT = UInt32[0x24292e, 0xc82829, 0x4d7a00, 0xa67400, 0x4271ae, 0x8959a8,
   rang::Int = 0                   # how many of the program's bells the view has answered
   rung::Float64 = 0.0             # when the view last answered one
   stirred::Float64 = 0.0          # when a key last went to the program. A caret that blinks is lit just after.
+  # Programs that start again: see resume.jl
+  token::String = ""              # the secret of the shell that runs, or "" for a shell whose programs aren't heard
+  records::Vector{Resumes.Record} = Resumes.Record[]   # what the shell's programs said of how to start them again
+  heard::Dict{Int,Int} = Dict{Int,Int}()               # the time of the last report that was taken from each program
+  waits::Union{Resumes.Record,Nothing} = nothing       # the program to start again in the view's next shell
+  line::String = ""               # the words that are still to type at the shell's first prompt, which start that program
+  started::Float64 = 0.0          # when the shell started
+  looked::Float64 = 0.0           # when the programs of the records were last looked at
 end
 
 # --- the font -------------------------------------------------------------------------------
@@ -204,7 +222,27 @@ terminal(v::TerminalView) = begin
   bytes = try isfile(v.path) && filesize(v.path) <= MOST_FILE ? read(v.path) : UInt8[] catch; UInt8[] end
   isempty(bytes) ? (v.fresh = !v.shown) : restore!(t, bytes)
   v.rang = t.bells   # a bell in the file rang long ago
+  # A program that ran here when the app closed, and that said how to start again, gets a shell at once
+  if hears(v)
+    v.waits = Resumes.waiting(v.path)
+    v.waits === nothing || (v.fresh = true)
+  end
   v.term = t
+end
+
+"True for a view whose programs can say how to start again: one with a file, whose shell is the person's"
+hears(v::TerminalView) = v.again && !v.shown && !isempty(v.path) && isempty(v.command) && Resumes.supported()
+
+"Write what the shell's programs said of how to start them again, where the view finds it after the app closes"
+keep!(v::TerminalView) = (Resumes.keep!(v.path, v.records); v)
+
+"Forget what programs said of how to start them again: the view's shell has ended, or its file has gone"
+forget!(v::TerminalView) = begin
+  empty!(v.records)
+  empty!(v.heard)
+  v.waits, v.line = nothing, ""
+  Resumes.forget!(v.path)
+  v
 end
 
 running(v::TerminalView) = v.shell !== nothing
@@ -220,7 +258,20 @@ start!(v::TerminalView) = begin
   rows, cols = grid_running(v)
   resize!(t, rows, cols)
   command = !isempty(v.command) ? v.command : !isempty(USUAL[]) ? USUAL[] : Ptys.shell()
-  v.shell = Ptys.start(command; dir=folder(v), rows, cols, wake=() -> wake!(v))
+  # What the last shell's programs said is for this start alone. A command that fails, or that the app closes on
+  # before the program speaks, isn't tried a second time.
+  again = v.waits
+  forget!(v)
+  dir = folder(v)
+  if again !== nothing && hears(v)
+    v.line = Resumes.prepare(again)
+    isdir(again.cwd) && (dir = again.cwd)
+  end
+  v.token = hears(v) ? Resumes.token() : ""
+  v.started = time()
+  env = Resumes.quiet(command[1], v.line)
+  isempty(v.token) || push!(env, Resumes.TOKEN_NAME => v.token)
+  v.shell = Ptys.start(command; dir, rows, cols, env, wake=() -> wake!(v))
   v.back = 0
   unselect!(v)
   redraw_in!(v, 0)
@@ -268,18 +319,71 @@ tick!(v::TerminalView) = begin
     said = answers!(t)
     isempty(said) || Ptys.send!(s, said)
     t.bells > v.rang && ring!(v)
+    hear!(v)
     v.dirty || (v.due = time() + SAVE_AFTER)
     v.dirty = true
   end
+  again!(v)
+  ended!(v)
   if Ptys.done(s) && isempty(v.unread)
     v.status, v.shell, v.ran = Ptys.status(s), nothing, true
     Ptys.stop!(s)
+    forget!(v)   # the shell ended by itself, so nothing that ran in it starts again
     settle!(t)
     v.dirty = true
     save!(v)
   elseif v.dirty && time() >= v.due
     save!(v)
   end
+  v
+end
+
+"""
+Read what the shell's programs said of how to start them again, and keep it.
+The terminal's reader only collects what they said. Here each report is
+checked with the shell's secret, and one that passes makes a record, changes
+one or takes one away.
+"""
+hear!(v::TerminalView) = begin
+  t, s = v.term, v.shell
+  (t === nothing || isempty(t.reports)) && return v
+  said = copy(t.reports)
+  empty!(t.reports)
+  (s === nothing || isempty(v.token)) && return v
+  tty, top = Ptys.device(s), Ptys.pid(s)
+  changed = false
+  for body in said
+    changed |= Resumes.hear!(v.records, v.heard, body, v.token; tty, top)
+  end
+  changed && keep!(v)
+  v
+end
+
+"""
+Start again the program that ran when the app closed: type its line once the
+shell waits at its first prompt. The shell has read the person's settings by
+then, so it finds the program as it did before. A shell that never says that
+it's at a prompt gets the line after some seconds.
+"""
+again!(v::TerminalView) = begin
+  (isempty(v.line) || v.shell === nothing) && return v
+  if Ptys.reading(v.shell) || time() - v.started > SLOW_SHELL
+    Ptys.send!(v.shell, Resumes.typed(v.line, v.term.col, v.term.cols))
+    v.line = ""
+  else
+    redraw_in!(v, 0.05)
+  end
+  v
+end
+
+"Take away the record of each program that has ended. It stays for a moment, since the app may be closing too."
+ended!(v::TerminalView; now=time(), closing=false) = begin
+  (isempty(v.records) || (!closing && now - v.looked < LOOK_AGAIN)) && return v
+  v.looked = now
+  waited = count(r -> r.gone > 0, v.records)
+  Resumes.ended!(v.records; now) && keep!(v)
+  # A view that isn't shown is looked at again when the moment is over, so that the record doesn't outlast it
+  !closing && count(r -> r.gone > 0, v.records) > waited && Threads.@spawn (sleep(Resumes.GRACE + 0.3); v.wake())
   v
 end
 
@@ -312,6 +416,10 @@ close!(v::TerminalView) = begin
     v.term === nothing || (feed!(v.term, @view v.unread[v.read+1:end]); feed!(v.term, take!(s)); v.dirty = true)
     empty!(v.unread)
     v.read = 0
+    # The programs that still run now are the ones that start again. They end with the shell, and that's not looked at.
+    hear!(v)
+    ended!(v, closing=true)
+    v.line = ""
     Ptys.stop!(s)
     v.shell, v.ran = nothing, true
     v.term === nothing || settle!(v.term)
