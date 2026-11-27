@@ -1893,7 +1893,7 @@ widen_for_agent!(e, w, p::AgentPane, side_was) = begin
   wide, tall = w.size
   x, y = w.position
   screen = w.screen
-  outline = e.right ? OUTLINE_W : 0px
+  outline = e.right && right_view(e) !== nothing ? OUTLINE_W : 0px   # a page with no outline has none
   card = something(PAGE_CARD_CHOSEN[], page_shape_wide(tall))
   want = AGENT_W + card + outline + 2PAGE_CARD_GAP
   new = px(round(num(min(max(want, wide), max(screen.size[1], wide)))))
@@ -1919,7 +1919,8 @@ end
 
 """
 Show an agent's session at the left of the page and the page's outline at
-its right, in a wider window, with the page between them on a card. Run it
+its right, in a wider window, with the page between them on a card. A page
+with no outline, like a design, has nothing at its right. Run it
 again to put the window back as it was. The session stays, for the next time.
 """
 agent_mode!(e) = begin

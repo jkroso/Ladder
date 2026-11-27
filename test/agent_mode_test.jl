@@ -440,7 +440,7 @@ try
     K.Browsers.scroll!(b, K.html_outline(eh)[2][rows[4].line] - 10)
     frames(wh, 3)
     @test rows[4].now && !brushes.now && first(K.page_context(eh)) == "Done"
-    # A page with no headings says so, with the title that its HTML gives it
+    # A page with no headings has no outline: the card goes to the window's right edge
     write(html, "<title>Bare</title><p>Words.</p>")
     for _ in 1:250
       frames(wh, 1)
@@ -448,10 +448,33 @@ try
       sleep(0.02)
     end
     frames(wh, 2)
-    words = [r.from.content for r in flat(K.rect(eh)) if hasproperty(r.from, :content)]
-    @test "Bare" in words && "No headings" in words
+    rects = flat(K.rect(eh))
+    card = rects[findfirst(r -> hasproperty(r.from, :name) && r.from.name == "Page card", rects)]
+    @test K.right_view(eh) === nothing && !any(r -> hasproperty(r.from, :name) && r.from.name == "Outline", rects)
+    @test card.left + card.width + K.PAGE_CARD_GAP == wh.size[1]
     @test K.page_context(eh) == ("shop.html", "<ladder>\nThe window shows the file $html.\nNothing is selected.\n</ladder>")
     K.close_agent!(eh)
+  end
+
+  @testset "A file with no outline, like a table, has nothing at the right, and the window grows only for the agent and the card" begin
+    csv = joinpath(dir, "sizes.csv")
+    write(csv, "name,size\nsmall,1\nbig,2\n")
+    ec = K.build_editor(csv)
+    wc = Window(ec, size=(900px, 700px))
+    frames(wc, 3)
+    @test ec.right   # the setting shows the panel at the right, so only the missing outline hides it
+    K.agent_mode!(ec)
+    frames(wc, 3)
+    @test K.agent_shows(ec) && isempty(K.page_outline(ec)) && K.right_view(ec) === nothing
+    rects = flat(K.rect(ec))
+    card = rects[findfirst(r -> hasproperty(r.from, :name) && r.from.name == "Page card", rects)]
+    @test !any(r -> hasproperty(r.from, :name) && r.from.name == "Outline", rects)
+    @test card.left + card.width + K.PAGE_CARD_GAP == wc.size[1]
+    # The top bar has no button for an outline
+    @test !any(r -> hasproperty(r.from, :from) && r.from.from isa K.ToolButton && r.from.from.action == :right_panel, rects)
+    # The agent's pane and a card in the shape of a sheet of paper fit in 900px, so the window stays as wide as it was
+    @test wc.size[1] == 900px
+    K.close_agent!(ec)
   end
 
   @testset "Return gives your words to the agent, with what the window shows, and its answer shows as a page" begin

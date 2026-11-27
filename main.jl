@@ -9316,10 +9316,15 @@ right_w(e) = begin
   px(round(num(clamp((w - left) * 0.4, 200px, RIGHT_W))))
 end
 
-"What the panel at the right shows for the page, or nothing when the page has no panel: see `page_side`"
+"""
+What the panel at the right shows for the page, or nothing when the page has
+no panel: see `page_side`. In agent mode it's the page's outline, while the
+page has one. A page with no headings, places or components, like a design,
+has no outline, so the card has the room.
+"""
 right_view(e) = begin
   (filled(e) || as_app(e) || nofile(e)) && return nothing
-  agent_shows(e) && return node!(OutlinePane, e, :outline_pane)   # in agent mode, the page's outline
+  agent_shows(e) && return isempty(page_outline(e)) ? nothing : node!(OutlinePane, e, :outline_pane)
   o = page_object(e)
   o === nothing ? nothing : page_side(e, o)
 end
