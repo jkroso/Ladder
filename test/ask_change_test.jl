@@ -14,10 +14,9 @@
 @use GeometryBasics: Vec2
 const px = K.px
 
-# The folder has the same name each time, so that Kip compiles its file once
-const dir = joinpath(tempdir(), "ladder-ask-change-test")
-rm(dir, recursive=true, force=true)
-mkpath(dir)
+# The folder is the test's own each time, so that two test processes that run at once don't write the same files
+const dir = mktempdir()
+const folder = basename(dir)   # Ladder names a file that it loaded by its folder and its name
 K.SETTINGS_FILE[] = joinpath(dir, "settings")
 K.STARTUP_FOLDER[] = dir
 const page = joinpath(dir, "tank.md")
@@ -1244,8 +1243,8 @@ end
 end
 
 @testset "Keep This Change adds the function to the startup page" begin
-  @test K.loaded_name(realpath(source)) == "ladder-ask-change-test/level.jl"
-  @test K.loaded("ladder-ask-change-test/level.jl") === K.loaded_module(realpath(source))
+  @test K.loaded_name(realpath(source)) == "$folder/level.jl"
+  @test K.loaded("$folder/level.jl") === K.loaded_module(realpath(source))
   @test_throws ErrorException K.loaded("no-such-file.jl")
   b = code.buf
   frames(cw, 3)
@@ -1260,7 +1259,7 @@ end
   # The function is as it's kept, in the app that runs
   @test rect(node()).width == 50px
   kept = read(K.startup_page(), String)
-  @test occursin("## Kept: `wide(l::Level)` of ladder-ask-change-test/level.jl\n\n```julia\n@eval Ladder.loaded(\"ladder-ask-change-test/level.jl\") begin\n\"How wide the bar of a tank is\"\nwide(l::Level) = 50px\nend\n```\n", kept)
+  @test occursin("## Kept: `wide(l::Level)` of $folder/level.jl\n\n```julia\n@eval Ladder.loaded(\"$folder/level.jl\") begin\n\"How wide the bar of a tank is\"\nwide(l::Level) = 50px\nend\n```\n", kept)
   # A function that was kept before is kept as it is now, in the same place
   K.edit!(b, (i, 0), (i, length(b.lines[i])), "wide(l::Level) = 70px")
   K.keep_change!(code)
