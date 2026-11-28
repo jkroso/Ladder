@@ -191,8 +191,7 @@ onkey(d::Document, ev::KeyPress{Keys.mouse_left}) = begin
   e = editor(d)
   done = press!(e, ev.window.mouse)
   # In what an agent said, once it's all said, the click puts the caret there. The pane under it would give the keyboard to the words that you type.
-  part = agent_part_of(e)
-  part !== nothing && part[2] == :reply && !e.buf.fixed ? handled : done
+  owner_of(e) isa PaneReply && !e.buf.fixed ? handled : done
 end
 onkey(p::Page, ev::KeyPress{Keys.mouse_left}) = press!(editor(p), ev.window.mouse)
 onmouse(d::Document, ev::MouseMove) = begin

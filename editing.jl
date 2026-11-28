@@ -759,8 +759,8 @@ and the copy is what goes in. An app that takes screenshots puts its picture
 on the clipboard as a file like that, and macOS removes the file later.
 """
 paste!(e) = begin
-  part = agent_part_of(e)
-  part !== nothing && part[2] == :field && return paste_for_agent!(part[1], e)
+  part = owner_of(e)
+  part isa PaneField && return paste_for_agent!(part.pane, e)
   b = e.buf
   paths = Pasteboard.files()
   if isempty(paths)

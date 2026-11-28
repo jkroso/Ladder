@@ -38,7 +38,6 @@
 @use "github.com/jkroso/UI.jl/Interface/abstract" SemanticUI describe reuse! window_of focus handled
 @use "github.com/jkroso/UI.jl/Interface/draw" draw ishovered cursor show_tooltip! redraw_in! rect popup! close_popup! placed!
 @use "github.com/jkroso/UI.jl/Interface/Semantic/Icon" Icon
-@use "github.com/jkroso/UI.jl/Interface/Semantic/TextInput" TextInput
 @use "github.com/jkroso/UI.jl/Interface/Semantic/Recorder" stop!
 @use "../markdown" Kind classify
 @use "./waiters" => Agent
@@ -73,8 +72,8 @@ export start_agent, asking_words, request_words, agent_step, agent_text, ToChang
        part_words, change_ask, change_prompt, AskedChange, AGENT_CHANGES, asked_rect, ask_change!, agent_said,
        reload_files!, ask_ended!, ask_tick!, either_prompt, PickedText, picked_words, words_thing,
        selected_thing, line_thing, picked_rects, picked_box, ASK_BOXES, ASK_BOX_W, ASK_TEXT_W, ASK_TEXT,
-       AskBox, box_answer, ask_boxes, box_key, box_about, add_answer!, asking_about, ask_editor, ask_box_of,
-       ask_key!, ask_selected!, show_answer!, open_ask!, new_field!, show_ask!, forget_ask!, ANSWER_MAX_H,
+       AskBox, box_answer, ask_boxes, box_key, box_about, add_answer!, asking_about, ask_editor,
+       ask_selected!, show_answer!, open_ask!, new_field!, show_ask!, forget_ask!, ANSWER_MAX_H,
        answer_flows, unanswered, on_box, answer_part, AskClose, field_button, box_place, waiting,
        edit_request!, still_waits!, waits_note, reworded, take_back!, AskTakeBack, send_ask!, ask_box_tick!,
        box_label, labelled_requests, mark_labels, box_shows, close_tip!, close_words, labelled_box,
@@ -874,32 +873,27 @@ asking_about(e, a::AskBox) = begin
     (t.asked !== nothing && t.asked.ended == 0 && !t.asked.stopped && same_things(t.asked.places, [a.thing]))
 end
 
-"The editor of the text of a request in place, which `e` shows: lines that no file holds, in the window's colours, at a field's size"
-ask_editor(e) = begin
-  sub = Editor()
-  sub.buf = Buffer()
-  sub.nodes[:input] = own!(sub, TextInput())
+"The editor of the text of the field `a` of a request in place: lines that no file holds, in the window's colours, at a field's size"
+ask_editor(a::AskBox) = begin
+  e = a.of
+  sub = small_editor(a)
   follow_host!(sub, e)
   sub.font, sub.zoom, sub.look = SANS, e.zoom * ASK_TEXT / TEXT_SIZE, :own
   sub
 end
 
-"The field of a request in place that the editor `e` is the text of, or nothing for any other editor"
-ask_box_of(e) = get(e.nodes, :ask_box, nothing)
-
 """
 What a key does in the text of a request in place, before its editor does
-what it does with a key. True when the key is done with. Return gives the
-request to the agent, and ⇧Return starts a new line.
-A command for the window runs in the window's page. Esc does nothing: only
-the Close button closes the field.
+what it does with a key: `handled` when the key is done with, or :text when
+it's the editor's. Return gives the request to the agent, and ⇧Return starts
+a new line. A command for the window runs in the window's page. Esc does
+nothing: only the Close button closes the field.
 """
-ask_key!(e, w, K, command) = begin
-  a = ask_box_of(e)
-  K == Keys.enter && unmodified(w) && (send_ask!(a, w); return true)
-  K == Keys.escape && return true
-  command !== nothing && command_kind(command) == :window && (run!(a.of, w, command, false); return true)
-  false
+owner_key!(a::AskBox, e, w, K, command, select) = begin
+  K == Keys.enter && unmodified(w) && (send_ask!(a, w); return handled)
+  K == Keys.escape && return handled
+  command !== nothing && command_kind(command) == :window && (run!(a.of, w, command, false); return handled)
+  :text
 end
 
 """
@@ -955,12 +949,7 @@ open_ask!(e, a::AskBox; anyway=false) = begin
 end
 
 "Give the field `a` a new editor for its text, with nothing in it"
-new_field!(a::AskBox) = begin
-  sub = ask_editor(a.of)
-  setfield!(sub, :parent, a)
-  sub.nodes[:ask_box] = a
-  a.parts[:text] = sub
-end
+new_field!(a::AskBox) = (a.parts[:text] = ask_editor(a))
 
 "Show the popup of the field `a` in the window `w` of `e`, under the place `r` of its words"
 show_ask!(e, w, a::AskBox, r) =
@@ -1200,7 +1189,7 @@ onkey(x::AskTakeBack, ev::KeyPress{Keys.mouse_left}) = begin
   close_ask!(a, ev.window)
 end
 
-# The keys go to the editor of its text: see `ask_key!`
+# The keys go to the editor of its text: see `owner_key!` of an AskBox
 
 """
 Give the agent what was typed in the field of `a`, about its words. If the

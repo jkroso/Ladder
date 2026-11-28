@@ -8,6 +8,7 @@
 @use "github.com/jkroso/UI.jl/Interface/Geometric"...
 @use "github.com/jkroso/UI.jl/Interface/Specific"...
 @use "github.com/jkroso/UI.jl/Interface/abstract" SemanticUI Theme light
+@use "github.com/jkroso/UI.jl/Interface/Semantic/TextInput" TextInput
 @use "./markdown" Cell Line words
 @use "./spreadsheet" Value
 @use "github.com/jkroso/URI.jl/FS" => FS FSObject AbstractDirectory
@@ -27,7 +28,7 @@
 export Item, Live, Grid, isspread, Glide, Editor, TopBar, Sidebar, Page, Document, Backdrop, FinderInput,
        ToolButton, TableButton, Mode, Levels, Stop, JuliaCode, Title, CheckCount, ReadOnly, SendButton,
        Paragraph, Heading, List, Quote, CodeBlock, Table, Rule, LiveBlock, SheetBlock, Trouble, Block,
-       FileRow, FileLabel, Entry, EntryLabel, Shown, docdir, item, hosted, top_editor, button, FileView,
+       FileRow, FileLabel, Entry, EntryLabel, Shown, small_editor, owner_of, owner_key!, docdir, item, hosted, top_editor, button, FileView,
        Sheet, FileEntry, Crumb, Breadcrumb, FileText, Pages, ChartView, FilterRows, FilterView, SaveView,
        GalleryView, TermSettings, TERM_SETTINGS, ViewBlock, ItemClock, PlainLine, Rect, TranscriptButton,
        FileCheck, DesignSheet, FolderPage, SourceChooser, SearchView, SearchChoice, ChoiceMenu, ChoiceRow,
@@ -280,6 +281,51 @@ a click on a checkbox shows.
   inline::Bool = false   # made by inline code, so it's in a line of text and only as wide as what it shows
 end
 
+# --- a small editor ----------------------------------------------------------------------
+#
+# A part of the window that has text of its own makes an Editor for that text:
+# a small editor. The field of a cell of a table has one, and so have a field
+# of a SolidCraft design, the words that you type to an agent, and a part of
+# another page. That part is the small editor's owner. `small_editor` makes
+# one, and `owner_of` gives its owner.
+#
+# A key that's pressed in a small editor goes to its owner first, as
+# `owner_key!`. A kind of owner is a type, and what a key does in its text is
+# its method of `owner_key!`, in the owner's own file. So a new kind of field
+# changes nothing here, and nothing in `key_does!`.
+
+"""
+An editor for the text of `owner`, a part of the window that has text of its
+own, like the field of a cell of a table. It holds `buf`. A key that's
+pressed in it goes to `owner` first: see `owner_key!`. In the window it's a
+child of `parent`: the owner, when the owner is a part of the window itself.
+"""
+small_editor(owner, buf::Buffer=Buffer(); parent=owner) = begin
+  sub = Editor()
+  sub.buf = buf
+  sub.nodes[:input] = own!(sub, TextInput())
+  sub.nodes[:owner] = owner
+  setfield!(sub, :parent, parent)
+  sub
+end
+
+"The part of the window that the small editor `e` is the text of, or nothing for a window's own editor"
+owner_of(e) = get(e.nodes, :owner, nothing)
+
+"""
+What the key `K` does in the small editor `e` of `owner`, in the window `w`,
+before the editor does what it does with a key. `command` is the command that
+the key runs, or nothing, and `select` is true when ⇧ is held to grow the
+selection: see `command!`. It gives :text when the key is the text's, and the
+editor then does what it does with it. Anything else is what the key press
+comes to, and the editor does no more: `handled` when the key is done with,
+or nothing when it goes on to the part of the window that the owner is in.
+
+Each kind of owner has its own method. This one is for a window's own editor,
+which has no owner, and for an owner that takes no key.
+"""
+owner_key!(owner, e, w, K, command, select) = :text
+
 # --- what the parts of a window ask of it ------------------------------------------------
 
 "The folder of the document that's showing. The sidebar can show another folder."
@@ -522,7 +568,7 @@ end
 @def mutable struct DesignSheet <: SemanticUI
   sub::Any = nothing          # the editor of its page
   room::Any = nothing         # how wide the panel has room for it to be, or nothing before the panel says
-  took::Bool = false          # the editor took the last key, which goes no further: see `design_key!`
+  took::Bool = false          # the editor took the last key, which goes no further: see its `owner_key!`
   names::Any = nothing        # the design's version, and each parameter's name and value then, for the rows to use
 end
 

@@ -29,7 +29,6 @@
 @use "github.com/jkroso/UI.jl/Interface/abstract" tabstop tabbed! USUAL_PX
 @use "github.com/jkroso/UI.jl/Interface/abstract" SemanticUI WrapMode Theme with_theme describe window_of focus handled version
 @use "github.com/jkroso/UI.jl/Interface/draw" cursor hittest redraw_in! rect popup! close_popup!
-@use "github.com/jkroso/UI.jl/Interface/Semantic/TextInput" TextInput
 @use "github.com/jkroso/UI.jl/Interface/Semantic/Mermaid" problem
 @use "./markdown" words
 @use "./sheet" SHEET Given sheetcells parts
@@ -55,7 +54,7 @@
 @use "./agent/window" WINDOW_ROUND agent_shows page_card_round
 
 export DesignFile, design_part, DesignField, FIELD_PAD, FIELD_ROOM, FIELD_BOX_COLS, follow_page!,
-       field_outcome!, box_room, FIELD_H, design_key!, field_key, SHEET_OPEN, mend!, sheet_key, leave_design!,
+       field_outcome!, box_room, FIELD_H, field_key, SHEET_OPEN, mend!, sheet_key, leave_design!,
        designs, unsaved_designs, close_designs!, closes!, CloseAsk, close_now!, save_and_close!, watch_close!
 
 const DesignFile = Union{FS.File{:sc},FS.File{:SC},FS.File{:solidcraft}}
@@ -103,7 +102,7 @@ Designs.code_look(v::Designs.DesignView) = (colours, codefont())
   code::Bool = false          # it holds Julia code
   placeholder::String = ""    # what it says while it has no text
   room::Any = nothing         # how wide the panel has room for it to be, or nothing before the panel says
-  took::Bool = false          # the editor of its text took the last key, which goes no further: see `design_key!`
+  took::Bool = false          # the editor of its text took the last key, which goes no further: see its `owner_key!`
 end
 
 const FIELD_PAD = 9px        # between the edge of a field of a design and its text
@@ -117,19 +116,15 @@ field has no use for go to the design.
 """
 Designs.new_field(v::Designs.DesignView, text, placeholder, code::Bool) = begin
   f = DesignField(code=code, placeholder=String(placeholder))
-  sub = Editor()
   lines = String.(split(text, '\n'))
-  sub.buf = code ? Buffer(lines=lines, view=:code, lang="julia") : Buffer(lines=lines)
-  sub.buf.caret = sub.buf.anchor = line_end(sub.buf, length(lines))
-  sub.nodes[:input] = own!(sub, TextInput())
-  sub.nodes[:design_field] = f
-  setfield!(sub, :parent, f)
-  f.sub = sub
+  buf = code ? Buffer(lines=lines, view=:code, lang="julia") : Buffer(lines=lines)
+  buf.caret = buf.anchor = line_end(buf, length(lines))
+  f.sub = small_editor(f, buf)
   f
 end
 
-"The field of a SolidCraft design that the editor `e` is the text of, or nothing for any other editor"
-design_field_of(e) = get(e.nodes, :design_field, nothing)
+"The field of a SolidCraft design that the editor `e` is the text of, or its sheet of parameters, or nothing for any other editor"
+design_field_of(e) = (f = owner_of(e); f isa Union{DesignField,DesignSheet} ? f : nothing)
 
 """
 Give the editor of the field `f` the colours and the keys of the page that
@@ -238,7 +233,7 @@ what it does with a key: `handled`, nothing when the key goes on to the
 design and then the window, or :text when the editor does what it does with
 the key. See "the fields of a SolidCraft design".
 """
-design_key!(f::DesignField, e, w, K, command) = begin
+owner_key!(f::DesignField, e, w, K, command, select) = begin
   done = field_key(f, e, w, K, command)
   f.took = done === :text
   done
@@ -347,13 +342,9 @@ const SHEET_OPEN = "```" * SHEET   # the line that opens the block of the sheet
 "The sheet of the parameters of the design `v`, with one empty row"
 Designs.new_sheet(v::Designs.DesignView) = begin
   s = DesignSheet()
-  sub = Editor()
-  sub.buf = Buffer(lines=[SHEET_OPEN, " = ", "```"])
-  sub.buf.caret = sub.buf.anchor = (2, 0)
-  sub.nodes[:input] = own!(sub, TextInput())
-  sub.nodes[:design_field] = s
-  setfield!(sub, :parent, s)
-  s.sub = sub
+  buf = Buffer(lines=[SHEET_OPEN, " = ", "```"])
+  buf.caret = buf.anchor = (2, 0)
+  s.sub = small_editor(s, buf)
   s
 end
 
@@ -433,7 +424,7 @@ what it does with a key: `handled`, nothing when the key goes on to the
 design and then the window, or :text when the editor does what it does with
 the key. See "the sheet of a SolidCraft design's parameters".
 """
-design_key!(s::DesignSheet, e, w, K, command) = begin
+owner_key!(s::DesignSheet, e, w, K, command, select) = begin
   done = sheet_key(s, e, w, K, command)
   s.took = done === :text
   done

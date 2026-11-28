@@ -9,7 +9,6 @@
 @use "github.com/jkroso/UI.jl/Interface/draw" draw ishovered cursor show_tooltip! hide_tooltip! redraw_in! rect popup! close_popup! with_clip
 @use "github.com/jkroso/UI.jl/Interface/image" image_aspect
 @use "github.com/jkroso/UI.jl/Interface/Semantic/Icon" Icon
-@use "github.com/jkroso/UI.jl/Interface/Semantic/TextInput" TextInput
 @use "github.com/jkroso/UI.jl/Interface/Semantic/Recorder" stop!
 @use "github.com/jkroso/UI.jl/Interface/media" picture_size
 @use "../pictures" thumbnail
@@ -47,8 +46,8 @@
 @use "./page" exports...
 @use "./recall" exports...
 
-export pane_field!, reply_editor, talk_on_page, talk_zoom, page_symbols, pane_style!, page_inked,
-       pane_layout!, show_reply!, agent_part_of, agent_key!, session!, pane_agent!, AGENT_MENU, AGENT_MENU_W,
+export PaneField, PaneReply, pane_field!, reply_editor, talk_on_page, talk_zoom, page_symbols, pane_style!, page_inked,
+       pane_layout!, show_reply!, pane_key!, session!, pane_agent!, AGENT_MENU, AGENT_MENU_W,
        AgentMenu, AgentMenuRow, choose_agent!, pane_model!, MODEL_MENU, MODEL_MENU_W, ModelMenu, ModelMenuRow,
        EffortButton, EFFORTS, model_effort, model_rows, menu_rows, menu_efforts, effort_wide, model_menu_wide,
        row_choice, choose_model!, effort_slot, effort_button, text_between, MOST_PICKED, page_context,
@@ -67,25 +66,24 @@ export pane_field!, reply_editor, talk_on_page, talk_zoom, page_symbols, pane_st
        talk_greeting, chat_tick!, close_chats!, new_agent_session!, agent_dir, Recall, said_file, pane_dir, on_edge,
        recall_key!
 
-"The editor of the words that you type to the agent, which the pane `p` of the window of `e` shows: lines that no file holds"
-pane_field!(p::AgentPane) = begin
-  sub = Editor()
-  sub.buf = Buffer()
-  sub.nodes[:input] = own!(sub, TextInput())
-  sub.nodes[:agent_part] = (p, :field)
-  setfield!(sub, :parent, p)
-  p.field = sub
+"The words that you type to the agent in the pane `pane`, as the owner of the editor of them: see `small_editor`"
+struct PaneField
+  pane::AgentPane
 end
+
+"A reply of the agent in the pane `pane`, as the owner of the editor that shows it: see `small_editor`"
+struct PaneReply
+  pane::AgentPane
+end
+
+"The editor of the words that you type to the agent, which the pane `p` of the window of `e` shows: lines that no file holds"
+pane_field!(p::AgentPane) = (p.field = small_editor(PaneField(p), parent=p))
 
 "The editor of a reply of the agent, which the pane `p` of the window of `e` shows as a page that's never changed. A link in it opens in the window."
 reply_editor(p::AgentPane, e, dir) = begin
-  sub = Editor()
-  sub.buf = Buffer(path=reply_page(dir), fixed=true, reading=true)
-  sub.nodes[:input] = own!(sub, TextInput())
+  sub = small_editor(PaneReply(p), Buffer(path=reply_page(dir), fixed=true, reading=true), parent=p)
   sub.nodes[:host] = e
   sub.nodes[:span] = (1, 1)
-  sub.nodes[:agent_part] = (p, :reply)
-  setfield!(sub, :parent, p)
   sub
 end
 
@@ -146,26 +144,35 @@ show_reply!(sub, it::AgentReply) = begin
   sub
 end
 
-"The part of the agent's pane of an editor `e` that the pane shows, with what kind of part it is: `:field` or `:reply`. Nothing for any other editor."
-agent_part_of(e) = get(e.nodes, :agent_part, nothing)
+"""
+What a key does in the words that you type to the agent, before their editor
+does what it does with a key: `handled` when the key is done with, or :text
+when it's the editor's. Return gives the words to the agent, ⇧Return starts a
+new line, and ↑ and ↓ bring back the words that you gave before: see
+`recall_key!`. The rest is as in a reply: see `pane_key!`.
+"""
+owner_key!(o::PaneField, e, w, K, command, select) = begin
+  p = o.pane
+  recall_key!(p, w, K) && return handled
+  # While the list of commands shows over the words, the arrows, Tab and Return are the list's
+  slash_key!(p, w, K) && return handled
+  K == Keys.enter && unmodified(w) && (send_words!(p); return handled)
+  pane_key!(p, w, K, command)
+end
+
+# In a reply of the agent, no key is the reply's own
+owner_key!(o::PaneReply, e, w, K, command, select) = pane_key!(o.pane, w, K, command)
 
 """
-What a key does in a part of the agent's pane, before the part's editor does
-what it does with a key. True when the key is done with. In the words that
-you type, Return gives them to the agent, ⇧Return starts a new line, and ↑
-and ↓ bring back the words that you gave before: see `recall_key!`. A
-command for the window runs in the window's page. Esc does nothing.
+What a key does in any part of the agent's pane `p`: `handled` when the key
+is done with, or :text when it's the part's editor's. A command for the
+window runs in the window's page. Esc does nothing.
 """
-agent_key!(e, w, K, command) = begin
-  p, kind = agent_part_of(e)
-  kind == :field && recall_key!(p, w, K) && return true
-  # While the list of commands shows over the words, the arrows, Tab and Return are the list's
-  kind == :field && slash_key!(p, w, K) && return true
-  kind == :field && K == Keys.enter && unmodified(w) && (send_words!(p); return true)
-  K == Keys.escape && return true
-  (command !== nothing && (command_kind(command) == :window || command in (:find, :find_next, :find_last))) || return false
+pane_key!(p::AgentPane, w, K, command) = begin
+  K == Keys.escape && return handled
+  (command !== nothing && (command_kind(command) == :window || command in (:find, :find_next, :find_last))) || return :text
   run!(editor(p), w, command, false)
-  true
+  handled
 end
 
 "The folder that an agent of the window of `e` works in: the top folder of the file's repository, or else the file's own folder"

@@ -53,7 +53,6 @@
 @use "github.com/jkroso/UI.jl/Interface/draw" ui draw ishovered cursor hittest rect popup! close_popup! MouseScroll
 @use "github.com/jkroso/UI.jl/Interface/window" system_menu
 @use "github.com/jkroso/UI.jl/Interface/Semantic/Icon" Icon
-@use "github.com/jkroso/UI.jl/Interface/Semantic/TextInput" TextInput
 @use "./pictures" natural
 @use "./markdown" Kind words
 @use "./sheet" parts known shown
@@ -84,7 +83,7 @@ export FILE_ROWS, FILE_BYTES, HEAD_H, CELL_PAD, SHEET_LINE, SHEET_ROUND, SHEET_A
        sheet_edits, sheet_whole, empty_row, edit_cell!, end_edit!, stop_edit!, put_cell!, table_edit!,
        add_line!, delete_row!, each_row!, add_column!, delete_column!, show_cell!, cell_at, ROW_MENU,
        next_cell, edit_on!, CellField, MenuField, SheetField, CELL_TEXT, MENU_TEXT, field_editor!,
-       cell_field!, cell_field_of, cell_text, fill_cell!, fill_field!, field_type, follow_cell!,
+       cell_field!, cell_text, fill_cell!, fill_field!, field_type, follow_cell!,
        CELL_COMMANDS, cell_key!, COLUMN_ACTIONS, ACTION_WORDS, live
 
 const FILE_ROWS = 100_000       # the most rows of a CSV file that the page reads
@@ -977,15 +976,7 @@ const CELL_TEXT = 12px     # how big the text of a table's cells is: see `cell_f
 const MENU_TEXT = 13px     # and the text of the menu of a column
 
 "Give the field `f` an editor of its own for its text, whose keys go to `cell_key!` before it does what it does with them"
-field_editor!(f::SheetField) = begin
-  sub = Editor()
-  sub.buf = Buffer(lines=[""], view=:code, lang=CELL_LANG)
-  sub.nodes[:input] = own!(sub, TextInput())
-  sub.nodes[:sheet_cell] = f
-  setfield!(sub, :parent, f)
-  f.sub = sub
-  f
-end
+field_editor!(f::SheetField) = (f.sub = small_editor(f, Buffer(lines=[""], view=:code, lang=CELL_LANG)); f)
 
 "The field of the cells of the table of `v`, made the first time that it's asked for"
 cell_field!(v) = begin
@@ -993,9 +984,6 @@ cell_field!(v) = begin
   s.input isa CellField && return s.input
   s.input = field_editor!(own!(sheet_part!(() -> SheetFrame(of=v), v, :frame), CellField(of=v)))
 end
-
-"The field of a CSV file's table that the editor `e` is the text of, or nothing for any other editor"
-cell_field_of(e) = get(e.nodes, :sheet_cell, nothing)
 
 "The text in the field `f`"
 cell_text(f::SheetField) = join(f.sub.buf.lines, '\n')
@@ -1096,6 +1084,14 @@ end
 
 "The commands that the field of a cell does as the page does them. Any other is the page's or the window's."
 const CELL_COMMANDS = (:undo, :redo, :cut, :copy, :paste, :paste_copy, :select_all)
+
+# A key in the editor of the field's text is the field's first: see `cell_key!`. The field notes a key that its editor
+# takes, so that the key goes no further.
+owner_key!(f::SheetField, e, w, K, command, select) = begin
+  done = cell_key!(f, e, w, K, command)
+  f.took = done === :text
+  done
+end
 
 """
 What a key does in the field of a cell, before its editor does what it does

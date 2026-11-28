@@ -52,7 +52,7 @@ export editor, page_object, object, list_files!, go_folder!, open!, open_folder!
        items, job_tip, ladder_runs, listed, load_settings!, make_job!, mark, mark_pointed, menu_w,
        move_old_folders!, new_window!, news_tab, node_name!, nodes_inside, off, omni_label,
        open_finder!, open_on_folder!, open_projects!, opens, own_page, page_cover, page_window,
-       pages, palette_key!, palette_plan, panel_theme, part_key!, paste!,
+       pages, palette_key!, palette_plan, panel_theme, paste!,
        paths_inside, peek!, point_tick!, rename_key!, ring_part, run_startup!, scrub!,
        settings_page, show_no_file!, side_button, side_least, startup_page!, toggle_palette!,
        toggle_panel!, toggle_settings!, transclusion_item, unlist!, update_tick!, watch_front!,
@@ -1116,9 +1116,6 @@ function palette_plan end
 
 "The colours of the sidebar's tree"
 function panel_theme end
-
-"What a key does in a part of another page before the part's editor does what it does with a key."
-function part_key! end
 
 "Put what the clipboard holds into the text at the caret."
 function paste! end

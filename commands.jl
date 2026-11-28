@@ -1137,19 +1137,11 @@ a key with a command and a key with none, so the first key that's pressed
 compiles it for them all.
 """
 key_does!(e::Editor, w, K, @nospecialize(command), select) = begin
-  # In a part of another page, a key for the window is the window's page's, and esc goes back to that page
-  (hosted(e) === nothing || agent_part_of(e) !== nothing) || !part_key!(e, w, K, command, select) || return handled
-  # In the text of a request in place, Return gives the request to the agent and esc takes the field away
-  ask_box_of(e) === nothing || !ask_key!(e, w, K, command) || return handled
-  # In the words that you type to the agent of agent mode, Return gives them to the agent. A key for the window is the window's page's.
-  agent_part_of(e) === nothing || !agent_key!(e, w, K, command) || return handled
-  # In a field of a SolidCraft design, Return, Esc, Tab and the window's keys are the design's and the window's. In
-  # the sheet of its parameters, Return and Tab are the sheet's.
-  field = design_field_of(e)
-  field === nothing || (done = design_key!(field, e, w, K, command); done === :text || return done)
-  # In the field of a cell of a CSV file's table, Return, Tab, ↑, ↓ and esc go from cell to cell
-  cell = cell_field_of(e)
-  cell === nothing || (done = cell_key!(cell, e, w, K, command); cell.took = done === :text; done === :text || return done)
+  # In a small editor, like the field of a cell of a table or a part of another page, the key is its owner's
+  # first: see `owner_key!`. Return in the words that you type to an agent gives them to the agent, and Tab in
+  # a cell goes to the next cell. The window's own editor has no owner, so its keys all go on from here.
+  done = owner_key!(owner_of(e), e, w, K, command, select)
+  done === :text || return done
   # While the command palette shows, every key is its own, whatever part of it has the keyboard
   e.popup == :commands && return (palette_key!(e, w, K, command); K == Keys.tab ? handled : nothing)
   kind = command === nothing ? :none : COMMANDS[command].kind

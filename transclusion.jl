@@ -7,7 +7,6 @@
 @use "github.com/jkroso/UI.jl/Interface/abstract" SemanticUI describe window_of focus handled
 @use "github.com/jkroso/UI.jl/Interface/draw" ui draw ishovered cursor redraw_in!
 @use "github.com/jkroso/UI.jl/Interface/Semantic/Icon" Icon
-@use "github.com/jkroso/UI.jl/Interface/Semantic/TextInput" TextInput
 @use "./markdown" Kind words front_matter block_id only_id
 @use "./sheet" shown
 @use "./spreadsheet" moved
@@ -111,7 +110,8 @@ end
 host_paths(e) = (h = hosted(e); h === nothing ? [e.buf.path] : [e.buf.path; host_paths(h)])
 
 "The views of the parts of other pages that `e`'s page shows"
-transclusions(e) = [v for (k, v) in e.nodes if v isa Transclusion && k[2] == e.buf.path]
+# The editor of a part keeps the part that shows it too, as its owner. That one isn't on its page, and its key is no tuple.
+transclusions(e) = [v for (k, v) in e.nodes if v isa Transclusion && k isa Tuple && k[2] == e.buf.path]
 
 "The pages whose lines the parts on `e`'s page edit, with the pages that parts of those edit, and so on"
 shown_buffers(e) = begin
@@ -262,8 +262,7 @@ show_part!(v::Transclusion, e, target::String) = begin
   path in host_paths(e) && return note("A page can't show a part of itself")
   length(host_paths(e)) >= DEEPEST_PART && return note("Parts of pages show inside each other too deeply to show $shown here")
   if v.sub === nothing || v.path != path
-    v.sub = part_editor(e, path)
-    setfield!(v.sub, :parent, v)
+    v.sub = part_editor(v, e, path)
   end
   v.path = path
   sub = v.sub
@@ -292,12 +291,10 @@ show_part!(v::Transclusion, e, target::String) = begin
   v
 end
 
-"An editor of the page at `path`, for a part of it that the page of `e` shows. It edits the lines that the window has open for that page."
-part_editor(e, path) = begin
-  sub = Editor()
+"An editor of the page at `path`, for the part of it that `v` shows on the page of `e`. It edits the lines that the window has open for that page."
+part_editor(v::Transclusion, e, path) = begin
+  sub = small_editor(v, get!(() -> load(path), e.buffers, path))
   sub.buffers = e.buffers
-  sub.buf = get!(() -> load(path), e.buffers, path)
-  sub.nodes[:input] = own!(sub, TextInput())
   sub.nodes[:host] = e
   sub
 end
@@ -430,7 +427,7 @@ over the part or under it.
 """
 leave_part!(e, by::Int=0) = begin
   host = hosted(e)
-  v = getfield(e, :parent)
+  v = owner_of(e)
   e.buf.reading = true
   e.plain = false
   hb = host.buf
@@ -447,17 +444,18 @@ const KEEP_PART = (:save, :bigger, :smaller, :usual_size, :inspector, :sidebar, 
 
 """
 What a key does in a part of another page before the part's editor does what
-it does with a key. True when the key is done with. A command for the window
-runs in the window's own page. ⌘E shows the part's lines as they're written.
+it does with a key: `handled` when the key is done with, or :text when it's
+the editor's. A command for the window runs in the window's own page. ⌘E
+shows the part's lines as they're written.
 """
-part_key!(e, w, K, command, select) = begin
+owner_key!(::Transclusion, e, w, K, command, select) = begin
   b = e.buf
   s, t = e.nodes[:span]
   kind = command === nothing ? :none : COMMANDS[command].kind
-  K == Keys.escape && unmodified(w) && return (leave_part!(e); true)
+  K == Keys.escape && unmodified(w) && return (leave_part!(e); handled)
   if command == :plain
     e.plain = !e.plain
-    return true
+    return handled
   end
   if kind == :window || command in (:find, :find_next, :find_last)
     if !(command in KEEP_PART)
@@ -465,21 +463,21 @@ part_key!(e, w, K, command, select) = begin
       while hosted(f) !== nothing; f = leave_part!(f) end
     end
     run!(top_editor(e), w, command, select)
-    return true
+    return handled
   end
   # ↑ on the first line and ↓ on the last go on to the page that shows the part
   if command in (:up, :down) && !select && isempty(others(b))
     by = command == :up ? -1 : 1
     p = vertical(e, by)
-    (p[1] < s || p[1] > t || p == b.caret) && return (leave_part!(e, by); true)
+    (p[1] < s || p[1] > t || p == b.caret) && return (leave_part!(e, by); handled)
   end
   # A key that would join the part's first line to the line over it, or its last line to the line under it, does nothing
   if !selecting(b) && ((command in (:erase_back, :erase_word_back, :erase_line_start) && b.caret == (s, 0)) ||
                        (command in (:erase, :erase_word) && b.caret == line_end(b, t)))
-    return true
+    return handled
   end
   # A live block in the part is only shown: the caret can be on it as a whole, and nothing changes it
-  picked(b) !== nothing && (K == Keys.enter || kind in (:edit, :type))
+  picked(b) !== nothing && (K == Keys.enter || kind in (:edit, :type)) ? handled : :text
 end
 
 """
