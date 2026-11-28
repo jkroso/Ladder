@@ -91,7 +91,7 @@ end
   K.get_page!(e, "https://shop.test/items/3")
   frames()
   @test opened == [(at("shop.test"), "https://shop.test/items/3", true, false)]
-  @test e.buf.path == at("shop.test/items/3") && isempty(asked) && !haskey(e.nodes, :page_asked)
+  @test e.buf.path == at("shop.test/items/3") && isempty(asked) && K.state_of(e, K.PageAsking).asked === nothing
   @test drawn("Shop page")
   @test K.web_address(e.buf.path) == "https://shop.test/items/3/"
   # Navigate goes the same way, and so does the site's other name
