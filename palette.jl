@@ -67,7 +67,7 @@ export Argument, CommandPalette, OMNI_BAR_X, OMNI_BAR_Y, OMNI_BLUR, OMNI_BOTTOM,
        palette_said, palette_say!, palette_shows, palette_sync!, palette_tab!, palette_take!,
        palette_target, palette_text!, preview!, reads, ready_method, resize_thing!,
        run_when_ready!, segment_state, segment_step!, start_chips!, strip_text, switch!,
-       take_command!, thing_chip, type_words, unpreview!
+       take_command!, thing_chip, type_words, unpreview!, PaletteState
 
 # --- the command palette --------------------------------------------------------------------
 #
@@ -304,11 +304,17 @@ end
 "The … at the end of the chips that fit, which puts the chips on more lines"
 @def mutable struct PaletteMore <: SemanticUI end
 
-palette(e) = node!(CommandPalette, e, :palette)
+"What a window keeps of its command palette"
+@def mutable struct PaletteState
+  palette::Union{Nothing,CommandPalette} = nothing   # the palette, or nothing until it first opens
+end
+
+"The command palette of the window of `e`. It's made the first time that it's asked for."
+palette(e) = (s = state_of(e, PaletteState); s.palette === nothing && (s.palette = own!(e, CommandPalette())); s.palette)
 
 "What's in focus in the window of `e` for a command. While the palette is open, its own field has the keyboard, so it's what was in focus when the palette opened."
 command_focus(e) = begin
-  p = get(e.nodes, :palette, nothing)
+  p = state_of(e, PaletteState).palette
   e.popup == :commands && p isa CommandPalette && !isempty(p.focus) ? p.focus : in_focus(e)
 end
 
@@ -863,10 +869,10 @@ palette_risen(e, p::CommandPalette) = begin
 end
 
 "True while the palette is in the window: while it's open, and while it slides down after it closes"
-palette_shows(e) = e.popup == :commands || (e.popup == :none && haskey(e.nodes, :palette) && palette_risen(e, e.nodes[:palette]) > 0)
+palette_shows(e) = e.popup == :commands || (e.popup == :none && (p = state_of(e, PaletteState).palette; p !== nothing && palette_risen(e, p) > 0))
 
 "True while the bar slides, so that each frame is drawn as soon as it can be"
-palette_moving(e) = haskey(e.nodes, :palette) && time() - e.nodes[:palette].moved < OMNI_RISE
+palette_moving(e) = (p = state_of(e, PaletteState).palette; p !== nothing && time() - p.moved < OMNI_RISE)
 
 "Put `text` in the palette's field, with the caret after it. With `select`, all of it is selected, so that typing takes its place."
 palette_text!(e, p::CommandPalette, text::AbstractString; select=false) = begin
@@ -1126,7 +1132,7 @@ it. True when the palette took the click. It takes a click on nothing that
 the chip takes too, so the page under the palette doesn't change.
 """
 palette_click!(e, w) = begin
-  p = get(e.nodes, :palette, nothing)
+  p = state_of(e, PaletteState).palette
   p isa CommandPalette || return false
   k = click_chip(e, p)
   (k === nothing || on_palette(p, num(w.mouse[1]), num(w.mouse[2]))) && return false
@@ -1159,7 +1165,7 @@ would choose, with its words. The window's tool draws them, over the rest of
 the window.
 """
 mark_chips(ctx, w, e) = begin
-  p = get(e.nodes, :palette, nothing)
+  p = state_of(e, PaletteState).palette
   (p isa CommandPalette && e.popup == :commands && p.command !== nothing) || return nothing
   chips = palette_chips(p)
   letters = chip_letters(p, chips)
@@ -1288,7 +1294,7 @@ end
 
 "While the window shows a row of the list, a line round the thing of that row, as for a place that Find Uses found"
 mark_preview(ctx, w, e) = begin
-  p = get(e.nodes, :palette, nothing)
+  p = state_of(e, PaletteState).palette
   (p isa CommandPalette && p.before !== nothing && e.popup == :commands && p.command !== nothing) || return nothing
   chips = palette_chips(p)
   p.at <= length(chips) || return nothing

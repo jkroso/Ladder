@@ -57,7 +57,11 @@ spot(p::Union{Tuple{Any,Any},AbstractVector}) = map(v -> v isa px ? v : px(v), (
 spot(p) = spot(middle(p))
 
 "End the slide of the command palette in the window `w`, so that the next frame draws it where it stops"
-rest!(w) = (nodes = w.ui.nodes; haskey(nodes, :palette) && (nodes[:palette].moved = 0.0))
+rest!(w) = for (kind, kept) in w.ui.nodes
+  # The window keeps its palette in a struct called PaletteState, under that type. This file doesn't load Ladder, so it knows the struct by its name.
+  (kind isa DataType && nameof(kind) === :PaletteState && kept.palette !== nothing) || continue
+  kept.palette.moved = 0.0
+end
 
 "The functions that drive the window `w`: see the top of this file"
 drive(w; frames=2, moved=1, pressed=0, latest=false, slide=true) = begin

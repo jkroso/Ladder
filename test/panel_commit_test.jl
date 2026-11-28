@@ -139,7 +139,7 @@ end
   tick!("b.md")
   e.own = true
   click(middle(button()))
-  @test haskey(e.nodes, :palette) && K.palette_shows(e)
+  @test K.state_of(e, K.PaletteState).palette !== nothing && K.palette_shows(e)
   e.own = false
   K.close_palette!(e)
   frames()

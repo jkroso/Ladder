@@ -207,7 +207,7 @@ end
   click(node())
   @test e.popup == :none && node().clicks == n && shown.buf.caret[1] == first_line
   # The click after that is the block's own again, once the bar has slid down
-  e.nodes[:palette].moved = 0.0
+  K.state_of(e, K.PaletteState).palette.moved = 0.0
   frames()
   click(node())
   @test node().clicks == n + 1
