@@ -77,7 +77,7 @@ export ADDED_ORDER, AT_EACH, AgentChoice, BUILDING_APP, BUNDLES, Bundle, COMMAND
        insert_block!, key_asking, key_bindings!, key_does!, keycap, keys!, keys_now, lost_note!,
        move_lines!, number_plus, pressed!, put_commands!, read_shortcuts, read_stroke, rebind!,
        select_lines!, select_next!, select_word!, side_button!, step_value!, stop_asking_keys!,
-       switch_agent!, toggle_comment!, touched, typing_key, with_added
+       switch_agent!, toggle_comment!, touched, typing_key, with_added, TreeTook, tree_took!
 
 # --- key bindings ------------------------------------------------------------------------
 #
@@ -1091,10 +1091,18 @@ side_button!(e, w, command) = begin
   nothing
 end
 
+"Whether the sidebar's tree took the key that comes to the editor next, so that the editor leaves it: see `chose!`"
+@def mutable struct TreeTook
+  key::Bool = false
+end
+
+"True when the sidebar's tree took the key or the click that has just come to the editor `e`. The editor asks once for each."
+tree_took!(e) = (s = state_of(e, TreeTook); took = s.key; s.key = false; took)
+
 # A press of a mouse button that nothing under the mouse took comes here. It has a method of its own, so the
 # first click in a window doesn't wait for the code of the key bindings to be made ready.
 onkey(e::Editor, ev::Union{KeyPress{Keys.mouse_left},KeyPress{Keys.mouse_right},KeyPress{Keys.mouse_middle}}) = begin
-  pop!(e.nodes, :chose, false) && return
+  tree_took!(e) && return
   # While a picture or a model fills the window, a right-click has no menu
   zooming(e) === nothing || e.popup != :none || return
   slideshow(e) === nothing || return   # nor has a right-click on a slide
@@ -1115,7 +1123,7 @@ onkey(e::Editor, ev::KeyPress{K}) where K = pressed!(e, ev.window, K)
 "The key `K` was pressed in the window `w` while `e` or a part of it had the keyboard"
 pressed!(e::Editor, w, K) = begin
   # A key that the sidebar's tree took, like Return on a heading, comes here next. It isn't for the text.
-  pop!(e.nodes, :chose, false) && return
+  tree_took!(e) && return
   # The first key of a shortcut of two, like ⌃X, does nothing but wait for the second
   command, select = command!(e, w, K)
   command == :wait && return

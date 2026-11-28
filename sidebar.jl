@@ -37,6 +37,7 @@
 @use "./editing" exports...
 @use "./palette" exports...
 @use "./finder" exports...
+@use "./commands" TreeTook
 
 export COMPONENTS, LAYOUTS, PanelEdge, SIDEBAR_GUIDES, SIDEBAR_ICONS, TRAIL_ARROW, TRAIL_GAP,
        TRAIL_PAD, TRAIL_SIZE, TrailName, chose!, edited, edited_entries, go_entry!, goes, outline!,
@@ -272,7 +273,7 @@ and the editor would leave out the next click or key, like a right-click.
 """
 chose!(e) = begin
   w = window_of(e)
-  (w === nothing || !(Keys.mouse_left in w.keys)) && (e.nodes[:chose] = true)
+  (w === nothing || !(Keys.mouse_left in w.keys)) && (state_of(e, TreeTook).key = true)
   nothing
 end
 

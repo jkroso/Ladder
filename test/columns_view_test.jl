@@ -450,7 +450,7 @@ end
   # A click on the entry does this: the caret is after the number, and the block shows its lines
   label = K.EntryLabel(path=e.buf.path, line=entry.line, level=entry.level, title=entry.title, icon=entry.icon, caret=entry.caret)
   K.choose!(e, (firstchild=label,))
-  pop!(e.nodes, :chose)   # the click itself comes to the page next, and takes this note away
+  K.tree_took!(e)   # the click itself comes to the page next, and takes this note away
   frames(w)
   @test e.buf.caret == (s + 1, 1) && K.item(e, s + 1).content isa K.Flow && K.item(e, s + 1).content.kind == K.Kind.code
   @test length(columns(e).columns) == 3

@@ -1,5 +1,6 @@
 # The menu of a file or a folder in the sidebar, the name that a rename types, and the commands of a file and of a folder
 
+@use "github.com/jkroso/Prospects.jl" @def
 @use "github.com/jkroso/MiniFB.jl"... onfiledrop onscroll
 @use "github.com/jkroso/UI.jl/Interface/Geometric"...
 @use "github.com/jkroso/UI.jl/Interface/Specific"...
@@ -35,7 +36,7 @@
 @use "./commands" exports...
 
 export FOLDER_MENU, copy_path, duplicate!, finish_rename!, new_folder!, new_terminal!, repath,
-       stop_rename!, wiki_link
+       stop_rename!, wiki_link, NewlyMade
 
 # --- the menu of a file ---------------------------------------------------------------------
 #
@@ -133,8 +134,7 @@ new_page!(e, dir) = begin
   try touch(path) catch; return end   # the disk said no
   open!(e, path)
   list_files!(e)
-  rename!(e, path)
-  e.nodes[:renaming_new] = :page
+  rename!(e, path, new=:page)
   nothing
 end
 
@@ -156,8 +156,7 @@ new_folder!(e, dir) = begin
   path = free_path(e, dir, "Untitled")
   try mkdir(path) catch; return end
   dir == e.folder ? list_files!(e) : go_folder!(e, dir)
-  rename!(e, path)
-  e.nodes[:renaming_new] = :folder
+  rename!(e, path, new=:folder)
   nothing
 end
 
@@ -186,20 +185,29 @@ renamer(e) = node!(e, :renamer) do
             look=(_, text) -> Row(width(grow=grow), height(grow=grow), clip=true, text))
 end
 
+"What kind of new thing the file that's being renamed is, when it was made a moment ago to be given its name: see `rename!`"
+@def mutable struct NewlyMade
+  kind::Union{Nothing,Symbol} = nothing   # :page, :folder or :file, or nothing for a file that was there already
+end
+
 """
 Start to rename the file or the folder at `path`. Its name becomes a text
 field, in the sidebar or in the top bar, as `at` says. Both show the whole
 name, so the field has the whole name. The part of a file's name before its
 ending is selected, and all of a folder's name, since a folder has no ending.
+`new` is the kind of thing that it is when it was made a moment ago to be
+given its name, like :page.
 """
-rename!(e, path; at=:sidebar) = begin
+rename!(e, path; at=:sidebar, new=nothing) = begin
   i = renamer(e)
   i.color = colours.ink
   i.text = basename(path)
   i.anchor, i.cursor = 0, length(isdir(path) ? i.text : title(path))
   e.nodes[:renaming] = path
   e.nodes[:renaming_at] = at
-  focus(i)
+  got = focus(i)
+  new === nothing || (state_of(e, NewlyMade).kind = new)
+  got
 end
 
 "The path of the file that's being renamed in `at`, the `:sidebar` or the `:title`. It's \"\" when none is."
@@ -211,7 +219,8 @@ text when the field was in the top bar or was the name of a new page.
 """
 stop_rename!(e) = begin
   delete!(e.nodes, :renaming)
-  new = pop!(e.nodes, :renaming_new, nothing)
+  made = state_of(e, NewlyMade)
+  new, made.kind = made.kind, nothing
   at = pop!(e.nodes, :renaming_at, :sidebar)
   at == :desktop ? focus_desktop!(e) : at == :title || new == :page ? focus(e) : focus(file_tree(e))
 end
@@ -234,7 +243,7 @@ ended_rename!(e) = begin
   finish_rename!(e)
   delete!(e.nodes, :renaming)
   delete!(e.nodes, :renaming_at)
-  delete!(e.nodes, :renaming_new)
+  state_of(e, NewlyMade).kind = nothing
   nothing
 end
 
@@ -256,7 +265,7 @@ finish_rename!(e) = begin
   # A Mac's disk takes Notes.md and notes.md to be one file, so a change of capitals isn't a clash
   ispath(new) && lowercase(new) != lowercase(old) && return false
   # A page that was made a moment ago has no links to it yet, though pages can link to its name, Untitled
-  move!(e, old, new, links=!haskey(e.nodes, :renaming_new))
+  move!(e, old, new, links=state_of(e, NewlyMade).kind === nothing)
   true
 end
 

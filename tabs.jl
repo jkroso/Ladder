@@ -37,7 +37,7 @@ export TABS_MOST, TAB_KEYS_WAIT, TabClose, TabLabel, add_tab!, choose_tab!, clos
        drop_gone_tabs!, fill_tabs!, focus_panel!, new_tab, new_tab!, own_scroll!, own_side_menu,
        show_tab!, show_tab_page!, side_menu, side_tick!, sidebar_view, tab_after_close!, tab_dots,
        tab_folder, tab_keys, tab_keys_shown!, tab_list, tab_marks, tab_menu!, tab_name, tab_rows,
-       tab_tree, tabbable
+       tab_tree, tabbable, NewTab, no_new_tab!
 
 # --- the files that are open, as tabs -------------------------------------------------------
 #
@@ -117,8 +117,16 @@ close_tab!(e, path) = begin
   nothing
 end
 
+"Whether ⌘T opened a new tab in the window that no file has taken yet: see `new_tab`"
+@def mutable struct NewTab
+  open::Bool = false
+end
+
 "True while the window shows the new tab that ⌘T opened, with no file in it yet"
-new_tab(e) = get(e.nodes, :new_tab, false) && nofile(e)
+new_tab(e) = state_of(e, NewTab).open && nofile(e)
+
+"The window of `e` has no new tab any more: a file took its place, or it closed"
+no_new_tab!(e) = (state_of(e, NewTab).open = false; e)
 
 """
 Open a new tab, at the bottom of the tabs, and the file finder, to find the
@@ -129,7 +137,7 @@ new_tab!(e) = begin
   e = top_editor(e)
   issettings(e) && return e
   nofile(e) || show_no_file!(e)
-  e.nodes[:new_tab] = true
+  state_of(e, NewTab).open = true
   open_finder!(e)
   e
 end

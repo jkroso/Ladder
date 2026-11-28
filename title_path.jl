@@ -56,7 +56,7 @@ export FolderList, FolderRow, PartArrow, RUN_ICONS, SearchButton, SearchChip, Se
        searchable, show_title_trail!, take_option!, title_edited, title_go!, title_listing,
        title_parts, title_place, title_steps, title_trail!, title_wide, title_widths,
        trail_can_show, trail_ground, trail_parts_wide, trail_pinned, trail_view, under_lines,
-       unfill_page!
+       unfill_page!, SearchAsked, search_asked
 
 # --- the file's name in the top bar ----------------------------------------------------------
 
@@ -389,10 +389,10 @@ title_trail!(e, t) = begin
   # A pinned path shows while the bar shows the file's name, with the mouse anywhere
   pinned = trail_pinned(e) && slideshow(e) === nothing && !as_app(e) && !screening(e)
   # ⌘F asked for the search, which opens once the path is in place
-  asked = haskey(e.nodes, :search_asked)
+  asked = search_asked(e)
   if !((ishovered(t) || listing || pinned || asked) && trail_can_show(e))
     delete!(e.nodes, :title_hover)
-    delete!(e.nodes, :search_asked)
+    state_of(e, SearchAsked).words = nothing
     listing && (close_folder_lists!(e, w); close_title_search!(e, w))
     open && close_popup!(w, :title_trail)
     return
@@ -1060,16 +1060,25 @@ find!(e, w=window_of(e)) = begin
   (searchable(e) && trail_can_show(e) && slideshow(e) === nothing && !as_app(e) && !screening(e)) || return open_find!(e)
   b = e.buf
   lo, hi = selection(b)
-  e.nodes[:search_asked] = selecting(b) && lo[1] == hi[1] ? rest(head(b.lines[lo[1]], hi[2]), lo[2]) : ""
+  state_of(e, SearchAsked).words = selecting(b) && lo[1] == hi[1] ? rest(head(b.lines[lo[1]], hi[2]), lo[2]) : ""
   redraw_in!(e, 0)
   nothing
 end
+
+"The search that ⌘F asked for and that hasn't opened yet, which the window keeps until the path in the top bar is in place: see `ask_search!`"
+@def mutable struct SearchAsked
+  words::Union{Nothing,String} = nothing   # the words that the search starts with, "" for none, or nothing when no search is asked for
+end
+
+"True when ⌘F asked for the search of the window of `e`, and it hasn't opened yet"
+search_asked(e) = state_of(e, SearchAsked).words !== nothing
 
 "Open the search that ⌘F asked for, under the › after the file's name of the path `v`, once the › has a place"
 ask_search!(e, w, v::TitleTrail) = begin
   a = get(v.drops, 0, nothing)
   (a !== nothing && rect(a) !== nothing) || return redraw_in!(e, 0)
-  words = pop!(e.nodes, :search_asked)
+  asked = state_of(e, SearchAsked)
+  words, asked.words = asked.words::String, nothing
   open_title_search!(e, w, a)
   s = get(e.nodes, :title_search, nothing)
   if s isa TitleSearch && s.arrow === a

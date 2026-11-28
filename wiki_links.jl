@@ -22,6 +22,7 @@
 @use "./code_names" exports...
 @use "./page_extras" exports...
 @use "./levels_view" exports...
+@use "./sheet_view" LinkNotes
 
 export PROJECT_MARKS, find_named, project_root, wiki_file, wiki_names
 
@@ -181,7 +182,7 @@ wiki_names(e, i, col) = begin
     push!(found, (fit, dirname(p) != dir, count(==('/'), folder), low, shown))
   end
   isempty(found) && return nothing
-  e.nodes[:wiki_notes] = notes
+  state_of(e, LinkNotes).notes = notes
   (i, start, unique([n for (_, _, _, _, n) in first(sort!(found), NAMES_SHOWN)]))
 end
 

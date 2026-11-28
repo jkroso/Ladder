@@ -45,6 +45,7 @@
 @use "./page_layout" exports...
 @use "./tabs" exports...
 @use "./transclusion" exports...
+@use "./peek_cards" scrubbing
 
 export SELECTION_RADIUS, blocktype, corners, guide_under, nofile_view, rounded
 
@@ -202,7 +203,7 @@ cursor(d::Document) = begin
   # A click on a to-do item's box ticks it
   todo_at(e, w.mouse) === nothing || return :hand
   # A drag on what a number comes to changes the number
-  (haskey(e.nodes, :scrub) || scrub_at(e, w.mouse) !== nothing) && return :resize_x
+  (scrubbing(e) || scrub_at(e, w.mouse) !== nothing) && return :resize_x
   # A click on the value of a name goes to where the page gives the name its value
   unmodified(w) && giver_at(e, w.mouse) !== nothing && return :hand
   # With ⌘ held, a click on a name of Julia code goes to where the name is defined. Julia compiles definition only when ⌘ is first held.

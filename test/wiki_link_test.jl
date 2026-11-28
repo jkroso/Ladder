@@ -176,7 +176,7 @@ end
   @test !("Hidden" in names())
   @test !isempty(K.suggestbox(e))
   # Each page's folder is at the right of its row
-  @test e.nodes[:wiki_notes]["Plans"] == "notes" && e.nodes[:wiki_notes]["home"] == ""
+  @test K.state_of(e, K.LinkNotes).notes["Plans"] == "notes" && K.state_of(e, K.LinkNotes).notes["home"] == ""
   type("pl")
   @test first(names()) == "Plans"
   # Return types the rest of the name and the ]] that ends the link

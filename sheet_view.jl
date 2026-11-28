@@ -12,6 +12,7 @@
 # bar over the grid adds and removes a row or a column. Hold ⌥ and click the
 # spreadsheet to see it as lines of code.
 
+@use "github.com/jkroso/Prospects.jl" @def
 @use "github.com/jkroso/MiniFB.jl/skia" rectangle
 @use "github.com/jkroso/MiniFB.jl"... onfiledrop onscroll
 @use "github.com/jkroso/UI.jl/Interface/Geometric"...
@@ -43,7 +44,7 @@
 export SPREAD_Y, gridrows, cellnames, spreadgrid, spreadsheet, ring, spreadop!, droprow!, SpreadBlock,
        SHEET_GAP, SHEET_X, SHEET_Y, RAISE, RESULT_X, load_sheet_font, drawn, exprpieces, chip_w, sheet_case,
        sheetgrid, row_top, expr_x, cellflow, cellunder, rowunder, place, sheetseg, sheetlines, next_row!,
-       sheet_tab!, erase_row!, isnamechar, offered, suggesting, suggestion, suggest_key!, suggestbox
+       sheet_tab!, erase_row!, isnamechar, offered, suggesting, suggestion, suggest_key!, suggestbox, LinkNotes
 
 const SPREAD_Y = 5px   # above and below the text of a cell
 
@@ -743,6 +744,11 @@ suggest_key!(e, K) = begin
   true
 end
 
+"The folder of each page that the list of names offers for a link, by the name that the list shows, which the window keeps for the list: see `wiki_offered`"
+@def mutable struct LinkNotes
+  notes::Dict{String,String} = Dict{String,String}()
+end
+
 "The list of names, placed in the window under the name being typed. Nothing when there's no list to show."
 suggestbox(e) = begin
   found = suggestion(e)
@@ -769,7 +775,7 @@ suggestbox(e) = begin
   end
   # In Julia code, each name has what it is at the right of its row, in a paler colour. A page has its folder there.
   notes = !(s isa Flow) ? fill("", length(names)) :
-          prose ? [get(get(e.nodes, :wiki_notes, Dict{String,String}()), n, "") for n in names] : name_notes(e, i, names)
+          prose ? [get(state_of(e, LinkNotes).notes, n, "") for n in names] : name_notes(e, i, names)
   pale = Face(face, color=colours.dim)
   span(note) = sum(((part, f),) -> measure(f, part), runs(note, pale), init=0px)
   needs(n, note) = measure(face, n) + (isempty(note) ? 0px : NOTE_GAP + span(note))

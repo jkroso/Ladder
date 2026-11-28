@@ -298,10 +298,10 @@ page_object(e) = begin
   path = e.buf.path
   (e.buf.view == :file && !isempty(path)) || return nothing
   haskey(e.entries, path) && return e.entries[path]
-  kept = get(e.nodes, :page_object, nothing)
+  kept = state_of(e, FoundObject).found
   kept !== nothing && kept[1] == path && time() - kept[2] < 1 && return kept[3]
   o = try object(e, path) catch; nothing end
-  e.nodes[:page_object] = (path, time(), o)
+  state_of(e, FoundObject).found = (path, time(), o)
   o
 end
 
@@ -486,7 +486,7 @@ open!(e, path; record=true) = begin
     isfile(path) ? (in_browser(path) ? web_buffer(path) : load(path)) : isdir(path) ? Buffer(path=path, view=:file) : Buffer(path=path)
   end
   add_tab!(e)   # the file stays open as a tab in the sidebar until ⌘W closes it
-  delete!(e.nodes, :new_tab)   # a file that shows in a new tab takes the tab's place
+  no_new_tab!(e)   # a file that shows in a new tab takes the tab's place
   # The sidebar lists a folder that shows, so its path ends where the top bar's does, and the folder that a file is in. It goes on
   # listing the folder that it lists while a page from a web server shows, or a view's copy of a file from one.
   at = isdir(path) ? path : dirname(path)
@@ -557,7 +557,7 @@ such folder closes to no file. The page keeps its changes, and goes on the
 list that `go_back!` reads.
 """
 close_file!(e) = begin
-  delete!(e.nodes, :new_tab)   # a new tab closes too
+  no_new_tab!(e)   # a new tab closes too
   next = tab_after_close!(e)
   next === nothing || return show_tab_page!(e, next)
   folder = closes_to(e)
@@ -592,7 +592,7 @@ describe(e::Editor) = begin
   # A web folder's page runs then too, once its site may run code. See "a web folder's own page".
   isempty(WEB_PAGES_DUE) || run_web_folder_pages!()
   ask_sandbox!(e)
-  haskey(e.nodes, :reload_ask) && ask_reload!(e)
+  ask_reload!(e)   # when a page came changed from its server over changes of your own
   scene
 end
 

@@ -157,7 +157,7 @@ end
   @test e.folder == joinpath(dir, "v2")
   @test menu() === nothing
   # The tree kept the click, so the editor leaves out no click or key after it, like the next right-click
-  @test !haskey(e.nodes, :chose)
+  @test !K.state_of(e, K.TreeTook).key
 end
 
 # --- what else the menus have ------------------------------------------------------------

@@ -1,5 +1,6 @@
 # Where the value of a name comes from, and the names that one part of the page has from another
 
+@use "github.com/jkroso/Prospects.jl" @def
 @use "github.com/jkroso/MiniFB.jl"... onfiledrop onscroll
 @use "github.com/jkroso/UI.jl/Interface/Geometric"...
 @use "github.com/jkroso/UI.jl/Interface/Specific"...
@@ -28,7 +29,7 @@
 
 export NO_GIVERS, block_givers!, cmd_words, follows, giver, giver_at, givers, go_to_giver!,
        inline_given!, mark_clickable, name_givers, named_sums, place_span, sum_names, value_name,
-       value_name_at
+       value_name_at, CmdCard, cmd_card
 
 # --- where the value of a name comes from ---------------------------------------------------------------
 #
@@ -234,6 +235,19 @@ cmd_words(e, pos) = begin
 end
 
 """
+The card that shows while ⌘ is held and the mouse rests on words, which the
+window keeps: see `peek!`. It's here, and not with `peek!`, since the mark of
+the words under the mouse takes the card away when ⌘ comes up.
+"""
+@def mutable struct CmdCard
+  peek::Union{Nothing,NamedTuple{(:words, :since, :shown)}} = nothing   # the words that the mouse is on, since when, and whether their card shows
+  mouse::Any = nothing   # where the mouse was when ⌘ went down, :moved once it has moved from there, and nothing while ⌘ is up
+end
+
+"What the window of `e` keeps of the card that shows while ⌘ is held: see `CmdCard`"
+cmd_card(e) = state_of(e, CmdCard)
+
+"""
 While ⌘ is held by itself, mark the words under the mouse that a click would
 act on: a soft box behind them and a line under them, as the mouse is a hand
 there. The page's text is at `ui`.
@@ -242,8 +256,9 @@ mark_clickable(ctx, e, ui) = begin
   w = window_of(e)
   if !(w !== nothing && only_held(w, Keys.cmd) && e.popup == :none && e.buf.view != :file && slideshow(e) === nothing)
     # The card of a name goes when ⌘ comes up
-    w === nothing || pop!(e.nodes, :peek, nothing) === nothing || hide_tooltip!(w)
-    delete!(e.nodes, :cmd_mouse)
+    card = cmd_card(e)
+    w === nothing || (was = card.peek; card.peek = nothing; was === nothing) || hide_tooltip!(w)
+    card.mouse = nothing
     return
   end
   redraw_in!(e, 1/30)   # the mark follows the mouse, and goes when ⌘ comes up

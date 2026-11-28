@@ -561,8 +561,7 @@ desktop_new!(v::DesktopView, kind::Symbol, at) = begin
   v.read = 0.0
   v.chosen = Set([basename(path)])
   list_files!(e)
-  rename!(e, path, at=:desktop)
-  e.nodes[:renaming_new] = kind
+  rename!(e, path, at=:desktop, new=kind)
   nothing
 end
 

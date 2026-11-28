@@ -383,7 +383,7 @@ matter_hidden() = (it = e.layout[1]; it.first == 1 && it.last == K.front_matter(
   Base.invokelatest(K.show_path!, e, joinpath(canon, "Readme.md")); frames()
   e.buf.caret = e.buf.anchor = (5, 0); frames()
   @test matter_hidden()
-  delete!(e.nodes, :chose)   # an earlier test chose in the sidebar with no key, so the next key would be the sidebar's
+  K.tree_took!(e)   # an earlier test chose in the sidebar with no key, so the next key would be the sidebar's
   foreach(_ -> (Base.invokelatest(onkey, w, KeyPress{Keys.up}(0, w)); frames()), 1:2)
   @test K.picked(e.buf) == (1, 3) && e.layout[1].content isa K.Live && e.layout[1].content.node isa K.MatterCard
   Base.invokelatest(onkey, w, KeyPress{Keys.enter}(0, w)); frames()

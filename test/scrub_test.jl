@@ -76,7 +76,7 @@ results() = [r.text for r in K.item(e, findfirst(==("```sheet"), e.buf.lines) + 
   @test cursor(K.node!(K.Document, e, :document)) == :resize_x
   caret = e.buf.caret
   press(first_sum)
-  @test haskey(e.nodes, :scrub) && e.buf.caret == caret
+  @test K.scrubbing(e) && e.buf.caret == caret
   at(first_sum .+ (10, 0))
   @test occursin("!`l = 18m`", text())
   at(first_sum .+ (20, 3)); frames()
@@ -87,7 +87,7 @@ results() = [r.text for r in K.item(e, findfirst(==("```sheet"), e.buf.lines) + 
   @test occursin("!`l = 0m`", text()) && said("area = l * h") == "0m²"
   at(first_sum .+ (20, 0))
   release()
-  @test !haskey(e.nodes, :scrub) && occursin("!`l = 20m`", text())
+  @test !K.scrubbing(e) && occursin("!`l = 20m`", text())
   # The mouse has let go, so a move changes nothing more
   at(first_sum .+ (60, 0))
   @test occursin("!`l = 20m`", text())

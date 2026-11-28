@@ -40,7 +40,7 @@
 export USUAL, share!, reads!, default_app!, text_size!, NARROWEST, WIDEST, page_width!, font!, weight!,
        problems, present, present_inline, note, redescribe!, swap!, OpenButton, Listing, list!, MOST_FILES,
        entry, steps, listing, contents, CRUMB_GAP, ARROW_W, DOTS_W, LONGEST_NAME, short, fitting,
-       MODEL_HEIGHT, TEXT_OPENS, codeline
+       MODEL_HEIGHT, TEXT_OPENS, codeline, DefaultAsked
 
 "The modules whose names a live block can use with no line that loads them"
 const USUAL = ("github.com/jkroso/UI.jl/Interface/Semantic", "github.com/jkroso/UI.jl/Interface/Geometric")
@@ -67,6 +67,11 @@ reads!(e, setting::Symbol) = begin
   nothing
 end
 
+"The answer that the window waits for, after it asked macOS to make Ladder the app that opens Markdown files: see `default_app!` and `await_default!`"
+@def mutable struct DefaultAsked
+  asked::Union{Nothing,Tuple{Float64,Any,Float64}} = nothing   # when it asked, the app that opened them then, and when the window last looked
+end
+
 """
 Ask macOS to make Ladder the app that opens Markdown files, for the button on
 the settings page. macOS asks you to confirm, so the window then looks for
@@ -75,7 +80,7 @@ your answer. It's false when the Ladder app isn't installed.
 default_app!(e) = begin
   before = markdown_app()
   make_default!() || return false
-  e.nodes[:asked] = (time(), before, time())
+  state_of(e, DefaultAsked).asked = (time(), before, time())
   true
 end
 

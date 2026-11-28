@@ -1,5 +1,6 @@
 # The cards that show while ⌘ is held: what a name is, and the start of the page that a link goes to
 
+@use "github.com/jkroso/Prospects.jl" @def
 @use "github.com/jkroso/MiniFB.jl"... onfiledrop onscroll
 @use "github.com/jkroso/UI.jl/Interface/Geometric"...
 @use "github.com/jkroso/UI.jl/Interface/Specific"...
@@ -42,7 +43,7 @@
 @use "./page_mouse" exports...
 
 export PEEK_LINES, PEEK_PAGE_HIGH, PEEK_PAGE_W, PEEK_WAIT, PagePeek, inline_codes, linked_page,
-       page_peek, peek_card, peek_from, peek_lines, peek_page_lines, peeks!, scrub_to!
+       page_peek, peek_card, peek_from, peek_lines, peek_page_lines, peeks!, scrub_to!, Scrubbing, scrubbing
 
 # --- a card of what a name is ---
 #
@@ -141,24 +142,26 @@ The mouse must move after ⌘ goes down before a card shows.
 """
 peek!(e, w, found) = begin
   # Where the mouse was when ⌘ went down, or :moved once it has moved from there
-  still = get!(e.nodes, :cmd_mouse, w.mouse)
-  still === :moved || w.mouse == still || (e.nodes[:cmd_mouse] = still = :moved)
-  was = get(e.nodes, :peek, nothing)
+  kept = cmd_card(e)
+  kept.mouse === nothing && (kept.mouse = w.mouse)
+  still = kept.mouse
+  still === :moved || w.mouse == still || (kept.mouse = still = :moved)
+  was = kept.peek
   if found === nothing || was === nothing || was.words != found
     was === nothing || !was.shown || hide_tooltip!(w)
-    found === nothing ? delete!(e.nodes, :peek) : (e.nodes[:peek] = (words=found, since=time(), shown=false))
+    kept.peek = found === nothing ? nothing : (words=found, since=time(), shown=false)
     return
   end
   # A mouse move took the card away. It comes again when the mouse rests.
   if was.shown
-    any(p -> p.key == :tooltip, popups(w)) || (e.nodes[:peek] = (words=found, since=time(), shown=false))
+    any(p -> p.key == :tooltip, popups(w)) || (kept.peek = (words=found, since=time(), shown=false))
     return
   end
   # The moment of rest starts when the mouse first moves
-  still === :moved || (e.nodes[:peek] = (words=found, since=time(), shown=false); return)
+  still === :moved || (kept.peek = (words=found, since=time(), shown=false); return)
   time() - was.since < PEEK_WAIT && return
   card = peek_card(e, found)
-  e.nodes[:peek] = (words=found, since=was.since, shown=true)
+  kept.peek = (words=found, since=was.since, shown=true)
   card === nothing && return
   line, lo, hi = found
   it = item(e, line)
@@ -298,11 +301,21 @@ preferred_agent!(e, name::String) = begin
   e
 end
 
+"The number that the mouse holds while a drag changes it, which the window keeps until the mouse lets go: see `scrub!`"
+@def mutable struct Scrubbing
+  # The number's line and where it starts and ends there, where the mouse took hold of it, its text then,
+  # how many steps the drag has changed it by, and whether the mouse has moved
+  held::Union{Nothing,NamedTuple{(:line, :lo, :hi, :x, :text, :steps, :moved)}} = nothing
+end
+
+"True while the mouse holds a number of the page of `e`"
+scrubbing(e) = state_of(e, Scrubbing).held !== nothing
+
 "Take hold of the number at `found`, which `scrub_at` gave, with the mouse at `pos`"
 scrub!(e, found, pos) = begin
   i, lo, hi = found
   b = e.buf
-  e.nodes[:scrub] = (line=i, lo=lo, hi=hi, x=num(pos[1]), text=rest(head(b.lines[i], hi), lo), steps=0, moved=false)
+  state_of(e, Scrubbing).held = (line=i, lo=lo, hi=hi, x=num(pos[1]), text=rest(head(b.lines[i], hi), lo), steps=0, moved=false)
   b.typed = 0.0   # the drag is taken back by itself, and not with what was typed before it
   e.popup = :none
   e.clicked = (time(), (i, 0), 0)
@@ -312,7 +325,7 @@ end
 
 "Give the number that the mouse holds the value for where the mouse is now, and write it into its line. The caret stays with its text."
 scrub_to!(e, pos) = begin
-  s = e.nodes[:scrub]
+  s = something(state_of(e, Scrubbing).held)
   b = e.buf
   steps = scrub_steps(num(pos[1]) - s.x) * (only_held(e, Keys.shft) ? 10 : 1)
   (steps == s.steps || !(1 <= s.line <= length(b.lines))) && return e
@@ -322,15 +335,15 @@ scrub_to!(e, pos) = begin
   by = length(new) - (s.hi - s.lo)
   kept(p) = p[1] == s.line && p[2] >= s.hi ? (p[1], p[2] + by) : p
   b.caret, b.anchor = kept(caret), kept(anchor)
-  e.nodes[:scrub] = (; s..., hi=s.lo + length(new), steps, moved=true)
+  state_of(e, Scrubbing).held = (; s..., hi=s.lo + length(new), steps, moved=true)
   e
 end
 
 "What happens in each frame to a number that the mouse holds: when the mouse lets go, the drag ends. A press that never moved was a click, and puts the caret there."
 scrub_tick!(e) = begin
-  s = get(e.nodes, :scrub, nothing)
+  s = state_of(e, Scrubbing).held
   (s === nothing || held(e, Keys.mouse_left)) && return e
-  delete!(e.nodes, :scrub)
+  state_of(e, Scrubbing).held = nothing
   b = e.buf
   b.typed = 0.0
   w = window_of(e)

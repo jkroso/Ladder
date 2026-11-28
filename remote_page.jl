@@ -6,6 +6,7 @@
 # code runs in. The commands Navigate, Reload Page and Open In Browser are in
 # main.jl.
 
+@use "github.com/jkroso/Prospects.jl" @def
 @use "github.com/jkroso/MiniFB.jl"... onfiledrop onscroll
 @use "github.com/jkroso/UI.jl/Interface/Geometric"...
 @use "github.com/jkroso/UI.jl/Interface/Specific"...
@@ -45,7 +46,7 @@ export COPY_ADDRESSES, COPY_MARK, GOT_MARK, PAGE_WAIT, PageAsked, RELOAD_ASKER, 
        ask_reload!, fingerprint, forget_view_copies!, got_mark, land_page!, mark_copy!, mark_file!,
        navigate!, navigate_place, open_in_browser!, place_label, reads_here, reload_page!,
        reload_panel, remote_tick!, saved_page, show_page!, take_page!, typed_path, unsay_getting!,
-       web_buffer, open_address!, site_folder
+       web_buffer, open_address!, site_folder, ReloadAsk
 
 # --- a page from a web server ----------------------------------------------------------------
 #
@@ -458,7 +459,7 @@ take_page!(e, a::PageAsked, path, address, bytes) = begin
   elseif read(path) == bytes
     mark_file!(path, GOT_MARK, fingerprint(bytes))   # what came is what you have, so nothing is changed after all
   elseif a.reload || fingerprint(bytes) != got_mark(path)
-    e.nodes[:reload_ask] = (path, String(address), bytes)
+    state_of(e, ReloadAsk).page = (path, String(address), bytes)
   end
   show_page!(e, a, path)
 end
@@ -476,6 +477,11 @@ show_page!(e, a::PageAsked, path) = begin
   e
 end
 
+"A page that came changed from its server over changes of your own, which the window keeps until its next frame asks which to keep: see `ask_reload!`"
+@def mutable struct ReloadAsk
+  page::Union{Nothing,Tuple{String,String,Any}} = nothing   # the file, the page's address and the bytes that came
+end
+
 """
 Ask whether the page of the browser folder that you changed takes what the
 server sent, after the frame that shows the page: see `take_page!`. A panel
@@ -485,7 +491,8 @@ and Ladder asks again only when the server has something newer, or you use
 Reload Page.
 """
 ask_reload!(e) = begin
-  q = pop!(e.nodes, :reload_ask, nothing)
+  ask = state_of(e, ReloadAsk)
+  q, ask.page = ask.page, nothing
   q === nothing && return nothing
   path, address, bytes = q
   yes = (RELOAD_ASKER[] !== reload_panel || on_screen(e)) && RELOAD_ASKER[](path, address)

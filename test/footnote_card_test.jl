@@ -68,7 +68,7 @@ shows() = any(p -> p.key == K.NOTE_KEY, popups(w))
   @test K.note_card(e, "rad") !== nothing && !any(t -> occursin("**", t), words) && !any(t -> occursin("[^rad]", t), words)
   # It goes when the mouse leaves the number
   move(at[1] - 200px, at[2])
-  @test !shows() && !haskey(e.nodes, :note_peek)
+  @test !shows() && !K.note_peeked(e)
 end
 
 @testset "no card where there's no footnote to show" begin

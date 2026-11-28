@@ -19,6 +19,7 @@
 @use "./host" exports...
 @use "./folder_page" exports...
 @use "./views" exports...
+@use "./live_view" DefaultAsked
 
 export MARKDOWN_TYPE, app_path, await_default!, inbox, markdown_type, open_outside, open_outside!,
        outside_button, receive!
@@ -94,17 +95,18 @@ the button on the settings page. When the app for Markdown files changes, the
 blocks that show which app it is run again.
 """
 await_default!(e) = begin
-  asked = get(e.nodes, :asked, nothing)
+  kept = state_of(e, DefaultAsked)
+  asked = kept.asked
   asked === nothing && return
   at, before, checked = asked
   now = time()
   if now - checked >= 0.5
     if markdown_app() != before
-      delete!(e.nodes, :asked)
+      kept.asked = nothing
       return rerun!(e, :app)
     end
-    now - at > 120 && return delete!(e.nodes, :asked)
-    e.nodes[:asked] = (at, before, now)
+    now - at > 120 && return (kept.asked = nothing)
+    kept.asked = (at, before, now)
   end
   # Nothing else may happen in the window while the dialog is open, so ask for the next look
   redraw_in!(e, 0.5)

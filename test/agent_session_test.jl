@@ -448,7 +448,7 @@ try
     at(start .+ (10px, 0px))
     @test occursin("!`l = 18m`", sub.buf.lines[1]) && made("area = l * 2.4m") == "43.2m²"
     w.keys ⊻= Keys.mouse_left; onkey(w, KeyRelease{Keys.mouse_left}(0, w)); frames(w, 2)
-    @test !haskey(sub.nodes, :scrub)
+    @test !K.scrubbing(sub)
     # The reply is what the drag left, and the file keeps it
     @test occursin("!`l = 18m`", it.text)
     ok = until(() -> occursin("!`l = 18m`", read(said, String)))

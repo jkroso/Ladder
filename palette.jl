@@ -1438,14 +1438,14 @@ palette_run!(e, w, p::CommandPalette) = begin
   named = Pair{Symbol,Any}[name => x for (name, x) in p.keywords]
   # The palette closes first, so that the function finds the page with the keyboard, and can show something of its own.
   # A row that the window showed stays, as the command runs with it. A jump notes the place from before that: see `place_now`.
-  p.before === nothing || (e.nodes[:unpreviewed] = p.before)
+  p.before === nothing || unpreviewed!(e, p.before)
   p.before = nothing
   close_palette!(e)
   try
     value = try
       Base.invokelatest(p.command.call, args...; named...)
     finally
-      delete!(e.nodes, :unpreviewed)
+      unpreviewed!(e, nothing)
     end
     # What a command of the page's own gave back shows under the top bar
     if p.command.kind == :page && value !== nothing

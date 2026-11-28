@@ -54,7 +54,7 @@ export notes, follow_note!, NOTE_KEY, NOTE_WAIT, NOTE_CARD_W, note_at, note_card
        has_comments, comments_in, comment_w, comment_room, comment_balance, with_comments, page_comments,
        comment_face, Comments, CommentCard, mark_commented, add_comment!, selected_word, same_word,
        outline_same_word, spell_act!, SVG_TEXT_AS_SHAPES, diagram_svg, export_html!, stay!, FRESH, FRESH_FADE,
-       fresh!, fresh, draw_fresh
+       fresh!, fresh, draw_fresh, NotePeek, note_peeked
 
 "The number of each footnote of the document, by name"
 notes(e) = (b = e.buf; get!(() -> footnotes(b.lines), e.flows, (:notes, b.path, b.version)))
@@ -140,6 +140,14 @@ note_card(e, name) = begin
       Column(width(grow=grow), Alignment.Start, spacer(TEXT_PAD), describe(e, Item(0, 0, 0px, tall(f), f), f))))
 end
 
+"The footnote whose number the mouse is on, which the window keeps so that its card shows once the mouse has rested there: see `note_peek!`"
+@def mutable struct NotePeek
+  on::Union{Nothing,NamedTuple{(:at, :since, :shown)}} = nothing   # the footnote, since when, and whether its card shows
+end
+
+"True while the mouse is on the number of a footnote of the page of `e`"
+note_peeked(e) = state_of(e, NotePeek).on !== nothing
+
 """
 In each frame: show the card of the footnote whose number the mouse has
 rested on, and take it away when the mouse leaves the number.
@@ -149,23 +157,24 @@ note_peek!(e) = begin
   w === nothing && return nothing
   over = e.popup == :none && unmodified(w) && !(Keys.mouse_left in w.keys) && ishovered(node!(Document, e, :document))
   found = over ? note_at(e, w.mouse) : nothing
-  was = get(e.nodes, :note_peek, nothing)
+  kept = state_of(e, NotePeek)
+  was = kept.on
   if found === nothing
     was === nothing && return nothing
-    delete!(e.nodes, :note_peek)
+    kept.on = nothing
     close_popup!(w, NOTE_KEY)
     return nothing
   end
   if was === nothing || was.at != found
     was === nothing || close_popup!(w, NOTE_KEY)
-    e.nodes[:note_peek] = (at=found, since=time(), shown=false)
+    kept.on = (at=found, since=time(), shown=false)
     redraw_in!(e, NOTE_WAIT)
     return nothing
   end
   was.shown && return nothing
   wait = NOTE_WAIT - (time() - was.since)
   wait > 0 && return (redraw_in!(e, wait); nothing)
-  e.nodes[:note_peek] = (at=found, since=was.since, shown=true)
+  kept.on = (at=found, since=was.since, shown=true)
   card = note_card(e, found.name)
   card === nothing && return nothing
   popup!(w, card, anchor=(e.origin[1] + found.x, e.origin[2] + found.top, max(found.w, 4px), found.high),

@@ -43,7 +43,7 @@ export ask_web_folders!, FOLDER_PAGE_KINDS, folder_page_lines, FOLDER_PAGE_STOPP
        OWN_KINDS, page_kind, pages_callable, PLACE_KINDS, SITE_KINDS, run_folder_pages!, run_web_folder_pages!,
        show_folder_as!, site_answers, SITE_ANSWERS, SITE_ASKER, site_runs!, sites_file,
        stop_trusting_site!, trust_bar, trust_panel, trust_site!, typed_as, WEB_FOLDER_PAGES,
-       web_folders_tick!, web_page, WEB_PAGES_DUE, WebFolderPage
+       web_folders_tick!, web_page, WEB_PAGES_DUE, WebFolderPage, FoundObject, find_object_again!
 
 # --- a folder's own page ----------------------------------------------------------------
 #
@@ -180,12 +180,24 @@ folder_pages!(path::AbstractString) = begin
   nothing
 end
 
+"""
+The object of the file or the folder that the page shows, as the window last
+found it: see `page_object`. It's here, and not with `page_object`, since a
+folder whose kind can have changed is found again.
+"""
+@def mutable struct FoundObject
+  found::Union{Nothing,Tuple{String,Float64,Any}} = nothing   # the path, when it was found, and its object or nothing
+end
+
+"Find the object of what the page of `e` shows again, the next time that something asks for it"
+find_object_again!(e) = (state_of(e, FoundObject).found = nothing; e)
+
 "List the sidebar's folder again when the kind of a folder with a page can have changed since the window last listed it"
 folder_pages_tick!(e) = begin
   (get(e.nodes, :folder_pages, 0) == FOLDER_PAGES_RAN[] || !pages_callable()) && return
   e.nodes[:folder_pages] = FOLDER_PAGES_RAN[]
   list_files!(e)
-  delete!(e.nodes, :page_object)   # the folder that the page shows is found again too
+  find_object_again!(e)   # the folder that the page shows is found again too
   show_opened!(e)   # a window that was opened on a folder shows it in the page, if its page said that its kind does
   nothing
 end
@@ -599,7 +611,7 @@ add_command!(show_folder_as!, title="Show a folder as a kind of folder: a deskto
 "Show the folder at `path` in the window of `e`, as its kind shows it, after its page ran"
 folder_shown!(e, path) = begin
   list_files!(e)
-  delete!(e.nodes, :page_object)
+  find_object_again!(e)
   d = try FS.get(FSPath(path)) catch; nothing end
   d isa AbstractDirectory && open!(e, d)
   nothing

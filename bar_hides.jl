@@ -122,7 +122,7 @@ edge of the window, or is still on the bar, or something hangs from the bar.
 """
 bar_wanted(e, w) = begin
   # The search that ⌘F opens hangs under the path in the bar, and the file's name is renamed where the bar shows it
-  haskey(e.nodes, :search_asked) && return true
+  search_asked(e) && return true
   any(p -> p.key == TS_KEY, popups(w)) && return true
   !isempty(e.buf.path) && renaming(e, :title) == e.buf.path && return true
   wide, _ = window_size(e)

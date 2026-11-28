@@ -181,7 +181,7 @@ end
 on_own_page(e, o) = false
 
 drag!(e, pos) = begin
-  haskey(e.nodes, :scrub) && held(e, Keys.mouse_left) && return scrub_to!(e, pos)
+  scrubbing(e) && held(e, Keys.mouse_left) && return scrub_to!(e, pos)
   held(e, Keys.mouse_left) && e.clicked[3] == 1 || return
   at = settle(e.buf, locate(e, pos))
   at == e.buf.caret && return
@@ -200,7 +200,7 @@ onmouse(d::Document, ev::MouseMove) = begin
   e = editor(d)
   Base.invokelatest(hover_check!, e, ev.position)
   # The window draws again as the mouse goes on to a footnote's number or off it, for its card: see `note_peek!`
-  (haskey(e.nodes, :note_peek) || Base.invokelatest(note_at, e, ev.position) !== nothing) && redraw_in!(e, 0)
+  (note_peeked(e) || Base.invokelatest(note_at, e, ev.position) !== nothing) && redraw_in!(e, 0)
   drag!(e, ev.position)
 end
 onmouse(p::Page, ev::MouseMove) = drag!(editor(p), ev.position)

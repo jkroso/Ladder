@@ -1,5 +1,6 @@
 # The files that a window showed before, which ⌘⌥← and ⌘⌥→ go back and forward through, and the files that you ignore
 
+@use "github.com/jkroso/Prospects.jl" @def
 @use "github.com/jkroso/MiniFB.jl"... onfiledrop onscroll
 @use "github.com/jkroso/UI.jl/Interface/Geometric"...
 @use "github.com/jkroso/UI.jl/Interface/Specific"...
@@ -25,7 +26,7 @@
 
 export __init__, full_takeoff, go_back!, go_forward!, go_place!, hidden!, ignore!,
        ignored_changed!, ignored_tick!, jump_list, last_shown, place_back, place_now, showable,
-       step_back!, step_words, takeoff_over
+       step_back!, step_words, takeoff_over, Unpreviewed, unpreviewed!
 
 # --- the files that showed before --------------------------------------------------------
 #
@@ -76,10 +77,18 @@ after it.
 """
 jump_list(e) = get!(() -> (back=Any[], ahead=Any[]), e.nodes, :jumps)
 
+"How far the page was scrolled before the command palette showed a row of its list in the window, which the window keeps while the palette's command runs: see `place_now`"
+@def mutable struct Unpreviewed
+  offset::Any = nothing   # nothing when the palette showed no row
+end
+
+"Note that the page of `e` was scrolled to `offset` before the command palette showed a row in it. With nothing, the palette showed no row."
+unpreviewed!(e, offset) = (state_of(e, Unpreviewed).offset = offset; e)
+
 "Where the window of `e` is: its file, its caret, its anchor and how far it's scrolled"
 place_now(e) = begin
   # While the palette showed a row of its list, the window scrolled to it. The place is where it was before that.
-  was = get(e.nodes, :unpreviewed, nothing)
+  was = state_of(e, Unpreviewed).offset
   (path=e.buf.path, caret=e.buf.caret, anchor=e.buf.anchor, offset=was isa typeof(e.scroll.offset) ? was : e.scroll.offset)
 end
 

@@ -165,11 +165,11 @@ end
   w.mouse = typeof(w.mouse)(point(p)...)
   w.keys |= Keys.cmd
   frames(1)
-  @test !e.nodes[:peek].shown && !any(x -> x.key == :tooltip, popups(w))
+  @test !K.cmd_card(e).peek.shown && !any(x -> x.key == :tooltip, popups(w))
   # The card waits for the mouse to move after ⌘ goes down
   w.mouse = typeof(w.mouse)(point(p)[1] + 1px, point(p)[2])
   frames(1)
-  e.nodes[:peek] = (words=e.nodes[:peek].words, since=time() - 1, shown=false)
+  K.cmd_card(e).peek = (words=K.cmd_card(e).peek.words, since=time() - 1, shown=false)
   frames(1)
   tip = only(filter(x -> x.key == :tooltip, popups(w)))
   # The card is the page's own colours, not the dark box of a tooltip, and it's under the link
@@ -181,7 +181,7 @@ end
   haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], "page-peek.png"), w)
   w.keys ⊻= Keys.cmd
   frames(1)
-  @test !haskey(e.nodes, :peek) && !any(x -> x.key == :tooltip, popups(w))
+  @test K.cmd_card(e).peek === nothing && !any(x -> x.key == :tooltip, popups(w))
 end
 
 # The settings page has the box that turns it on and off
