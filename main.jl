@@ -1332,6 +1332,8 @@ sandbox(e) = get!(e.nodes, :sandbox) do
   Core.eval(m, :(const term_bell! = $(name -> term_setting!(e, :bell, term_choice(TERM_BELLS, name)))))
   Core.eval(m, :(const term_lines = $(() -> (reads!(e, :terminal); TERM_SETTINGS.most))))
   Core.eval(m, :(const term_lines! = $(n -> term_setting!(e, :most, term_choice(TERM_PASTS, Int(n))))))
+  Core.eval(m, :(const term_again = $(() -> (reads!(e, :terminal); TERM_SETTINGS.again))))
+  Core.eval(m, :(const term_again! = $(on -> term_setting!(e, :again, Bool(on)))))
   # ... and the key bindings. `key_bundles()` gives the names of the bundles, and `key_bundle()` the one that's chosen.
   # `key_list()` shows each command with its keys, and a click on one changes them. `keys_changed()` is true when a
   # command has other keys than the bundle's, and `key_reset!()` gives every command the bundle's keys again.
@@ -1379,8 +1381,6 @@ end
 
 # --- one thing in many parts of the page -------------------------------------------------------
 #
-  Core.eval(m, :(const term_again = $(() -> (reads!(e, :terminal); TERM_SETTINGS.again))))
-  Core.eval(m, :(const term_again! = $(on -> term_setting!(e, :again, Bool(on)))))
 # One thing can show in many parts of a page. A to-do item is a line of the
 # text, a card of a board, a bar of a schedule, a thing of a calendar's day
 # and the rows of a time log. A row of a table is a bar of a chart. While the
