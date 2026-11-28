@@ -1245,8 +1245,8 @@ The file keeps what the terminal shows: its text, with its colours. So when you 
 - **Selecting.** Drag to select text. Two clicks select a word, and three select a line.
 - **Programs that fill the terminal**, like vim, work as they do in a terminal app. A program that asks for the mouse gets the clicks and the wheel. Hold ⇧ to select text there.
 - **The shell runs on** while the window shows other files. It ends when you type `exit`, and when the window closes.
-- **Levels.** ⌘E shows the file's text, with the codes that colour it.
 - **Programs that start again.** Some programs tell the terminal which command starts them again. An agent gives the command that opens the same session. If Ladder closes while such a program runs, the terminal starts a shell the next time you open its file, and runs the command there. A program that you ended yourself doesn't start again.
+- **Levels.** ⌘E shows the file's text, with the codes that colour it.
 - **Settings.** The [Terminal](settings/terminal.md) page of the settings has the shape of the caret and whether it blinks. It can also make selecting copy the text, make ⌥ the Meta key, change what the bell does, set how many lines a terminal keeps, and turn off starting programs again.
 
 A `view` block shows the last lines of a terminal's file. It starts no shell:
