@@ -29,7 +29,7 @@
 @use "../editor_type" exports...
 @use "../faces" exports...
 @use "../blocks" exports...
-@use "../rich" end_room
+@use "../rich" end_room flow
 @use "../strokes" exports...
 @use "../shared" exports...
 @use "../host" exports...
@@ -44,6 +44,7 @@
 @use "./session" exports...
 @use "./window" exports...
 @use "./page" exports...
+@use "./recall" exports...
 
 export pane_field!, reply_editor, talk_on_page, talk_zoom, page_symbols, pane_style!, page_inked,
        pane_layout!, show_reply!, agent_part_of, agent_key!, session!, pane_agent!, AGENT_MENU, AGENT_MENU_W,
@@ -62,7 +63,8 @@ export pane_field!, reply_editor, talk_on_page, talk_zoom, page_symbols, pane_st
        section_in_view, OUTLINE_STEP, widen_for_agent!, narrow_from_agent!, agent_mode!, end_agent_session!,
        CHAT_WIDE, PAGE_TALK, TALK_MARK, chats, pane_wide, pane_context, talk_mark, talk_body, talk_part, talk_parts,
        talk_text, read_talk, load_talk!, chat_part, TALK_SLIDE, TalkRoom, said_nothing, talk_page,
-       talk_greeting, chat_tick!, close_chats!, new_agent_session!
+       talk_greeting, chat_tick!, close_chats!, new_agent_session!, agent_dir, Recall, said_file, pane_dir, on_edge,
+       recall_key!
 
 "The editor of the words that you type to the agent, which the pane `p` of the window of `e` shows: lines that no file holds"
 pane_field!(p::AgentPane) = begin
@@ -149,11 +151,13 @@ agent_part_of(e) = get(e.nodes, :agent_part, nothing)
 """
 What a key does in a part of the agent's pane, before the part's editor does
 what it does with a key. True when the key is done with. In the words that
-you type, Return gives them to the agent, and ⇧Return starts a new line. A
+you type, Return gives them to the agent, ⇧Return starts a new line, and ↑
+and ↓ bring back the words that you gave before: see `recall_key!`. A
 command for the window runs in the window's page. Esc does nothing.
 """
 agent_key!(e, w, K, command) = begin
   p, kind = agent_part_of(e)
+  kind == :field && recall_key!(p, w, K) && return true
   # While the list of commands shows over the words, the arrows, Tab and Return are the list's
   kind == :field && slash_key!(p, w, K) && return true
   kind == :field && K == Keys.enter && unmodified(w) && (send_words!(p); return true)
@@ -163,17 +167,22 @@ agent_key!(e, w, K, command) = begin
   true
 end
 
+"The folder that an agent of the window of `e` works in: the top folder of the file's repository, or else the file's own folder"
+agent_dir(e) = begin
+  b = e.buf
+  onmac = !isempty(b.path) && !isremote(b.path)
+  top = repo_of(e)
+  !isempty(top) ? top : onmac ? (isdir(b.path) ? b.path : dirname(b.path)) : isempty(e.folder) ? homedir() : e.folder
+end
+
 "The session of the pane `p` of the window of `e`, with its program running. The first words start it, in the top folder of the file's repository."
 session!(p::AgentPane, e) = begin
   on_page(p) && p.session === nothing && load_talk!(p, e)   # a session's file has its session from the file
   s = p.session
   if s === nothing
     b = e.buf
-    onmac = !isempty(b.path) && !isremote(b.path)
-    top = repo_of(e)
-    dir = !isempty(top) ? top : onmac ? (isdir(b.path) ? b.path : dirname(b.path)) : isempty(e.folder) ? homedir() : e.folder
     agent = pane_agent(p, e)
-    s = AgentSession(agent=agent, dir=dir, page=writes(b) ? truepath(b.path) : "", turns=by_turns(agent), model=chosen_model(agent))
+    s = AgentSession(agent=agent, dir=agent_dir(e), page=writes(b) ? truepath(b.path) : "", turns=by_turns(agent), model=chosen_model(agent))
   end
   has_code(s) && beside!(s, p)
   # An agent that works by turns has no program between turns: `say!` starts one
@@ -690,6 +699,8 @@ send_words!(p::AgentPane) = begin
   pictures = filter(isfile, attached(p))
   edited = p.session === nothing ? AgentReply[] : changed_replies(p.session)
   isempty(words) && isempty(pictures) && isempty(edited) && return nothing
+  # ↑ brings these words back later, in a new field or a new session of the same folder
+  isempty(words) || keep_said!(said_file(), pane_dir(p), words)
   # A command that Ladder does itself, like /resume, doesn't go to the agent
   named = slash_named(words)
   named !== nothing && own_command(p, named[1]) !== nothing && return (run_own!(p, named...); nothing)
@@ -725,6 +736,62 @@ send_words!(p::AgentPane) = begin
   typing && focus(p.field)
   redraw_in!(e, SOON)
   nothing
+end
+
+# --- the words that you gave before ---
+
+"Where ↑ and ↓ are among the words that you gave the agent before: see `recall_key!`"
+@def mutable struct Recall
+  list::Vector{String} = String[]   # the words, the newest first
+  at::Int = 0                       # which of them the field shows, or 0 for what you were typing
+  typed::String = ""                # what you were typing when ↑ first brought back words
+end
+
+"The file that keeps the words that you gave agents. It's beside the file of Ladder's settings, so a test's settings keep a test's words too."
+said_file() = joinpath(dirname(settings_file()), "prompts")
+
+"The folder that the agent of the pane `p` works in, or will work in when your first words start it"
+pane_dir(p::AgentPane) = p.session === nothing ? agent_dir(editor(p)) : p.session.dir
+
+"True when the caret of the editor `sub` is on its top line on the screen, for `by` = -1, or on its bottom line, for 1, and nothing is selected"
+on_edge(sub, by) = begin
+  b = sub.buf
+  b.caret == b.anchor || return false
+  i, col = b.caret
+  i == (by < 0 ? 1 : length(b.lines)) || return false
+  f = flow(sub, i)
+  k, _ = spot(f, col)
+  k == (by < 0 ? 1 : length(f.lines))
+end
+
+"""
+What ↑ and ↓ do in the words that you type in the pane `p`: they bring back
+the words that you gave an agent before in the same folder, as a terminal
+does. ↑ brings older words when the caret is on the field's top line, and ↓
+newer ones when it's on the bottom line. While the field shows words that
+came back, and you haven't changed them, each ↑ and ↓ goes on, wherever the
+caret is. ↓ after the newest words puts back what you were typing. ⌘Z puts
+back what the field showed before. True when the key is done with.
+"""
+recall_key!(p::AgentPane, w, K) = begin
+  (K in (Keys.up, Keys.down) && unmodified(w)) || return false
+  sub = p.field
+  b = sub.buf
+  by = K == Keys.up ? -1 : 1
+  text = join(b.lines, "\n")
+  r = get(sub.nodes, :recall, nothing)
+  showing = r !== nothing && r.at > 0 && text == r.list[r.at]
+  # While the list of commands shows over words that you typed, the arrows are the list's
+  showing || (on_edge(sub, by) && isempty(slash_rows(p, text))) || return false
+  r === nothing && (r = sub.nodes[:recall] = Recall(list=said_before(said_file(), pane_dir(p))))
+  at = r.at - by
+  0 <= at <= length(r.list) || return false   # nothing older or newer: the caret moves as usual
+  r.at == 0 && (r.typed = text)
+  r.at = at
+  edit!(b, (1, 0), line_end(b, length(b.lines)), at == 0 ? r.typed : r.list[at])
+  sub.goal = nothing
+  redraw_in!(editor(p), SOON)
+  true
 end
 
 # --- the list of commands over the field ---

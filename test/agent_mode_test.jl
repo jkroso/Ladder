@@ -781,6 +781,67 @@ try
     @test named("Outline") !== nothing && (named("Agent").width, named("Page card").left) == was[1:2]
   end
 
+  @testset "↑ and ↓ bring back the words that you gave the agent before in the same folder, as a terminal does" begin
+    # The words that you sent are kept beside the settings file, so a test's words are its own
+    folder = K.pane_dir(pane)
+    @test folder == pane.session.dir && K.said_file() == joinpath(dir, "prompts")
+    @test "Make a table" in K.said_before(K.said_file(), folder)
+    kept = K.SETTINGS_FILE[]
+    typing = pane.field   # the next tests want the words that the test before typed
+    K.SETTINGS_FILE[] = joinpath(mktempdir(), "settings")
+    try
+      file = K.said_file()
+      K.keep_said!(file, folder, "Older words")
+      K.keep_said!(file, joinpath(dir, "elsewhere"), "Words of another folder")
+      K.keep_said!(file, folder, "Make the title bigger\nand bold")
+      K.keep_said!(file, folder, "Fix the typo")
+      K.keep_said!(file, folder, "Fix the typo")
+      # The words of another folder don't come back, and the same words twice in a row come back once
+      @test K.said_before(file, folder) == ["Fix the typo", "Make the title bigger\nand bold", "Older words"]
+      K.pane_field!(pane); K.focus(pane.field); frames()
+      lines() = pane.field.buf.lines
+      typed("half")
+      press(Keys.up)
+      @test lines() == ["Fix the typo"] && pane.field.buf.caret == (1, 12)
+      # While the field shows words that came back, ↑ goes on, though the caret is on the last of their lines
+      press(Keys.up)
+      @test lines() == ["Make the title bigger", "and bold"] && pane.field.buf.caret == (2, 8)
+      press(Keys.up)
+      @test lines() == ["Older words"]
+      # Nothing is older, so the caret moves as usual
+      press(Keys.up)
+      @test lines() == ["Older words"] && pane.field.buf.caret == (1, 0)
+      press(Keys.down); press(Keys.down)
+      @test lines() == ["Fix the typo"]
+      # ↓ after the newest words puts back what you were typing, and then it moves the caret
+      press(Keys.down)
+      @test lines() == ["half"]
+      press(Keys.down)
+      @test lines() == ["half"] && pane.field.buf.caret == (1, 4)
+      # Words that came back and that you change are yours: ↑ moves the caret up their lines, and on the top line it goes on
+      press(Keys.up); press(Keys.up)
+      typed(" now")
+      @test lines() == ["Make the title bigger", "and bold now"]
+      press(Keys.up)
+      @test lines() == ["Make the title bigger", "and bold now"] && pane.field.buf.caret[1] == 1
+      press(Keys.up)
+      @test lines() == ["Older words"]
+      # ⌘Z puts back what the field showed before
+      press(Keys.z, Keys.cmd)
+      @test lines() == ["Make the title bigger", "and bold now"]
+      # Words that start with a slash come back too, and the next ↑ goes on from them, not into the list of commands
+      K.keep_said!(file, folder, "/new")
+      K.pane_field!(pane); K.focus(pane.field); frames()
+      press(Keys.up)
+      @test lines() == ["/new"] && !isempty(K.slash_rows(pane, "/new"))
+      press(Keys.up)
+      @test lines() == ["Fix the typo"]
+    finally
+      K.SETTINGS_FILE[] = kept
+      pane.field = typing; K.focus(pane.field); frames()
+    end
+  end
+
   @testset "A drag of the strip beside the card gives the agent or the page more of the window" begin
     move(x, y) = (w.mouse = typeof(w.mouse)(x, y); onmouse(w, MouseMove(w.mouse, w)); frames(w, 2))
     hold() = (w.keys |= Keys.mouse_left; onkey(w, KeyPress{Keys.mouse_left}(0, w)); frames(w, 1))
