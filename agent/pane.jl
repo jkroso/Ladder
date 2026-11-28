@@ -82,8 +82,8 @@ pane_field!(p::AgentPane) = (p.field = small_editor(PaneField(p), parent=p))
 "The editor of a reply of the agent, which the pane `p` of the window of `e` shows as a page that's never changed. A link in it opens in the window."
 reply_editor(p::AgentPane, e, dir) = begin
   sub = small_editor(PaneReply(p), Buffer(path=reply_page(dir), fixed=true, reading=true), parent=p)
-  sub.nodes[:host] = e
-  sub.nodes[:span] = (1, 1)
+  host!(sub, e)
+  span!(sub, (1, 1))
   sub
 end
 
@@ -139,7 +139,7 @@ show_reply!(sub, it::AgentReply) = begin
   b.lines = String.(split(rstrip(it.text), '\n'))
   b.version = (stamp[] += 1)   # a number that no other version has had, as an edit gives
   b.caret = b.anchor = (1, 0)
-  sub.nodes[:span] = (1, length(b.lines))
+  span!(sub, (1, length(b.lines)))
   sub.nodes[:shown] = it.n
   sub
 end
@@ -1677,7 +1677,7 @@ pane_foot(p::AgentPane, e, room) = begin
   # While the model's button shows, the words flow round it: the last line ends before it, and its last words go onto
   # a new line when they'd reach it. The room stays while the mouse is on the send button, whose pill then covers it.
   model_room = model_shows(p, e) ? model_wide(p, e) + MODEL_GAP : 0px
-  end_room(sub) == model_room || (sub.nodes[:end_room] = model_room)
+  end_room(sub) == model_room || (ties(sub).end_room = model_room)
   # The ends come from the first line as it was last laid out. When it's laid out at another height, the words go again.
   pane_layout!(sub, room_for(one_line(sub, line)))
   one = one_line(sub, line)

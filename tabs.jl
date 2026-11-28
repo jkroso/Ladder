@@ -427,7 +427,7 @@ laid out: the page beside it needs its width. `side_part` shows it.
 side_tick!(e) = begin
   menu = side_menu(e, window_object(e))
   own = !(menu isa Sidebar)
-  e.nodes[:side_menu] = menu
+  window_parts(e).side_menu = menu
   e.nodes[:own_side_menu] = own
   least = own ? clamp(compact_width(menu), 0px, panel_w(e)) : 0px
   e.nodes[:side_least] = least
@@ -460,8 +460,8 @@ What's at the left of the window of `e`: Ladder's sidebar, or the side menu
 that a kind of folder has in its place, in the sidebar's room.
 """
 side_part(e) = begin
-  haskey(e.nodes, :side_menu) || side_tick!(e)
-  menu = e.nodes[:side_menu]
+  window_parts(e).side_menu === nothing && side_tick!(e)
+  menu = window_parts(e).side_menu
   menu isa Sidebar && return menu
   wide, shows = panel_w(e), menu_w(e)
   # A menu with a compact form narrows to it, and is laid out as wide as it shows

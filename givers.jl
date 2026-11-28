@@ -399,7 +399,7 @@ A sheet that's on no page has the names that the part that shows it gives:
 the sheet of a SolidCraft design's parameters has the design's.
 """
 sheet_given(e, upto::Int) = begin
-  outside = get(e.nodes, :sheet_names, nothing)
+  outside = ties(e).given
   outside === nothing || return outside
   b = e.buf
   given, spots = given_and_sums(e, upto, true)

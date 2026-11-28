@@ -147,7 +147,7 @@ cline(v, text) = findfirst(l -> occursin(text, l), v.sub.buf.lines)
   v = part(line("![[costs#Prices]]"))
   @test v !== nothing && isempty(v.note) && v.tall > 100px
   @test v.sub.buf.path == costs
-  s, t = v.sub.nodes[:span]
+  s, t = K.shown_span(v.sub)
   @test v.sub.buf.lines[s] == "## Prices" && v.sub.buf.lines[t] == "```"
   # The part's editor shows only the lines of the part
   @test first(v.sub.layout).first == s && last(v.sub.layout).last == t
@@ -184,7 +184,7 @@ end
   click(spot(v, j, length(v.sub.buf.lines[j])))
   key(Keys.enter); typed("Sand the walls")
   @test v.sub.buf.lines[j+1] == "- [ ] Sand the walls"
-  s, t = v.sub.nodes[:span]
+  s, t = K.shown_span(v.sub)
   @test s <= j + 1 <= t
   # ⌘Z takes it back in the other page
   key(Keys.z, Keys.cmd); key(Keys.z, Keys.cmd)
@@ -341,7 +341,7 @@ end
   j = paste_in_plan!()
   @test e.buf.lines[j] == "![[jobs#^kitchen]]"
   v = part(j)
-  @test v !== nothing && v.sub.nodes[:span] == (h, h + 5)
+  @test v !== nothing && K.shown_span(v.sub) == (h, h + 5)
   K.undo!(e.buf); frames()
   # Some of a block's words aren't a block
   K.open!(e, jobs); frames()

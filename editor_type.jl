@@ -33,7 +33,8 @@ export Item, Live, Grid, isspread, Glide, Editor, TopBar, Sidebar, Page, Documen
        GalleryView, TermSettings, TERM_SETTINGS, ViewBlock, ItemClock, PlainLine, Rect, TranscriptButton,
        FileCheck, DesignSheet, FolderPage, SourceChooser, SearchView, SearchChoice, ChoiceMenu, ChoiceRow,
        editors, EmailHead, EACH_FRAME, AT_QUIT, BAR_PARTS, BUTTONS, AgentKind, WebFolder, WebPage,
-       PAGE_WINDOWS, OutcomeBody, Bound, AgentPane, FileBlock, Things, each_thing, CodePicker
+       PAGE_WINDOWS, OutcomeBody, Bound, AgentPane, FileBlock, Things, each_thing, CodePicker,
+       Ties, ties, host!, shown_span, span!, WindowParts, window_parts
 
 # --- what a window holds ---------------------------------------------------------
 
@@ -303,14 +304,14 @@ child of `parent`: the owner, when the owner is a part of the window itself.
 small_editor(owner, buf::Buffer=Buffer(); parent=owner) = begin
   sub = Editor()
   sub.buf = buf
-  sub.nodes[:input] = own!(sub, TextInput())
-  sub.nodes[:owner] = owner
+  window_parts(sub).input = own!(sub, TextInput())
+  ties(sub).owner = owner
   setfield!(sub, :parent, parent)
   sub
 end
 
 "The part of the window that the small editor `e` is the text of, or nothing for a window's own editor"
-owner_of(e) = get(e.nodes, :owner, nothing)
+owner_of(e) = ties(e).owner
 
 """
 What the key `K` does in the small editor `e` of `owner`, in the window `w`,
@@ -347,6 +348,49 @@ default for each field.
 """
 state_of(e, ::Type{T}) where T = get!(T, e.nodes, T)::T
 
+# --- what a window keeps for more than one file --------------------------------------------
+#
+# Most of what a window keeps is one file's own, and its struct is in that
+# file. These are the window's own: files that load before and after one
+# another set them and read them. So their structs are here, where each file
+# finds them. A field takes a value of its own type only, since `@def` doesn't
+# convert what it's given.
+
+"""
+What ties a small editor to the window that it's in: the part of the window
+that it's the text of, and for one that shows lines of a page, the editor of
+the page that shows them. A window's own editor has neither.
+"""
+@def mutable struct Ties
+  owner::Any = nothing                            # the part of the window that it's the text of: see `owner_of`
+  host::Union{Nothing,Editor} = nothing           # the editor of the page that shows it: see `hosted`
+  span::Union{Nothing,Tuple{Int,Int}} = nothing   # the first and the last of the lines of its page that it shows: see `shown_span`
+  end_room::px = 0px                              # the room that its last line leaves free at its right end: see `end_room`
+  # The names that the part that shows it gives a sheet in it, each with its value: see `sheet_given`
+  given::Union{Nothing,Vector{Tuple{String,Any}}} = nothing
+end
+
+"What ties the editor `e` to the window that it's in: see `Ties`"
+ties(e) = state_of(e, Ties)
+
+"Note that the page of the editor `e` shows the lines that the small editor `sub` edits"
+host!(sub, e) = (ties(sub).host = e; sub)
+
+"The first and the last of the lines of its page that `e` shows: the editor of a part of another page, or of a reply of an agent"
+shown_span(e) = ties(e).span::Tuple{Int,Int}
+
+"Note that `sub` shows the lines `span` of its page: the first and the last"
+span!(sub, span) = (ties(sub).span = span; sub)
+
+"The parts of a window that its editor keeps for more than one file"
+@def mutable struct WindowParts
+  input::Union{Nothing,TextInput} = nothing   # the text field of the file finder. A small editor has one too, which nothing shows.
+  side_menu::Any = nothing                    # what's at the left of the window in this frame: Ladder's sidebar, or the side menu of a kind of folder. See `side_tick!`.
+end
+
+"The parts of the window of `e` that more than one file asks for: see `WindowParts`"
+window_parts(e) = state_of(e, WindowParts)
+
 # --- what the parts of a window ask of it ------------------------------------------------
 
 "The folder of the document that's showing. The sidebar can show another folder."
@@ -356,7 +400,7 @@ docdir(e) = isempty(e.buf.path) ? e.folder : dirname(e.buf.path)
 item(e, i::Int) = e.layout[something(findfirst(it -> it.first <= i <= it.last, e.layout), length(e.layout))]
 
 "The editor of the page that shows the part of a page that `e` edits, or nothing when `e` is the window's own"
-hosted(e) = get(e.nodes, :host, nothing)
+hosted(e) = ties(e).host
 
 "The editor of the window that `e` is in: `e`, or the editor of the page that shows the part that `e` edits, and so on up"
 top_editor(e) = (h = hosted(e); h === nothing ? e : top_editor(h))

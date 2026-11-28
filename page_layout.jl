@@ -173,7 +173,7 @@ layout!(e, width=text_width(e)) = begin
   n::Int = length(b.lines)
   # The lines of a block that went down a level from the window it filled show by themselves, and so do
   # the lines of a part of this page that another page shows
-  span = hosted(e) === nothing ? lowered(e) : e.nodes[:span]
+  span = hosted(e) === nothing ? lowered(e) : shown_span(e)
   span === nothing || ((i, n) = span)
   # The email as it was sent, with the lines that it stands for, or nothing when the page shows its lines
   sent = span === nothing ? sent_email(e) : nothing

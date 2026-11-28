@@ -456,7 +456,7 @@ end
 
 "Keep the caret, and each selection, in the lines that fill the window, or in the part of a page that another page shows"
 confine!(e) = begin
-  span = hosted(e) === nothing ? lowered(e) : e.nodes[:span]
+  span = hosted(e) === nothing ? lowered(e) : shown_span(e)
   span === nothing && return e
   b = e.buf
   s, t = span

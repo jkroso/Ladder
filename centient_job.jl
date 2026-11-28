@@ -256,7 +256,7 @@ bar_row(t::TopBar, inks=(nothing, nothing, nothing)) = begin
   # A side menu with a compact form is always there, so the bar's own button that shows and hides the sidebar goes.
   # The menu can have a button of its own in that place: see `side_button`.
   toggles = !full && side_least(e) == 0px
-  own_button = full || toggles ? nothing : side_button(e.nodes[:side_menu])
+  own_button = full || toggles ? nothing : side_button(window_parts(e).side_menu)
   buttons = full ? () : ((toggles ? (button(e, :panel, "layout-sidebar"),) : own_button === nothing ? () : (own_button,))..., hidden_button(e)...)
   # The two arrows are at the sidebar's right edge, as far in as the right end of a row of its list. They
   # ride on that edge while the sidebar slides open, once it has passed the other buttons.

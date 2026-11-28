@@ -368,7 +368,7 @@ follow_page!(s::DesignSheet) = begin
     s.names = (version, Tuple{String,Any}[(String(p["name"]), Given(x)) for p in Designs.every_param(v)
                                           for x in (Designs.Expressions.value_of(p),) if x !== nothing])
   end
-  sub.nodes[:sheet_names] = s.names[2]
+  ties(sub).given = s.names[2]
   s
 end
 

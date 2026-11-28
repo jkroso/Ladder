@@ -583,7 +583,7 @@ How much room the last line of the text of `e` leaves free at its right end,
 for a button that lies over the end of the words there, like the model's
 button in the field of an agent's pane. Usually none.
 """
-end_room(e) = get(e.nodes, :end_room, 0px)::px
+end_room(e) = ties(e).end_room
 
 """
 Lay out `text`, line `i` of the document, which is a line of the kind `line`,

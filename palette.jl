@@ -478,7 +478,7 @@ in_focus(e) = begin
   hold(node) = (path = chosen_path(node); path === nothing || add(thing(path)); add(node))
   w = window_of(e)
   b = e.buf
-  field = get(e.nodes, :input, nothing)
+  field = window_parts(e).input
   node = w === nothing ? nothing : w.focus
   while node isa SemanticUI && node !== e
     node === field || node isa CommandPalette || hold(node)
@@ -934,7 +934,7 @@ close_palette!(e) = begin
   # The part of the page that had the keyboard gets it back, if it still shows, so that it's still the one in focus
   had = p.had
   p.had = nothing
-  focus(had isa SemanticUI && had !== get(e.nodes, :input, nothing) && part_of(had, e) && rect(had) !== nothing ? had : e)
+  focus(had isa SemanticUI && had !== window_parts(e).input && part_of(had, e) && rect(had) !== nothing ? had : e)
   nothing
 end
 

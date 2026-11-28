@@ -280,7 +280,7 @@ show_part!(v::Transclusion, e, target::String) = begin
   end
   span === nothing && return note("$shown has no $(isempty(part) ? "lines" : part)")
   v.note = ""
-  sub.nodes[:span] = span
+  span!(sub, span)
   sub.nodes[:kept] = (span, length(b.lines))
   # While no part of this page has the other page's caret, every line of the part shows as it reads
   (w !== nothing && w.focus isa Editor && w.focus.buf === b) || (b.reading = true; sub.plain = false)
@@ -295,7 +295,7 @@ end
 part_editor(v::Transclusion, e, path) = begin
   sub = small_editor(v, get!(() -> load(path), e.buffers, path))
   sub.buffers = e.buffers
-  sub.nodes[:host] = e
+  host!(sub, e)
   sub
 end
 
@@ -396,7 +396,7 @@ onmouse(::PartSource, ::MouseMove) = handled
 "Show the page that `v` shows a part of, with the part's first line near the top of the window"
 open_part!(v::Transclusion) = begin
   top = top_editor(editor(v))
-  s = v.sub === nothing ? 1 : get(v.sub.nodes, :span, (1, 1))[1]
+  s = v.sub === nothing ? 1 : something(ties(v.sub).span, (1, 1))[1]
   open!(top, v.path)
   show_line!(top, s)
   top.nodes[:hold] = (s, 24px - PAGE_TOP)
@@ -411,7 +411,7 @@ enter_shown!(v::Transclusion, at=nothing) = begin
   sub = v.sub
   (sub === nothing || !isempty(v.note)) && return nothing
   b = sub.buf
-  s, t = sub.nodes[:span]
+  s, t = shown_span(sub)
   b.reading = false
   b.caret = b.anchor = settle(b, something(at, (s, 0)), 1)
   confine!(sub)
@@ -450,7 +450,7 @@ shows the part's lines as they're written.
 """
 owner_key!(::Transclusion, e, w, K, command, select) = begin
   b = e.buf
-  s, t = e.nodes[:span]
+  s, t = shown_span(e)
   kind = command === nothing ? :none : COMMANDS[command].kind
   K == Keys.escape && unmodified(w) && return (leave_part!(e); handled)
   if command == :plain

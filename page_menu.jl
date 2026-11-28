@@ -115,7 +115,7 @@ select_all!(e) = begin
   b = e.buf
   b.reading = false   # a selection shows the caret's end of it
   # In a part of another page, it's all of the part
-  s, t = hosted(e) === nothing ? (1, length(b.lines)) : e.nodes[:span]
+  s, t = hosted(e) === nothing ? (1, length(b.lines)) : shown_span(e)
   b.anchor, b.caret = (s, 0), line_end(b, t)
   e
 end

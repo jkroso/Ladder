@@ -137,8 +137,8 @@ blank_editor() = begin
   load_sheet_font()
   load_omni_font()
   load_site_font()
-  e.nodes[:input] = own!(e, TextInput(placeholder="Find a file", font_family=SANS, font_size=15px,
-                                      look=(_, text) -> Row(width(grow=grow), height(grow=grow), clip=true, text)))
+  window_parts(e).input = own!(e, TextInput(placeholder="Find a file", font_family=SANS, font_size=15px,
+                                              look=(_, text) -> Row(width(grow=grow), height(grow=grow), clip=true, text)))
   e
 end
 

@@ -202,7 +202,7 @@ go_folder!(e, folder) = begin
   e.files_scroll.offset = 0px
   e
 end
-input(e) = e.nodes[:input]::TextInput
+input(e) = window_parts(e).input::TextInput
 
 "The takeoff of the page that fills the window, or nothing"
 full_takeoff(e) = (v = full_block(e); v isa TakeoffView ? v : nothing)
