@@ -52,7 +52,20 @@ export NAMES_SHOWN, NAME, NO_NAMES, no_names, page_names, scope_names, Syntax, N
        how_made, value_note, CALL_SHOWN, CALL_LINES, Bracket, given_name, next_value!, open_brackets,
        caret_brackets, scope, named_value, method_parts, key_notes, call_lines, method_lines, takes_more,
        takes, caret_part, call_names, calling, call_typed!, call_shown, call_key!, call_pieces, call_fit,
-       callbox, KeptFileNames, kept_file_names, JustTyped, typed_here!, just_typed
+       callbox, KeptFileNames, kept_file_names, JustTyped, typed_here!, just_typed, NamesState, OpenCall
+
+"What a window keeps of the names that its page's code can use, between frames"
+@def mutable struct NamesState
+  scope::Union{Nothing,Tuple{Any,UInt,NTuple{2,Vector{String}}}} = nothing   # the module of the page's code, the age of Julia's world, and the lists of names then: see `scope_names`
+  key_notes::Dict{String,String} = Dict{String,String}()                     # what the list says at the right of each name that the function of a call gives a value: see `name_notes`
+  bounds::Union{Nothing,Tuple{Tuple{String,Int},Vector{Bound}}} = nothing    # the page and its version, and the names that its Julia code made then: see `page_bounds`
+end
+
+"What a window keeps of the box of the call that the caret is in, between frames"
+@def mutable struct OpenCall
+  calling::Union{Nothing,@NamedTuple{path::String, open::Pos, hidden::Bool}} = nothing   # where the box of the open call is, and whether esc hid it
+  shown::Union{Nothing,Tuple{Any,Any}} = nothing                                         # what the box was last worked out for, and what it shows: see `call_shown`
+end
 
 const NAMES_SHOWN = 8                         # the most names in the list
 
@@ -101,13 +114,13 @@ something makes a new name.
 scope_names(e) = begin
   m = something(made_workspace(e), window_modules(e).sandbox, Some(nothing))
   world = Base.get_world_counter()
-  kept = get(e.nodes, :scope, nothing)
+  kept = state_of(e, NamesState).scope
   kept !== nothing && kept[1] === m && kept[2] == world && return kept[3]
   named(list) = String[s for s in (string(n) for n in list) if occursin(r"^[\p{L}_@]", s)]
   mine(n) = !(n in (nameof(m), :eval, :include, :Kip, :Usual, :SheetUnits))
   lists = m === nothing ? (String[], named([names(Base); names(Core)])) :
           (named(filter(mine, Base.invokelatest(names, m, all=true, imported=true))), named(Base.invokelatest(names, m, usings=true)))
-  e.nodes[:scope] = (m, world, lists)
+  state_of(e, NamesState).scope = (m, world, lists)
   lists
 end
 
@@ -165,7 +178,7 @@ code_offered(e) = begin
     lowercase(key) == typed || note!(key * given, -1, k)
   end
   # The list says the type of each of them at its right: see `name_notes`
-  e.nodes[:key_notes] = Dict{String,String}(key * given => get(said, key, "") for key in keys)
+  state_of(e, NamesState).key_notes = Dict{String,String}(key * given => get(said, key, "") for key in keys)
   if only
     isempty(found) && return nothing
     return (i, start, [name for (_, _, _, name) in first(sort!(found), NAMES_SHOWN)])
@@ -553,7 +566,7 @@ end
 "The names that the page's Julia code makes, from every block of it. They're kept until the text changes."
 page_bounds(e) = begin
   b = e.buf
-  kept = get(e.nodes, :bounds, nothing)
+  kept = state_of(e, NamesState).bounds
   kept !== nothing && kept[1] == (b.path, b.version) && return kept[2]
   ks = kinds(b)
   julia(i) = ks[i].kind == Kind.code && !no_names(ks[i].lang) && shared_lang(ks[i].lang) == "julia"
@@ -568,7 +581,7 @@ page_bounds(e) = begin
     j > i && append!(found, read_names(b.lines[i:j-1], i))
     i = max(j, i + 1)
   end
-  e.nodes[:bounds] = ((b.path, b.version), found)
+  state_of(e, NamesState).bounds = ((b.path, b.version), found)
   found
 end
 
@@ -641,7 +654,7 @@ name_notes(e, i::Int, names) = begin
     ""
   end
   # A name that the function of a call gives a value says the type of that value: see `key_notes`
-  keys = get(e.nodes, :key_notes, Dict{String,String}())
+  keys = state_of(e, NamesState).key_notes
   map(names) do name
     haskey(keys, name) && return keys[name]
     startswith(name, '@') && return "macro"
@@ -966,7 +979,7 @@ call_names(e, word) = begin
 end
 
 "Where the box of the open call is, and whether esc hid it. Nothing when no call's box is open."
-calling(e) = get(e.nodes, :calling, nothing)
+calling(e) = state_of(e, OpenCall).calling
 
 """
 The character `c` was typed at the caret. The ( that starts a call opens the
@@ -985,7 +998,7 @@ call_typed!(e, c::Char) = begin
     # A call that's typed in a call whose box shows uses that box. A box that esc hid stays hidden for the rest of its call.
     (!state.hidden || c != '(') && return
   end
-  e.nodes[:calling] = (path=b.path, open=stack[k].open, hidden=false)
+  state_of(e, OpenCall).calling = (path=b.path, open=stack[k].open, hidden=false)
   nothing
 end
 
@@ -1000,10 +1013,10 @@ call_shown(e) = begin
   state = calling(e)
   state === nothing && return nothing
   b = e.buf
-  off() = (delete!(e.nodes, :calling); nothing)
+  off() = (state_of(e, OpenCall).calling = nothing; nothing)
   (state.path != b.path || caretless(b) || selecting(b)) && return off()
   key = (b.path, b.version, b.caret, Base.get_world_counter(), scope(e))
-  kept = get(e.nodes, :call_shown, nothing)
+  kept = state_of(e, OpenCall).shown
   kept !== nothing && kept[1] == key && return state.hidden ? nothing : kept[2]
   stack = caret_brackets(e)
   # The box is for the call that was typed and the calls in it, so it closes when the caret leaves that call
@@ -1027,14 +1040,14 @@ call_shown(e) = begin
     isempty(fitting) || (found = (name=String(last(split(t.name, '.'))), call=t, lines=first(fitting, CALL_SHOWN),
                                   more=max(0, length(fitting) - CALL_SHOWN)))
   end
-  e.nodes[:call_shown] = (key, found)
+  state_of(e, OpenCall).shown = (key, found)
   state.hidden ? nothing : found
 end
 
 "What esc does while the box of a call shows: it hides the box. It returns true when it did."
 call_key!(e, K) = begin
   (K == Keys.escape && call_shown(e) !== nothing) || return false
-  e.nodes[:calling] = (path=e.buf.path, open=calling(e).open, hidden=true)
+  state_of(e, OpenCall).calling = (path=e.buf.path, open=calling(e).open, hidden=true)
   touch!(e)
   true
 end
