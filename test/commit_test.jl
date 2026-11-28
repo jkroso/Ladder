@@ -40,7 +40,7 @@ const (; frames, click, typed, key) = drive(w, frames=3, pressed=1, latest=true,
 "Draw until git has answered, and then what it said is on the screen"
 again() = (G.forget!(); frames(2); G.wait!(); frames(2))
 "The button of the top bar that commits, or nothing"
-button() = (b = get(e.nodes, :commit, nothing); b !== nothing && !isempty(K.commit_part(e)) ? b : nothing)
+button() = (b = K.state_of(e, K.CommitState).button; b !== nothing && !isempty(K.commit_part(e)) ? b : nothing)
 subjects() = split(chomp(git("log", "--format=%s")), '\n')
 status() = strip(git("status", "--porcelain"))
 again()

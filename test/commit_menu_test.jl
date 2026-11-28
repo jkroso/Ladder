@@ -53,7 +53,7 @@ committed() = (t = time(); while (K.state_of(e, K.CommitState).writing !== nothi
 list_open() = any(p -> p.key == K.COMMIT_LIST, popups(w))
 "Click the chevron, and click the row of the way `way` in its list: :file, :part or :all"
 choose(way) = (click(rect(K.state_of(e, K.CommitState).more)); click(rect(e.nodes[(:commit_way, way)])); frames())
-commit_button() = e.nodes[:commit]
+commit_button() = K.state_of(e, K.CommitState).button
 said() = something(K.said_result(e), ("", 0.0))[1]
 subjects() = split(chomp(git("log", "--format=%s")), '\n')
 "Close the palette, and draw until it has slid away"

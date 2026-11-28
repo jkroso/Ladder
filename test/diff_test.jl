@@ -71,7 +71,7 @@ const CHANGED = replace(COMMITTED, "What this is." => "What this is, and what it
   b = button()
   @test b !== nothing
   # While what changed doesn't show, there are no chevrons between the two
-  c = e.nodes[:commit]
+  c = K.state_of(e, K.CommitState).button
   @test K.num(rect(b).left) < K.num(rect(c).left) <= K.num(rect(b).left + rect(b).width) + 4   # just before it
   @test K.tip(b) == "Show what changed in Readme.md since the last commit"
   @test !K.BUTTONS[:diff].on(e)
@@ -109,7 +109,7 @@ end
 
 @testset "while what changed shows, two chevrons are beside the diff button, one over the other" begin
   b = button()
-  up, down, c = rect(e.nodes[:previous_change]), rect(e.nodes[:next_change]), rect(e.nodes[:commit])
+  up, down, c = rect(e.nodes[:previous_change]), rect(e.nodes[:next_change]), rect(K.state_of(e, K.CommitState).button)
   right(r) = K.num(r.left + r.width)
   @test right(rect(b)) <= K.num(up.left) <= right(rect(b)) + 4
   @test K.num(up.left) == K.num(down.left) && K.num(up.top + up.height) <= K.num(down.top)
@@ -188,7 +188,7 @@ end
   frames()
   @test !K.diffing(e) && K.gone_now(e) === nothing
   # The chevrons go too, and the Commit button is just after the diff button again
-  @test K.num(rect(e.nodes[:commit]).left) <= K.num(rect(button()).left + rect(button()).width) + 4
+  @test K.num(rect(K.state_of(e, K.CommitState).button).left) <= K.num(rect(button()).left + rect(button()).width) + 4
   plain = plain_tops()
   frames()
   @test all(it -> K.num(it.top) ≈ plain[it.first], e.layout)
