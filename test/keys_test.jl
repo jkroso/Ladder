@@ -517,14 +517,14 @@ end
   click(w, row(:save))
   key(w, Keys.a)
   @test K.key_asking(e) == :save && keys(:save) == ["⌃S"]
-  @test occursin("types a character", e.nodes[:key_refused])
+  @test occursin("types a character", K.state_of(e, K.KeysAsked).refused)
   key(w, Keys.escape)
   @test K.key_asking(e) === nothing && keys(:save) == ["⌃S"]
   # The keys of another command go to this one, and a line under the row says so
   click(w, row(:save))
   key(w, Keys.o, cmd)
   @test keys(:save) == ["⌘O"] && isempty(keys(:open))
-  @test e.nodes[:key_note][1] == :save && occursin("Find a file by name", e.nodes[:key_note][2])
+  @test K.state_of(e, K.KeysAsked).note[1] == :save && occursin("Find a file by name", K.state_of(e, K.KeysAsked).note[2])
   # A key with ⌥ would type a character. The page's own text never gets it.
   click(w, row(:print))
   key(w, Keys.p, opt)

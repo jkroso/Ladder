@@ -77,7 +77,7 @@ export ADDED_ORDER, AT_EACH, AgentChoice, BUILDING_APP, BUNDLES, Bundle, COMMAND
        insert_block!, key_asking, key_bindings!, key_does!, keycap, keys!, keys_now, lost_note!,
        move_lines!, number_plus, pressed!, put_commands!, read_shortcuts, read_stroke, rebind!,
        select_lines!, select_next!, select_word!, side_button!, step_value!, stop_asking_keys!,
-       switch_agent!, toggle_comment!, touched, typing_key, with_added, TreeTook, tree_took!
+       switch_agent!, toggle_comment!, touched, typing_key, with_added, TreeTook, tree_took!, KeysState, KeysAsked
 
 # --- key bindings ------------------------------------------------------------------------
 #
@@ -107,6 +107,23 @@ end
 
 "The keys that run a command: one stroke, or two that are pressed one after the other"
 const Shortcut = Tuple{Vararg{Stroke}}
+
+"What a window keeps of its key bindings and of the keys that were just pressed, between frames"
+@def mutable struct KeysState
+  # The key bindings as `keys_now` last made them, with the bundle, the changed shortcuts and the count of commands that they were made for
+  made::Union{Nothing,@NamedTuple{bundle::String, rebound::Dict{Symbol,String}, of::Dict{Symbol,Vector{Shortcut}}, commands::Dict{Shortcut,Symbol},
+                                  also::Dict{Shortcut,Vector{Symbol}}, starts::Set{Stroke}, count::Int}} = nothing
+  stroke::Union{Nothing,Stroke} = nothing   # the first key of a shortcut of two, while the window waits for the second
+  mute::Float64 = 0.0                       # when a key that types a character ran a command, so that its character is dropped
+  stepped::Int = -1                         # the version of the text after `step_value!` last changed it
+end
+
+"What a window keeps of the key bindings page while you give a command new keys"
+@def mutable struct KeysAsked
+  asking::Union{Nothing,Symbol} = nothing   # the command whose row waits for new keys
+  note::Tuple{Symbol,String} = (:none, "")  # a command, and what the list says under its row: see `lost_note!`
+  refused::Union{Nothing,String} = nothing  # why the row didn't take the keys that were pressed, in words
+end
 
 # The keys that are held with another key: the name that the settings file has for each, and the Mac's sign for it
 const HOLDS = ((Keys.ctrl, "ctrl", "⌃"), (Keys.cmd, "cmd", "⌘"), (Keys.opt, "opt", "⌥"), (Keys.shft, "shift", "⇧"))
@@ -609,10 +626,10 @@ step_value!(e, steps::Int) = begin
   lo, hi, new = found
   caret, anchor = b.caret, b.anchor
   # A press right after a press, with no other change between them, is taken back with it
-  b.typed = get(e.nodes, :value_stepped, -1) == b.version ? time() : 0.0
+  b.typed = state_of(e, KeysState).stepped == b.version ? time() : 0.0
   edit!(b, (i, lo), (i, hi), new, typing=true)
   b.typed = 0.0   # and what's typed after it is taken back by itself
-  e.nodes[:value_stepped] = b.version
+  state_of(e, KeysState).stepped = b.version
   # A place in the number stays as far from its end as it was, so the caret at the end of 9 is at the end of 10
   by = length(new) - (hi - lo)
   kept(p) = p[1] != i || p[2] <= lo ? p : (i, max(lo, p[2] + by))
@@ -831,7 +848,7 @@ command of each shortcut, and `starts` each stroke that starts a shortcut of two
 `also` has the other commands of a shortcut that two or more commands have.
 """
 keys_now(e) = begin
-  made = get(e.nodes, :keys, nothing)
+  made = state_of(e, KeysState).made
   # Code from the startup page can add commands, so the bindings are made again when there are more
   made !== nothing && made.bundle == e.bundle && made.rebound === e.rebound && made.count == length(COMMANDS) && return made
   of = bundle_keys(e.bundle)
@@ -845,7 +862,7 @@ keys_now(e) = begin
     haskey(commands, s) ? push!(get!(Vector{Symbol}, also, s), c.name) : (commands[s] = c.name)
   end
   starts = Set{Stroke}(first(s) for s in keys(commands) if length(s) == 2)
-  e.nodes[:keys] = (bundle=e.bundle, rebound=e.rebound, of=of, commands=commands, also=also, starts=starts, count=length(COMMANDS))
+  state_of(e, KeysState).made = (bundle=e.bundle, rebound=e.rebound, of=of, commands=commands, also=also, starts=starts, count=length(COMMANDS))
 end
 
 """
@@ -878,13 +895,14 @@ command!(e, w, K) = begin
   (ismouse(K) || K in HELD || K == Keys.capslock || K == Keys.fn) && return (nothing, false)
   ks = keys_now(e)
   s = Stroke(w.keys & HELD, K)
-  before = pop!(e.nodes, :stroke, nothing)
+  kept = state_of(e, KeysState)
+  before, kept.stroke = kept.stroke, nothing
   name, select = if before !== nothing
     (something(command_here(e, ks, (before, s)), :wait), false)
   elseif haskey(ks.commands, (s,))
     (command_here(e, ks, (s,)), false)
   elseif s in ks.starts
-    e.nodes[:stroke] = s
+    kept.stroke = s
     (:wait, false)
   else
     # ⇧ with the keys of a command that moves the caret grows the selection. With a key like ⌫, it changes nothing.
@@ -893,7 +911,7 @@ command!(e, w, K) = begin
     kind == :move ? (found, true) : kind == :type ? (found, false) : (nothing, false)
   end
   # A key that types a character types nothing when it's the key of a command, like ⌥F in the Emacs bundle
-  name !== nothing && typing_key(K) && !(Keys.cmd in s.held) && !(Keys.ctrl in s.held) && (e.nodes[:mute] = time())
+  name !== nothing && typing_key(K) && !(Keys.cmd in s.held) && !(Keys.ctrl in s.held) && (kept.mute = time())
   (name, select)
 end
 
@@ -919,7 +937,7 @@ keys!(e, bundle::String, rebound::Dict{Symbol,String}) = begin
   usual = bundle_keys(bundle)
   # A command that has the bundle's own shortcuts again isn't changed any more
   e.bundle, e.rebound = bundle, filter(((name, text),) -> haskey(usual, name) && read_shortcuts(text) != usual[name], rebound)
-  delete!(e.nodes, :stroke)
+  state_of(e, KeysState).stroke = nothing
   save_settings!(e)
   rerun!(e, :bundle)
   rerun!(e, :rebound)
@@ -989,17 +1007,17 @@ keycap(s::Shortcut) = Box(height(22px), padding(7px, 0px), radius(5px), backgrou
                           label(caps(s), 12px, color=colours.ink))
 
 "The command whose row waits for new keys, or nothing"
-key_asking(e) = get(e.nodes, :key_asking, nothing)
+key_asking(e) = state_of(e, KeysAsked).asking
 
 "Stop waiting for a command's new keys, and give the keyboard back to the text"
-stop_asking_keys!(e) = (delete!(e.nodes, :key_asking); focus(e); handled)
+stop_asking_keys!(e) = (state_of(e, KeysAsked).asking = nothing; focus(e); handled)
 
 "What the list says under the row of `name`, after its new keys took the keys of the commands in `lost`"
 lost_note!(e, name::Symbol, lost) = begin
-  isempty(lost) && return delete!(e.nodes, :key_note)
+  isempty(lost) && return (state_of(e, KeysAsked).note = (:none, ""))
   titles = [COMMANDS[other].title for other in lost]
   none = [other for other in lost if isempty(keys_now(e).of[other])]
-  e.nodes[:key_note] = (name, "\"$(join(titles, "\", \"", "\" and \""))\" had $(length(lost) == 1 ? "this key" : "these keys") before." *
+  state_of(e, KeysAsked).note = (name, "\"$(join(titles, "\", \"", "\" and \""))\" had $(length(lost) == 1 ? "this key" : "these keys") before." *
                               (isempty(none) ? "" : length(lost) == 1 ? " It has no key now." : " $(length(none)) of them have no key now."))
 end
 
@@ -1017,11 +1035,11 @@ describe(r::KeyRow) = begin
   w = window_of(e)
   waits = key_asking(e) == r.name
   # A click somewhere else gives the keyboard to something else, and the row stops waiting
-  waits && (w === nothing || w.focus !== r) && (delete!(e.nodes, :key_asking); waits = false)
+  waits && (w === nothing || w.focus !== r) && (state_of(e, KeysAsked).asking = nothing; waits = false)
   list = keys_now(e).of[r.name]
-  under = get(e.nodes, :key_note, (:none, ""))
+  under = state_of(e, KeysAsked).note
   # Words by themselves would take half of the row, so each is in a box that's as wide as the words
-  right = waits ? (Box(label(get(e.nodes, :key_refused, "Press the new keys, or esc to keep these"), 12px, color=colours.accent)),) :
+  right = waits ? (Box(label(something(state_of(e, KeysAsked).refused, "Press the new keys, or esc to keep these"), 12px, color=colours.accent)),) :
           isempty(list) ? (Box(label("No keys", 12px, color=colours.faint)),) : map(keycap, list)
   row = Row(width(grow=grow), height(KEY_ROW_H), padding(10px, 0px), radius(6px), child_gap=6px, name="Command",
             background(waits ? colours.active : ishovered(r) ? colours.hover : clear),
@@ -1038,9 +1056,8 @@ cursor(::KeyRow) = :hand
 
 onkey(r::KeyRow, ::KeyPress{Keys.mouse_left}) = begin
   e = editor(r)
-  e.nodes[:key_asking] = r.name
-  delete!(e.nodes, :key_refused)
-  delete!(e.nodes, :key_note)
+  asked = state_of(e, KeysAsked)
+  asked.asking, asked.refused, asked.note = r.name, nothing, (:none, "")
   focus(r)
   handled
 end
@@ -1054,12 +1071,12 @@ onkey(r::KeyRow, ev::KeyPress{K}) where K = begin
   K == Keys.escape && return stop_asking_keys!(e)
   s = Stroke(ev.window.keys & HELD, K)
   # The text gets the keyboard back before the key types its character, like the π of ⌥P, so the character is dropped
-  typing_key(K) && !(Keys.cmd in s.held) && !(Keys.ctrl in s.held) && (e.nodes[:mute] = time())
+  typing_key(K) && !(Keys.cmd in s.held) && !(Keys.ctrl in s.held) && (state_of(e, KeysState).mute = time())
   if typing_key(K) && !(Keys.cmd in s.held) && !(Keys.ctrl in s.held) && !(Keys.opt in s.held)
-    e.nodes[:key_refused] = "$(caps(s)) types a character. Hold ⌘, ⌃ or ⌥ with it."
+    state_of(e, KeysAsked).refused = "$(caps(s)) types a character. Hold ⌘, ⌃ or ⌥ with it."
     return handled
   elseif K == Keys.enter && s.held == Keys(0)
-    e.nodes[:key_refused] = "Return starts a new line. Hold ⌘, ⌃, ⌥ or ⇧ with it."
+    state_of(e, KeysAsked).refused = "Return starts a new line. Hold ⌘, ⌃, ⌥ or ⇧ with it."
     return handled
   end
   lost_note!(e, r.name, rebind!(e, r.name, (s,)))
@@ -1238,7 +1255,9 @@ end
 # emoji list. A key that's held with ⌘ types nothing.
 ontype(e::Editor, ev::Typed) = begin
   # The key that types this just ran a command, like ⌥F in the Emacs bundle, so it types nothing
-  time() - pop!(e.nodes, :mute, 0.0) < 0.5 && return handled
+  kept = state_of(e, KeysState)
+  muted, kept.mute = kept.mute, 0.0
+  time() - muted < 0.5 && return handled
   # A character that a part of a live block didn't take comes here next. It isn't for the text.
   ev.window.focus === e || return nothing
   zooming(e) === nothing || return handled   # the page under a picture that fills the window doesn't change
