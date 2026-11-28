@@ -55,6 +55,9 @@ end
 
 @testset "a right-click on the top bar beside the name shows no menu" begin
   r = rect(title())
+  # The mouse comes from the page. When it rests on the name, the file's path shows over this part of the bar,
+  # and a right-click there is on a folder of the path.
+  at((500, 400))
   right_click((K.num(r.left) - 40, K.num(r.top) + K.num(r.height) / 2))
   @test menu() === nothing
 end
@@ -145,7 +148,8 @@ end
 
 @testset "Rename in the sidebar's menu still puts the field in the sidebar" begin
   K.toggle_panel!(e)
-  frames(30)   # the sidebar slides in
+  e.slid = 0.0   # the sidebar is all the way in at once. 30 quick frames take less time than the slide does.
+  frames(3)
   other = joinpath(dir, "other.md")
   label = only(n for n in K.items(K.file_tree(e)) if n.firstchild isa K.FileLabel && n.firstchild.path == other).firstchild
   right_click(middle(rect(label)))
