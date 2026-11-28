@@ -31,9 +31,12 @@ headings(path) = (lines = K.text(path); [K.heading_slug(K.rest(lines[i], l.prefi
 
 @testset "each link goes somewhere" begin
   @test length(links) > 10
+  # Two pages are in no copy of Ladder until it has started there, since Ladder writes them when it starts: the startup
+  # page and the page of the ignored files. A link to one of them goes to where Ladder writes it.
+  written = normpath.((K.startup_page(), K.Folders.page()))
   for link in links
     file, heading = parts(link)
-    @test isfile(joinpath(pages, file))
+    @test isfile(joinpath(pages, file)) || normpath(joinpath(pages, file)) in written
     isempty(heading) || @test heading in headings(joinpath(pages, file))
   end
 end
@@ -47,7 +50,8 @@ end
   end
   # Every kind of block has an example in the welcome page or a page that it links to. `web` is the name that a `view`
   # block had before, which still works, and the pages use the new one.
-  text = join((read(joinpath(pages, file), String) for file in unique([linked; "welcome.md"]) if K.ismarkdown(file)), "\n")
+  # A page that Ladder writes when it starts may not be there yet, and has no example that the other pages lack
+  text = join((read(joinpath(pages, file), String) for file in unique([linked; "welcome.md"]) if K.ismarkdown(file) && isfile(joinpath(pages, file))), "\n")
   @test !occursin("\n```$(K.WEBVIEW)\n", text)
   for lang in [K.LIVE, K.SHEET, K.SPREADSHEET, K.DIAGRAM, K.TAKEOFF, K.SCHEDULE, "julia", filter(!=(K.WEBVIEW), keys(K.BLOCKS))...]
     @test occursin("\n```$lang\n", text)
