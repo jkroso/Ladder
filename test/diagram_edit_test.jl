@@ -118,8 +118,11 @@ end
   command(Keys.z, Keys.shft)
   @test block() == replace(CODE, "A[Write a page]" => "A[Draft it]")
   command(Keys.z)
-  # Esc leaves the words as they were
+  # Esc leaves the words as they were. This click is long after the two above. In a process that has run this code
+  # before, it comes within the 0.4 s of a second click, and would start the typing itself.
+  m.clicked = (0.0, 0.0, 0.0)
   click(spot((:box, "A")))
+  @test m.typing === nothing
   key(Keys.enter)
   @test m.typing == (:box, "A")
   type("x")
