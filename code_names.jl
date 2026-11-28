@@ -22,6 +22,7 @@
 # second character. It doesn't show in a string or a comment, after a dot, for
 # a word of the language like `end`, or when what's typed is a whole name.
 
+@use "github.com/jkroso/Prospects.jl" @def
 @use "github.com/jkroso/MiniFB.jl"... onfiledrop onscroll
 @use "github.com/jkroso/UI.jl/Interface/Geometric"...
 @use "github.com/jkroso/UI.jl/Interface/Specific"...
@@ -51,9 +52,20 @@ export NAMES_SHOWN, NAME, NO_NAMES, no_names, page_names, scope_names, Syntax, N
        how_made, value_note, CALL_SHOWN, CALL_LINES, Bracket, given_name, next_value!, open_brackets,
        caret_brackets, scope, named_value, method_parts, key_notes, call_lines, method_lines, takes_more,
        takes, caret_part, call_names, calling, call_typed!, call_shown, call_key!, call_pieces, call_fit,
-       callbox
+       callbox, KeptFileNames, kept_file_names, JustTyped, typed_here!, just_typed
 
 const NAMES_SHOWN = 8                         # the most names in the list
+
+"Where a character was last typed, which the window keeps so that a list of names is offered only just after one is typed"
+@def mutable struct JustTyped
+  at::Union{Nothing,Tuple{String,Int,Pos}} = nothing   # the page, its version after the character, and the caret
+end
+
+"Note that a character was typed at the caret of `e` just now"
+typed_here!(e) = (b = e.buf; state_of(e, JustTyped).at = (b.path, b.version, b.caret); e)
+
+"True when a character was typed at the caret of `e` just now, and the caret and the text are as they were then"
+just_typed(e) = (b = e.buf; state_of(e, JustTyped).at == (b.path, b.version, b.caret))
 const NAME = r"[\p{L}_][\p{L}\p{N}_!]*"       # a name in code
 # The blocks that aren't code, and a block with no language. Blocks with `block_is_code(T)` (ui, check, result) are Julia.
 const NO_NAMES = (MATTER, TOML_MATTER, HEX, BITS, MATH, (l for (l, T) in BLOCKS if !block_is_code(T))..., "")
@@ -112,7 +124,7 @@ code_offered(e) = begin
   i, col = b.caret
   # Only just after a character was typed here. The caret can move through code with no list in
   # its way, and a caret that comes back to where it was has no list either.
-  get(e.nodes, :typed_at, nothing) == (b.path, b.version, b.caret) || (delete!(e.nodes, :typed_at); return nothing)
+  just_typed(e) || (state_of(e, JustTyped).at = nothing; return nothing)
   line = kinds(b)[i]
   (line.kind == Kind.code && !no_names(line.lang)) || return nothing
   chars = collect(b.lines[i])
@@ -465,6 +477,14 @@ struct FileNames
   found::Vector{Bound}
 end
 
+"The names of the file of Julia code that the window last read, which it keeps so that a change reads only the code that it touches: see `file_bounds`"
+@def mutable struct KeptFileNames
+  names::Union{Nothing,FileNames} = nothing
+end
+
+"The names of the file of Julia code that the window of `e` last read, with the lines that they're of, or nothing"
+kept_file_names(e) = state_of(e, KeptFileNames).names
+
 """
 The Julia code of `lines` in parts, each with the names that it makes. The
 first of the lines is line `start` of the page. The parts cover all the lines:
@@ -509,7 +529,7 @@ end
 
 "The names that the file of Julia code in `b` makes. See \"the names of a long file\"."
 file_bounds(e, b::Buffer) = begin
-  old = get(e.nodes, :file_names, nothing)
+  old = kept_file_names(e)
   lines, n = b.lines, length(b.lines)
   parts = if old isa FileNames && old.key[1] == b.path
     m, ps = length(old.lines), old.parts
@@ -526,7 +546,7 @@ file_bounds(e, b::Buffer) = begin
     read_parts(lines, 1)
   end
   found = part_names(parts)
-  e.nodes[:file_names] = FileNames((b.path, b.version), copy(lines), parts, found)
+  state_of(e, KeptFileNames).names = FileNames((b.path, b.version), copy(lines), parts, found)
   found
 end
 

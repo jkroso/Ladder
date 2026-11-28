@@ -96,7 +96,7 @@ breaks(e) = begin
     held || push!(out, it.top + it.tall)
   end
   # A page doesn't end part of the way down a group of columns: the place would be between two lines of one column only
-  columns = get(e.nodes, :columns, nothing)
+  columns = laid_columns(e)
   columns === nothing || filter!(y -> !any(g -> g.top < y < g.top + g.tall, columns.groups), out)
   sort!(out)
 end

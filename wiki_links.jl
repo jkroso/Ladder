@@ -142,7 +142,7 @@ wiki_offered(e) = begin
   b = e.buf
   i, col = b.caret
   key = (b.path, b.version, b.caret)
-  get(e.nodes, :typed_at, nothing) == key || return nothing
+  just_typed(e) || return nothing
   kept = get(e.nodes, :wiki_offered, nothing)
   kept !== nothing && kept[1] == key && return kept[2]
   found = wiki_names(e, i, col)

@@ -135,13 +135,13 @@ names_match() = sort(K.page_bounds(e), by=x -> (x.at, x.name)) == sort(K.read_na
 
 @testset "after a change, only the code that it touches is read again for its names" begin
   @test names_match()
-  kept = e.nodes[:file_names]
+  kept = K.kept_file_names(e)
   @test length(kept.parts) >= 9000 && kept.parts[1].first == 1
   at = findfirst(==("function step4500(wall, count=4500)"), b.lines)
   # A new name in a function
   K.edit!(b, (at + 1, 0), (at + 1, 0), "  height = wall / 2\n")
   @test names_match() && any(x -> x.name == "height" && x.at[1] == at + 1, K.page_bounds(e))
-  now = e.nodes[:file_names]
+  now = K.kept_file_names(e)
   # The parts before the function are the ones that were read before, and so are the names of the parts after it
   k = findfirst(p -> p.first > at, now.parts)
   @test now.parts[1] === kept.parts[1] && now.parts[k-3].names === kept.parts[k-3].names

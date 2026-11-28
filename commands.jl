@@ -1244,7 +1244,7 @@ ontype(e::Editor, ev::Typed) = begin
   # In code, a bracket or a quote comes with the one that closes it
   each_selection!(() -> pair!(e, c) || type!(e, string(c), typing=true), e)
   # A code block offers names only just after a character is typed
-  e.nodes[:typed_at] = (e.buf.path, e.buf.version, e.buf.caret)
+  typed_here!(e)
   # The ( of a call opens the box of what the function takes, and so does a , or a ; in a call
   c in ('(', ',', ';') && call_typed!(e, c)
   handled

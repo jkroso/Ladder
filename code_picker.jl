@@ -151,7 +151,7 @@ tool_input(t::CodePicker, w, ::KeyPress{Keys.escape}) = begin
   dragging(t) && (block_drag(t.editor).lines = nothing; redraw_in!(t.editor, 0); return true)
   t.chosen === nothing || (unchoose!(t); return true)
   # The values of Show Steps go: see "the steps of a check"
-  haskey(t.editor.nodes, :steps) && (delete!(t.editor.nodes, :steps); redraw_in!(t.editor, 0); return true)
+  shown_steps(t.editor) === nothing || (hide_steps!(t.editor); redraw_in!(t.editor, 0); return true)
   false
 end
 
@@ -265,8 +265,8 @@ tool_cursor(t::CodePicker, w, pos) = begin
   x, y = num(pos[1]), num(pos[2])
   on(left, top, wide, tall) = left <= x <= left + wide && top <= y <= top + tall
   over = any(((action, place),) -> action != :label && on(place...), t.buttons)
-  d = get(t.editor.nodes, :block_drag, nothing)
-  handle = d isa BlockDrag && (d.lines !== nothing || (d.at !== nothing && on(d.at...)))
+  d = block_drag(t.editor)
+  handle = d.lines !== nothing || (d.at !== nothing && on(d.at...))
   label = popup_at(w, pos) === nothing && any(r -> r !== nothing && on(r...), mark_labels(t))
   over || handle || label ? :hand : nothing
 end

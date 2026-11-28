@@ -65,7 +65,7 @@ export CHECK, CHECK_GOOD, Checked, COMPARES, value_brief, check_line, CheckView,
        open_check!, settle_check!, describe_dots, CHECK_LEVELS, in_lines, check_in_charge, check_html,
        FILE_CHECK, file_checks, file_checks_tick!, LIVE_WAIT, part_expr, defines_function, live_checks_tick!,
        check_note, mark_checks, hover_check!, file_results, check_part, next_check!, expression_at,
-       check_value, add_check!
+       check_value, add_check!, CheckButtons, check_buttons
 
 const CHECK = "check"
 push!(BLOCK_ICONS, "check2-square", "check-circle-fill", "x-circle-fill", "exclamation-triangle-fill", "arrow-clockwise")
@@ -593,6 +593,14 @@ check_note(r::Checked, loaded::Bool) = begin
   length(note) > 100 ? first(note, 99) * "…" : note
 end
 
+"The buttons that follow a check's line, as the last frame drew them, which the window keeps for a click on one: see `mark_checks` and `check_button!`"
+@def mutable struct CheckButtons
+  drawn::Vector{Any} = Any[]   # for each button: what it does, where it is in the window, and its check
+end
+
+"The buttons that follow a check's line in the window of `e`, as the last frame drew them"
+check_buttons(e) = state_of(e, CheckButtons).drawn
+
 """
 Draw a dot at the end of each line of a file of Julia code that's a check,
 green or red, and what a check that failed found. While the mouse or the
@@ -600,7 +608,7 @@ caret is on a check's line, buttons follow: Show Steps, and Fix It for one
 that fails. The page's text is at `ui`.
 """
 mark_checks(ctx, e, ui) = begin
-  buttons = get!(() -> Any[], e.nodes, :check_buttons)
+  buttons = check_buttons(e)
   empty!(buttons)
   s = get(e.nodes, :file_checks, nothing)
   (s === nothing || isempty(s.found) || s.version != e.buf.version) && return nothing

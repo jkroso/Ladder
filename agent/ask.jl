@@ -216,7 +216,7 @@ code_blocks(e) = begin
   b.view == :markdown && return page_blocks(b, file)
   julia_file(b) || return ToChange[]
   made = page_bounds(e)   # it reads the file's parts again after a change
-  kept = get(e.nodes, :file_names, nothing)
+  kept = kept_file_names(e)
   kept isa FileNames || return ToChange[]
   mod = something(loaded_module(file), Some(get(PAGE_MODULES, file, nothing)))
   out = ToChange[]
@@ -667,7 +667,7 @@ end
 
 "In each frame: when the agent that was asked for a change has ended, run the code that it changed, and say how it went"
 ask_tick!(e) = begin
-  t = get(e.nodes, :code_picker, nothing)
+  t = made_picker(e)
   t isa CodePicker || return nothing
   queue_tick!(e, t)
   t.asked === nothing && return nothing
@@ -1760,7 +1760,7 @@ asked_label(a::AskedChange; open=true) =
 
 "The agents that are working in the window of `e` now: the one that works on a request, if one does"
 working_agents(e) = begin
-  t = get(e.nodes, :code_picker, nothing)
+  t = made_picker(e)
   t isa CodePicker && t.asked !== nothing && t.asked.ended == 0 ? Any[t.asked] : Any[]
 end
 

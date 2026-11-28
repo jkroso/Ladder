@@ -178,13 +178,13 @@ end
   K.show_steps!(e, K.FileCheck(n + 2, "total([1, 2, 3]) == 6", :pass))
   frames()
   haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], "show-steps.png"), w)
-  @test haskey(e.nodes, :steps)
+  @test K.shown_steps(e) !== nothing
   onkey(w, KeyPress{Keys.escape}(0, w)); frames()
-  @test !haskey(e.nodes, :steps)
+  @test K.shown_steps(e) === nothing
   K.show_steps!(e, K.FileCheck(n + 2, "total([1, 2, 3]) == 6", :pass))
   K.edit!(b, (n + 4, 9), (n + 4, 9), " ")
   frames()
-  @test !haskey(e.nodes, :steps)
+  @test K.shown_steps(e) === nothing
   foreach(_ -> K.undo!(b), 1:2)
   @test length(b.lines) == n
 end
@@ -220,26 +220,26 @@ end
   b.caret = b.anchor = (1, 0)
   e.scroll.offset = 0px
   frames()
-  @test isempty(e.nodes[:check_buttons])
+  @test isempty(K.check_buttons(e))
   # A mouse that moves onto a check's line draws the window again, with the buttons. One that passes has nothing to fix.
   point(y) = (w.mouse = typeof(w.mouse)(300px, y); onmouse(w, MouseMove(Vec2{px}(300px, y), w)))
   it = K.item(e, 2)
   point(e.origin[2] + it.top + it.tall / 2)
   @test e.nodes[:check_hover] == 2
   frames()
-  @test first.(e.nodes[:check_buttons]) == [:steps] && e.nodes[:check_buttons][1][3].line == 2
+  @test first.(K.check_buttons(e)) == [:steps] && K.check_buttons(e)[1][3].line == 2
   it = K.item(e, findfirst(startswith("twice(x)"), b.lines))
   point(e.origin[2] + it.top + it.tall / 2)
   @test e.nodes[:check_hover] == 0
   # The buttons show while the caret is on the check's line
   b.caret = b.anchor = (i, 0)
   frames()
-  buttons = e.nodes[:check_buttons]
+  buttons = K.check_buttons(e)
   @test first.(buttons) == [:steps, :fix] && all(x -> x[3].line == i, buttons) && buttons[1][2][2] > 40
   haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], "check-buttons.png"), w)
   left, top, wide, tall = buttons[1][2]
   click(left + wide / 2, top + tall / 2)
-  @test haskey(e.nodes, :steps) && e.nodes[:steps].stopped > 0
+  @test K.shown_steps(e) !== nothing && K.shown_steps(e).stopped > 0
   # The palette offers the check on the caret's line first, then those that fail
   @test first(K.choices_for(K.FileCheck, e)).line == i && K.chip_start(K.FileCheck, e).line == i
   @test K.works_here(e, Val(:fix_check)) && K.works_here(e, Val(:show_steps))
@@ -247,7 +247,7 @@ end
   K.AGENT_COMMAND[] = `sh $(agent("fix.sh", "sed -i '' 's/^# check: share(\"half\")\$/# check: share(\"10%\") == 0.1/' \"$source\"", "The check was wrong, so I changed it."))`
   b.caret = b.anchor = (i, 0)
   frames()
-  left, top, wide, tall = e.nodes[:check_buttons][2][2]
+  left, top, wide, tall = K.check_buttons(e)[2][2]
   click(left + wide / 2, top + tall / 2)
   @test picker().asked !== nothing && picker().asked.words == "Fix the check share(\"half\")"
   finish()

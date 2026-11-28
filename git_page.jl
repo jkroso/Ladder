@@ -66,6 +66,7 @@
 @use "./slides_view" exports...
 @use "./folder_table" exports...
 @use "./blog_page" exports...
+@use "./columns_view" laid_columns
 
 export GitDirectory, RepoView, GitPanel, follow_words, GIT_RUNS, send_command, SENDING_WORDS, push_or_pull!,
        diverged, commits_words, git_reason, clashing_files, git_said, git_run_tick!, send_buttons, PULL_LIST,
@@ -1838,7 +1839,7 @@ diff_now(e) = begin
   diffing(e) || return nothing
   b = e.buf
   b.view in (:code, :markdown, :text) || return nothing
-  (lowered(e) === nothing && slideshow(e) === nothing && !haskey(e.nodes, :columns)) || return nothing
+  (lowered(e) === nothing && slideshow(e) === nothing && laid_columns(e) === nothing) || return nothing
   root = git_top(dirname(b.path))
   isempty(root) && return nothing
   s = watch_git!(e, root)

@@ -48,7 +48,7 @@
 
 export COLUMN_BLOCK, COLUMN_GAP, COLUMN_MARK, PageColumn, ColumnGroup, PageColumns, column_gap, column_groups,
        page_columns!, flat, column_cache, in_column, shifted, column_turn!, whole_groups, page_parts, land,
-       ColumnsView, COLUMN_WORDS, html_columns, columns_html
+       ColumnsView, COLUMN_WORDS, html_columns, columns_html, LaidColumns, laid_columns
 
 const COLUMN_BLOCK = Columns.COLUMNS   # the language of the block. `COLUMNS` is the columns of a takeoff's table.
 const COLUMN_GAP = 1.6     # the room between two columns, as a part of the size of the page's text
@@ -84,6 +84,14 @@ mutable struct PageColumns
   flows::Dict{Any,Any}              # the page's own layouts and its width, to put back after a column
   width::px
 end
+
+"The columns of the page, as its last layout found them, which the window keeps until the next layout: see `page_columns!`"
+@def mutable struct LaidColumns
+  found::Union{Nothing,PageColumns} = nothing
+end
+
+"The columns that the last layout of the page of `e` found, or nothing for a page that has none"
+laid_columns(e) = state_of(e, LaidColumns).found
 
 "The room between two columns of the page"
 column_gap(e) = body(e).size * COLUMN_GAP
@@ -136,7 +144,8 @@ layout that failed in a column left the column's width behind, so the page's
 own is put back first.
 """
 page_columns!(e) = begin
-  old = pop!(e.nodes, :columns, nothing)
+  kept = state_of(e, LaidColumns)
+  old, kept.found = kept.found, nothing
   old !== nothing && old.now !== nothing && (e.flows = old.flows; empty!(e.flows))
   b = e.buf
   (b.view == :markdown && lowered(e) === nothing) || return nothing
@@ -161,7 +170,7 @@ page_columns!(e) = begin
     end
   end
   isempty(s.columns) && isempty(s.folds) && return nothing
-  e.nodes[:columns] = s
+  kept.found = s
 end
 
 "True when `it`, an item that the layout just made, is of a `columns` block that takes no room: the block, or an empty line after it"
@@ -178,7 +187,7 @@ flat(e, it::Item) = Item(it.first, it.last, it.top, 0px, Flow([VLine(Seg[], 0px,
 
 "The column that line `i` of the page shows in, or nothing"
 column_at(e, i::Int) = begin
-  s = get(e.nodes, :columns, nothing)
+  s = laid_columns(e)
   # Another page can show before the next layout finds its columns
   (s === nothing || s.busy || s.path != e.buf.path) && return nothing
   for c in s.columns
@@ -214,7 +223,7 @@ shifted(content, dx::px) = content   # a sheet and a component have no place acr
 
 "Line `i` of the page, which is in the column `c`, laid out for the column's width and placed at its left edge"
 column_flow(e, c::PageColumn, i::Int, raw::Bool) = begin
-  s = e.nodes[:columns]
+  s = laid_columns(e)::PageColumns
   s.busy = true
   f = try
     # The layout of the page is in the column already. Anything else that asks is at the page's own width.
@@ -267,7 +276,7 @@ column_turn!(s::PageColumns, e, items::Vector{Item}, i::Int, top::px) = begin
 end
 
 "How far down the page the lowest of `items` ends. In a group of columns, that's the end of the tallest column."
-lowest(e, items) = haskey(e.nodes, :columns) ? maximum(it -> it.top + it.tall, items) : last(items).top + last(items).tall
+lowest(e, items) = laid_columns(e) !== nothing ? maximum(it -> it.top + it.tall, items) : last(items).top + last(items).tall
 
 "The first and the last of the items `lo` to `hi` of the page, with the whole of each group of columns that they're part of"
 whole_groups(e, items, lo::Int, hi::Int) = begin
@@ -291,7 +300,7 @@ last item.
 item_under(e, dx::px, dy::px) = begin
   items = e.layout
   k = something(findlast(it -> it.top <= dy, items), 1)
-  s = get(e.nodes, :columns, nothing)
+  s = laid_columns(e)
   s === nothing && return k
   g = findfirst(g -> g.top <= dy < g.top + g.tall, s.groups)
   g === nothing && return k
@@ -310,7 +319,7 @@ blocks while the page's text is as wide as the column.
 """
 page_parts(d::Document, e, items) = begin
   parts(run) = Any[x isa Item ? describe(e, x) : x for x in blocks(d, run)]
-  s = get(e.nodes, :columns, nothing)
+  s = laid_columns(e)
   s === nothing && return parts(items)
   out, run = Any[], Item[]
   k, n = 1, length(items)
@@ -370,7 +379,7 @@ that's under the caret.
 """
 vertical(e, by::Int) = begin
   p = line_step(e, by)
-  s = get(e.nodes, :columns, nothing)
+  s = laid_columns(e)
   s === nothing && return p
   b = e.buf
   i = b.caret[1]

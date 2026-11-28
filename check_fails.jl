@@ -10,6 +10,7 @@
 # function is for. See "checks in a file of Julia code" and "ask for a change
 # to a thing".
 
+@use "github.com/jkroso/Prospects.jl" @def
 @use "github.com/jkroso/MiniFB.jl"... onfiledrop onscroll
 @use "github.com/jkroso/UI.jl/Interface/Geometric"...
 @use "github.com/jkroso/UI.jl/Interface/Specific"...
@@ -28,7 +29,7 @@
 @use "./agent/ask" exports...
 
 export check_now, checked_block, fix_check!, ask_for_checks!, check_button!, STEP_INK, arg_names, arg_name,
-       noted, noted_line, first_call, called_names, definitions, check_steps, show_steps!, mark_steps
+       noted, noted_line, first_call, called_names, definitions, check_steps, show_steps!, mark_steps, ShownSteps, shown_steps, hide_steps!
 
 worded(c::FileCheck) = c.code
 sidenote(c::FileCheck) = (c.went == :pass ? "passes" : c.went == :fail ? "fails" : "stops") * " · line $(c.line)"
@@ -139,8 +140,8 @@ of a file of Julia code: Fix It or Show Steps. It's true when the click was on
 one. What goes wrong shows under the top bar.
 """
 check_button!(e, w) = begin
-  found = get(e.nodes, :check_buttons, nothing)
-  (found === nothing || isempty(found)) && return false
+  found = check_buttons(e)
+  isempty(found) && return false
   x, y = num(w.mouse[1]), num(w.mouse[2])
   for (action, (left, top, wide, tall), check) in found
     (left <= x <= left + wide && top <= y <= top + tall) || continue
@@ -322,6 +323,17 @@ check_steps(e, check::FileCheck) = begin
   (first=minimum(first.(defs)), words=words, stopped=stopped)
 end
 
+"What each line of the function of Show Steps came to, which the window keeps while the text is as it was: see `show_steps!`"
+@def mutable struct ShownSteps
+  steps::Union{Nothing,NamedTuple} = nothing   # what `check_steps` gave, with the version of the text
+end
+
+"The steps that Show Steps shows in the window of `e`, or nothing when it shows none"
+shown_steps(e) = state_of(e, ShownSteps).steps
+
+"Take away the steps that Show Steps shows in the window of `e`"
+hide_steps!(e) = (state_of(e, ShownSteps).steps = nothing; e)
+
 """
 Run the check `check` of a file of Julia code again, and write what each line
 of the function that it calls came to at the end of that line. See "the steps
@@ -330,7 +342,7 @@ of a check".
 show_steps!(e, check::FileCheck) = begin
   julia_file(e) || error("Show Steps is for a check of a file of Julia code.")
   steps = check_steps(e, check)
-  e.nodes[:steps] = (; steps..., version=e.buf.version)
+  state_of(e, ShownSteps).steps = (; steps..., version=e.buf.version)
   # The function comes in sight, near the top of the window, when it isn't
   r = line_rect(e, steps.first)
   _, tall = window_size(e)
@@ -347,9 +359,9 @@ works_here(e, ::Val{:show_steps}) = julia_file(e) && !isempty(file_results(e))
 
 "Draw what each line of the function of Show Steps came to, at the end of the line. The page's text is at `ui`."
 mark_steps(ctx, e, ui) = begin
-  s = get(e.nodes, :steps, nothing)
+  s = shown_steps(e)
   s === nothing && return nothing
-  s.version == e.buf.version || (delete!(e.nodes, :steps); return nothing)
+  s.version == e.buf.version || (hide_steps!(e); return nothing)
   for it in e.layout[e.shown]
     f = it.content
     f isa Flow || continue

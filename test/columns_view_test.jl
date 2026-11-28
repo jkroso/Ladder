@@ -38,7 +38,7 @@ key(w, k, held=Keys(0)) = (w.keys = held; onkey(w, KeyPress{k}(0, w)); w.keys = 
 type(e, w, text) = (foreach(c -> ontype(e, Typed(c, w)), text); frames(w))
 caret!(e, w, p) = (e.buf.caret = e.buf.anchor = p; K.touch!(e); frames(w))
 line(e, text) = findfirst(==(text), e.buf.lines)
-columns(e) = get(e.nodes, :columns, nothing)
+columns(e) = K.laid_columns(e)
 "Where a place of the page's text is in the window: `x` across and `y` down the item that shows line `i`"
 spot(e, i, x, y) = (it = K.item(e, i); (K.num(e.origin[1]) + x, K.num(e.origin[2] + it.top) + y))
 "Where column `col` of line `i` is in the window: the middle of its line on the screen"
