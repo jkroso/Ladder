@@ -54,7 +54,7 @@ export notes, follow_note!, NOTE_KEY, NOTE_WAIT, NOTE_CARD_W, note_at, note_card
        has_comments, comments_in, comment_w, comment_room, comment_balance, with_comments, page_comments,
        comment_face, Comments, CommentCard, mark_commented, add_comment!, selected_word, same_word,
        outline_same_word, spell_act!, SVG_TEXT_AS_SHAPES, diagram_svg, export_html!, stay!, FRESH, FRESH_FADE,
-       fresh!, fresh, draw_fresh, NotePeek, note_peeked
+       fresh!, fresh, draw_fresh, NotePeek, note_peeked, FindState, CommentsSeen, FreshLines
 
 "The number of each footnote of the document, by name"
 notes(e) = (b = e.buf; get!(() -> footnotes(b.lines), e.flows, (:notes, b.path, b.version)))
@@ -198,10 +198,20 @@ end
   action::Symbol = :next
 end
 
-finding(e) = get(e.nodes, :finding, false)::Bool
-find_input(e) = get!(e.nodes, :find_input) do
-  own!(e, TextInput(placeholder="Find in the page", font_family=SANS, font_size=14px,
-                    look=(_, text) -> Row(width(grow=grow), height(grow=grow), clip=true, text)))
+"What a window keeps of the bar that finds text in the page, between frames"
+@def mutable struct FindState
+  open::Bool = false                           # the bar shows
+  input::Union{Nothing,TextInput} = nothing    # the bar's field, once it has been asked for
+  text::String = ""                            # the field's text when the page last went to a place that has it
+  found::Union{Nothing,Tuple{Tuple{String,Int,String},Vector{NTuple{3,Int}}}} = nothing   # the page, its version and the text that the places were last found for, and the places
+end
+
+finding(e) = state_of(e, FindState).open
+find_input(e) = begin
+  s = state_of(e, FindState)
+  s.input === nothing && (s.input = own!(e, TextInput(placeholder="Find in the page", font_family=SANS, font_size=14px,
+                                                     look=(_, text) -> Row(width(grow=grow), height(grow=grow), clip=true, text))))
+  s.input::TextInput
 end
 
 "Open the bar and give it the keyboard. What's selected goes into it, if that's part of one line."
@@ -211,21 +221,22 @@ open_find!(e) = begin
   lo, hi = selection(b)
   selecting(b) && lo[1] == hi[1] && (i.text = rest(head(b.lines[lo[1]], hi[2]), lo[2]))
   i.anchor, i.cursor = 0, length(i.text)
-  e.nodes[:finding] = true
-  e.nodes[:find_text] = i.text
+  s = state_of(e, FindState)
+  s.open = true
+  s.text = i.text
   focus(i)
   nothing
 end
 
-close_find!(e) = (e.nodes[:finding] = false; focus(e); touch!(e); nothing)
+close_find!(e) = (state_of(e, FindState).open = false; focus(e); touch!(e); nothing)
 
 "Each place in the document that has the bar's text: its line, and the columns where it starts and ends"
 found(e) = begin
   b = e.buf
   q = finding(e) ? lowercase(find_input(e).text) : ""
   key = (b.path, b.version, q)
-  kept = get(e.nodes, :found, nothing)
-  kept !== nothing && kept[1] == key && return kept[2]::Vector{NTuple{3,Int}}
+  kept = state_of(e, FindState).found
+  kept !== nothing && kept[1] == key && return kept[2]
   out = NTuple{3,Int}[]
   n = length(q)
   if n > 0
@@ -237,7 +248,7 @@ found(e) = begin
       end
     end
   end
-  e.nodes[:found] = (key, out)
+  state_of(e, FindState).found = (key, out)
   out
 end
 
@@ -262,8 +273,9 @@ end
 find_tick!(e) = begin
   finding(e) || return
   text = find_input(e).text
-  text == get(e.nodes, :find_text, "") && return
-  e.nodes[:find_text] = text
+  s = state_of(e, FindState)
+  text == s.text && return
+  s.text = text
   places = found(e)
   isempty(places) && return
   lo, _ = selection(e.buf)
@@ -454,17 +466,22 @@ struct PageComment
   at::px
 end
 
+"What a window keeps of whether its page has a comment for the margin: the page, its version, and whether it had one then"
+@def mutable struct CommentsSeen
+  seen::Union{Nothing,Tuple{String,Int,Bool}} = nothing
+end
+
 "True when the page shows comments in the margin: a page of Markdown, as rich text, with a comment in it"
 has_comments(e) = begin
   b = e.buf
   (b.view == :markdown && !numbered(b) && wraps(e) && slideshow(e) === nothing && lowered(e) === nothing && hosted(e) === nothing) || return false
-  seen = get(e.nodes, :has_comments, nothing)
-  seen !== nothing && seen[1] == b.path && seen[2] == b.version && return seen[3]::Bool
+  seen = state_of(e, CommentsSeen).seen
+  seen !== nothing && seen[1] == b.path && seen[2] == b.version && return seen[3]
   ks = kinds(b)
   # {>> in code, or in a table, is no comment that the margin shows
   yes = any(i -> occursin("{>>", b.lines[i]) && !(ks[i].kind in (Kind.code, Kind.fence, Kind.table)) &&
                  !isempty(comments_in(spans(rest(b.lines[i], ks[i].prefix), ks[i].prefix))), eachindex(b.lines))
-  e.nodes[:has_comments] = (b.path, b.version, yes)
+  state_of(e, CommentsSeen).seen = (b.path, b.version, yes)
   yes
 end
 
@@ -817,15 +834,26 @@ end
 const FRESH = 4.0        # how many seconds a bar shows
 const FRESH_FADE = 1.5   # how many of them it takes to fade
 
+"What a window keeps of the lines that changed on the disk a moment ago: when they changed, the page, and the runs of lines"
+@def mutable struct FreshLines
+  at::Float64 = 0.0
+  path::String = ""
+  runs::Vector{UnitRange{Int}} = UnitRange{Int}[]
+end
+
 "Remember the lines that just changed. `moved` is what `refresh!` gave."
-fresh!(e, moved) = (e.nodes[:fresh] = (time(), e.buf.path, UnitRange{Int}[c[2] for c in moved if !isempty(c[2])]))
+fresh!(e, moved) = begin
+  s = state_of(e, FreshLines)
+  s.at, s.path, s.runs = time(), e.buf.path, UnitRange{Int}[c[2] for c in moved if !isempty(c[2])]
+  (s.at, s.path, s.runs)
+end
 
 "The runs of lines of the page that changed on the disk in the last few seconds"
 fresh(e) = begin
-  at, path, runs = get(e.nodes, :fresh, (0.0, "", UnitRange{Int}[]))::Tuple{Float64,String,Vector{UnitRange{Int}}}
-  (path == e.buf.path && time() - at < FRESH) && return runs
-  delete!(e.nodes, :fresh)
-  runs[1:0]
+  s = state_of(e, FreshLines)
+  (s.path == e.buf.path && time() - s.at < FRESH) && return s.runs
+  s.at, s.path, s.runs = 0.0, "", UnitRange{Int}[]
+  s.runs
 end
 
 "Draw a bar in the margin beside each item on screen that shows a line that just changed. The text starts at `left`, and its first line is at `top`."
@@ -835,7 +863,7 @@ draw_fresh(ctx, e, left, top) = begin
   kept = marking(e) ? theirs(e) : UnitRange{Int}[]
   runs = isempty(kept) ? fresh(e) : kept
   isempty(runs) && return
-  strength = isempty(kept) ? clamp((FRESH - (time() - e.nodes[:fresh][1])) / FRESH_FADE, 0, 1) : 1.0
+  strength = isempty(kept) ? clamp((FRESH - (time() - state_of(e, FreshLines).at)) / FRESH_FADE, 0, 1) : 1.0
   ink = RGBA(colours.accent, strength * 0.7)
   for it in e.layout[e.shown]
     any(r -> first(r) <= it.last && last(r) >= it.first, runs) || continue
