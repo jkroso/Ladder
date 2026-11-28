@@ -20,6 +20,7 @@ using Kip
 @use "./facts" => Facts
 @use "../transcribe" => Transcribe
 @use "../map" => Maps
+@use "../hiddenpage" => Hidden
 
 include("bundle.jl")
 
@@ -43,6 +44,9 @@ function build_ladder(; install::Bool=false,
   # The program that makes the picture of a map goes beside it. See map.jl.
   mapper = joinpath(mktempdir(), "map")
   Maps.compile(mapper)
+  # The program that holds the pages of a site that you're signed in to goes beside them. See hiddenpage.jl.
+  hider = joinpath(mktempdir(), "hiddenpage")
+  Hidden.compile(hider)
   # CFBundleDocumentTypes tells macOS that the app opens Markdown files, so the Finder lists it under Open With.
   # Its rank is Alternate, so it doesn't take Markdown files from another app until you ask it to on the settings page.
   app = Bundle.build_app(
@@ -52,7 +56,7 @@ function build_ladder(; install::Bool=false,
     version=version,
     entry=Facts.ENTRY_FILE,
     icon=Facts.ICON_FILE,
-    helpers=[transcriber, mapper],
+    helpers=[transcriber, mapper, hider],
     releasing=releasing,
     signer=signer,
     packages=packages,

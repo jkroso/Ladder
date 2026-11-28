@@ -138,7 +138,9 @@ follow!(e, url) = begin
   to = linked_file(e, url)
   to !== nothing && ispath(to[1]) && return show_path!(e, to[1])
   # The address of a page of Markdown on a web server shows in the window: see "a page from a web server"
-  reads_here(e, url) ? get_page!(e, url, else_browser=true) : open_url(url)
+  reads_here(e, url) && return get_page!(e, url, else_browser=true)
+  # A site with a viewer of its own shows in the window too: see "a site with a viewer of its own"
+  site_shows!(e, url) ? e : open_url(url)
 end
 
 """

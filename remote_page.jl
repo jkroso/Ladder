@@ -16,6 +16,8 @@
 @use "./markdown" Kind Line words wikitarget MATTER TOML_MATTER MATH
 @use "./markdown" COMMENT
 @use "./sheet" parts shown
+@use "github.com/jkroso/URI.jl/FSPath" FSPath
+@use "github.com/jkroso/URI.jl/FS" => FS AbstractDirectory
 @use "./remote" => Remote
 @use "./macfile" => MacFiles
 @use "./app/facts" APP_ID
@@ -42,7 +44,7 @@ export COPY_ADDRESSES, COPY_MARK, GOT_MARK, PAGE_WAIT, PageAsked, RELOAD_ASKER, 
        ask_reload!, fingerprint, forget_view_copies!, got_mark, land_page!, mark_copy!, mark_file!,
        navigate!, navigate_place, open_in_browser!, place_label, reads_here, reload_page!,
        reload_panel, remote_tick!, saved_page, show_page!, take_page!, typed_path, unsay_getting!,
-       web_buffer
+       web_buffer, open_address!, site_folder
 
 # --- a page from a web server ----------------------------------------------------------------
 #
@@ -266,6 +268,77 @@ web_buffer(path) = begin
   b
 end
 
+# --- a site with a viewer of its own ---
+#
+# A site's folder in the browser folder, like ~/Browser/x.com, can have a kind,
+# as any folder can. Code gives it one by its path, in `FS.kinds`, or the
+# folder's own page does: a file called `.ladder` that you put in the folder.
+# The kind then shows the site its own way, as a kind shows a folder of films
+# as posters. Ladder asks the kind before it asks the site's server, wherever
+# an address of the site comes from: a link, a link card, Navigate, a
+# favourite site, Reload Page.
+#
+#     Ladder.FS.kinds[FSPath(joinpath(Ladder.browser_folder(), "x.com"))] = XDirectory
+#     Ladder.open_address!(e, d::XDirectory, address; record=true, reload=false) = begin
+#       path = ...   # the folder of ~/Browser/x.com that's this address
+#       mkpath(path)
+#       Ladder.open!(e, path; record)
+#       true
+#     end
+#     Ladder.FS.kind(::XDirectory, path::FSPath) = XPosts   # what its folders are
+#     Ladder.page_view(e, d::XPosts) = ...                  # what the page shows of one
+#
+# The kind's method of `open_address!` shows a file or a folder of the site's
+# folder, with `open!`, and what shows there is the kind's own: `page_view`,
+# `window_view`, `side_menu` and the rest, as for any kind of folder. A site
+# that only gives its pages to a browser that's signed in reads them through
+# hiddenpage.jl. A site has other names, like twitter.com for x.com, when the
+# folder of each name has the kind. The folder of a name needn't be there.
+
+"""
+Show the page at `address` in the window of `e`, for the site whose folder in
+the browser folder is `d`: true when the folder's kind showed it. False
+leaves the page to Ladder, which asks the site's server for it, as it does
+for a site with no viewer. A kind of folder has a method of this to show the
+pages of its site its own way. `record` is false when the page that leaves
+doesn't go on the list that `go_back!` reads. `reload` is true when Reload
+Page asked, so what shows is asked for again.
+"""
+open_address!(e, d, address; record=true, reload=false) = false
+
+"""
+The object of the folder of the browser folder that keeps the site of
+`address`, when that folder has a kind, or nothing: for an address of no
+site, and for a site whose folder is plain. The folder needn't be there:
+its object is of the kind that its path has.
+"""
+site_folder(address::AbstractString) = begin
+  host = lowercase(Remote.host(address))
+  (Remote.isaddress(address) && !isempty(host) && !startswith(host, '.') && !occursin('/', host)) || return nothing
+  path = joinpath(browser_folder(), host)
+  # The folder's own page says its kind, and loads the code of the kind. It runs now if it hasn't.
+  isdir(path) && folder_pages!(path)
+  d = try
+    if isdir(path)
+      Base.invokelatest(FS.get, FSPath(path))
+    else
+      kind = Base.invokelatest(folder_kind, FSPath(path))
+      kind === FS.Directory ? nothing : kind(path=FSPath(path), parent=nothing)
+    end
+  catch
+    nothing
+  end
+  d isa AbstractDirectory && !(d isa FS.Directory) ? d : nothing
+end
+
+site_shows!(e, address::AbstractString; record=true, reload=false) = begin
+  d = site_folder(address)
+  d === nothing && return false
+  hosted(e) === nothing || (e = top_editor(e))   # a link in a part of another page shows in the window
+  # A kind that a folder's page gave is newer than the click that asks
+  Base.invokelatest(open_address!, e, d, String(address); record, reload) === true
+end
+
 "A page that the window of `e` has asked a web server for"
 mutable struct PageAsked
   address::String      # as it was asked for, with what follows a #
@@ -289,6 +362,7 @@ way takes its place. `reload` is Reload Page's.
 get_page!(e, address; record=true, else_browser=false, again=false, reload=false) = begin
   hosted(e) === nothing || return get_page!(top_editor(e), address; record, else_browser, again, reload)   # a link in a part of another page
   address = String(strip(address))
+  site_shows!(e, address; record, reload) && return e   # the site has a viewer of its own, and it showed the page
   saved = again ? nothing : saved_page(address)
   if saved !== nothing
     open!(e, saved; record)

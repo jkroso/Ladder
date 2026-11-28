@@ -31,7 +31,7 @@ export editor, page_object, object, list_files!, go_folder!, open!, open_folder!
        filter_table, filter_subset, key_panel, error_words, file_start, server_said, keep_key, table_file,
        choice_matches, toggle_source!, tick_item!, block_end, type!, web_browser, sum_name, given_and_sums,
        carry_sums!, follow_remote!, run_place, value_text, usual_module, own_units, remote_src, finding,
-       follow!, filled, todo_at, link_on, close_find!, took, page_bottom, keep_got!, get_page!, browser_path,
+       follow!, filled, todo_at, link_on, close_find!, took, page_bottom, keep_got!, get_page!, site_shows!, browser_path,
        page_online, changed_here, fetched, email_head!, email_shows, ismouse, ignored_shown, file_menu!,
        holds_words, page_html, new_page!, build_editor, news_look, web_page_kind, rename!, renaming,
        copy_text!, renamer, move!, toggle_right!, right_w, open_palette!, lens_shapes, theirs, change_diff,
@@ -633,6 +633,9 @@ function keep_got! end
 
 "Ask the server for the page at `address`, and show it in the window of `e`"
 function get_page! end
+
+"Show the page at `address` in the window of `e` as the viewer of its site shows it: true when the site has a viewer, and it showed the page"
+function site_shows! end
 
 "The file of the browser folder that keeps what's at `address`, or nothing when no file can, as for a name that starts with a dot"
 function browser_path end

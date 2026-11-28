@@ -175,7 +175,9 @@ opening(c::LinkCard) = only_held(c, Keys.cmd) || (follows_links(editor(c).buf) &
 
 cursor(c::LinkCard) = opening(c) ? :hand : :arrow
 # A click with ⌘ held opens the address. Any other click goes to the page, which puts the caret on the card as a whole.
-onkey(c::LinkCard, ev::KeyPress{Keys.mouse_left}) = opening(c) ? (BROWSER[](c.card.url); handled) : click_page!(c, ev)
+# The address shows in Ladder when its site has a viewer of its own, and in your browser when it has none.
+onkey(c::LinkCard, ev::KeyPress{Keys.mouse_left}) =
+  opening(c) ? (site_shows!(editor(c), c.card.url) || BROWSER[](c.card.url); handled) : click_page!(c, ev)
 
 """
 The HTML of the line `text` when it shows a card: the card as a link in a box.

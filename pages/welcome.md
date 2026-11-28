@@ -565,6 +565,19 @@ The browser folder has a globe for its icon. Open it, and its page is a desktop 
 
 In a page of your own, a click on a link to an address that ends in `.md` shows that page in Ladder. Any other web address opens in your browser.
 
+### A site with a viewer of its own
+
+A site can show in Ladder its own way, as a folder of films shows as posters. Its folder in the browser folder, like `~/Browser/x.com`, gets a kind, as any folder can: from code on the startup page, or from a `.ladder` page that you put in the folder. The kind then shows each address of the site, wherever the address comes from: a link, a link card, Navigate, or a favourite site. A site with no such kind shows as before.
+
+X.lad is such a viewer, for x.com. It shows your timeline, a post with its replies, and a person's page, and it likes, reposts and replies. This block on the [startup page](settings/startup.md) adds it:
+
+```
+@use "github.com/jkroso/X.lad" => X
+X.start(Ladder)
+```
+
+Some sites give their pages only to a browser that's signed in. A viewer for one opens the site's real page in WebKit, in a window that's never on the screen, and reads what the site sends that page. You sign in once, in a window of the site's own sign-in page, and WebKit keeps the sign-in in a store that only that viewer uses. Ladder's `hiddenpage.jl` has the functions, and "a site with a viewer of its own" in `remote_page.jl` says how to write a kind.
+
 ## Views of other files
 
 A code block in the language `view` shows another file in your page, as the file is. Write the file's name in it, like `plan.pdf` for a file beside your page, or its path, like `~/Desktop/notes.md`. The name of a folder works too, and so does the address of a page of the web.

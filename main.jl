@@ -411,6 +411,7 @@
 @use "./web/browser" => Browsers
 @use "./web/files" => Webfiles
 @use "./web/fetch" => Webfetch
+@use "./hiddenpage" => Hidden
 @use "./web/source" => Sources
 @use "./remote" => Remote
 @use "./guard" => Guard
