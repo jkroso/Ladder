@@ -493,6 +493,9 @@ end
   at((x, y)) = (w.mouse = typeof(w.mouse)(px(x), px(y)); onmouse(w, MouseMove(Vec2{px}(px(x), px(y)), w)); frames(1))
   middle(node) = (r = rect(node); (K.num(r.left) + K.num(r.width) / 2, K.num(r.top) + K.num(r.height) / 2))
   showing() = any(p -> p.key == :title_trail, popups(w))
+  # The palette of the tests above slides away for a moment after it closes, and until it has gone it's over the
+  # top bar, so the mouse isn't on the file's name. Quick frames get here before it has gone.
+  @test timedwait(() -> (frames(1); !K.palette_shows(e)), 2) == :ok
   at(middle(e.nodes[:title])); sleep(K.TT_WAIT + 0.05); frames()
   @test showing()
   v = e.nodes[:title_trail]
