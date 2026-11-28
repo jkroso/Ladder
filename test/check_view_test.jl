@@ -12,6 +12,7 @@
 @use "github.com/jkroso/UI.jl/Interface/draw" frame rect
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
 @use GeometryBasics: Vec2
+@use "./drive" drive
 const px = K.px
 
 const dir = mktempdir()
@@ -40,20 +41,10 @@ The end.
 
 const e = K.build_editor(page)
 const w = Window(e, size=(900px, 700px))
-frames(n=3) = foreach(_ -> Base.invokelatest(frame, w), 1:n)
+const (; frames, click, typed, key) = drive(w, frames=3, latest=true)
 frames()
 view() = e.nodes[(:block, K.CHECK, page, 1)]
 went() = [r.went for r in view().results]
-"Click the window at `pos`, as the mouse does"
-click(pos) = begin
-  w.mouse = typeof(w.mouse)(pos...)
-  onmouse(w, MouseMove(pos, w))
-  w.keys |= Keys.mouse_left
-  onkey(w, KeyPress{Keys.mouse_left}(0, w))
-  w.keys ⊻= Keys.mouse_left
-  onkey(w, KeyRelease{Keys.mouse_left}(0, w))
-  frames()
-end
 "Run the page's Julia block, as ⌘Return in it does"
 run_page() = (i = findfirst(==("```julia"), e.buf.lines); t = findnext(==("```"), e.buf.lines, i); K.run_code(e, join(e.buf.lines[i+1:t-1], "\n")); frames())
 "Every piece of text that a node shows"
@@ -183,8 +174,6 @@ end
   @test any(x -> x isa Tuple && x[1] == "Check", K.INSERTS) && K.known_lang("check")
 end
 
-typed(s) = (foreach(c -> ontype(w, Typed(c, w)), s); frames())
-key(k) = (onkey(w, KeyPress{k}(0, w)); onkey(w, KeyRelease{k}(0, w)); frames())
 "Select all that the field holds, as ⌘A does"
 select_all() = (w.keys |= Keys.cmd; key(Keys.a); w.keys ⊻= Keys.cmd)
 block() = (span = K.block_lines(e.buf, K.CHECK, 1); e.buf.lines[span[1]+1:span[2]-1])

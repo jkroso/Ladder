@@ -12,6 +12,7 @@
 @use "github.com/jkroso/UI.jl/Interface/draw" frame rect
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
 @use GeometryBasics: Vec2
+@use "./drive" drive
 const C, px = K.Cards, K.px
 
 const dir = mktempdir()
@@ -78,30 +79,16 @@ K.fetches[PHOTO] = joinpath(dir, "plan.png")
 
 const e = K.build_editor(page)
 const w = Window(e, size=(1000px, 1000px))
-frames(n=2) = foreach(_ -> frame(w), 1:n)
+const (; frames, at, click, key, shot) = drive(w)
 frames()
 K.focus(e)
-shot(name) = haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], name), w)
 line(text) = findfirst(startswith(text), e.buf.lines)
 flows(i) = K.item(e, i).content isa K.Flow
 "The card that line `i` shows, or nothing when it shows none"
 card(i) = (c = K.item(e, i).content; c isa K.Live && c.node isa K.LinkCard ? c.node : nothing)
 "The lines that show the cards: of the paint, of the slow page, and of the page that can't be had"
 lines() = (line("![Paint"), line("![]("), line("![Gone"))
-key(k, held=Keys(0)) = (w.keys = held; onkey(w, KeyPress{k}(0, w)); w.keys = Keys(0); frames())
 caret!(p) = (e.buf.caret = e.buf.anchor = p; K.touch!(e); frames())
-at((x, y)) = (w.mouse = typeof(w.mouse)(px(x), px(y)); onmouse(w, MouseMove(Vec2{px}(px(x), px(y)), w)); frames(1))
-"Click the middle of `node`, with the keys `held`"
-click(node, held=Keys(0)) = begin
-  r = rect(node)
-  at((K.num(r.left + r.width / 2), K.num(r.top + r.height / 2)))
-  w.keys = held | Keys.mouse_left
-  onkey(w, KeyPress{Keys.mouse_left}(0, w))
-  w.keys = held
-  onkey(w, KeyRelease{Keys.mouse_left}(0, w))
-  w.keys = Keys(0)
-  frames()
-end
 
 @testset "what a line shows" begin
   paint, slow, gone = lines()

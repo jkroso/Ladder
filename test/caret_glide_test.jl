@@ -10,6 +10,7 @@
 @use GeometryBasics: Vec2
 @use "github.com/jkroso/UI.jl/Interface/draw" frame
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
+@use "./drive" drive
 const px = K.px
 
 const dir = mktempdir()
@@ -23,8 +24,7 @@ write(other, "# Other\n\nAnother page.\n")
 
 const e = K.build_editor(page)
 const w = Window(e, size=(900px, 600px))
-frames(n=2) = foreach(_ -> frame(w), 1:n)
-key(k, held=Keys(0)) = (w.keys = held; onkey(w, KeyPress{k}(0, w)); w.keys = Keys(0); frame(w))
+const (; frames, click, key, shot) = drive(w, pressed=1)
 type(text) = (foreach(c -> ontype(e, Typed(c, w)), text); frame(w))
 caret!(p) = (e.buf.caret = e.buf.anchor = p; K.touch!(e); frame(w))
 "Where column `col` of line `i` is in the window: the middle of its line on the screen"
@@ -34,18 +34,11 @@ place(i, col) = begin
   k, x = K.spot(f, col)
   (K.num(e.origin[1] + x), K.num(e.origin[2] + it.top + K.line_top(f, k) + f.lines[k].high / 2))
 end
-"Click at a place in the window"
-click((x, y)) = begin
-  w.mouse = typeof(w.mouse)(px(x), px(y)); onmouse(w, MouseMove(Vec2{px}(px(x), px(y)), w)); frame(w)
-  w.keys |= Keys.mouse_left; onkey(w, KeyPress{Keys.mouse_left}(0, w)); frame(w)
-  w.keys ⊻= Keys.mouse_left; onkey(w, KeyRelease{Keys.mouse_left}(0, w)); frame(w)
-end
 line(text) = findfirst(==(text), e.buf.lines)
 "Draw frames until the caret has arrived"
 arrive() = (sleep(K.GLIDE_TIME + 0.02); frames())
 "The glide of the main caret"
 glide() = e.glides[1]
-shot(name) = haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], name), w)
 frames()
 K.focus(e)   # only the page that has the keyboard draws its caret
 frames()

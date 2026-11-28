@@ -105,7 +105,7 @@ end
 
 const e = K.build_editor(home)
 const w = Window(e, size=(1000px, 900px))
-const (; frames, typed, key, shot) = drive(w)
+const (; frames, at, click, typed, key, shot) = drive(w)
 frames()
 K.focus(e)
 
@@ -113,17 +113,6 @@ K.focus(e)
 line(text) = findfirst(l -> occursin(text, l), e.buf.lines)
 "The view of the part that line `i` shows"
 part(i) = (it = K.item(e, i); it.content isa K.Live && it.content.node isa K.Transclusion ? it.content.node : nothing)
-at(x, y) = (w.mouse = typeof(w.mouse)(x, y); onmouse(w, MouseMove(Vec2{px}(x, y), w)); frame(w))
-click((x, y), held...) = begin
-  at(x, y)
-  foreach(h -> w.keys |= h, held)
-  w.keys |= Keys.mouse_left
-  onkey(w, KeyPress{Keys.mouse_left}(0, w))
-  w.keys ⊻= Keys.mouse_left
-  onkey(w, KeyRelease{Keys.mouse_left}(0, w))
-  foreach(h -> w.keys ⊻= h, held)
-  frames()
-end
 "The place in the window of column `col` of line `i` of the page that a part shows. In a table, it's in the first cell of the row."
 spot(v, i, col=0) = begin
   sub = v.sub
@@ -241,7 +230,7 @@ end
   it = K.item(v.sub, i)
   @test it.content isa K.Live
   x, y = v.sub.origin[1] + 40px, v.sub.origin[2] + it.top + it.tall / 2
-  at(x, y)
+  at((x, y))
   @test hittest(w) isa K.LiveCover
   had = copy(v.sub.buf.lines)
   click((x, y))
@@ -251,11 +240,11 @@ end
 @testset "a link in the part opens its page in the window" begin
   v = part(line("![[costs#Prices]]"))
   # The button shows while the mouse is over the part, and stays while the mouse goes on to it
-  at(spot(v, cline(v, "## Prices"))...)
+  at(spot(v, cline(v, "## Prices")))
   source = v.sub.nodes[:source]
   r = rect(source)
   x, y = r.left + r.width / 2, r.top + r.height / 2
-  at(x, y)
+  at((x, y))
   @test hittest(w) === source
   shot("part_button.png")
   click((x, y))

@@ -9,6 +9,7 @@
 @use "github.com/jkroso/MiniFB.jl" Window KeyPress Keys onkey
 @use "github.com/jkroso/UI.jl/Interface/draw" frame rect
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
+@use "./drive" drive
 const px = K.px
 
 const dir = mktempdir()
@@ -27,27 +28,11 @@ const broken = file("broken.json", """{"job": "Kitchen", """)
 const page = file("index.md", "# Files\n")
 const e = K.build_editor(page)
 const w = Window(e, size=(1000px, 800px))
-frames(n=2) = foreach(_ -> frame(w), 1:n)
+const (; frames, press, release, key, shot) = drive(w)
 frames()
-shot(name) = haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], name), w)
 
-press(k, held...) = begin
-  foreach(h -> w.keys |= h, held)
-  onkey(w, KeyPress{k}(0, w))
-  foreach(h -> w.keys ⊻= h, held)
-  frames()
-end
 "Click row `i` of the tree `t`"
-click(t, i, held...) = begin
-  r = rect(t)
-  h = K.json_row_h(e)
-  w.mouse = typeof(w.mouse)(r.left + 40px, r.top + h * (i - 0.5))
-  frame(w)
-  foreach(k -> w.keys |= k, (Keys.mouse_left, held...))
-  onkey(w, KeyPress{Keys.mouse_left}(0, w))
-  foreach(k -> w.keys ⊻= k, (Keys.mouse_left, held...))
-  frames()
-end
+click(t, i, held...) = (r = rect(t); press((r.left + 40px, r.top + K.json_row_h(e) * (i - 0.5)), held...); release(held...))
 "The tree of the page"
 tree() = only(n.viewer for n in values(e.nodes) if n isa K.FileView && n.path == e.buf.path)
 "How many rows of `t` were made in the last frame, and the two spaces above and below them"
@@ -101,27 +86,27 @@ end
   c = findfirst(r -> r.key == "client", t.rows)
   click(t, c)   # closed
   @test w.focus === t
-  press(Keys.right)
+  key(Keys.right)
   @test K.json_opened(t, c) && t.chosen == c
-  press(Keys.right)
+  key(Keys.right)
   @test t.chosen == c + 1 && t.rows[t.chosen].key == "name"
-  press(Keys.down)
+  key(Keys.down)
   @test t.rows[t.chosen].key == "phone"
-  press(Keys.left)
+  key(Keys.left)
   @test t.chosen == c
-  press(Keys.left)
+  key(Keys.left)
   @test !K.json_opened(t, c)
-  press(Keys.enter)
+  key(Keys.enter)
   @test K.json_opened(t, c)
   # With ⌃, ⌥ or ⇧ held, the arrows and Return are the window's, and the tree stays as it is
   for (k, held) in ((Keys.left, Keys.opt), (Keys.left, Keys.ctrl), (Keys.down, Keys.shft), (Keys.enter, Keys.shft))
-    press(k, held)
+    key(k, held)
     @test K.json_opened(t, c) && t.chosen == c && w.focus === t
   end
-  press(Keys.up)
+  key(Keys.up)
   @test t.chosen == c - 1
   # Esc gives the keyboard back to the page
-  press(Keys.escape)
+  key(Keys.escape)
   @test w.focus === e
 end
 

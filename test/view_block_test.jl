@@ -75,13 +75,10 @@ The end.
 
 const e = K.build_editor(page)
 const w = Window(e, size=(1000px, 2600px))
-const (; frames, at, press, release, shot) = drive(w, frames=3)
+const (; frames, at, press, release, click, shot) = drive(w, frames=3)
 frames()
 view(n) = e.nodes[(:block, K.VIEW_BLOCK, page, n)]
 
-click(place) = (press(place); release())
-"A click at `place` with the key `held` down"
-click(place, held) = (was = w.keys; w.keys |= held; click(place); w.keys = was)
 "The button beside the top right corner of the `n`th view, which shows while the mouse is over the view"
 go_button(n) = (at(middle(rect(view(n)))); K.fills(e)[objectid(view(n))].button)
 "Go back to the document, as ⌘⌥← does, and let it lay its blocks out again"

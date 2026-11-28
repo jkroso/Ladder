@@ -8,6 +8,7 @@
 @use "../main" => K
 @use "github.com/jkroso/MiniFB.jl" Window KeyPress KeyRelease MouseMove Keys onkey onmouse Typed ontype
 @use "github.com/jkroso/UI.jl/Interface/draw" frame cursor popups
+@use "./drive" drive
 "The words of each Text in the layout `x`, from the top"
 texts(x) = begin
   hasfield(typeof(x), :content) && getfield(x, :content) isa AbstractString && return Any[x]
@@ -68,7 +69,7 @@ Base.invokelatest(K.Kip.require, rooms, dir)
 
 const e = K.build_editor(rooms)
 const w = Window(e, size=(1000px, 700px))
-frames(n=3) = foreach(_ -> Base.invokelatest(frame, w), 1:n)
+const (; frames) = drive(w, frames=3, latest=true)
 frames()
 const b = e.buf
 line(words) = findfirst(l -> occursin(words, l), b.lines)

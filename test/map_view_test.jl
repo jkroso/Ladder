@@ -42,13 +42,11 @@ The end.
 
 const e = K.build_editor(page)
 const w = Window(e, size=(1000px, 900px))
-const (; frames, at, press, key, shot) = drive(w)
+const (; frames, at, press, release, click, key, shot) = drive(w)
 frames()
 K.focus(e)
 view(n=1) = e.nodes[(:block, K.MAP, page, n)]
 
-release(n=2) = (w.keys ⊻= Keys.mouse_left; onkey(w, KeyRelease{Keys.mouse_left}(0, w)); frames(n))
-click(place) = (press(place); release())
 "Press the mouse at one place, move it to another by way of the place between, and let go"
 drag(from, to) = (press(from); at((from .+ to) ./ 2); at(to); release())
 button(name, n=1) = click(middle(rect(view(n).parts[(:button, name)])))
@@ -208,7 +206,7 @@ end
   p = m .+ (150, -60)
   n, f, file = length(Fake.calls), length(Fake.finds), v.shown.file
   Fake.slow[] = true   # Apple takes a while to say what the point's address is
-  press(p); release(1)
+  press(p); drive(w, frames=1).release()
   # In the next frame the pin is where the click was, and the old pin is gone
   @test pinned(p) && !pinned(m)
   # The picture that fills the window isn't made in that frame

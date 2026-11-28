@@ -46,7 +46,7 @@ const tall_email = email("A long one", """<body style="margin:0"><div style="hei
 
 const e = K.build_editor(quote_email)
 const w = Window(e, size=(1000px, 900px))
-const (; frames, at, press, release, click, shot) = drive(w)
+const (; frames, at, press, release, click, key, shot) = drive(w)
 e.plain && K.level!(e)   # the page starts at the high level, whatever the test before this one left
 frames(3)
 K.focus(e)
@@ -134,8 +134,6 @@ end
 letter(i, k) = (s = laid().words[i]; spot(s.edges[k+1] + 1, s.top + s.tall / 2))
 "Press `key` with ⌘ held"
 command(key) = (w.keys |= Keys.cmd; onkey(w, KeyPress{key}(0, w)); w.keys ⊻= Keys.cmd; frames(1))
-"Press `key`"
-key(key) = (onkey(w, KeyPress{key}(0, w)); frames(1))
 "Drag from one place to another"
 drag(from, to) = (press(from); at(to); release())
 "The red, the green and the blue of an email's page where nothing is drawn on it"

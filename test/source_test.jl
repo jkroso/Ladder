@@ -60,12 +60,9 @@ The end.
 
 const e = K.build_editor(page)
 const w = Window(e, size=(1000px, 1100px))
-const (; frames, at, press, shot) = drive(w)
+const (; frames, at, press, release, click, key, shot) = drive(w)
 frames()
 
-release() = (w.keys ⊻= Keys.mouse_left; onkey(w, KeyRelease{Keys.mouse_left}(0, w)); frames(3))
-click(place) = (press(place); release())
-key(k) = (onkey(w, KeyPress{k}(0, w)); frames(3))
 view(lang, n) = e.nodes[(:block, lang, page, n)]
 block(lang, n) = (s = K.block_lines(e.buf, lang, n); e.buf.lines[s[1]+1:s[2]-1])
 "Scroll the page until the top of the `n`th block in `lang` is near the top of the window, and it has been laid out and drawn"

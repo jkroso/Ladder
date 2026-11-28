@@ -7,6 +7,7 @@
 @use "github.com/jkroso/MiniFB.jl" Window KeyPress MouseMove Keys onkey onmouse
 @use "github.com/jkroso/UI.jl/Interface/draw" frame rect
 @use GeometryBasics: Vec2
+@use "./drive" drive
 const px = K.px
 
 const dir = mktempdir()
@@ -20,7 +21,7 @@ write(joinpath(dir, "tool.jl"), "f(x) = x + 1\n")
 
 const e = K.build_editor(joinpath(dir, "a.md"))
 const w = Window(e, size=(900px, 700px))
-frames(n=2) = foreach(_ -> frame(w), 1:n)
+const (; frames, click) = drive(w, moved=2)
 frames()
 
 "Show the sidebar, or hide it, and draw the window until the sidebar has finished its slide"
@@ -38,20 +39,8 @@ file(name) = only(item for item in K.file_tree(e).children if basename(item.firs
 isopen(name) = !file(name).collapsed
 "The headings that the sidebar lists, from the top"
 headings() = [item.firstchild.title for item in K.items(K.file_tree(e)) if item.firstchild isa K.EntryLabel]
-"Click the window at `x`, `y`"
-click(x, y) = begin
-  w.mouse = typeof(w.mouse)(x, y)
-  onmouse(w, MouseMove(Vec2{px}(x, y), w))
-  frames()
-  w.keys |= Keys.mouse_left
-  onkey(w, KeyPress{Keys.mouse_left}(0, w))
-  w.keys ⊻= Keys.mouse_left
-  frames()
-end
-"Click the middle of the part of the window that `node` is drawn in"
-click(node) = (r = rect(node); click(r.left + r.width / 2, r.top + r.height / 2))
 "Click the icon at the start of the row of the file `name`. It opens or closes the file's group."
-click_icon(name) = (r = rect(file(name).firstchild); click(r.left + 8px, r.top + r.height / 2))
+click_icon(name) = (r = rect(file(name).firstchild); click((r.left + 8px, r.top + r.height / 2)))
 
 @testset "the sidebar opens the file that shows the first time it opens" begin
   sidebar!()

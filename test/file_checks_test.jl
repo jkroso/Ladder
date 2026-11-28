@@ -12,6 +12,7 @@
 @use "github.com/jkroso/UI.jl/Interface/draw" frame window_tool
 @use GeometryBasics: Vec2
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
+@use "./drive" drive
 const px = K.px
 
 # The folder is the test's own each time, so that two test processes that run at once don't write the same files
@@ -34,7 +35,7 @@ quarter() = share("25%")
 
 const e = K.build_editor(source)
 const w = Window(e, size=(900px, 400px))
-frames(n=2) = foreach(_ -> Base.invokelatest(frame, w), 1:n)
+const (; frames, click) = drive(w, latest=true)
 frames(3)
 const b = e.buf
 results() = e.nodes[:file_checks].results
@@ -204,16 +205,6 @@ finish() = begin
   end
   frames()
 end
-click(x, y) = begin
-  w.mouse = typeof(w.mouse)(x, y)
-  onmouse(w, MouseMove(Vec2{px}(x, y), w))
-  frames(1)
-  w.keys |= Keys.mouse_left
-  onkey(w, KeyPress{Keys.mouse_left}(0, w))
-  w.keys ⊻= Keys.mouse_left
-  onkey(w, KeyRelease{Keys.mouse_left}(0, w))
-  frames()
-end
 
 @testset "a check that fails has Show Steps and Fix It beside it, and Fix It asks an agent" begin
   i = findfirst(==("# check: share(\"half\")"), b.lines)
@@ -238,7 +229,7 @@ end
   @test first.(buttons) == [:steps, :fix] && all(x -> x[3].line == i, buttons) && buttons[1][2][2] > 40
   haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], "check-buttons.png"), w)
   left, top, wide, tall = buttons[1][2]
-  click(left + wide / 2, top + tall / 2)
+  click((left + wide / 2, top + tall / 2))
   @test K.shown_steps(e) !== nothing && K.shown_steps(e).stopped > 0
   # The palette offers the check on the caret's line first, then those that fail
   @test first(K.choices_for(K.FileCheck, e)).line == i && K.chip_start(K.FileCheck, e).line == i
@@ -248,7 +239,7 @@ end
   b.caret = b.anchor = (i, 0)
   frames()
   left, top, wide, tall = K.check_buttons(e)[2][2]
-  click(left + wide / 2, top + tall / 2)
+  click((left + wide / 2, top + tall / 2))
   @test picker().asked !== nothing && picker().asked.words == "Fix the check share(\"half\")"
   finish()
   asked = read(joinpath(dir, "asked.txt"), String)

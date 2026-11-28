@@ -10,6 +10,7 @@
 @use "github.com/jkroso/UI.jl/Interface/draw" frame rect onpinch
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
 @use GeometryBasics: Vec2
+@use "./drive" drive middle
 const px = K.px
 
 const SITE = Dict(
@@ -67,27 +68,11 @@ The end.
 
 const e = K.build_editor(page)
 const w = Window(e, size=(1000px, 900px))
-frames(n=3) = foreach(_ -> frame(w), 1:n)
+const (; frames, at, press, release, click, typed, key, shot) = drive(w, frames=3)
 frames()
 const v = e.nodes[(:block, K.VIEW_BLOCK, page, 1)]
 const b = v.browser
-shot(name) = haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], name), w)
 
-at((x, y)) = (w.mouse = typeof(w.mouse)(px(x), px(y)); onmouse(w, MouseMove(Vec2{px}(px(x), px(y)), w)); frames(1))
-press(place) = (at(place); w.keys |= Keys.mouse_left; onkey(w, KeyPress{Keys.mouse_left}(0, w)))
-release() = (w.keys ⊻= Keys.mouse_left; onkey(w, KeyRelease{Keys.mouse_left}(0, w)); frames())
-click(place) = (press(place); release())
-"Press and let go of the key `k`, with the keys `held` down meanwhile"
-key(k, held=nothing) = begin
-  was = w.keys
-  held === nothing || (w.keys |= held)
-  onkey(w, KeyPress{k}(0, w))
-  onkey(w, KeyRelease{k}(0, w))
-  w.keys = was
-  frames()
-end
-typed(s) = (foreach(c -> ontype(w, Typed(c, w)), s); frames())
-middle(r) = (K.num(r.left + r.width / 2), K.num(r.top + r.height / 2))
 "The button beside the top right corner of the first block, which shows while the mouse is over the block"
 go_button() = (at(middle(rect(b))); K.fills(e)[objectid(v)].button)
 "Where a point of the page of the web is in the window"

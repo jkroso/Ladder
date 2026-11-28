@@ -27,18 +27,9 @@ write(notes, "# Notes\n\nSome words.\n")
 
 const e = K.build_editor(site)
 const w = Window(e, size=(1000px, 800px))
-const (; frames, at, press, release, click, shot) = drive(w, frames=3)
+const (; frames, at, press, release, click, key, shot) = drive(w, frames=3)
 frames()
 
-"Press and let go of the key `k`, with the keys `held` down meanwhile"
-key(k, held=nothing) = begin
-  was = w.keys
-  held === nothing || (w.keys |= held)
-  onkey(w, KeyPress{k}(0, w))
-  onkey(w, KeyRelease{k}(0, w))
-  w.keys = was
-  frames()
-end
 "Press ⌘E"
 other_level() = key(Keys.e, Keys.cmd)
 "The HTMLPage of the file that shows, and its Browser"

@@ -11,6 +11,7 @@
 @use "github.com/jkroso/UI.jl/Interface/draw" frame
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
 @use GeometryBasics: Vec2
+@use "./drive" drive
 const px = K.px
 
 const dir = mktempdir()
@@ -51,10 +52,9 @@ The end.
 
 const e = K.build_editor(page)
 const w = Window(e, size=(1000px, 700px))
-frames(n=2) = foreach(_ -> frame(w), 1:n)
+const (; frames, click, shot) = drive(w)
 frames()
 K.focus(e)
-shot(name) = haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], name), w)
 
 "The line of the page that holds `text`"
 line(text) = findfirst(l -> occursin(text, l), e.buf.lines)
@@ -64,18 +64,6 @@ words() = line("Ladder opens")
 show!(i) = (e.scroll.offset = max(0px, K.item(e, i).top - 60px); frames(3))
 "The place in the window that is `down` from the top of what line `i` shows, in the middle of the page"
 spot(i, down) = (it = K.item(e, i); (e.origin[1] + e.width / 2, e.origin[2] + it.top + down))
-click(place, held...) = begin
-  x, y = place
-  w.mouse = typeof(w.mouse)(x, y)
-  onmouse(w, MouseMove(Vec2{px}(x, y), w)); frame(w)
-  foreach(h -> w.keys |= h, held)
-  w.keys |= Keys.mouse_left
-  onkey(w, KeyPress{Keys.mouse_left}(0, w))
-  w.keys ⊻= Keys.mouse_left
-  onkey(w, KeyRelease{Keys.mouse_left}(0, w))
-  foreach(h -> w.keys ⊻= h, held)
-  frames()
-end
 caret!(i, col=0) = (e.buf.caret = e.buf.anchor = (i, col); K.touch!(e); frames())
 "True when a line goes round the part of the page that the caret is on"
 ringed() = K.picked(e.buf) !== nothing && w.focus === e

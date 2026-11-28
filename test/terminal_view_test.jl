@@ -32,7 +32,7 @@ write(notes, "# Notes\n\nSome words.\n\n```view\nkept.vt\n```\n")
 
 const e = K.build_editor(fresh)
 const w = Window(e, size=(900px, 560px))
-const (; frames, at, press, shot) = drive(w, frames=3, pressed=1)
+const (; frames, at, press, release, click, typed, key, shot) = drive(w, frames=3, pressed=1)
 frames()
 
 "The terminal of the file at `path`, and the text that it shows"
@@ -40,21 +40,8 @@ view(path=e.buf.path) = e.nodes[(:term, path)]
 words(path=e.buf.path) = Screens.words(view(path).term)
 "Draw frames until `done()` is true, for no more than `seconds`. The shell's output comes on another thread."
 until(done; seconds=10) = (t = time(); while !done() && time() - t < seconds; sleep(0.02); frames(1); end; frames(1); done())
-release() = (w.keys ⊻= Keys.mouse_left; onkey(w, KeyRelease{Keys.mouse_left}(0, w)); frames(1))
-click(place) = (press(place); release())
-"Press and let go of the key `k`, with the keys `held` down meanwhile"
-key(k, held=nothing) = begin
-  was = w.keys
-  held === nothing || (w.keys |= held)
-  onkey(w, KeyPress{k}(0, w))
-  onkey(w, KeyRelease{k}(0, w))
-  w.keys = was
-  frames(1)
-end
-"Type text, as the keyboard does"
-type(text) = (foreach(c -> ontype(w, Typed(c, w)), text); frames(1))
 "Type a line into the shell and wait until the terminal shows `expect`"
-run(line, expect) = (type(line); key(Keys.enter); until(() -> occursin(expect, words())))
+run(line, expect) = (typed(line); key(Keys.enter); until(() -> occursin(expect, words())))
 "The middle of the cell in line `row` and cell `col` of the terminal that shows, in the window"
 cell(row, col) = begin
   v = view()
@@ -111,7 +98,7 @@ end
   k = findlast(l -> startswith(Screens.words(t, l), "crimson"), Screens.everything(t))
   @test Screens.everything(t)[k].cells[1].fg == Screens.numbered(1)
   # The arrows and Control with a letter send what a terminal sends
-  type("cat -v")
+  typed("cat -v")
   key(Keys.enter)
   key(Keys.up)
   key(Keys.left, Keys.opt)
@@ -143,7 +130,7 @@ end
   release()
   @test Terms.selected(v) == "pasted"
   # Typing takes the selection away
-  type("x")
+  typed("x")
   @test Terms.selected(v) == ""
   key(Keys.backspace)
 end
@@ -163,7 +150,7 @@ end
   # New lines don't move a view that's back in the past
   first_shown() = Screens.words(t, Screens.line(t, length(t.past) - v.back + 1))
   top = first_shown()
-  type("echo more")
+  typed("echo more")
   @test v.back == 0   # but typing shows the newest lines again
   key(Keys.enter)
   until(() -> occursin("\nmore\n", words()))
@@ -246,7 +233,7 @@ end
   click(cell(row, 2))
   @test clipboard(w) == "copy-me"
   # ⌥ as a Meta key sends ESC and the key, with ⇧ too, and the Mac's character doesn't come
-  type("cat -v")
+  typed("cat -v")
   key(Keys.enter)
   meta(k, char, held=Keys(0)) = begin
     w.keys |= Keys.opt | held
@@ -359,7 +346,7 @@ end
   text = read(fresh, String)
   @test occursin("keep-12", text) && occursin("\r\n", text)
   # A shell that ends says so, and Return starts another
-  type("exit 3")
+  typed("exit 3")
   key(Keys.enter)
   ok = until(() -> !Terms.running(v))
   @test ok
@@ -382,7 +369,7 @@ end
   @test occursin("Press Return to start a shell in", Terms.hint(v))
   shot("terminal-kept.png")
   # Keys do nothing to it, and the file is as it was
-  type("ls")
+  typed("ls")
   key(Keys.up)
   @test words() == "red and plain\nthe last line of the file"
   @test read(kept, String) == "\e[1;31mred\e[0m and plain\r\nthe last line of the file"

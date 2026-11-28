@@ -50,11 +50,10 @@ The end.
 
 const e = K.build_editor(page)
 const w = Window(e, size=(1000px, 1300px))
-const (; frames, at, press, release, click, typed, shot) = drive(w)
+const (; frames, at, press, release, click, typed, key, shot) = drive(w)
 frames()
 log(n=1) = e.nodes[(:block, K.TIMELOG, page, n)]
 
-key(k) = (onkey(w, KeyPress{k}(0, w)); onkey(w, KeyRelease{k}(0, w)); frames())
 block(n=1) = (s = K.block_lines(e.buf, K.TIMELOG, n); e.buf.lines[s[1]+1:s[2]-1])
 button(n=1) = log(n).parts[(:button, :clock)]
 cell(i, part, n=1) = log(n).parts[(:cell, i, part)]

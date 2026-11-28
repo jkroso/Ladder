@@ -11,6 +11,7 @@
 @use "github.com/jkroso/UI.jl/Interface/draw" frame rect scene draw draw_tool window_tool focus popups
 @use "github.com/jkroso/UI.jl/Interface/testing" click!
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
+@use "./drive" drive
 const px = K.px
 
 @testset "what a form's block says, and what each field takes" begin
@@ -91,13 +92,11 @@ write(page, start)
 K.calendar_day[] = Date(2026, 11, 24)   # a Tuesday
 const e = K.build_editor(page)
 const w = Window(e, size=(900px, 800px))
-frames(n=2) = foreach(_ -> Base.invokelatest(frame, w), 1:n)
+const (; frames, key, shot) = drive(w, latest=true)
 frames(4)
 e.buf.anchor = e.buf.caret = (14, 3); K.touch!(e); frames(3)
 form() = K.block_view(e, "form", 1)
 field(k) = K.form_field(form(), k)
-key(k) = (onkey(w, KeyPress{k}(0, w)); frames(1))
-shot(name) = haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], name), w)
 
 @testset "a form has a field for each column of the table above it" begin
   v = form()

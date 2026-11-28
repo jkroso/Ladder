@@ -23,16 +23,10 @@ write(joinpath(dir, "page.md"), "# A page\n\n```ui\nnotes_count()\n```\n")
 
 const e = K.build_editor(joinpath(notes, "one.md"))
 const w = Window(e, size=(1000px, 700px))
-const (; frames, at, click) = drive(w)
+const (; frames, at, click, key) = drive(w)
 frames()
 K.focus(e)
 
-press(key, mods...) = begin
-  foreach(k -> (w.keys |= k), mods)
-  onkey(w, KeyPress{key}(0, w)); onkey(w, KeyRelease{key}(0, w))
-  foreach(k -> (w.keys ⊻= k), mods)
-  frames()
-end
 "Each Text in the layout `node`, in the order they read"
 texts(node, out=String[]) = begin
   node isa K.Text ? push!(out, node.content) : node isa K.GeometricUI && foreach(n -> texts(n, out), node.children)
@@ -137,12 +131,12 @@ end
   n = length(K.COMMANDS)
   K.add_commands!("Notes", [K.Command(:note_file, "File the note", :window, "ctrl+cmd+n", (o, win, _) -> (ran[] += 1))])
   @test length(K.COMMANDS) == n + 1 && first(last(K.COMMAND_GROUPS)) == "Notes" && K.caps(first(K.keys_now(e).of[:note_file])) == "⌃⌘N"
-  press(Keys.n, Keys.ctrl, Keys.cmd)
+  key(Keys.n, Keys.ctrl, Keys.cmd)
   @test ran[] == 1
   # The same command again takes the place of the one that was there, and its group isn't there twice
   K.add_commands!("Notes", [K.Command(:note_file, "File it", :window, "ctrl+cmd+n", (o, win, _) -> (ran[] += 10))])
   @test length(K.COMMANDS) == n + 1 && count(g -> first(g) == "Notes", K.COMMAND_GROUPS) == 1 && K.COMMANDS[:note_file].title == "File it"
-  press(Keys.n, Keys.ctrl, Keys.cmd)
+  key(Keys.n, Keys.ctrl, Keys.cmd)
   @test ran[] == 11
 end
 
@@ -178,10 +172,10 @@ end
   took = Any[]
   K.FIELD_KEYS[:notes] = (o, win, key) -> win.focus === field && key == Keys.enter && (push!(took, key); true)
   @test w.focus === field
-  press(Keys.enter)
+  key(Keys.enter)
   @test took == [Keys.enter] && e.buf.lines == K.text(e.buf.path)   # and the page's text didn't get the key
   # A key that the code doesn't take goes on as ever
-  press(Keys.a)
+  key(Keys.a)
   @test length(took) == 1
   K.focus(e); frames()
 end
