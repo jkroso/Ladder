@@ -1025,7 +1025,8 @@ describe(r::KeyRow) = begin
           isempty(list) ? (Box(label("No keys", 12px, color=colours.faint)),) : map(keycap, list)
   row = Row(width(grow=grow), height(KEY_ROW_H), padding(10px, 0px), radius(6px), child_gap=6px, name="Command",
             background(waits ? colours.active : ishovered(r) ? colours.hover : clear),
-    Box(width(grow=grow), Alignment.Start, label(COMMANDS[r.name].title, 14px)),
+    # A long title is cut off where the row ends, so that it doesn't push the keys out past the page's right edge
+    Box(width(grow=grow), Alignment.Start, clip_x=true, label(COMMANDS[r.name].title, 14px)),
     (haskey(e.rebound, r.name) && !waits ? (node!(() -> KeyReset(name=r.name), e, (:key_reset, r.name)),) : ())...,
     right...)
   under[1] == r.name || return row

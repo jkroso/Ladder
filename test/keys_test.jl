@@ -519,6 +519,8 @@ end
   row(name) = e.nodes[(:key_row, name)]
   keys(name) = K.caps.(K.keys_now(e).of[name])
   text = copy(e.buf.lines)
+  # A row is as wide as the page, however long the longest title of a command is, so its keys are in the window
+  @test rect(row(:save)).width <= e.width
   # A click on a command's row waits for its new keys, and the next key with the keys held with it is the command's shortcut
   click(w, row(:save))
   @test K.key_asking(e) == :save && w.focus === row(:save)
@@ -606,8 +608,8 @@ end
   @test s.nodes[:title] isa K.Title && !any(key -> key isa Tuple && first(key) == :settings_tab, keys(s.nodes))
   # Each other page of the settings' folder has a link on the main page, and a link back to it
   others = filter(name -> endswith(name, ".md") && name != "settings.md", readdir(K.settings_dir()))
-  # The startup page is there once Ladder has started, since Ladder writes it then
-  @test sort(filter(!=("startup.md"), others)) == ["code-editor.md", "key-bindings.md"]
+  # The startup page and the page of ignored files are there once Ladder has started, since Ladder writes them then
+  @test sort(filter(!in(("startup.md", "ignored-files.md")), others)) == ["code-editor.md", "key-bindings.md", "terminal.md"]
   for name in others
     @test any(line -> occursin("]($name)", line), s.buf.lines)
     @test occursin("](settings.md)", read(K.settings_page(name), String))
