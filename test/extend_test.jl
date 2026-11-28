@@ -41,9 +41,22 @@ end
 bar() = texts(K.describe(e.nodes[:topbar]))
 "True when the page that shows is in the folder of notes"
 innotes(e) = startswith(e.buf.path, notes * "/")
-"Take the test's extension out of every table"
-forget() = foreach(t -> delete!(t, :notes), (K.EACH_FRAME, K.AT_QUIT, K.BAR_PARTS, K.BUTTONS, K.PAGE_TITLES, K.MATTER_TITLES, K.MATTER_CARDS,
-                                             K.PAGE_NAMES, K.FIELD_KEYS, K.SETTINGS_FOLDERS))
+"""
+Take the test's extension out of every table, and take away its command and
+its item of the Insert menu. The tests that run after this one in the same
+process then have Ladder's own commands and menu.
+"""
+forget() = begin
+  foreach(t -> delete!(t, :notes), (K.EACH_FRAME, K.AT_QUIT, K.BAR_PARTS, K.BUTTONS, K.PAGE_TITLES, K.MATTER_TITLES, K.MATTER_CARDS,
+                                    K.PAGE_NAMES, K.FIELD_KEYS, K.SETTINGS_FOLDERS))
+  delete!(K.COMMANDS, :note_file)
+  filter!(g -> first(g) != "Notes", K.COMMAND_GROUPS)
+  filter!(a -> last(a).name != :note_file, K.ADDED_COMMANDS)
+  menu = last(K.PAGE_MENU[findfirst(x -> x isa Pair && first(x) == "Insert", K.PAGE_MENU)])
+  was = findfirst(x -> x isa Tuple && x[1] == "Note", K.INSERTS)
+  was === nothing || (deleteat!(K.INSERTS, was); deleteat!(menu, was))
+  nothing
+end
 
 @testset "with nothing added, Ladder is as it was" begin
   forget()
