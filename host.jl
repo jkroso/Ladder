@@ -17,6 +17,7 @@ export editor, page_object, object, list_files!, go_folder!, open!, open_folder!
        keep_talk!, follow_host!, celltext, lowest, component, unscaled, command_kind, pinch_open, another_day,
        blocks, chart_file, chat_shown, code_offered, code_start, complete!, def_call, definition_of,
        design_field_of, escaped, file_table, folder_pages, follow_wiki!, hide_bar!, hiding_name, html_shown,
+       hiding_named, same_settings!,
        ispicture, istable, keep_copy, keep_pasted, line_step, listed_agents, mark_colour, markdown_app,
        name_at, name_notes, needs_run, note_place!, page_covered, page_given, page_log, page_text, page_then,
        part_lines, part_texts, passing, plain_name, planned_tasks, redraw_windows!, rows, run_in, run_sum,
@@ -125,6 +126,9 @@ function page_day end
 
 "Give the other windows the settings of the editor `e`, and write them to their file if `e` keeps them"
 function save_settings! end
+
+"Give `new`, the editor of a window that's about to open, each setting of `e` that every window has the same"
+function same_settings! end
 
 "Run again the live blocks of the editor `e` that asked for `setting`"
 function rerun! end
@@ -263,6 +267,9 @@ function hide_bar! end
 
 "The settings page's name for `how` the top bar hides"
 function hiding_name end
+
+"How the top bar hides, from its name on the settings page"
+function hiding_named end
 
 "True when the page shows an HTML file as the page that its HTML makes"
 function html_shown end

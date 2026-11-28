@@ -59,7 +59,7 @@ show_as_app!(e) = begin
   (b.view == :markdown && !isempty(b.path)) || error("Only a page of Markdown that's in a file shows as an app.")
   dirty(b) && writes(b) && save!(b)
   shown = build_editor(b.path)
-  foreach(name -> setfield!(shown, name, getfield(e, name)), SHARED)
+  same_settings!(shown, e)
   shown.remember = false   # what this window sets, like a sidebar that's shut, isn't written to the settings
   shown.panel = false
   shown.nodes[:as_app] = true

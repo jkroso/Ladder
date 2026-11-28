@@ -891,7 +891,7 @@ show_place!(e, file::AbstractString, line::Int) = begin
   k = findfirst(o -> o !== e && !isempty(o.buf.path) && (o.buf.path == file || page_key(o.buf.path) == file), editors)
   if k === nothing
     shown = build_editor(file)
-    foreach(name -> setfield!(shown, name, getfield(e, name)), SHARED)
+    same_settings!(shown, e)
     shown.remember = e.remember
     shown.panel = false
     size, at = window_beside(by)

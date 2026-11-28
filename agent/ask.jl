@@ -2015,7 +2015,7 @@ show_change!(e) = begin
     return shown
   end
   shown = build_editor(page)
-  foreach(name -> setfield!(shown, name, getfield(e, name)), SHARED)
+  same_settings!(shown, e)
   shown.remember = false
   shown.panel = false
   by = window_of(e)

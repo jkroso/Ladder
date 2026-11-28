@@ -30,6 +30,7 @@
 @use "./levels_view" exports...
 @use "./page_mouse" exports...
 @use "./commands" exports...
+@use "./settings" FOLLOWED
 
 export DEEPEST_PART, KEEP_PART, LiveCover, PART_NOTE_H, PART_TAB, PartSource, TRANSCLUSION,
        Transclusion, block_link!, copy_link_to_block!, enter_shown!, heading_lines, heading_words,
@@ -302,8 +303,8 @@ end
 
 "Give the editor of a part the choices of the editor of the page that shows it: its colours, font, text size and keys"
 follow_host!(sub, e) = begin
-  for f in (:theme, :look, :font, :weight, :zoom, :code_scale, :code_font, :code_weight, :indent, :wrap, :spelling,
-            :glide, :bundle, :rebound, :widest, :size, :autosave)
+  # FOLLOWED has the settings. The look of a blog's page and the window's size are no settings, and the part has those too.
+  for f in (FOLLOWED..., :look, :size)
     setfield!(sub, f, getfield(e, f))
   end
   # Text that was laid out in another font or at another size is laid out again

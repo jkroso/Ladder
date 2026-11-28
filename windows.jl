@@ -767,7 +767,7 @@ settings of the editor `like`. `show_window!` puts it on the screen.
 """
 page_window(path, like) = begin
   e = build_editor(path)
-  foreach(name -> setfield!(e, name, getfield(like, name)), SHARED)
+  same_settings!(e, like)
   e.remember = like.remember
   e.size = paper_window(screen_room(), e.side)
   window!(e, title="Ladder", size=e.size)
@@ -795,7 +795,7 @@ new_window!(e) = begin
   e = top_editor(e)
   folder = current_folder(e)
   shown = blank_editor()
-  foreach(name -> setfield!(shown, name, getfield(e, name)), SHARED)
+  same_settings!(shown, e)
   shown.remember = e.remember
   show_path!(shown, folder)
   by = window_of(e)

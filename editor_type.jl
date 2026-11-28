@@ -32,7 +32,7 @@ export Item, Live, Grid, isspread, Glide, Editor, TopBar, Sidebar, Page, Documen
        GalleryView, TermSettings, TERM_SETTINGS, ViewBlock, ItemClock, PlainLine, Rect, TranscriptButton,
        FileCheck, DesignSheet, FolderPage, SourceChooser, SearchView, SearchChoice, ChoiceMenu, ChoiceRow,
        editors, EmailHead, EACH_FRAME, AT_QUIT, BAR_PARTS, BUTTONS, AgentKind, WebFolder, WebPage,
-       PAGE_WINDOWS, OutcomeBody, Bound, AgentPane, FileBlock, Things, each_thing, SHARED, CodePicker
+       PAGE_WINDOWS, OutcomeBody, Bound, AgentPane, FileBlock, Things, each_thing, CodePicker
 
 # --- what a window holds ---------------------------------------------------------
 
@@ -746,9 +746,6 @@ end
 
 "The things that `x`, what a chip has, is: itself, or each of several"
 each_thing(x) = x isa Things ? x.all : Any[x]
-
-"The settings that every window has the same: each is a field of the editor"
-const SHARED = (:theme, :font, :weight, :zoom, :widest, :plain, :spelling, :updates, :autosave, :peeks, :ai, :glide, :wrap, :numbers, :shade, :beside, :indent, :code_scale, :code_font, :code_weight, :guide, :bundle, :rebound, :side, :hidden, :right, :own, :pinned, :hide_bar)
 
 """
 The tool of a window of the editor `editor` that shows the code of a thing.
