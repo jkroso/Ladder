@@ -140,6 +140,14 @@ else
     name = only(c for c in values(trail.crumbs) if c.last)
     @test abs(K.num(rect(name).left + K.TT_PAD - rect(title).left)) <= 1
     @test any(n -> length(n) == 1 && n != "/", first.(trail.steps))
+    # A folder that shows only its first letter shows its whole name in a tooltip, under it
+    short = first(s[2] for s in trail.steps if length(s[1]) == 1 && s[1] != "/")
+    at(rect_middle(trail.crumbs[short]))
+    tip = only(p for p in popups(w) if p.key == :tooltip)
+    @test first(tip.content.content.children).content == basename(short)
+    shot("design-path-tip.png")
+    at((middle_x(rect(title)), middle_y(rect(title))))
+    @test !any(p -> p.key == :tooltip, popups(w)) && any(p -> p.key == :title_trail, popups(w))
     # The path stays in the name's room, on the toolbar's colour
     @test within(rect(trail), rect(grip)) && K.trail_ground(e) == V.panel_colour(V.theme(v))
     shot("design-path-hover.png")

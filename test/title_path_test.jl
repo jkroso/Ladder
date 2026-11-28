@@ -227,6 +227,33 @@ end
   @test K.num(r.left) >= K.num(K.mac_buttons_room(e)) && K.num(r.left + r.width) <= 1100
 end
 
+"The words of the tooltip that shows, or nothing"
+tip() = (ts = [p for p in popups(w) if p.key == :tooltip]; isempty(ts) ? nothing : first(only(ts).content.content.children).content)
+
+@testset "a name that shrank to fit shows its whole name in a tooltip, and the … shows the folders that it stands for" begin
+  # The page is 41 folders down, more than the path has room for, even with each folder's first letter
+  deep = mkpath(joinpath(dir, "deep", (string("f", lpad(k, 2, '0')) for k in 1:40)...))
+  page = made(joinpath(deep, "deep.md"))
+  K.open!(e, page); frames()
+  hover!()
+  steps = trail().steps
+  @test steps[2] == ("…", "") && any(s -> s[1] == "f", steps)
+  # A folder that shows only its first letter
+  path = first(s[2] for s in steps if s[1] == "f")
+  at(middle(crumb(path))); frames()
+  @test tip() == basename(path)
+  # The … has the names of the folders between ~ and the next name, in order
+  all = K.trail_steps(page)
+  next = findfirst(s -> s[2] == steps[3][2], all)
+  at(middle(trail().gap)); frames()
+  @test tip() == join(first.(all[2:next-1]), " › ") && startswith(tip(), "deep › f01 › f02")
+  # A name that shows whole has no tooltip
+  at(middle(crumb(page))); frames()
+  @test tip() === nothing
+  K.open!(e, a); at((550, 400)); frames()
+  @test !showing()
+end
+
 "The path's box in the window"
 path_box() = rect(only(p for p in popups(w) if p.key == :title_trail).content)
 "How far the middle of the path is from the middle of the file's name in the bar"

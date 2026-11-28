@@ -9017,8 +9017,10 @@ end
 @def mutable struct TitleTrail <: SemanticUI
   path::String = ""
   steps::Vector{Tuple{String,String}} = Tuple{String,String}[]   # the name and the path of each step, as they show. "…" has no path.
+  all::Vector{Tuple{String,String}} = Tuple{String,String}[]     # each step with its whole name, as it would show with room for all of them
   size::Any = nothing                                            # how big the window was when the path was put in place
   crumbs::Dict{String,Any} = Dict{String,Any}()                  # the TitleCrumb of each step, by its path
+  gap::Any = nothing                                             # the TitleGap, when an … stands for folders that there's no room for
   arrows::Dict{String,Any} = Dict{String,Any}()                  # the TitleArrow after each folder, by the folder's path
   parts::Vector{Entry} = Entry[]                                 # the headings over the caret and the component that it's on, after the file's name
   marks::Dict{Int,Any} = Dict{Int,Any}()                         # the TitlePart of each of those
@@ -9040,8 +9042,14 @@ end
 "One name of the path in the top bar: a folder, or the file at the end"
 @def mutable struct TitleCrumb <: SemanticUI
   path::String = ""
-  name::String = ""
+  name::String = ""   # as it shows, which can be shorter than its whole name
+  full::String = ""   # its whole name
   last::Bool = false
+end
+
+"The … of the path in the top bar, in the place of folders that there's no room for"
+@def mutable struct TitleGap <: SemanticUI
+  names::Vector{String} = String[]   # the folders that it stands for, from the left
 end
 
 "The › after a folder's name in the top bar. A click shows a menu of what's in the folder."
@@ -9280,7 +9288,7 @@ show_title_trail!(e, t, w, path) = begin
   v.path == path || (empty!(v.crumbs); empty!(v.arrows))
   # A pinned path is in the middle of the bar. After a click unpins it, it stays there until it closes, so the name doesn't move from under the mouse.
   v.centred = trail_pinned(e) || (v.centred && any(p -> p.key == :title_trail, popups(w)))
-  v.path, v.steps, v.size, v.parts, v.title_at = path, shown, window_size(e), parts, title_place(e, t)
+  v.path, v.steps, v.all, v.size, v.parts, v.title_at = path, shown, all, window_size(e), parts, title_place(e, t)
   widths = title_widths(shown)
   total = title_wide(shown) + more
   # How far the file's name is from the path's left edge
@@ -9314,10 +9322,16 @@ trail_view(v::TitleTrail) = begin
       push!(parts, isempty(before) || isremote(before) ? arrow() : get!(() -> own!(v, TitleArrow(path=before)), v.arrows, before))
     end
     if isempty(path)
-      push!(parts, Box(height(grow=grow), padding(TT_PAD, 0px), Alignment.Center, justify=Alignment.Center, label(name, 13px, color=colours.faint)))
+      # The … knows the names of the folders that it stands for: those between the steps either side of it
+      g = v.gap === nothing ? (v.gap = own!(v, TitleGap())) : v.gap
+      from, to = (findfirst(s -> s[2] == v.steps[j][2], v.all) for j in (i - 1, i + 1))
+      g.names = from === nothing || to === nothing ? String[] : first.(v.all[from+1:to-1])
+      push!(parts, g)
     else
       c = get!(() -> own!(v, TitleCrumb(path=path)), v.crumbs, path)
       c.name, c.last = name, i == n
+      k = findfirst(s -> s[2] == path, v.all)
+      c.full = k === nothing ? name : v.all[k][1]
       push!(parts, c)
     end
   end
@@ -9354,6 +9368,18 @@ describe(c::TitleCrumb) =
   Box(height(grow=grow), padding(TT_PAD, 0px), radius(5px), Alignment.Center, justify=Alignment.Center, name="Step",
       background(ishovered(c) ? colours.hover : clear),
     label(c.name, 13px, color=c.last ? colours.ink : colours.dim, weight=c.last ? "Medium" : ""))
+
+describe(g::TitleGap) =
+  Box(height(grow=grow), padding(TT_PAD, 0px), Alignment.Center, justify=Alignment.Center, name="Gap",
+    label("…", 13px, color=colours.faint))
+
+# A name that's shorter than its whole name, to fit, shows its whole name in a tooltip while the mouse is over it.
+# The … shows the names of the folders that it stands for.
+onmouse(c::TitleCrumb, ev::MouseMove) = (c.name == c.full || crumb_tip!(c, ev.window, c.full); nothing)
+onmouse(g::TitleGap, ev::MouseMove) = (isempty(g.names) || crumb_tip!(g, ev.window, join(g.names, " › ")); nothing)
+
+"Show `words` in a tooltip under `node`, a part of the path. The path is a popup, so the tooltip goes by the node's rectangle: one that follows a node in a popup closes at once."
+crumb_tip!(node, w, words) = (r = rect(node); r === nothing || show_tooltip!(w, tip_label(words), r.left, r.top, r.width, r.height, placement=:bottom, gap=6px); nothing)
 
 describe(a::TitleArrow) = begin
   # It's shaded while its list shows under it
