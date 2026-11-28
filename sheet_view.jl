@@ -708,8 +708,6 @@ offered(e) = begin
   nothing
 end
 
-@use "github.com/jkroso/Prospects.jl" @def
-
 "Which name of the list of names is chosen, and the list that esc hid. Each is kept with the place its list is for."
 @def mutable struct Suggesting
   at::Tuple{Int,Int} = (0, 0)       # the line, and the column where the name starts, of the list that `chosen` is for

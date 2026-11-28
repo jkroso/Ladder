@@ -1,5 +1,6 @@
 # The app's windows: the editor of each, the file or the folder that it opens, closing a file, what the whole window shows, and more windows
 
+@use "github.com/jkroso/Prospects.jl" @def
 @use "github.com/jkroso/MiniFB.jl"... onfiledrop onscroll
 @use "github.com/jkroso/UI.jl/Interface/Geometric"...
 @use "github.com/jkroso/UI.jl/Interface/Specific"...
@@ -156,8 +157,6 @@ open_on_folder!(e, path) = begin
   show_opened!(e)
   e
 end
-
-@use "github.com/jkroso/Prospects.jl" @def
 
 "The folder that a window was opened on, until the window shows it in the page or shows another file"
 @def mutable struct OpenedOn

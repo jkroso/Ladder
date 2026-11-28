@@ -1,5 +1,6 @@
 # The top bar: its buttons, its lock and its dot, and its colour over a web page
 
+@use "github.com/jkroso/Prospects.jl" @def
 @use "github.com/jkroso/MiniFB.jl"... onfiledrop onscroll
 @use "github.com/jkroso/UI.jl/Interface/Geometric"...
 @use "github.com/jkroso/UI.jl/Interface/Specific"...
@@ -47,8 +48,6 @@ export DOT_GAP, DOT_W, LOCK_SHAPES, LOCK_W, TINT_COLOURS, TIP_CODE, Tipped, bar_
 # dark one when they don't. The part of the bar over the sidebar, and over a
 # panel at the right, keeps the window's colours. A page with no one colour
 # along its top, like one with a picture there, leaves the bar as it was.
-
-@use "github.com/jkroso/Prospects.jl" @def
 
 "The colour that a window's top bar last took from a web page, kept between frames"
 @def mutable struct BarTint

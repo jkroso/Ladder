@@ -30,6 +30,7 @@
 # command there: term/resume.jl has the rules. The records of this are with
 # Ladder's own files, never in the terminal's file.
 
+@use "github.com/jkroso/Prospects.jl" @def
 @use GLFW
 @use "github.com/jkroso/MiniFB.jl"... onfiledrop onscroll
 @use "github.com/jkroso/UI.jl/Interface/Geometric"...
@@ -56,8 +57,6 @@ term_page(b::Buffer) = b.view in FILE_VIEWS && lowercase(splitext(b.path)[2]) in
 
 "True when the page shows a terminal's file as the terminal"
 term_shown(e) = e.buf.view == :file && hosted(e) === nothing && term_page(e.buf)
-
-@use "github.com/jkroso/Prospects.jl" @def
 
 "The terminals of a window"
 @def mutable struct Terminals

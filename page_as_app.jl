@@ -2,6 +2,7 @@
 #
 # Its commands are in main.jl.
 
+@use "github.com/jkroso/Prospects.jl" @def
 @use "github.com/jkroso/MiniFB.jl"... onfiledrop onscroll
 @use "github.com/jkroso/UI.jl/Interface/Geometric"...
 @use "github.com/jkroso/UI.jl/Interface/Specific"...
@@ -34,8 +35,6 @@ export app_tick!, show_as_app!, AppWindow
 # has nothing that says a page isn't saved. No key changes the page's text
 # there. The command, run in that window, makes it a window that changes the
 # page again.
-
-@use "github.com/jkroso/Prospects.jl" @def
 
 "What a window keeps of a page shown as an app"
 @def mutable struct AppWindow

@@ -1,5 +1,6 @@
 # One thing in many parts of the page: the mouse on a thing in one part marks it in the others
 
+@use "github.com/jkroso/Prospects.jl" @def
 @use "github.com/jkroso/MiniFB.jl"... onfiledrop onscroll
 @use "github.com/jkroso/UI.jl/Interface/Geometric"...
 @use "github.com/jkroso/UI.jl/Interface/Specific"...
@@ -155,8 +156,6 @@ pointed_line(e) = begin
   end
   nothing
 end
-
-@use "github.com/jkroso/Prospects.jl" @def
 
 "The thing that the mouse is on in a window, as the last frame found it"
 @def mutable struct PointedThing

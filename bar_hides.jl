@@ -1,5 +1,6 @@
 # A top bar that hides until the mouse is at the top of the window
 
+@use "github.com/jkroso/Prospects.jl" @def
 @use "github.com/jkroso/MiniFB.jl"... onfiledrop onscroll
 @use "github.com/jkroso/UI.jl/Interface/Geometric"...
 @use "github.com/jkroso/UI.jl/Interface/Specific"...
@@ -62,8 +63,6 @@ hides_bar(e) = e.hide_bar == :always || (e.hide_bar == :full_screen && e.full_sc
 
 "How much room the top bar keeps at the top of the window, over the page. A bar that hides keeps none: it shows over the page."
 above_page(e) = (hides_bar(e) ? 0px : TOPBAR_H) + (agent_shows(e) ? PAGE_CARD_GAP : 0px)   # in agent mode, the page's card starts a little under the window's top
-
-@use "github.com/jkroso/Prospects.jl" @def
 
 "What a window keeps of a top bar that hides, between frames"
 @def mutable struct HidingBar

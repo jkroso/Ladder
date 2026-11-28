@@ -1,5 +1,6 @@
 # Wiki links, like [[Ideas]], which name a page and not its file
 
+@use "github.com/jkroso/Prospects.jl" @def
 @use "github.com/jkroso/MiniFB.jl"... onfiledrop onscroll
 @use "github.com/jkroso/UI.jl/Interface/Geometric"...
 @use "github.com/jkroso/UI.jl/Interface/Specific"...
@@ -133,8 +134,6 @@ end
 # from the top of the project, is at the right of its row. Return or Tab types
 # the rest of the name and the ]] that ends the link. Two pages with the same
 # name are each written with their folders, like notes/Ideas.
-
-@use "github.com/jkroso/Prospects.jl" @def
 
 "What a window keeps of the wiki link that's being typed"
 @def mutable struct WikiOffer

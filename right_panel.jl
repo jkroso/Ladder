@@ -1,5 +1,6 @@
 # The panel at the right of the window, which a page of some kinds shows
 
+@use "github.com/jkroso/Prospects.jl" @def
 @use "github.com/jkroso/MiniFB.jl"... onfiledrop onscroll
 @use "github.com/jkroso/UI.jl/Interface/Geometric"...
 @use "github.com/jkroso/UI.jl/Interface/Specific"...
@@ -34,8 +35,6 @@ export MAC_BUTTONS_W, RIGHT_W, cleared, clearing, mac_buttons_room, right_part, 
 # setting: each window shows it or none does, and so does the next window.
 
 const RIGHT_W = 340px   # how wide the panel at the right is, in a window that has room for it
-
-@use "github.com/jkroso/Prospects.jl" @def
 
 "What a window keeps of the panel at its right, between frames"
 @def mutable struct RightSlide

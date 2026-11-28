@@ -4,6 +4,7 @@
 # Ladder asks you before the code may do more. Each section below says more.
 # guard.jl changes the code so that each call it makes is checked first.
 
+@use "github.com/jkroso/Prospects.jl" @def
 @use "github.com/jkroso/MiniFB.jl"... onfiledrop onscroll
 @use "github.com/jkroso/UI.jl/Interface/Geometric"...
 @use "github.com/jkroso/UI.jl/Interface/Specific"...
@@ -180,8 +181,6 @@ const SANDBOX_ASKER = Ref{Function}(sandbox_panel)
 
 "The name of the agent that would read a package for the window that asks now, for the panel's words"
 const ASKING_AGENT = Ref("Claude")
-
-@use "github.com/jkroso/Prospects.jl" @def
 
 "What a window keeps of the sandbox's questions"
 @def mutable struct SandboxAsking

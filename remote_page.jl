@@ -353,7 +353,7 @@ mutable struct PageAsked
 end
 
 "What a window keeps of the page that it has asked a web server for"
-Base.@kwdef mutable struct PageAsking
+@def mutable struct PageAsking
   asked::Union{Nothing,PageAsked} = nothing   # the page that's on its way, or nothing
 end
 

@@ -1,5 +1,6 @@
 # A job in Centient from the page: a project page asks the walkthrough service for its tasks
 
+@use "github.com/jkroso/Prospects.jl" @def
 @use "github.com/jkroso/MiniFB.jl"... onfiledrop onscroll
 @use "github.com/jkroso/UI.jl/Interface/Geometric"...
 @use "github.com/jkroso/UI.jl/Interface/Specific"...
@@ -97,8 +98,6 @@ job_args(e) = begin
   end
   args
 end
-
-@use "github.com/jkroso/Prospects.jl" @def
 
 "What a window keeps of the job that Centient makes from a page"
 @def mutable struct JobState

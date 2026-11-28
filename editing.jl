@@ -1,5 +1,6 @@
 # Editing: typing, deleting, the pairs of brackets and quotes, and copying the selection
 
+@use "github.com/jkroso/Prospects.jl" @def
 @use Skia
 @use "github.com/jkroso/MiniFB.jl"... onfiledrop onscroll
 @use "github.com/jkroso/UI.jl/Interface/Geometric"...
@@ -532,8 +533,6 @@ bracket_pair(b::Buffer) = begin
   end
   nothing
 end
-
-@use "github.com/jkroso/Prospects.jl" @def
 
 "What a window keeps of the brackets that the caret is between"
 @def mutable struct BracketsState

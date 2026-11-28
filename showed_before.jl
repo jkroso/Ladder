@@ -68,8 +68,6 @@ end
 # jump left, with the caret and the scroll as they were, before it goes back
 # to another file. ⌘⌥→ goes to the jump's line again.
 
-@use "github.com/jkroso/Prospects.jl" @def
-
 "The places that a window jumped from: see `jump_list`"
 @def mutable struct Jumps
   back::Vector{Any} = Any[]    # the places that ⌘⌥← goes back to, the last one last

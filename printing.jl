@@ -1,5 +1,6 @@
 # Printing the page: Ladder draws it into a PDF the way it reads
 
+@use "github.com/jkroso/Prospects.jl" @def
 @use Skia
 @use "github.com/jkroso/MiniFB.jl"... onfiledrop onscroll
 @use "github.com/jkroso/UI.jl/Interface/Geometric"...
@@ -206,8 +207,6 @@ print_pdf(e, paper=paper_size()) = begin
     layout!(e)
   end
 end
-
-@use "github.com/jkroso/Prospects.jl" @def
 
 "What a window keeps of its printing"
 @def mutable struct PrintedPDF

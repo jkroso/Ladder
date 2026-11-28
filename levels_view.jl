@@ -16,6 +16,7 @@
 # picture, it opens into a slider with a stop for each level. See "the slider
 # of the levels".
 
+@use "github.com/jkroso/Prospects.jl" @def
 @use "github.com/jkroso/MiniFB.jl"... onfiledrop onscroll
 @use "github.com/jkroso/UI.jl/Interface/Geometric"...
 @use "github.com/jkroso/UI.jl/Interface/Specific"...
@@ -407,8 +408,6 @@ page_level!(e) = begin
   kept === nothing || refill!(e, kept)
   e
 end
-
-@use "github.com/jkroso/Prospects.jl" @def
 
 "What a window keeps of a block whose lines fill it as text: see `lower!`"
 @def mutable struct LoweredState

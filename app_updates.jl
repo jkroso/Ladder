@@ -1,5 +1,6 @@
 # The app's own updates, and its extensions' new code: what a window does about them in each frame, and what the settings page shows and does
 
+@use "github.com/jkroso/Prospects.jl" @def
 @use "github.com/jkroso/UI.jl/Interface/abstract" window_of
 @use "github.com/jkroso/UI.jl/Interface/draw" redraw_in!
 @use "./update" => Update
@@ -31,8 +32,6 @@ export updates!, unsaved, extensions_tick!, extensions_news, extensions_act!, up
 # same box turns that off. The new code loads the next time that Ladder opens.
 # The settings page has a line that says which extensions have new code, and a
 # button that looks for it now or restarts Ladder to load it.
-
-@use "github.com/jkroso/Prospects.jl" @def
 
 "What a window keeps of the app's update and of its extensions' new code"
 @def mutable struct UpdatesState
