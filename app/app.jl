@@ -462,6 +462,9 @@ if building
   # Skia's calls were compiled with the old path, so compile them again
   warm_up()
   check_pages(PAGES)
+  # GLFW.Init during the build sets INITIALIZED, and the image keeps that.
+  # The next process would skip glfwInit, then the first window call fails.
+  GLFW.Terminate()
 end
 
 """
