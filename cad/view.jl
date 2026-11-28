@@ -4493,7 +4493,8 @@ onscroll(v::DesignView, e::MouseScroll) = begin
   over = panel_at(v, e.window)
   dx, dy = num(e.delta[1]), num(e.delta[2])
   if over == :history
-    v.along -= (abs(dx) > abs(dy) ? dx : dy) * (e.wheel ? 30 : 1)
+    # As far as a page moves for the same scroll, from a wheel or from two fingers
+    v.along -= (abs(dx) > abs(dy) ? dx : dy) * 30
     return handled
   end
   over === nothing || return

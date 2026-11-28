@@ -1102,6 +1102,12 @@ else
     click(v.parts[:last])
     settle()
     @test Models.marker(m) == length(Models.timeline(m))
+    # Two fingers move the history as far as they move a page: 30 times the scroll
+    at(rect_middle(v.parts[:history]))
+    v.along = 0.0
+    @test onscroll(v, K.MouseScroll(Vec2{px}(px(-2), px(0)), w)) !== nothing && v.along == 60
+    v.along = 0.0
+    frame(w)
     # A right click on a step shows its menu over the step. It looks as the menu of a table's column does.
     step = rect_middle(v.parts[(:step, 2)])
     right_click() = (at(step); w.keys |= Keys.mouse_right; onkey(w, KeyPress{Keys.mouse_right}(0, w)); w.keys ⊻= Keys.mouse_right;
