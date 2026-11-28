@@ -64,7 +64,7 @@ export PaneField, PaneReply, pane_field!, reply_editor, talk_on_page, talk_zoom,
        CHAT_WIDE, PAGE_TALK, TALK_MARK, chats, pane_wide, pane_context, talk_mark, talk_body, talk_part, talk_parts,
        talk_text, read_talk, load_talk!, chat_part, TALK_SLIDE, TalkRoom, said_nothing, talk_page,
        talk_greeting, chat_tick!, close_chats!, new_agent_session!, agent_dir, Recall, said_file, pane_dir, on_edge,
-       recall_key!
+       recall_key!, PaneText, PaneWords, PaneKept, ChatFiles
 
 "The words that you type to the agent in the pane `pane`, as the owner of the editor of them: see `small_editor`"
 struct PaneField
@@ -101,6 +101,13 @@ and a block that fills the window, are at the high level here.
 """
 page_symbols(e) = e.plain && e.buf.view == :markdown && full_block(e) === nothing
 
+"What the editor of a part of the agent's pane keeps of its text: a reply of the agent, or the words that you type"
+@def mutable struct PaneText
+  inks::Union{Nothing,NTuple{3,Any}} = nothing   # the colours of text that its lines were laid out in: see `pane_style!`
+  reply::Union{Nothing,AgentReply} = nothing     # the reply that it shows, in the editor of a reply
+  shown::Int = -1                                # how much of that reply it shows: the reply's `n` then
+end
+
 "Give the editor `sub` of a part of the agent's pane the colours and keys of the window of `e`, with the pane's own font and size, at the level of the window's page"
 pane_style!(sub, e; own=false) = begin
   follow_host!(sub, e)
@@ -110,7 +117,7 @@ pane_style!(sub, e; own=false) = begin
   sub.plain = page_symbols(e)   # at the snake, the run with the caret in a reply or in your words shows its markup too
   # Text that was laid out in other colours than the pane's is laid out again: each line keeps the colours that it was laid out in
   inks = (colours.ink, colours.dim, colours.accent)
-  get(sub.nodes, :pane_inks, nothing) == inks || (sub.nodes[:pane_inks] = inks; empty!(sub.flows))
+  state_of(sub, PaneText).inks == inks || (state_of(sub, PaneText).inks = inks; empty!(sub.flows))
   sub
 end
 
@@ -131,16 +138,17 @@ end
 
 "Put the words of the reply `it` in its editor `sub`, when they changed since it last showed them"
 show_reply!(sub, it::AgentReply) = begin
-  sub.nodes[:reply] = it
+  kept = state_of(sub, PaneText)
+  kept.reply = it
   # What the agent still says can't be changed, as its next words would take the place of the change
   sub.buf.fixed = !it.whole
-  get(sub.nodes, :shown, -1) == it.n && return sub
+  kept.shown == it.n && return sub
   b = sub.buf
   b.lines = String.(split(rstrip(it.text), '\n'))
   b.version = (stamp[] += 1)   # a number that no other version has had, as an edit gives
   b.caret = b.anchor = (1, 0)
   span!(sub, (1, length(b.lines)))
-  sub.nodes[:shown] = it.n
+  kept.shown = it.n
   sub
 end
 
@@ -564,6 +572,15 @@ end
 
 const MOST_PARAGRAPH = 2000   # characters. A longer paragraph doesn't go to the agent with the selection or the caret in it.
 
+"What a window keeps of what it last worked out for the agent's pane, each with what it was worked out for"
+@def mutable struct PaneKept
+  picked::Union{Nothing,Tuple{Any,Tuple,Any}} = nothing                               # the page of an HTML file, what was selected in it, and what the agent is told of that: see `html_picked`
+  html_letters::Union{Nothing,Tuple{Tuple,NamedTuple}} = nothing                      # an HTML file and when it last changed, and its text with the letters that its page can show
+  page_letters::Union{Nothing,Tuple{Any,Any}} = nothing                               # the page that a Browser shows, and its letters
+  outline::Union{Nothing,Tuple{Buffer,Int,Vector}} = nothing                          # the page's text, its version, and its outline: see `page_outline`
+  html_outline::Union{Nothing,Tuple{Any,Vector{Entry},Vector{Float64}}} = nothing     # the page of an HTML file, its headings, and how far down the page each one is
+end
+
 """
 What the agent is told of the page that the HTML file of the window of `e`
 makes: the lines for the `<ladder>` block about what's selected in it, or
@@ -579,31 +596,31 @@ html_picked(e) = begin
   v = html_part(e)
   b = html_browser(v)
   key = (b.picked, b.clicks[2], v.path, mtime(v.path))
-  kept = get(e.nodes, :html_picked, nothing)
+  kept = state_of(e, PaneKept).picked
   kept !== nothing && kept[1] === b.view.page && kept[2] == key && return kept[3]
   told = html_told(e, v, b)
-  e.nodes[:html_picked] = (b.view.page, key, told)
+  state_of(e, PaneKept).picked = (b.view.page, key, told)
   told
 end
 
 "The text of the HTML file at `path`, and the letters of it that its page can show, kept until the file changes"
 html_letters(e, path) = begin
   at = mtime(path)
-  kept = get(e.nodes, :html_letters, nothing)
+  kept = state_of(e, PaneKept).html_letters
   kept !== nothing && kept[1] == (path, at) && return kept[2]
   html = isfile(path) ? read(path, String) : ""
   got = (html=html, seen=Sources.seen(html))
-  e.nodes[:html_letters] = ((path, at), got)
+  state_of(e, PaneKept).html_letters = ((path, at), got)
   got
 end
 
 "The letters of the page that the Browser `b` shows, kept until it lays the page out again"
 page_letters(e, b) = begin
   p = b.view.page
-  kept = get(e.nodes, :page_letters, nothing)
+  kept = state_of(e, PaneKept).page_letters
   kept !== nothing && kept[1] === p && return kept[2]
   got = Sources.shown(Browsers.page_words(b))
-  e.nodes[:page_letters] = (p, got)
+  state_of(e, PaneKept).page_letters = (p, got)
   got
 end
 
@@ -664,11 +681,11 @@ It's kept until the text changes.
 """
 page_outline(e, b::Buffer) = begin
   b.view in (:markdown, :code) || return nothing
-  kept = get(e.nodes, :pane_outline, nothing)
+  kept = state_of(e, PaneKept).outline
   kept !== nothing && kept[1] === b && kept[2] == b.version && return kept[3]::Vector{Entry}
   found = b.view == :markdown ? outline(b) :
           [Entry(h.line, h.what == "section" ? 1 : 2, h.words, h.what == "section" ? "text-left" : "braces", h.line) for h in code_places(e)]
-  e.nodes[:pane_outline] = (b, b.version, found)
+  state_of(e, PaneKept).outline = (b, b.version, found)
   found
 end
 
@@ -687,12 +704,12 @@ list. They're kept until the page is laid out again.
 html_outline(e) = begin
   b = html_browser(html_part(e))
   p = b.view.page
-  kept = get(e.nodes, :html_outline, nothing)
+  kept = state_of(e, PaneKept).html_outline
   kept !== nothing && kept[1] === p && return (kept[2], kept[3])
   heads = Browsers.headings(b)
   found = Entry[Entry(i, h.level, h.words, "type-h$(h.level)", i) for (i, h) in enumerate(heads)]
   tops = Float64[h.top for h in heads]
-  e.nodes[:html_outline] = (p, found, tops)
+  state_of(e, PaneKept).html_outline = (p, found, tops)
   (found, tops)
 end
 
@@ -755,6 +772,13 @@ end
   typed::String = ""                # what you were typing when ↑ first brought back words
 end
 
+"What the editor of the words that you type to the agent keeps with them"
+@def mutable struct PaneWords
+  recall::Union{Nothing,Recall} = nothing   # where ↑ and ↓ are among the words that you gave before, once one of them was pressed
+  pictures::Vector{String} = String[]       # the pictures that go with the words, as files: see `attached`
+  made::Vector{String} = String[]           # the files of them that Ladder wrote: see `made_pictures`
+end
+
 "The file that keeps the words that you gave agents. It's beside the file of Ladder's settings, so a test's settings keep a test's words too."
 said_file() = joinpath(dirname(settings_file()), "prompts")
 
@@ -787,11 +811,11 @@ recall_key!(p::AgentPane, w, K) = begin
   b = sub.buf
   by = K == Keys.up ? -1 : 1
   text = join(b.lines, "\n")
-  r = get(sub.nodes, :recall, nothing)
+  r = state_of(sub, PaneWords).recall
   showing = r !== nothing && r.at > 0 && text == r.list[r.at]
   # While the list of commands shows over words that you typed, the arrows are the list's
   showing || (on_edge(sub, by) && isempty(slash_rows(p, text))) || return false
-  r === nothing && (r = sub.nodes[:recall] = Recall(list=said_before(said_file(), pane_dir(p))))
+  r === nothing && (r = state_of(sub, PaneWords).recall = Recall(list=said_before(said_file(), pane_dir(p))))
   at = r.at - by
   0 <= at <= length(r.list) || return false   # nothing older or newer: the caret moves as usual
   r.at == 0 && (r.typed = text)
@@ -918,9 +942,8 @@ field!(p::AgentPane, text::AbstractString) = begin
   typing = w !== nothing && was !== nothing && w.focus === was
   pane_field!(p)
   if was !== nothing
-    for key in (:pictures, :made_pictures)
-      haskey(was.nodes, key) && (p.field.nodes[key] = was.nodes[key])
-    end
+    old, new = state_of(was, PaneWords), state_of(p.field, PaneWords)
+    new.pictures, new.made = old.pictures, old.made
   end
   b = p.field.buf
   b.lines = [String(text)]
@@ -1211,7 +1234,7 @@ end
 # --- pictures that go with your words ---
 
 "The pictures that go with the words in the field of the pane `p`, as files. A new field starts with none."
-attached(p::AgentPane) = get!(() -> String[], p.field.nodes, :pictures)
+attached(p::AgentPane) = state_of(p.field, PaneWords).pictures
 
 "A test puts a folder of its own here, for the pictures that agent mode keeps"
 const AGENT_PICTURES = Ref("")
@@ -1230,7 +1253,7 @@ agent_pictures(p::AgentPane) = begin
 end
 
 "The files that Ladder wrote for the pictures in the field of the pane `p`, which go when a picture is taken away before it's sent"
-made_pictures(p::AgentPane) = get!(() -> String[], p.field.nodes, :made_pictures)
+made_pictures(p::AgentPane) = state_of(p.field, PaneWords).made
 
 """
 Put the picture at `path` with the words of the pane `p`. `made` is true for
@@ -1394,8 +1417,9 @@ reply_tick!(p::AgentPane, sub) = begin
   blocks_tick!(sub)
   scrub_tick!(sub)
   inline_tick!(sub)
-  it, s = get(sub.nodes, :reply, nothing), p.session
-  if it isa AgentReply && it.whole && s !== nothing && get(sub.nodes, :shown, -1) == it.n
+  kept = state_of(sub, PaneText)
+  it, s = kept.reply, p.session
+  if it isa AgentReply && it.whole && s !== nothing && kept.shown == it.n
     text = join(sub.buf.lines, "\n")
     if text != rstrip(it.text)
       it.saw === nothing && (it.saw = String(rstrip(it.text)))
@@ -2108,8 +2132,13 @@ chat_page(b::Buffer) = b.view in FILE_VIEWS && lowercase(splitext(b.path)[2]) in
 "True when the page shows a session's file as the session"
 chat_shown(e) = e.buf.view == :file && hosted(e) === nothing && chat_page(e.buf)
 
+"What a window keeps of its sessions' files: the pane of each one that it has shown and that's still there"
+@def mutable struct ChatFiles
+  panes::Vector{Any} = Any[]
+end
+
 "The sessions' files of the window of `e`: the pane of each one that it has shown and that's still there"
-chats(e) = get!(() -> Any[], e.nodes, :chats)
+chats(e) = state_of(e, ChatFiles).panes
 
 "How wide the pane `p` is: the pane of agent mode has what the page's card leaves, and a session's file has a column in the middle of the page"
 pane_wide(p::AgentPane, e) = on_page(p) ? px(round(num(clamp(page_room(e)[1] - 16px, 260px, CHAT_WIDE * e.zoom)))) : agent_wide(e)
@@ -2356,7 +2385,7 @@ the agent has done and the file has no tab: your next words start it again.
 One whose file has gone ends.
 """
 chat_tick!(e) = begin
-  haskey(e.nodes, :chats) || return nothing
+  isempty(chats(e)) && return nothing
   shown = chat_shown(e) ? get(e.nodes, (:chat, e.buf.path), nothing) : nothing
   w = window_of(e)
   for p in copy(chats(e))
@@ -2380,7 +2409,7 @@ end
 
 "End the agent of every session's file of the window of `e`, and write each file: the window has closed"
 close_chats!(e) = begin
-  haskey(e.nodes, :chats) || return nothing
+  isempty(chats(e)) && return nothing
   end_companions!(e)
   for p in chats(e)
     s = p.session
