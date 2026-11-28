@@ -37,7 +37,7 @@ export TABS_MOST, TAB_KEYS_WAIT, TabClose, TabLabel, add_tab!, choose_tab!, clos
        drop_gone_tabs!, fill_tabs!, focus_panel!, new_tab, new_tab!, own_scroll!, own_side_menu,
        show_tab!, show_tab_page!, side_menu, side_tick!, sidebar_view, tab_after_close!, tab_dots,
        tab_folder, tab_keys, tab_keys_shown!, tab_list, tab_marks, tab_menu!, tab_name, tab_rows,
-       tab_tree, tabbable, NewTab, no_new_tab!
+       tab_tree, tabbable, NewTab, no_new_tab!, TabsState, OwnSideMenu
 
 # --- the files that are open, as tabs -------------------------------------------------------
 #
@@ -66,8 +66,24 @@ export TABS_MOST, TAB_KEYS_WAIT, TabClose, TabLabel, add_tab!, choose_tab!, clos
 # closes. Ladder keeps the front window's tabs when it quits, and opens with
 # them the next time: see "where Ladder opens".
 
+"What a window keeps of its tabs between frames"
+@def mutable struct TabsState
+  open::Vector{String} = String[]                   # the files that have a tab, in the order that they opened
+  twins::Set{String} = Set{String}()                # the names that two tabs have: see `tab_folder`
+  keys_since::Union{Nothing,Float64} = nothing      # when ⌘ started to be held by itself, or nothing while it isn't
+  keys_shown::Bool = false                          # the first nine tabs show their keys, like ⌘1
+  checked::Float64 = 0.0                            # when the tabs whose files have gone were last closed
+  shown::String = ""                                # the file whose tab was last scrolled into sight
+end
+
+"What a window keeps of a side menu that a kind of folder made, between frames: see `side_tick!`"
+@def mutable struct OwnSideMenu
+  own::Bool = false     # the window has such a side menu, in the place of Ladder's sidebar
+  least::px = 0px       # how wide it stays while the sidebar is closed
+end
+
 "The files that are open in the window of `e`, as tabs at the top of the sidebar, in the order that they opened"
-tabs(e) = get!(() -> String[], e.nodes, :tabs)::Vector{String}
+tabs(e) = state_of(e, TabsState).open
 
 "True when the page at `path` can have a tab: a file, a new page that has no file yet, or a page from a web server. A folder can't."
 tabbable(path) = !isempty(path) && (isremote(path) || !isdir(path) || news_tab(path))
@@ -183,7 +199,7 @@ The name of the folder that the file of a tab is in, when another tab has the
 same name, or nothing. It tells the two apart. `fill_tabs!` finds the names
 that two tabs have.
 """
-tab_folder(e, path) = !isempty(path) && !isremote(path) && tab_name(path) in get(e.nodes, :tab_twins, ()) ? basename(dirname(path)) : nothing
+tab_folder(e, path) = !isempty(path) && !isremote(path) && tab_name(path) in state_of(e, TabsState).twins ? basename(dirname(path)) : nothing
 
 describe(l::TabLabel) = begin
   e = editor(l)
@@ -231,8 +247,10 @@ True when the tabs show the keys that show them: ⌘ has been held by itself for
 """
 tab_keys_shown!(e) = begin
   w = window_of(e)
-  (w !== nothing && only_held(w, Keys.cmd)) || return (delete!(e.nodes, :tab_keys_since); false)
-  since = get!(e.nodes, :tab_keys_since, time())
+  s = state_of(e, TabsState)
+  (w !== nothing && only_held(w, Keys.cmd)) || return (s.keys_since = nothing; false)
+  s.keys_since === nothing && (s.keys_since = time())
+  since = s.keys_since
   left = TAB_KEYS_WAIT - (time() - since)
   left > 0 && (redraw_in!(e, left); return false)
   true
@@ -240,7 +258,7 @@ end
 
 "The keys that show the tab of the file at `path`, like ⌘1, while the tabs show their keys, or \"\""
 tab_keys(e, path) = begin
-  get(e.nodes, :tab_keys_shown, false) || return ""
+  state_of(e, TabsState).keys_shown || return ""
   n = findfirst(==(path), tabs(e))
   (n === nothing || n > 9) ? "" : String(strip(hint(e, Symbol(:tab_, n))))
 end
@@ -288,8 +306,8 @@ Make the tabs' list hold a row for each tab, and shade the tab of the file
 that shows. Tabs whose files have gone close, once a second.
 """
 fill_tabs!(e, tree) = begin
-  t = get(e.nodes, :tabs_checked, 0.0)
-  time() - t > 1 && (drop_gone_tabs!(e); e.nodes[:tabs_checked] = time())
+  s = state_of(e, TabsState)
+  time() - s.checked > 1 && (drop_gone_tabs!(e); s.checked = time())
   ts = tabs(e)
   rows = tab_rows(e)
   if [item.firstchild.path for item in tree.children] != rows
@@ -301,7 +319,7 @@ fill_tabs!(e, tree) = begin
   i = findfirst(item -> item.firstchild.path == e.buf.path, listed)
   tree.focused = i === nothing ? nothing : listed[i]
   seen = Set{String}()
-  e.nodes[:tab_twins] = Set(n for n in map(tab_name, ts) if n in seen || (push!(seen, n); false))
+  s.twins = Set{String}(n for n in map(tab_name, ts) if n in seen || (push!(seen, n); false))
   tree
 end
 
@@ -325,7 +343,7 @@ shows.
 tab_list(e) = begin
   rows = tab_rows(e)
   isempty(rows) && return ()
-  e.nodes[:tab_keys_shown] = tab_keys_shown!(e)
+  state_of(e, TabsState).keys_shown = tab_keys_shown!(e)
   tree = fill_tabs!(e, tab_tree(e))
   high = Tree.ROW_HEIGHT   # the height of a row while the theme's text has its usual size, as the sidebar's has
   pad = 6px
@@ -333,11 +351,11 @@ tab_list(e) = begin
   room = max(high + 2pad, (window_size(e)[2] - above_page(e)) * TABS_MOST)
   scroll = node!(() -> own_scroll!(Scroll(width(grow=grow), height(grow=grow))), e, :tabs_scroll)
   at = findfirst(==(e.buf.path), rows)
-  if needs > room && at !== nothing && get(e.nodes, :tab_shown, "") != e.buf.path
+  if needs > room && at !== nothing && state_of(e, TabsState).shown != e.buf.path
     # The scroll knows how tall it is once it has been laid out, so a scroll that's new waits a frame
     if scroll.viewport > 0px
       scroll_into_view!(scroll, high * (at - 1), high * at + 2pad)   # with the room above the tab and under it
-      e.nodes[:tab_shown] = e.buf.path
+      state_of(e, TabsState).shown = e.buf.path
     else
       redraw_in!(e, 0)
     end
@@ -436,9 +454,9 @@ side_tick!(e) = begin
   menu = side_menu(e, window_object(e))
   own = !(menu isa Sidebar)
   window_parts(e).side_menu = menu
-  e.nodes[:own_side_menu] = own
+  state_of(e, OwnSideMenu).own = own
   least = own ? clamp(compact_width(menu), 0px, panel_w(e)) : 0px
-  e.nodes[:side_least] = least
+  state_of(e, OwnSideMenu).least = least
   # In agent mode the agent's pane is beside the side menu, and it gives the menu its room: see `menu_room`. While the
   # menu slides, the pane is as wide as it is beside the open menu, so its words don't wrap again in each frame.
   state_of(e, AgentMode).menu_room = !agent_shows(e) ? 0px : e.panel || sliding(e) ? panel_w(e) : least
@@ -447,7 +465,7 @@ side_tick!(e) = begin
 end
 
 "How wide the side menu stays while the sidebar is closed: its compact form's width, or 0px"
-side_least(e) = get(e.nodes, :side_least, 0px)
+side_least(e) = state_of(e, OwnSideMenu).least
 
 """
 How wide the sidebar is now, or the side menu that a kind of folder has in its
@@ -480,7 +498,7 @@ side_part(e) = begin
 end
 
 "True when the window has a side menu that a kind of folder made, in the place of Ladder's sidebar"
-own_side_menu(e) = get(e.nodes, :own_side_menu, false) === true
+own_side_menu(e) = state_of(e, OwnSideMenu).own
 
 "True when the sidebar shows Ladder's own tree of the folder's files, and not a list or a menu that a kind of folder made"
 files_listed(e) = !own_side_menu(e) && folder_view(e, directory(e)).list === nothing
