@@ -38,7 +38,7 @@ const w = Window(e, size=(900px, 400px))
 const (; frames, click) = drive(w, latest=true)
 frames(3)
 const b = e.buf
-results() = e.nodes[:file_checks].results
+results() = K.state_of(e, K.ChecksState).results
 went(code) = results()[code].went
 
 @testset "the comments that are checks" begin
@@ -63,7 +63,7 @@ end
   """)
   o = K.build_editor(other)
   K.file_checks_tick!(o)
-  @test o.nodes[:file_checks].found == [(4, "real(1)"), (10, "real(2)")]
+  @test K.state_of(o, K.ChecksState).found == [(4, "real(1)"), (10, "real(2)")]
 end
 
 @testset "a check of a function that hasn't run yet says to run it" begin
@@ -90,10 +90,10 @@ end
   frames()
   @test went("share(\"50%\") == 0.5") == :pass
   # They don't run again while neither a check nor the code changed
-  ran = e.nodes[:file_checks].ran
+  ran = K.state_of(e, K.ChecksState).ran
   K.edit!(b, (5, 0), (5, 0), " ")
   frames()
-  @test e.nodes[:file_checks].ran === ran
+  @test K.state_of(e, K.ChecksState).ran === ran
 end
 
 @testset "the top bar says how many checks pass, and a click goes to the next that fails" begin
@@ -216,12 +216,12 @@ end
   point(y) = (w.mouse = typeof(w.mouse)(300px, y); onmouse(w, MouseMove(Vec2{px}(300px, y), w)))
   it = K.item(e, 2)
   point(e.origin[2] + it.top + it.tall / 2)
-  @test e.nodes[:check_hover] == 2
+  @test K.state_of(e, K.ChecksState).hover == 2
   frames()
   @test first.(K.check_buttons(e)) == [:steps] && K.check_buttons(e)[1][3].line == 2
   it = K.item(e, findfirst(startswith("twice(x)"), b.lines))
   point(e.origin[2] + it.top + it.tall / 2)
-  @test e.nodes[:check_hover] == 0
+  @test K.state_of(e, K.ChecksState).hover == 0
   # The buttons show while the caret is on the check's line
   b.caret = b.anchor = (i, 0)
   frames()

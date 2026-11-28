@@ -65,7 +65,7 @@ export CHECK, CHECK_GOOD, Checked, COMPARES, value_brief, check_line, CheckView,
        open_check!, settle_check!, describe_dots, CHECK_LEVELS, in_lines, check_in_charge, check_html,
        FILE_CHECK, file_checks, file_checks_tick!, LIVE_WAIT, part_expr, defines_function, live_checks_tick!,
        check_note, mark_checks, hover_check!, file_results, check_part, next_check!, expression_at,
-       check_value, add_check!, CheckButtons, check_buttons
+       check_value, add_check!, CheckButtons, check_buttons, ChecksState
 
 const CHECK = "check"
 push!(BLOCK_ICONS, "check2-square", "check-circle-fill", "x-circle-fill", "exclamation-triangle-fill", "arrow-clockwise")
@@ -486,24 +486,34 @@ end
 "True for a window that shows a file of Julia code as its text"
 julia_file(e) = endswith(e.buf.path, ".jl") && e.buf.view == :code
 
+"What a window keeps of the checks of a file of Julia code, between frames"
+@def mutable struct ChecksState
+  version::Union{Nothing,Int} = nothing                     # the version of the text that the checks were found in, or nothing before any were looked for
+  found::Vector{Tuple{Int,String}} = Tuple{Int,String}[]    # the line of each check, and its code
+  ran::Any = nothing                                        # what the checks last ran for: the code of each, and how many times code had run
+  results::Dict{String,Checked} = Dict{String,Checked}()    # how each check went, by its code
+  # The functions with checks over them that run again by themselves: `mod`, the file's module, `version`, the version
+  # of the text that they last ran for, `typed` and `changed`, the version that was last typed and when, `start`, the
+  # code that the module started with, and `ran`, the code of each function that ran since. See `live_checks_tick!`.
+  live::Union{Nothing,NamedTuple} = nothing
+  hover::Int = 0                                            # the line of the check that the mouse is on, or 0
+end
+
 """
 In each frame: find the checks of a file of Julia code when its text changed,
 and run them when a check changed or code ran since they last ran. What they
-found is in `e.nodes[:file_checks]`.
+found is in the window's `ChecksState`.
 """
 file_checks_tick!(e) = begin
   julia_file(e) || return nothing
   b = e.buf
-  s = get(e.nodes, :file_checks, nothing)
-  if s === nothing || s.version != b.version
-    s = (version=b.version, found=file_checks(b.lines, string_opens(b)), ran=s === nothing ? nothing : s.ran,
-         results=s === nothing ? Dict{String,Checked}() : s.results)
-  end
+  s = state_of(e, ChecksState)
+  s.version == b.version || (s.found = file_checks(b.lines, string_opens(b)); s.version = b.version)
   key = (unique(last.(s.found)), CODE_RUNS[])
   if !isempty(key[1]) && key != s.ran
-    s = (; s..., ran=key, results=Dict(code => check_line(e, code) for code in key[1]))
+    s.results = Dict{String,Checked}(code => check_line(e, code) for code in key[1])
+    s.ran = key
   end
-  e.nodes[:file_checks] = s
   nothing
 end
 
@@ -539,22 +549,22 @@ last ran. See "checks in a file of Julia code".
 live_checks_tick!(e) = begin
   julia_file(e) || return nothing
   b = e.buf
-  s = get(e.nodes, :file_checks, nothing)
-  (s === nothing || isempty(s.found)) && return nothing
+  s = state_of(e, ChecksState)
+  isempty(s.found) && return nothing
   key = page_key(b.path)
   mod = something(loaded_module(key), Some(get(PAGE_MODULES, key, nothing)))
   mod === nothing && return nothing
-  live = get(e.nodes, :live_checks, nothing)
+  live = s.live
   # The module has each function as the window had it when the module was first seen, or as it last ran since
   if live === nothing || live.mod !== mod
-    e.nodes[:live_checks] = (mod=mod, version=b.version, typed=b.version, changed=0.0,
-                             start=Set(t for (_, t) in part_texts(b.lines)), ran=Dict{String,String}())
+    s.live = (mod=mod, version=b.version, typed=b.version, changed=0.0,
+              start=Set(t for (_, t) in part_texts(b.lines)), ran=Dict{String,String}())
     return nothing
   end
   live.version == b.version && return nothing
   # Each change starts the wait again
   if live.typed != b.version
-    e.nodes[:live_checks] = (; live..., typed=b.version, changed=time())
+    s.live = (; live..., typed=b.version, changed=time())
     redraw_in!(e, LIVE_WAIT)
     return nothing
   end
@@ -579,7 +589,7 @@ live_checks_tick!(e) = begin
       # Code that doesn't run yet leaves the checks as they were
     end
   end
-  e.nodes[:live_checks] = (; live..., version=b.version)
+  s.live = (; live..., version=b.version)
   ran > 0 && (CODE_RUNS[] += 1; redraw_windows!())   # the checks run again
   nothing
 end
@@ -610,8 +620,8 @@ that fails. The page's text is at `ui`.
 mark_checks(ctx, e, ui) = begin
   buttons = check_buttons(e)
   empty!(buttons)
-  s = get(e.nodes, :file_checks, nothing)
-  (s === nothing || isempty(s.found) || s.version != e.buf.version) && return nothing
+  s = state_of(e, ChecksState)
+  (isempty(s.found) || s.version != e.buf.version) && return nothing
   rows = Dict(s.found)
   loaded = loaded_module(page_key(e.buf.path)) !== nothing
   w = window_of(e)
@@ -651,21 +661,20 @@ end
 
 "Draw the window again when the mouse at `pos` moves onto the line of a check of a file of Julia code, or off it, for the buttons beside a check: see `mark_checks`"
 hover_check!(e, pos) = begin
-  s = get(e.nodes, :file_checks, nothing)
-  (julia_file(e) && s !== nothing && !isempty(s.found) && !isempty(e.layout)) || return nothing
+  s = state_of(e, ChecksState)
+  (julia_file(e) && !isempty(s.found) && !isempty(e.layout)) || return nothing
   i = locate(e, pos)[1]
   on = any(((l, _),) -> l == i, s.found) ? i : 0
-  get(e.nodes, :check_hover, 0) == on && return nothing
-  e.nodes[:check_hover] = on
+  s.hover == on && return nothing
+  s.hover = on
   redraw_in!(e, 0)
   nothing
 end
 
 "The checks of the file of `e` that ran, each with its line and how it went, from the top"
 file_results(e) = begin
-  s = get(e.nodes, :file_checks, nothing)
-  s === nothing && return Tuple{Int,Checked}[]
-  [(i, s.results[code]) for (i, code) in s.found if haskey(s.results, code)]
+  s = state_of(e, ChecksState)
+  Tuple{Int,Checked}[(i, s.results[code]) for (i, code) in s.found if haskey(s.results, code)]
 end
 
 "The count of the checks in the top bar, for a file of Julia code that has checks"
