@@ -186,7 +186,7 @@ end
   sleep(K.TT_WAIT + 0.05)
   frames()
   @test any(p -> p.key == :title_trail, popups(w))
-  path = rect(e.nodes[:title_trail])
+  path = rect(K.state_of(e, K.TitlePathState).trail)
   @test near(colour_at((K.num(path.left) + 4, K.num(path.top + path.height / 2))), (20, 40, 70))
   shot("bar-tint-path")
   # Over a page with no colour of its own the path has the window's colours, as before
@@ -194,7 +194,7 @@ end
   frames()
   sleep(K.TT_WAIT + 0.05)
   frames()
-  path = rect(e.nodes[:title_trail])
+  path = rect(K.state_of(e, K.TitlePathState).trail)
   any(p -> p.key == :title_trail, popups(w)) && @test near(colour_at((K.num(path.left) + 4, K.num(path.top + path.height / 2))), rgb(K.colours.bg))
 end
 

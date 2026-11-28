@@ -25,7 +25,7 @@
 @use "./title_path" exports...
 
 export BAR_BELOW, BAR_EDGE, BAR_HIDINGS, BAR_STAYS, BAR_WAIT, bar_out, bar_slid, bar_wanted,
-       hiding_named, slide_bar!
+       hiding_named, slide_bar!, HidingBar
 
 # --- a top bar that hides -------------------------------------------------------------------
 #
@@ -63,11 +63,21 @@ hides_bar(e) = e.hide_bar == :always || (e.hide_bar == :full_screen && e.full_sc
 "How much room the top bar keeps at the top of the window, over the page. A bar that hides keeps none: it shows over the page."
 above_page(e) = (hides_bar(e) ? 0px : TOPBAR_H) + (agent_shows(e) ? PAGE_CARD_GAP : 0px)   # in agent mode, the page's card starts a little under the window's top
 
+@use "github.com/jkroso/Prospects.jl" @def
+
+"What a window keeps of a top bar that hides, between frames"
+@def mutable struct HidingBar
+  slid::Tuple{Float64,Float64} = (1.0, 0.0)   # how much of the bar showed when it last started to slide, from 0 to 1, and when that was
+  out::Bool = true                            # the bar is out, or sliding out
+  leaving::Union{Nothing,Float64} = nothing   # when the mouse left a bar that's out, or nothing while it's on the bar
+  rest::Union{Nothing,Float64} = nothing      # when the mouse came to rest at the top edge of the window, or nothing
+end
+
 "When the top bar that hides last started to slide in or out, and how much of it showed then, from 0 to 1"
-bar_slid(e) = get(e.nodes, :bar_slid, (1.0, 0.0))
+bar_slid(e) = state_of(e, HidingBar).slid
 
 "True when the top bar that hides is out, or sliding out. A new window's bar starts out, and goes when the mouse isn't on it."
-bar_out(e) = get(e.nodes, :bar_out, true)
+bar_out(e) = state_of(e, HidingBar).out
 
 "How much of the top bar shows, from 0 to 1. A bar that doesn't hide always shows."
 bar_shown(e) = hides_bar(e) ? ((from, at) = bar_slid(e); eased(from, bar_out(e) ? 1.0 : 0.0, at)) : 1.0
@@ -83,8 +93,9 @@ bar_bottom(e) = TOPBAR_H + bar_top(e)
 "Start the top bar sliding down into the window, or with `out` false, back up out of it"
 slide_bar!(e, out::Bool) = begin
   bar_out(e) == out && return e
-  e.nodes[:bar_slid] = (bar_shown(e), time())
-  e.nodes[:bar_out] = out
+  bar = state_of(e, HidingBar)
+  bar.slid = (bar_shown(e), time())
+  bar.out = out
   e
 end
 
@@ -97,13 +108,14 @@ bar_tick!(e) = begin
   w = window_of(e)
   w === nothing && return
   hides_bar(e) || return (fade_window_buttons!(w, 1); nothing)
+  bar = state_of(e, HidingBar)
   if bar_wanted(e, w)
-    delete!(e.nodes, :bar_leaving)
+    bar.leaving = nothing
     slide_bar!(e, true)
   elseif bar_out(e)
-    since = get!(e.nodes, :bar_leaving, time())
+    since = bar.leaving = something(bar.leaving, time())
     if time() - since >= BAR_STAYS
-      delete!(e.nodes, :bar_leaving)
+      bar.leaving = nothing
       slide_bar!(e, false)
     else
       redraw_in!(e, BAR_STAYS - (time() - since))
@@ -142,12 +154,13 @@ bar_wanted(e, w) = begin
     x, y = w.mouse
     inside(x, y) && y < BAR_EDGE && !(Keys.mouse_left in w.keys)
   end
-  at_edge() || return (delete!(e.nodes, :bar_rest); false)
-  since = get!(e.nodes, :bar_rest, time())
+  bar = state_of(e, HidingBar)
+  at_edge() || return (bar.rest = nothing; false)
+  since = bar.rest = something(bar.rest, time())
   time() - since < BAR_WAIT && return (redraw_in!(e, BAR_WAIT - (time() - since)); false)
   # The mouse may have gone on out of the window
   isempty(w.glfw) || sync_mouse!(w)
-  delete!(e.nodes, :bar_rest)
+  bar.rest = nothing
   at_edge()
 end
 

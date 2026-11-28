@@ -56,7 +56,7 @@ export FolderList, FolderRow, PartArrow, RUN_ICONS, SearchButton, SearchChip, Se
        searchable, show_title_trail!, take_option!, title_edited, title_go!, title_listing,
        title_parts, title_place, title_steps, title_trail!, title_wide, title_widths,
        trail_can_show, trail_ground, trail_parts_wide, trail_pinned, trail_view, under_lines,
-       unfill_page!, SearchAsked, search_asked
+       unfill_page!, SearchAsked, search_asked, TitlePathState
 
 # --- the file's name in the top bar ----------------------------------------------------------
 
@@ -91,7 +91,7 @@ describe(t::Title) = begin
     popfirst!(parts)
   end
   after = parts_wide(parts)
-  e.nodes[:title_lead] = isempty(parts) ? 0px : after + 6px   # how far the name is from the left of the title, for the path
+  state_of(e, TitlePathState).lead = isempty(parts) ? 0px : after + 6px   # how far the name is from the left of the title, for the path
   Row(child_gap=6px, Alignment.Center,
     (isempty(parts) ? () : (Box(width(after)),))...,
     label(elide(named, 13px, max(room - 2after, 40px)), 13px, color=colours.dim),
@@ -282,8 +282,9 @@ focus_parts(e) = begin
   line = b.caret[1]
   ks = kinds(b)
   # The bar asks in every frame, and a code block in a language of its own makes `outline` look for a file, so it's kept until the text changes
-  kept = get(e.nodes, :focus_outline, nothing)
-  found = kept !== nothing && kept[1] === b && kept[2] == b.version ? kept[3] : (e.nodes[:focus_outline] = (b, b.version, outline(b)))[3]
+  s = state_of(e, TitlePathState)
+  kept = s.outline
+  found = kept !== nothing && kept[1] === b && kept[2] == b.version ? kept[3] : (s.outline = (b, b.version, outline(b)))[3]
   heads, on = Entry[], nothing
   for x in found
     x.line > line && break
@@ -391,19 +392,20 @@ title_trail!(e, t) = begin
   # ⌘F asked for the search, which opens once the path is in place
   asked = search_asked(e)
   if !((ishovered(t) || listing || pinned || asked) && trail_can_show(e))
-    delete!(e.nodes, :title_hover)
+    state_of(e, TitlePathState).hover = nothing
     state_of(e, SearchAsked).words = nothing
     listing && (close_folder_lists!(e, w); close_title_search!(e, w))
     open && close_popup!(w, :title_trail)
     return
   end
   searching && search_tick!(e, w)
-  since = get!(e.nodes, :title_hover, time())
+  s = state_of(e, TitlePathState)
+  since = s.hover = something(s.hover, time())
   !pinned && !asked && time() - since < TT_WAIT && return redraw_in!(e, TT_WAIT)
-  kept = get(e.nodes, :title_trail, nothing)
+  kept = s.trail
   # The path follows the file's name when the name moves, as it does while a sidebar or git's panel slides open.
   # The name's place is from the last frame, so one more frame checks that the path is where the name is now.
-  placed = open && kept isa TitleTrail && kept.path == path && kept.size == window_size(e) && kept.parts == focus_parts(e) &&
+  placed = open && kept !== nothing && kept.path == path && kept.size == window_size(e) && kept.parts == focus_parts(e) &&
            (kept.centred || !pinned) && kept.title_at == title_place(e, t)
   placed || (show_title_trail!(e, t, w, path); redraw_in!(e, 0))
   # A top bar that hides moves the path while it slides out, and a move closes the search. So the search waits for the bar.
@@ -418,7 +420,7 @@ Where the file's name is in the top bar, or in a page that shows the path
 itself: the left edge, the top and the width of its node, the room in it
 before the name, how far the bar has slid, and whether the name says "— edited"
 """
-title_place(e, t) = (r = rect(t); r === nothing ? nothing : (r.left, r.top, r.width, get(e.nodes, :title_lead, 0px), bar_top(e), title_edited(e)))
+title_place(e, t) = (r = rect(t); r === nothing ? nothing : (r.left, r.top, r.width, state_of(e, TitlePathState).lead, bar_top(e), title_edited(e)))
 
 "How wide \"— edited\" is after the file's name in the path, with the room after it, or 0px when the file has no changes"
 edited_wide(e) = title_edited(e) ? measure(Face(SANS, "", 13px, colours.ink, false), "— edited") + TT_PAD : 0px
@@ -446,10 +448,12 @@ show_title_trail!(e, t, w, path) = begin
   # shrink to fit it, as in the sidebar.
   lo = r.left + r.width / 2 - room / 2
   if inpage
-    left = r.left + get(e.nodes, :title_lead, 0px) - lo   # the room for the folders, before the name
+    left = r.left + state_of(e, TitlePathState).lead - lo   # the room for the folders, before the name
     shown = title_steps(all, min(room - more, left + title_widths(all[end:end])[1] - TT_PAD + TT_EDGE + 1px))
   end
-  v = get!(() -> own!(t, TitleTrail()), e.nodes, :title_trail)
+  s = state_of(e, TitlePathState)
+  s.trail === nothing && (s.trail = own!(t, TitleTrail()))
+  v = s.trail
   v.path == path || (empty!(v.crumbs); empty!(v.arrows))
   # A pinned path is in the middle of the bar. After a click unpins it, it stays there until it closes, so the name doesn't move from under the mouse.
   v.centred = trail_pinned(e) || (v.centred && any(p -> p.key == :title_trail, popups(w)))
@@ -459,7 +463,7 @@ show_title_trail!(e, t, w, path) = begin
   # How far the file's name is from the path's left edge
   before = sum(widths[1:end-1], init=0px) + TT_ARROW * (length(shown) - 1) + TT_EDGE + 1px + TT_PAD
   # The name is in the middle of its room in the bar, with the headings after it and as much room before it, so the middle of the name's node is the bar's
-  x = v.centred ? r.left + r.width / 2 - total / 2 : r.left + get(e.nodes, :title_lead, 0px) - before
+  x = v.centred ? r.left + r.width / 2 - total / 2 : r.left + state_of(e, TitlePathState).lead - before
   # In the page the path stays in the name's room, so it lies over nothing else of the page
   inpage && (x = clamp(x, lo, max(lo, lo + room - total)))
   x = clamp(x, start, max(start, wide - 8px - total))
@@ -925,6 +929,15 @@ const TS_ROWS = 12                    # the rows that show before the list scrol
   parts::Dict{Any,Any} = Dict{Any,Any}()   # its field, its chips, its Kinds button, its scroll and its rows
 end
 
+"What a window keeps of the path in its top bar, between frames"
+@def mutable struct TitlePathState
+  lead::px = 0px                                 # how far the file's name is from the left of the title in the bar, for the path
+  outline::Union{Nothing,Tuple} = nothing        # the text that shows, its version and its outline, kept until the text changes: see `focus_parts`
+  hover::Union{Nothing,Float64} = nothing        # when the mouse came over the file's name, or nothing while the path has no reason to show
+  trail::Union{Nothing,TitleTrail} = nothing     # the path, or nothing until it first shows
+  search::Union{Nothing,TitleSearch} = nothing   # the search that last opened under a › of the path, or nothing
+end
+
 "A kind that the search finds, in its field. A click takes it away."
 @def mutable struct SearchChip <: SemanticUI
   of::Any = nothing
@@ -1017,7 +1030,7 @@ open_title_search!(e, w, a::PartArrow) = begin
   s = TitleSearch(of=e, arrow=a, page=e.buf.path, under=under)
   s.parts[:field] = own!(s, search_box(""))
   s.wide = min(TS_WIDE, window_size(e)[1] - 16px)
-  e.nodes[:title_search] = s
+  state_of(e, TitlePathState).search = s
   # The caret at the top of the search points at the middle of the ›
   popup!(w, s, anchor=(r.left + r.width / 2 - TT_AIM, r.top, 0px, r.height), placement=:below, gap=8px, width=s.wide,
          key=TS_KEY, theme=component_theme(), onclose=() -> (close_popup!(w, TS_MENU); left_search!(e, w)))
@@ -1034,9 +1047,9 @@ close_title_search!(e, w) = (close_popup!(w, TS_MENU); close_popup!(w, TS_KEY); 
 
 "Give the keyboard back to the page when a field of the search, which has gone, has it"
 left_search!(e, w) = begin
-  s = get(e.nodes, :title_search, nothing)
+  s = state_of(e, TitlePathState).search
   f = w.focus
-  s isa TitleSearch && (f === search_field(s) || (f isa SemanticUI && f.parent isa SearchMenu)) && focus(e)
+  s !== nothing && (f === search_field(s) || (f isa SemanticUI && f.parent isa SearchMenu)) && focus(e)
   nothing
 end
 
@@ -1050,8 +1063,8 @@ the page instead: see `open_find!`.
 """
 find!(e, w=window_of(e)) = begin
   w === nothing && return open_find!(e)
-  s = get(e.nodes, :title_search, nothing)
-  if s isa TitleSearch && any(p -> p.key == TS_KEY, popups(w))
+  s = state_of(e, TitlePathState).search
+  if s !== nothing && any(p -> p.key == TS_KEY, popups(w))
     f = search_field(s)
     f.anchor, f.cursor = 0, length(f.text)
     focus(f)
@@ -1080,8 +1093,8 @@ ask_search!(e, w, v::TitleTrail) = begin
   asked = state_of(e, SearchAsked)
   words, asked.words = asked.words::String, nothing
   open_title_search!(e, w, a)
-  s = get(e.nodes, :title_search, nothing)
-  if s isa TitleSearch && s.arrow === a
+  s = state_of(e, TitlePathState).search
+  if s !== nothing && s.arrow === a
     f = search_field(s)
     f.text = words
     f.anchor, f.cursor = 0, length(words)

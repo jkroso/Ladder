@@ -57,13 +57,13 @@ const (; frames, at, click, typed, key, shot) = drive(w, frames=3, pressed=1, la
 frames()
 
 showing(k) = any(p -> p.key == k, popups(w))
-trail() = e.nodes[:title_trail]
+trail() = K.state_of(e, K.TitlePathState).trail
 "Hold the mouse over the file's name until the path shows"
 hover!() = (at(middle(e.nodes[:title])); sleep(K.TT_WAIT + 0.05); frames())
 "Put the caret on line `i` of the page, as a click there would"
 caret!(i) = (b = e.buf; b.reading = false; b.caret = b.anchor = (i, 0); frames())
 titles() = [x.title for x in trail().parts]
-search() = e.nodes[:title_search]
+search() = K.state_of(e, K.TitlePathState).search
 menu() = only(p.content for p in popups(w) if p.key == K.TS_MENU)
 "What each row of the search shows, in the list's order: a heading or a component that's there, or a thing that was found"
 found() = [r.kind == :entry ? "part " * "  "^r.depth * r.x.title : r.m.text for r in search().rows]
@@ -97,7 +97,7 @@ end
   @test rect(trail().crumbs[plan]).left < rect(drop(0)).left < rect(trail().marks[1]).left < rect(drop(1)).left
   # The file's name is where the bar had it, after the room that the bar keeps empty before it
   t = rect(e.nodes[:title])
-  @test abs(K.num(rect(trail().crumbs[plan]).left) + K.num(K.TT_PAD) - K.num(t.left) - K.num(e.nodes[:title_lead])) <= 2
+  @test abs(K.num(rect(trail().crumbs[plan]).left) + K.num(K.TT_PAD) - K.num(t.left) - K.num(K.state_of(e, K.TitlePathState).lead)) <= 2
   shot("title-search-heading")
 end
 

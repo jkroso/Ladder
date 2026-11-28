@@ -46,7 +46,7 @@ row(l, name) = l.parts[(:row, findfirst(==(name), l.names))]
 "Rest the mouse on the row of `l` that has `name` until something happens"
 rest!(l, name) = (at(middle(row(l, name))); sleep(K.TT_WAIT + 0.05); frames())
 showing() = any(p -> p.key == :title_trail, popups(w))
-trail() = e.nodes[:title_trail]
+trail() = K.state_of(e, K.TitlePathState).trail
 crumb(path) = trail().crumbs[path]
 arrow(path) = trail().arrows[path]
 "Hold the mouse over the file's name until the path shows"
@@ -67,7 +67,7 @@ bar_places() = Dict(k => place(n) for (k, n) in e.nodes if n isa K.ToolButton &&
   @test trail().steps == [("~", dir), ("top", top), ("Plain", plain), ("a.md", a)]
   # The file's name stays where the bar had it, and the folders come in to its left. The bar keeps room
   # before the name as wide as the heading after it, so the name stays in the middle.
-  @test abs(K.num(rect(crumb(a)).left) + K.num(K.TT_PAD) - K.num(title_at[1]) - K.num(get(e.nodes, :title_lead, 0px))) <= 2
+  @test abs(K.num(rect(crumb(a)).left) + K.num(K.TT_PAD) - K.num(title_at[1]) - K.num(K.state_of(e, K.TitlePathState).lead)) <= 2
   @test K.num(rect(crumb(plain)).left) < K.num(rect(crumb(a)).left)
   # The bar's own parts are where they were
   @test place(e.nodes[:title]) == title_at && bar_places() == places

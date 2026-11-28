@@ -489,7 +489,7 @@ end
   @test timedwait(() -> (frames(1); !K.palette_shows(e)), 2) == :ok
   at(middle(e.nodes[:title])); sleep(K.TT_WAIT + 0.05); frames()
   @test showing()
-  v = e.nodes[:title_trail]
+  v = K.state_of(e, K.TitlePathState).trail
   @test v.steps == [("example.com", "https://example.com/"), ("docs", "https://example.com/docs/"),
                     ("my guide", "https://example.com/docs/my%20guide/"), ("start.md", e.buf.path)]
   # A server doesn't say what's in a folder, so a › there lists nothing
@@ -516,11 +516,11 @@ end
   @test address() == "https://example.com/guide.md" && K.searchable(e)
   mouse_click() = (w.keys |= Keys.mouse_left; onkey(w, KeyPress{Keys.mouse_left}(0, w)); frames(1); w.keys ⊻= Keys.mouse_left; onkey(w, KeyRelease{Keys.mouse_left}(0, w)); frames(2))
   at(middle(e.nodes[:title])); sleep(K.TT_WAIT + 0.05); frames()
-  v = e.nodes[:title_trail]
+  v = K.state_of(e, K.TitlePathState).trail
   @test haskey(v.drops, 0)   # a › follows the page's name
   at(middle(v.drops[0])); mouse_click()
   @test any(p -> p.key == K.TS_KEY, popups(w))
-  s = e.nodes[:title_search]
+  s = K.state_of(e, K.TitlePathState).search
   # With nothing asked, it lists the page's headings
   @test [r.x.title for r in s.rows if r.kind == :entry] == ["Guide", "Tea", "Milk"]
   @test K.search_place(s) == "guide.md" && K.search_field(s).placeholder == "Search guide.md"
@@ -536,8 +536,8 @@ end
   @test e.scroll.offset > 0px
   # A kind with no words finds every thing of that kind
   at(middle(e.nodes[:title])); sleep(K.TT_WAIT + 0.05); frames()
-  at(middle(e.nodes[:title_trail].drops[0])); mouse_click()
-  s = e.nodes[:title_search]
+  at(middle(K.state_of(e, K.TitlePathState).trail.drops[0])); mouse_click()
+  s = K.state_of(e, K.TitlePathState).search
   s.wants = [:todo]; frames()
   @test [r.m.text for r in s.rows if r.kind == :thing] == ["Buy milk"]
   key(Keys.escape)

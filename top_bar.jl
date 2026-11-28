@@ -34,7 +34,7 @@
 
 export DOT_GAP, DOT_W, LOCK_SHAPES, LOCK_W, TINT_COLOURS, TIP_CODE, Tipped, bar_inks, blended,
        how_light, lock_icon, lock_part, page_actions, panel_w, shows_lock, side!, tint_colours!,
-       tip_rect, waiting_dot, widest_panel
+       tip_rect, waiting_dot, widest_panel, BarTint
 
 # --- the top bar over a web page ------------------------------------------------------------------
 #
@@ -47,6 +47,13 @@ export DOT_GAP, DOT_W, LOCK_SHAPES, LOCK_W, TINT_COLOURS, TIP_CODE, Tipped, bar_
 # dark one when they don't. The part of the bar over the sidebar, and over a
 # panel at the right, keeps the window's colours. A page with no one colour
 # along its top, like one with a picture there, leaves the bar as it was.
+
+@use "github.com/jkroso/Prospects.jl" @def
+
+"The colour that a window's top bar last took from a web page, kept between frames"
+@def mutable struct BarTint
+  tint::Union{Nothing,Tuple} = nothing   # the web page that the bar last took its colour from, how far it was scrolled, and the colour
+end
 
 """
 The colour of the web page that the window shows, which the top bar takes, or
@@ -63,11 +70,12 @@ bar_tint(e) = begin
   p, s = b.view.page, Browsers.scrolled(b)
   p === nothing && return nothing
   # The bar asks more than once in each frame, so the colour is kept until the page is laid out again or scrolls
-  was = get(e.nodes, :bar_tint, nothing)
+  bar = state_of(e, BarTint)
+  was = bar.tint
   was !== nothing && was[1] === p && was[2] == s && return was[3]
   c = Browsers.tint(b)
   tint = c === nothing ? nothing : RGBA(((c >> 16) & 0xff) / 255, ((c >> 8) & 0xff) / 255, (c & 0xff) / 255, 1.0)
-  e.nodes[:bar_tint] = (p, s, tint)
+  bar.tint = (p, s, tint)
   tint
 end
 

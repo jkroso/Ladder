@@ -760,7 +760,7 @@ try
     @test !e.panel && w.size[1] == window_was[1] && (named("Agent").width, named("Page card").left) == was[1:2]
     # The button at the right end of the top bar hides the outline. The card stays beside the window's edge, and the agent has the room.
     K.toggle_right!(e)
-    e.nodes[:right_slid] = (0.0, 0.0)
+    K.state_of(e, K.RightSlide).slid = (0.0, 0.0)
     frames(w, 2)
     @test named("Outline") === nothing && named("Page card").left + named("Page card").width + K.PAGE_CARD_GAP == w.size[1]
     @test named("Agent").width > was[1]
@@ -768,7 +768,7 @@ try
     r = named("Page card").from.radius
     @test r.tl == r.bl == K.PAGE_CARD_ROUND && r.tr == r.br == K.WINDOW_ROUND - K.PAGE_CARD_GAP
     K.toggle_right!(e)
-    e.nodes[:right_slid] = (1.0, 0.0)
+    K.state_of(e, K.RightSlide).slid = (1.0, 0.0)
     frames(w, 2)
     @test named("Outline") !== nothing && (named("Agent").width, named("Page card").left) == was[1:2]
   end

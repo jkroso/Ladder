@@ -23,7 +23,7 @@
 @use "./editing" exports...
 
 export MAC_BUTTONS_W, RIGHT_W, cleared, clearing, mac_buttons_room, right_part, right_slid,
-       right_sliding, screen_tick!
+       right_sliding, screen_tick!, RightSlide
 
 # --- the panel at the right ---------------------------------------------------------------
 #
@@ -35,8 +35,15 @@ export MAC_BUTTONS_W, RIGHT_W, cleared, clearing, mac_buttons_room, right_part, 
 
 const RIGHT_W = 340px   # how wide the panel at the right is, in a window that has room for it
 
+@use "github.com/jkroso/Prospects.jl" @def
+
+"What a window keeps of the panel at its right, between frames"
+@def mutable struct RightSlide
+  slid::Tuple{Float64,Float64} = (1.0, 0.0)   # how far open the panel was when it last started to slide, from 0 to 1, and when that was
+end
+
 "When the panel at the right last started to slide in or out, and how far open it was then, from 0 to 1"
-right_slid(e) = get(e.nodes, :right_slid, (1.0, 0.0))
+right_slid(e) = state_of(e, RightSlide).slid
 
 "How far the panel at the right is open, from 0 to 1"
 right_opened(e) = ((from, at) = right_slid(e); eased(from, e.right ? 1.0 : 0.0, at))
@@ -44,7 +51,7 @@ right_opened(e) = ((from, at) = right_slid(e); eased(from, e.right ? 1.0 : 0.0, 
 right_sliding(e) = time() - right_slid(e)[2] < SLIDE_TIME
 
 "Show or hide the panel at the right of the page, like git's panel beside a repository's files. Each window does the same."
-toggle_right!(e) = (e.nodes[:right_slid] = (right_opened(e), time()); e.right = !e.right; save_settings!(e); e)
+toggle_right!(e) = (state_of(e, RightSlide).slid = (right_opened(e), time()); e.right = !e.right; save_settings!(e); e)
 add_command!(toggle_right!, name=:right_panel, title="Show or hide the panel at the right of the page, like git's panel beside a repository's files")
 
 # The button at the right end of the top bar that shows the panel and hides it
