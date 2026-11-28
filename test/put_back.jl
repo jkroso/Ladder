@@ -12,6 +12,10 @@
 # Other Refs change as Ladder runs, like the count of changes that tells a kept
 # layout it's out of date, or the flag that a thread is running. Putting those
 # back would make Ladder believe what's no longer true.
+#
+# The environment goes back too, all of it: a test sets a variable like
+# `GIT_AUTHOR_NAME`, `TZ` or `PATH` for the programs that it starts, and the
+# next test's programs would get it.
 
 using Kip
 
@@ -49,4 +53,19 @@ put_back!(before, path, m) = begin
     push!(done, name)
   end
   done
+end
+
+"Each variable of the environment, with its value now"
+env_now() = Dict{String,String}(ENV)
+
+"Give the environment the variables that it had in `before`, and take away the ones that it didn't have. The names of those that changed are returned."
+put_back_env!(before) = begin
+  done = String[]
+  for name in collect(keys(ENV))
+    haskey(before, name) || (delete!(ENV, name); push!(done, name))
+  end
+  for (name, value) in before
+    get(ENV, name, nothing) == value || (ENV[name] = value; push!(done, name))
+  end
+  sort!(done)
 end

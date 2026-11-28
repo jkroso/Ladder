@@ -24,7 +24,8 @@
 #   - A method that you delete stays until the process starts again.
 #   - Every test shares the one process. When a test ends, each Ref that its
 #     text sets, like `K.SETTINGS_FILE[] = ...` or `K.AGENT_COMMAND[] = ...`,
-#     gets back the value it had before the test: see put_back.jl. Other things
+#     gets back the value it had before the test, and so does the environment:
+#     see put_back.jl. Other things
 #     stay as the test left them: the open windows, what's in a table of
 #     Ladder's, a function that a test defined again with `@eval K`. So a test
 #     can fail here and pass by itself. Run a test that fails here once in a
@@ -79,6 +80,7 @@ run_test(path, log) = open(log, "w") do io
     t = time()
     m = Module(:HotTest)
     before = nothing
+    env = env_now()
     ok = try
       reload_all!()
       before = refs_now()
@@ -103,6 +105,9 @@ run_test(path, log) = open(log, "w") do io
         println(stderr, "Couldn't put back the Refs that the test set: ", sprint(showerror, e))
       end
     end
+    # So does the environment
+    back = put_back_env!(env)
+    isempty(back) || println("Put back in the environment: ", join(back, ", "))
     # Watch the files that this test loaded, as they are now, so that a change that's saved later is seen
     track!()
     println(ok ? "PASS " : "FAIL ", path, " in ", round(time() - t, digits=1), " s")
