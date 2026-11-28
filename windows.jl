@@ -329,8 +329,9 @@ page_edited(e, o) = false
 What shows in a panel at the right of the window, beside what `page_view`
 gives for `o`: a node, or nothing for no panel. The page of a repository has
 git's panel there. The panel runs from the top of the window to the bottom, as
-the sidebar does, and the top bar's button at its right end hides it. It's for
-a page that covers the page's space (see `page_covers`), which leaves it room.
+the sidebar does, and the top bar's button at its right end hides it. A page
+that covers the page's space (see `page_covers`) leaves it room, and any other
+page gets narrower beside it, as a folder in a repository does.
 """
 page_side(e, o) = nothing
 

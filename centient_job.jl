@@ -320,7 +320,8 @@ bar_row(t::TopBar, inks=(nothing, nothing, nothing)) = begin
        shown ? (own_ends..., (isempty(b.about) ? () : (said_part(b.about, side - LOCK_W - (isempty(outside) ? 0px : 40px) - (isempty(mode) ? 0px : MODE_W + grown)),))...,
                       (term_shown(e) || chat_shown(e) || !(readonly(b) || b.fixed) || !shows_lock(e, page_object(e)) ? () : (lock_part(e),))...,   # a terminal is yours to type in, and so are a session and a CSV file
                       mode...,
-                      outside...) :
+                      outside...,
+                      right_part(e)...) :   # as a folder in a repository has git's panel
                      (more..., job_part(e)..., agent_part(e)..., checks..., diff_part(e)..., commit_part(e)..., mode...,
                       # A page that's never changed has a lock at the end
                       (b.fixed ? (lock_part(e),) : ())...,

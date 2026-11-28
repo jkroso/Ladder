@@ -116,16 +116,26 @@ see `GitPanel`.
   scroll::Scroll = Scroll(width(grow=grow), height(grow=grow), scrollbar_inset=0px)   # its scrollbar is at the page's right edge, as the editor's is
 end
 
+"The top folder of the repository that `d` is in: `d` itself, or a folder over it. \"\" when git no longer keeps it."
+repo_top(d::GitDirectory) = (path = string(d.path); Git.istop(path) ? path : git_top(path))
+
+"True when the page of `d` is the page of its repository's top folder, or shows a commit of its repository"
+own_git_page(e, d::GitDirectory) = (root = repo_top(d); !isempty(root) && (root == string(d.path) || !isempty(shown_commit(e, root))))
+
 page_view(e, d::GitDirectory) = begin
-  path = string(d.path)
-  Git.istop(path) || return nothing
-  # A click on a commit in git's panel shows the commit in place of the files: see "a commit's page"
-  isempty(shown_commit(e, path)) ? node!(() -> RepoView(path=path), e, (:repo, path)) : e.nodes[(:commit, path)]
+  path, root = string(d.path), repo_top(d)
+  isempty(root) && return nothing
+  # A click on a commit in git's panel shows the commit in place of the files: see "a commit's page".
+  # A folder in the repository shows it too, since it has the same panel.
+  isempty(shown_commit(e, root)) || return e.nodes[(:commit, root)]
+  # A folder in the repository has the page of any folder, with git's marks in its table
+  path == root ? node!(() -> RepoView(path=path), e, (:repo, path)) : nothing
 end
 # The page of a repository covers the page's space, so git's panel has the room at its right
-page_fills(e, d::GitDirectory) = Git.istop(string(d.path))
-page_covers(e, d::GitDirectory) = Git.istop(string(d.path))
-page_side(e, d::GitDirectory) = (path = string(d.path); Git.istop(path) ? node!(() -> GitPanel(path=path), e, (:git_panel, path)) : nothing)
+page_fills(e, d::GitDirectory) = own_git_page(e, d)
+page_covers(e, d::GitDirectory) = own_git_page(e, d)
+# A folder in the repository has the panel of its repository, as its top folder has
+page_side(e, d::GitDirectory) = (root = repo_top(d); isempty(root) ? nothing : node!(() -> GitPanel(path=root), e, (:git_panel, root)))
 side_name(e, ::GitDirectory) = "git's panel"
 # A window that's opened on a repository shows its first page of text, which is often its Readme
 page_first(e, ::GitDirectory) = false
@@ -656,6 +666,7 @@ const OPEN_ALL = 5000
 @def mutable struct CommitView <: SemanticUI
   root::String = ""
   hash::String = ""                          # the commit, as git's panel has it, or "" while the repository's files show
+  at::String = ""                            # the folder whose page shows it: the repository's top folder, or a folder in it
   open::Dict{Int,Bool} = Dict{Int,Bool}()    # whether the lines of each file show, by the file's place in the commit
   views::Dict{Int,Any} = Dict{Int,Any}()     # the changes of each file whose lines have shown, by its place: a ChangesView
   tallies::Dict{Int,Tuple{Int,Int}} = Dict{Int,Tuple{Int,Int}}()   # how many lines each file gains and loses
@@ -665,16 +676,23 @@ const OPEN_ALL = 5000
   wide::Float64 = 0.0                        # how wide the lines of the changes are, in this frame
 end
 
-"The commit that the page of the repository at `root` shows, or \"\" while it shows the repository's files"
-shown_commit(e, root) = (v = get(e.nodes, (:commit, root), nothing); v === nothing ? "" : v.hash)
+"""
+The commit of the repository at `root` that the page shows, or \"\" while it
+shows the files. A commit shows only on the page of the folder where it was
+clicked, the repository's top folder or a folder in it, so another folder's
+page shows its files.
+"""
+shown_commit(e, root) = (v = get(e.nodes, (:commit, root), nothing); v === nothing || v.at != e.buf.path ? "" : v.hash)
 
 """
-Show the commit `hash` of the repository at `root` in the repository's page.
-The commit that shows already goes away again, and the repository's files show.
+Show the commit `hash` of the repository at `root` in the page of the folder
+that shows: the repository's top folder, or a folder in it. The commit that
+shows already goes away again, and the folder's files show.
 """
 show_commit!(e, root, hash) = begin
   v = node!(() -> CommitView(root=root), e, (:commit, root))
-  v.hash = v.hash == hash ? "" : hash
+  v.hash = shown_commit(e, root) == hash ? "" : hash
+  v.at = e.buf.path
   empty!(v.open); empty!(v.views); empty!(v.tallies); empty!(v.rows)
   v.scroll.offset = 0px
   redraw_in!(e, 0)
@@ -685,7 +703,7 @@ end
 close_commit!(e, root) = isempty(shown_commit(e, root)) ? false : (show_commit!(e, root, shown_commit(e, root)); true)
 
 "The page of a repository takes a step back of its own: from a commit to the repository's files"
-page_back!(e, d::GitDirectory) = close_commit!(e, string(d.path))
+page_back!(e, d::GitDirectory) = (root = repo_top(d); !isempty(root) && close_commit!(e, root))
 
 """
 A commit in git's panel. A click shows what it holds in the page, and a click
@@ -942,7 +960,9 @@ describe(v::CommitView) = begin
   room, _ = page_room(e)
   # As wide as the room beside the sidebar and git's panel, since lines of code are long
   v.wide = max(num(room) - num(right_w(e)) * right_opened(e) - 2num(PAGE_X), 240.0)
-  back = block_button!(v, :close, (:close,), icon="arrow-left", words=basename(v.root), tip="Show the repository's files again")
+  # It goes back to the folder where the commit was clicked
+  back = block_button!(v, :close, (:close,), icon="arrow-left", words=basename(v.at),
+                       tip=v.at == v.root ? "Show the repository's files again" : "Show the folder's files again")
   top = Row(width(grow=grow), back)
   body = if s === nothing
     (page_title("git", "No such commit", "git can't find the commit $(v.hash) in this repository."),)

@@ -39,7 +39,7 @@
 @use "./top_bar" exports...
 @use "./editing" exports...
 
-export PLAIN_KINDS, keep_plain!, page_margin, page_x, reveal!, sheet_page, text_inset
+export PLAIN_KINDS, keep_plain!, page_margin, page_x, reveal!, sheet_page, text_inset, right_room
 
 # --- the page's lines, laid out ----------------------------------------------------
 #
@@ -70,6 +70,14 @@ page_margin(e, o) = nothing
 "How much room the page has at each side: the least beside a page's text, or what the kind of the file or folder that shows says"
 page_x(e) = something(page_margin(e, page_object(e)), PAGE_X)
 
+"""
+How much of the window's width the panel at the right takes from the page's
+text, as git's panel takes it beside the page of a folder in a repository. A
+page that covers the page's space lays itself out beside the panel, and in
+agent mode the page's card has its own room, so they lose none.
+"""
+right_room(e) = agent_shows(e) || page_covered(e) || right_view(e) === nothing ? 0px : right_w(e) * right_opened(e)
+
 "How wide the page's text is in the window"
 text_width(e) = begin
   w, _ = window_size(e)
@@ -81,7 +89,8 @@ text_width(e) = begin
   # A side menu's compact form keeps its width beside the text while the sidebar is closed
   beside = alone ? 0px : e.panel || sliding(e) ? panel_w(e) : side_least(e)
   # In agent mode, the text is on the page's card, which keeps its width while a pane slides
-  room = (agent_shows(e) ? page_card_wide(e) : w - beside) - 2page_x(e) - gutter(e)
+  # A panel at the right takes its room too
+  room = (agent_shows(e) ? page_card_wide(e) : w - beside - right_room(e)) - 2page_x(e) - gutter(e)
   # A file of code or of text takes all the room that the window has, and so do a CSV file's table and
   # the lines of a block that fill the window. A page is no wider than the settings say. A page of a blog is
   # as wide as its site's text, for as many words to a line. A page with comments leaves room for them at its right.
@@ -99,7 +108,8 @@ scrolled to the right.
 text_left(e) = begin
   side, space = page_span(e)
   # The lines of a file's bytes start at the left too, and scroll to the right as numbered lines do
-  numbered(e.buf) || bytes_page(e.buf) ? side + PAGE_X + gutter(e) - sideways(e) : side + text_inset(e, space)
+  # ... and a page of text is in the middle of the room that a panel at the right leaves it
+  numbered(e.buf) || bytes_page(e.buf) ? side + PAGE_X + gutter(e) - sideways(e) : side + text_inset(e, space - right_room(e))
 end
 
 """

@@ -163,6 +163,60 @@ end
   @test e.folder == repo && e.buf.path == repo
 end
 
+@testset "a folder in the repository has git's panel too, and a commit shows in its page" begin
+  src = joinpath(repo, "src")
+  K.open_folder!(e, src)
+  settle()
+  @test e.buf.path == src
+  # The panel is the repository's own, with every change in the repository
+  p = e.nodes[(:git_panel, repo)]
+  @test K.right_view(e) === p
+  @test K.right_part(e) != ()
+  # The button that hides it is at the right end of the top bar, as it is over the repository's page
+  b = e.nodes[:right_panel]
+  @test rect(b) !== nothing && K.num(rect(b).left) > 1000
+  @test K.tip(b) == "Hide git's panel"
+  page, q = rect(e.nodes[(:folder_page, src)]), rect(p)
+  @test page !== nothing && q !== nothing
+  @test K.num(q.left) >= K.num(page.left) + K.num(page.width) - 1
+  @test K.num(q.left) + K.num(q.width) ≈ 1100 atol=1
+  @test sort!([k[2] for k in keys(p.rows) if k[1] == :change]) == ["Readme.md", "new.md", "notes.md", "src/deep/b.jl"]
+  shot("folder-panel")
+  # A folder further down has it too
+  deep = joinpath(src, "deep")
+  K.open_folder!(e, deep)
+  settle()
+  @test K.right_view(e) === p
+  # A click on a commit shows it in place of the folder's files, and the arrow that goes back shows the files again
+  hash = only(G.commits(repo, 30)).hash
+  click(middle(e.nodes[(:commit_line, repo, hash)]))
+  @test K.shown_commit(e, repo) == hash
+  @test rect(e.nodes[(:commit, repo)]) !== nothing
+  @test e.buf.path == deep
+  shot("folder-commit")
+  K.go_back!(e)
+  frames()
+  @test K.shown_commit(e, repo) == ""
+  @test e.buf.path == deep
+  @test rect(e.nodes[(:folder_page, deep)]) !== nothing
+  # A commit shows only on the page where it was clicked: a folder that's opened after it shows its files
+  K.open_folder!(e, repo)
+  settle()
+  click(middle(e.nodes[(:commit_line, repo, hash)]))
+  @test K.shown_commit(e, repo) == hash && rect(e.nodes[(:commit, repo)]) !== nothing
+  K.open_folder!(e, src)
+  settle()
+  @test K.shown_commit(e, repo) == ""
+  @test rect(e.nodes[(:folder_page, src)]) !== nothing && rect(e.nodes[(:commit, repo)]) === nothing
+  # The repository's page still shows it, until a click on it again
+  K.open_folder!(e, repo)
+  settle()
+  @test K.shown_commit(e, repo) == hash
+  click(middle(e.nodes[(:commit_line, repo, hash)]))
+  @test K.shown_commit(e, repo) == ""
+  @test e.folder == repo && e.buf.path == repo
+end
+
 @testset "a click on a file in git's panel shows the file" begin
   p = e.nodes[(:git_panel, repo)]
   click(middle(p.rows[(:change, "notes.md")]))
