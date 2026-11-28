@@ -22,7 +22,12 @@ K.SETTINGS_FILE[] = joinpath(dir, "settings")
 const video = joinpath(dir, "walk.mp4")
 run(pipeline(`$ffmpeg -nostdin -v error -y -f lavfi -i testsrc=d=8:s=320x180:r=24 -f lavfi -i sine=d=8 -c:v libx264 -g 24 -pix_fmt yuv420p -c:a aac $video`, stdout=devnull))
 
-const e = K.build_editor(video)
+# The video is in a page, where a button makes it fill the window. A video's own file covers its page's space
+# with no button: see "a video's own file covers the page's space" in zoom_test.jl.
+const page = joinpath(dir, "walk.md")
+write(page, "# A walk\n\n![The walk](walk.mp4)\n\nThe end.\n")
+
+const e = K.build_editor(page)
 const w = Window(e, size=(1000px, 700px))
 # macOS reads a file while the app's event loop runs, so each frame runs the loop for a moment
 const CoreFoundation = "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation"
@@ -32,7 +37,9 @@ frames(n=3) = foreach(_ -> (frame(w); loop(0.02)), 1:n)
 until(f, most=10) = (stop = time() + most; while !f() && time() < stop; frames(1); end; f())
 key!(key) = (onkey(w, KeyPress{key}(0, w)); onkey(w, KeyRelease{key}(0, w)); frames())
 frames()
-const p = e.nodes[(:fileview, video)].viewer
+"The video player that the page's line `i` shows, or nothing"
+player(i) = (it = K.item(e, i); it.first == i && it.content isa K.Live && it.content.node isa K.Shown ? it.content.node.value : nothing)
+const p = player(3)
 "True when the window draws its top bar"
 has_bar() = named(K.describe(e), "TopBar")
 "True when the layout `node` has a part called `name` in it"
@@ -90,6 +97,19 @@ end
   K.zoom_out!(K.zooming(e)); frames()
   @test !p.screen
   pause!(p)
+end
+
+@testset "F makes a video's own file fill the screen, and esc puts the top bar back" begin
+  K.open!(e, video); frames()
+  K.focus(e)
+  own = K.video_part(e)
+  # The file's page has the video under the top bar already, with nothing round it
+  @test own isa K.VideoPlayer && !K.screening(e) && has_bar() && own.height == 700px - K.TOPBAR_H
+  key!(Keys.f)
+  @test K.screening(e) && own.screen && !has_bar() && own.height == 700px
+  key!(Keys.escape)
+  @test !K.screening(e) && K.zooming(e) === nothing && has_bar() && own.height == 700px - K.TOPBAR_H
+  pause!(own)
 end
 
 end
