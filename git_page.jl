@@ -86,7 +86,7 @@ export GitDirectory, RepoView, GitPanel, follow_words, GIT_RUNS, send_command, S
        switch_look, diffing, toggle_diff!, show_changes!, change_span, go_change!, change_after, step_change!,
        next_change!, previous_change!, step_tip, COMMITTED, committed_lines, diff_now, gone_h, inline_diff!,
        gone_now, gone_rows, gone_under, gone_over, is_new, tint_new, draw_diff_bars, put_change_back!,
-       PutBack, put_back_over, diff_part, BarWords, said_result, unsay_result!, AgentMarks
+       PutBack, put_back_over, diff_part, BarWords, said_result, unsay_result!, AgentMarks, CommitState, DiffState
 
 "A folder that git keeps: the top folder of a repository, or a folder in one"
 @def struct GitDirectory <: AbstractDirectory end
@@ -544,7 +544,7 @@ works_here(e, ::Union{Val{:merge},Val{:rebase}}) = (root = repo_of(e); !isempty(
 end
 
 "True while the window is busy with a commit of the repository at `root`, or git runs there, so the ticks stay as they are"
-committing(e, root) = (w = get(e.nodes, :writing, nothing); (w !== nothing && w.root == root) || haskey(GIT_RUNS, root))
+committing(e, root) = (w = state_of(e, CommitState).writing; (w !== nothing && w.root == root) || haskey(GIT_RUNS, root))
 
 describe(t::FileTick) = begin
   e = editor(t)
@@ -596,7 +596,7 @@ ticked, and its words say which.
 commit_button(e, root, s) = begin
   n = count(rel -> rel in s.staged, keys(s.changes))
   b = node!(PageButton, e, (:git_button, root, :commit))
-  w = get(e.nodes, :writing, nothing)
+  w = state_of(e, CommitState).writing
   b.act = _ -> commit_scope!(e, n > 0 ? :staged : :all)
   b.icon = "check2"
   b.words = w !== nothing && w.root == root ? "Committing…" : n > 0 ? "Commit $n" : "Commit all"
@@ -1091,10 +1091,13 @@ list under the chevron shows, the two are on the list's colour, as one tab of
 the list's envelope: see `commit_envelope`.
 """
 commit_part(e) = begin
-  !haskey(e.nodes, :writing) && commit_change(e, e.buf.path) === nothing && return ()
+  s = state_of(e, CommitState)
+  s.writing === nothing && commit_change(e, e.buf.path) === nothing && return ()
   open = commit_list_open(e)
+  s.button = button(e, :commit, "git")
+  s.more === nothing && (s.more = own!(e, CommitMore()))
   (Row(Alignment.Center, name="Commit", radius(px(COMMIT_ROUND), px(COMMIT_ROUND), 0px, 0px), background(open ? found_colours().frame : clear),
-       button(e, :commit, "git"), node!(CommitMore, e, :commit_more)),)
+       s.button, s.more),)
 end
 
 # --- an agent writes the commit's message --------------------------------------------------------
@@ -1247,7 +1250,7 @@ when the message comes. The agent is the one of the conversation beside the
 page, once you have talked with it, else the one that Settings chose.
 """
 commit_now!(e, what::Symbol) = begin
-  haskey(e.nodes, :writing) && return e   # one at a time
+  state_of(e, CommitState).writing === nothing || return e   # one at a time
   try
     path = e.buf.path
     root = repo_of(e)
@@ -1281,7 +1284,7 @@ commit_now!(e, what::Symbol) = begin
       shown, told = talk_prompt(root, what, basename(path), diff)
       @async clean_message(ask_talk!(talk, shown, told); who)
     end
-    e.nodes[:writing] = (task=task, what=what, root=root, path=path, rel=rel, part=part, who=who)
+    state_of(e, CommitState).writing = (task=task, what=what, root=root, path=path, rel=rel, part=part, who=who)
     redraw_in!(e, 0.05)
   catch err
     say_result!(e, trouble(err))
@@ -1339,8 +1342,8 @@ message_by(e) = e.own ? ", with a message that you write" :
 # A click commits the file with a message that the agent of the conversation beside the page writes, or else the
 # agent that Settings chose, or that you write when the setting says so. While ticked changes are chosen, it commits only those.
 BUTTONS[:commit] = (run=e -> commit_scope!(e, choosing(e) ? :part : :file), off=e -> choosing(e) && isempty(ticked(e)), strong=false,
-                    busy=e -> haskey(e.nodes, :writing),
-                    tip=e -> haskey(e.nodes, :writing) ? "$(e.nodes[:writing].who) is writing the commit message…" :
+                    busy=e -> state_of(e, CommitState).writing !== nothing,
+                    tip=e -> (w = state_of(e, CommitState).writing) !== nothing ? "$(w.who) is writing the commit message…" :
                              (!choosing(e) ? "Commit $(basename(e.buf.path))" :
                               (n = length(ticked(e)); n == 0 ? "Tick the changes to commit" : n == 1 ? "Commit the ticked change" : "Commit the $n ticked changes")) *
                              (choosing(e) && isempty(ticked(e)) ? "" : message_by(e)))
@@ -1398,10 +1401,10 @@ say_result!(e, words) = (state_of(e, BarWords).said = (String(words), time()); r
 
 "Commit what `commit_now!` started, once the agent has written its message. Each window does this in each frame."
 commit_tick!(e) = begin
-  w = get(e.nodes, :writing, nothing)
+  w = state_of(e, CommitState).writing
   w === nothing && return
   istaskdone(w.task) || return (yield(); redraw_in!(e, 0.05))   # the button spins, and the task that reads the agent gets its turn
-  delete!(e.nodes, :writing)
+  state_of(e, CommitState).writing = nothing
   message = try
     fetch(w.task)
   catch err
@@ -1448,7 +1451,7 @@ end
 commit_text!(e, root, rel, text, message) = begin
   done, why = Git.commit_text(root, rel, text, message)
   Git.forget!()
-  delete!(e.nodes, :choosing)
+  state_of(e, CommitState).choosing = nothing
   redraw_in!(e, 0)
   done || error("git didn't commit it: " * why)
   nothing
@@ -1457,15 +1460,15 @@ end
 # --- choosing the changes to commit ---
 
 "True while the window shows a tick box on each change of its file, for a commit of the ticked ones"
-choosing(e) = (c = get(e.nodes, :choosing, nothing); c !== nothing && c.path == e.buf.path && diffing(e))
+choosing(e) = (c = state_of(e, CommitState).choosing; c !== nothing && c.path == e.buf.path && diffing(e))
 
 "Show what changed in the file, with a tick box on each change, or stop"
 choose_changes!(e) = begin
   if choosing(e)
-    delete!(e.nodes, :choosing)
+    state_of(e, CommitState).choosing = nothing
   else
-    e.nodes[:diffing] = e.buf.path
-    e.nodes[:choosing] = (path=e.buf.path, ticked=Set{Any}())
+    state_of(e, DiffState).path = e.buf.path
+    state_of(e, CommitState).choosing = (path=e.buf.path, ticked=Set{Any}())
   end
   redraw_in!(e, 0)
   e
@@ -1479,7 +1482,7 @@ ticked(e) = begin
   choosing(e) || return Int[]
   d = diff_now(e)
   d === nothing && return Int[]
-  set = e.nodes[:choosing].ticked
+  set = state_of(e, CommitState).choosing.ticked
   [k for k in eachindex(d.changes) if tick_key(e, d, k) in set]
 end
 
@@ -1502,7 +1505,7 @@ onkey(t::TickChange, ::KeyPress{Keys.mouse_left}) = begin
   d = diff_now(e)
   (d === nothing || !choosing(e) || t.k > length(d.changes)) && return handled
   key = tick_key(e, d, t.k)
-  set = e.nodes[:choosing].ticked
+  set = state_of(e, CommitState).choosing.ticked
   key in set ? delete!(set, key) : push!(set, key)
   redraw_in!(e, 0)
   handled
@@ -1520,6 +1523,17 @@ end
 
 "The chevron beside the Commit button: a click shows the list of the ways to commit"
 @def mutable struct CommitMore <: SemanticUI end
+
+"What a window keeps of a commit that it makes from the Commit button, between frames"
+@def mutable struct CommitState
+  # The commit whose message an agent is writing: `task`, the task that reads the agent, `what`, what it commits,
+  # `root`, `path`, `rel` and `part`, the repository, the file, its place there and the ticked text, and `who`, the agent.
+  # Nothing while no commit waits for its message.
+  writing::Union{Nothing,NamedTuple} = nothing
+  choosing::Union{Nothing,@NamedTuple{path::String, ticked::Set{Any}}} = nothing   # the file whose changes have tick boxes, and the ticked ones: see `tick_key`
+  button::Union{Nothing,ToolButton} = nothing   # the Commit button of the top bar, once it has shown
+  more::Union{Nothing,CommitMore} = nothing     # the chevron beside it, once it has shown
+end
 
 describe(c::CommitMore) =
   Box(width(16px), height(28px), radius(6px), Alignment.Center, name="CommitMore", background(ishovered(c) ? colours.hover : clear),
@@ -1553,7 +1567,8 @@ commit_list_open(e) = (w = window_of(e); w !== nothing && any(p -> p.key == COMM
 
 "Where the Commit button and its chevron are in the window, as one rectangle in px, or nothing before both are drawn"
 commit_target(e) = begin
-  b, c = get(e.nodes, :commit, nothing), get(e.nodes, :commit_more, nothing)
+  s = state_of(e, CommitState)
+  b, c = s.button, s.more
   (b === nothing || c === nothing) && return nothing
   rb, rc = rect(b), rect(c)
   (rb === nothing || rc === nothing) && return nothing
@@ -1664,7 +1679,7 @@ cursor(::CommitWay) = :hand
 onkey(r::CommitWay, ev::KeyPress{Keys.mouse_left}) = begin
   e = editor(r)
   close_popup!(ev.window, COMMIT_LIST)
-  haskey(e.nodes, :writing) && return handled   # the agent is writing a message
+  state_of(e, CommitState).writing === nothing || return handled   # the agent is writing a message
   r.way == :part ? choose_changes!(e) : commit_scope!(e, r.way)
   handled
 end
@@ -1713,7 +1728,7 @@ push!(BLOCK_ICONS, "chevron-down", "square", "check2-square")
 # The lines that went take room on the page. After `layout!`, in each frame of
 # the window, `inline_diff!` moves each item down by the height of the old
 # lines over it, in a new list, since `file_lines` keeps the list that it gave.
-# It keeps what it did in `e.nodes[:gone]`. The Document draws the old lines
+# It keeps what it did in the window's `DiffState`. The Document draws the old lines
 # only for the layout that it made, so printing and slides, which lay the page
 # out again, never have them.
 
@@ -1726,15 +1741,25 @@ agent's page, since hiding what changed in a file hides the bars too.
   page::String = ""   # the path of the page, or "" for none
 end
 
+"What a window keeps of the changes of its file that it shows in the file itself, between frames"
+@def mutable struct DiffState
+  path::String = ""                                # the file whose changes show, or "" when none show
+  now::Union{Nothing,Tuple{Tuple,NamedTuple}} = nothing   # the file, its version and git's HEAD that the changes were last found for, and the changes: see `diff_now`
+  # What `inline_diff!` did: `from`, the layout that it was given, `layout`, the one that it made, `diff`, the changes,
+  # `after` and `above`, the old lines under each item and over the first, `lh`, how tall an old line is, and `tops`,
+  # where each change starts on the page. Nothing while no change shows.
+  gone::Union{Nothing,NamedTuple} = nothing
+end
+
 "True while the window shows what changed in its file since the last commit, in the file itself"
-diffing(e) = !isempty(e.buf.path) && get(e.nodes, :diffing, "") == e.buf.path
+diffing(e) = !isempty(e.buf.path) && state_of(e, DiffState).path == e.buf.path
 
 """
 Show what changed in the file since the last commit, in the file itself, or
 hide it again. Hiding it hides the bars beside the agent's changes too, since
 their button goes with it.
 """
-toggle_diff!(e) = (diffing(e) ? (delete!(e.nodes, :diffing); state_of(e, AgentMarks).page = "") : (e.nodes[:diffing] = e.buf.path); redraw_in!(e, 0); e)
+toggle_diff!(e) = (diffing(e) ? (state_of(e, DiffState).path = ""; state_of(e, AgentMarks).page = "") : (state_of(e, DiffState).path = e.buf.path); redraw_in!(e, 0); e)
 add_command!(toggle_diff!, name=:show_changes_in_place, title="Show or hide what changed in the file since the last commit, in the file itself")
 
 BUTTONS[:diff] = (run=toggle_diff!, off=e -> false, strong=false, on=diffing,
@@ -1749,7 +1774,7 @@ does this. A folder, or a file that Ladder shows only in a viewer, just shows.
 show_changes!(e, path) = begin
   show_path!(e, path)
   e.buf.path == path || return e
-  e.nodes[:diffing] = path
+  state_of(e, DiffState).path = e.buf.path
   d = diff_now(e)
   (d === nothing || isempty(d.changes)) && return e
   go_change!(e, 1)
@@ -1795,7 +1820,7 @@ one before it. The chevrons beside the diff button do this. From the palette,
 the window shows what changed first, if it doesn't yet.
 """
 step_change!(e, by=1) = begin
-  diffing(e) || (e.nodes[:diffing] = e.buf.path)
+  diffing(e) || (state_of(e, DiffState).path = e.buf.path)
   k = change_after(e, by)
   k === nothing ? (redraw_in!(e, 0); e) : go_change!(e, k)
 end
@@ -1845,12 +1870,12 @@ diff_now(e) = begin
   s = watch_git!(e, root)
   s.known || return nothing
   key = (b.path, b.version, s.head)
-  kept = get(e.nodes, :diff_now, nothing)
+  kept = state_of(e, DiffState).now
   kept !== nothing && kept[1] == key && return kept[2]
   rel = try relpath(realpath(b.path), realpath(root)) catch; return nothing end
   old = committed_lines(root, rel, s.head)
   found = (changes=changes(old, b.lines), old=old)
-  e.nodes[:diff_now] = (key, found)
+  state_of(e, DiffState).now = (key, found)
   found
 end
 
@@ -1864,9 +1889,9 @@ lines over it. The old lines go under the item that has the line before them.
 """
 inline_diff!(e) = begin
   d = diff_now(e)
-  (d === nothing || isempty(e.layout)) && return (delete!(e.nodes, :gone); nothing)
+  (d === nothing || isempty(e.layout)) && return (state_of(e, DiffState).gone = nothing; nothing)
   items = e.layout
-  was = get(e.nodes, :gone, nothing)
+  was = state_of(e, DiffState).gone
   # A file of code keeps its layout while its text is the same, so the room is made once
   was !== nothing && was.from === items && was.diff === d && return (e.layout = was.layout; nothing)
   lh = gone_h(e)
@@ -1894,12 +1919,12 @@ inline_diff!(e) = begin
     first(n) <= 1 ? out[1].top - lh * length(above) : (it = out[shows(first(n) - 1)]; it.top + it.tall)
   end
   e.layout = out
-  e.nodes[:gone] = (from=items, layout=out, diff=d, after=after, above=above, lh=lh, tops=tops)
+  state_of(e, DiffState).gone = (from=items, layout=out, diff=d, after=after, above=above, lh=lh, tops=tops)
   nothing
 end
 
 "What `inline_diff!` did to the layout that the window shows now, or nothing"
-gone_now(e) = (g = get(e.nodes, :gone, nothing); g !== nothing && g.layout === e.layout ? g : nothing)
+gone_now(e) = (g = state_of(e, DiffState).gone; g !== nothing && g.layout === e.layout ? g : nothing)
 
 "The lines `lines` that went from the file: red rows each `lh` tall, with the colours of code in the file's language"
 gone_rows(e, lines, lh) = begin

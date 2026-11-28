@@ -48,11 +48,11 @@ const (; frames, click, typed, key, shot) = drive(w, frames=3, pressed=1, latest
 "Draw until git has answered, and then what it said is on the screen"
 again() = (G.forget!(); frames(2); G.wait!(); frames(2))
 "Draw until the message has come and the commit is made, for 10 seconds at the most"
-committed() = (t = time(); while haskey(e.nodes, :writing) && time() - t < 10; frames(1); sleep(0.01) end; again())
+committed() = (t = time(); while (K.state_of(e, K.CommitState).writing !== nothing) && time() - t < 10; frames(1); sleep(0.01) end; again())
 "True while the list under the chevron shows"
 list_open() = any(p -> p.key == K.COMMIT_LIST, popups(w))
 "Click the chevron, and click the row of the way `way` in its list: :file, :part or :all"
-choose(way) = (click(rect(e.nodes[:commit_more])); click(rect(e.nodes[(:commit_way, way)])); frames())
+choose(way) = (click(rect(K.state_of(e, K.CommitState).more)); click(rect(e.nodes[(:commit_way, way)])); frames())
 commit_button() = e.nodes[:commit]
 said() = something(K.said_result(e), ("", 0.0))[1]
 subjects() = split(chomp(git("log", "--format=%s")), '\n')
@@ -67,9 +67,9 @@ again()
   K.refresh!(e.buf)
   again()
   b = commit_button()
-  @test rect(b) !== nothing && rect(e.nodes[:commit_more]) !== nothing
+  @test rect(b) !== nothing && rect(K.state_of(e, K.CommitState).more) !== nothing
   # The chevron is just right of the button
-  @test 0 <= K.num(rect(e.nodes[:commit_more]).left - (rect(b).left + rect(b).width)) <= 4
+  @test 0 <= K.num(rect(K.state_of(e, K.CommitState).more).left - (rect(b).left + rect(b).width)) <= 4
   @test K.tip(b) == "Commit Readme.md, with a message that Claude writes"
   shot("commit-button")
   click(rect(b))
@@ -124,7 +124,7 @@ end
 end
 
 @testset "the chevron's list has the three ways, and a switch that makes you write the message" begin
-  click(rect(e.nodes[:commit_more]))
+  click(rect(K.state_of(e, K.CommitState).more))
   @test list_open()
   @test [K.way_words(e, way)[1] for way in K.COMMIT_WAYS] == ["Commit this file", "Commit part of this file", "Commit all changed files"]
   @test K.way_words(e, :file)[2] == "Readme.md" && endswith(K.way_words(e, :all)[2], "files")
@@ -271,7 +271,7 @@ end
   again()
   @test !isempty(K.commit_part(e)) && K.tip(commit_button()) == "Commit Readme.md, with a message that Fake writes"
   click(rect(commit_button()))
-  @test e.nodes[:writing].who == "Fake"
+  @test K.state_of(e, K.CommitState).writing.who == "Fake"
   committed()
   @test subjects()[1] == "Say who it is for" && said() == "Committed Readme.md: Say who it is for"
   words = read(joinpath(dir, "words.txt"), String)

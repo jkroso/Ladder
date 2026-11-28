@@ -60,7 +60,7 @@ commit!() = begin
     click(middle(button()))
   end
   t = time()
-  while haskey(e.nodes, :writing) && time() - t < 10
+  while (K.state_of(e, K.CommitState).writing !== nothing) && time() - t < 10
     withenv(() -> frames(1), me...)
     sleep(0.02)
   end

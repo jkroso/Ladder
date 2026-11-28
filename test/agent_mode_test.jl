@@ -1778,10 +1778,10 @@ try
     n = length(heard_lines())
     K.BUTTONS[:commit].run(e)
     foreach(_ -> (frames(w, 1); sleep(0.02)), 1:10)
-    @test ok && s.busy && length(heard_lines()) == n && haskey(e.nodes, :writing) && tip() == "Claude is writing the commit message…"
+    @test ok && s.busy && length(heard_lines()) == n && (K.state_of(e, K.CommitState).writing !== nothing) && tip() == "Claude is writing the commit message…"
     # When that turn ends, the agent is asked, and its reply is the message
     K.stop!(s)
-    ok = until(() -> !haskey(e.nodes, :writing))
+    ok = until(() -> !(K.state_of(e, K.CommitState).writing !== nothing))
     @test ok && strip(git("log", "-1", "--format=%B")) == "Buy less paint\n\nThe plan says why."
     @test isempty(strip(git("status", "--porcelain", "plan.md"))) && startswith(K.said_result(e)[1], "Committed plan.md: Buy less paint")
     # The pane shows the question and the message. The diff and the last messages went to the agent, though the pane doesn't show them.
