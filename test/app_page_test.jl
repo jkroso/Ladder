@@ -8,7 +8,7 @@
 @use Test: @test, @testset, @test_throws
 @use "../main" => K
 @use "github.com/jkroso/MiniFB.jl" Window Typed Keys ontype KeyPress
-@use "github.com/jkroso/UI.jl/Interface/draw" frame
+@use "github.com/jkroso/UI.jl/Interface/draw" frame rect
 const px = K.px
 
 const dir = mktempdir()
@@ -23,12 +23,16 @@ frames()
 
 @testset "the window has only the page" begin
   @test haskey(e.nodes, :topbar) && !K.as_app(e)
+  # The window that changes the page has its sidebar open
+  e.panel = true
+  frames()
+  @test rect(e.nodes[:sidebar]) !== nothing
   shown = K.show_as_app!(e)
   win = K.window_of(shown)
   frames(win)
   @test shown !== e && shown.buf.path == page && K.as_app(shown)
-  # No sidebar and no caret
-  @test !haskey(shown.nodes, :sidebar) && !shown.panel && K.caretless(shown.buf)
+  # No sidebar and no caret. Each window has the node of a sidebar, and this one doesn't draw it.
+  @test rect(shown.nodes[:sidebar]) === nothing && !shown.panel && K.caretless(shown.buf)
   # The top bar is there with nothing in it, so you can drag it to move the window
   bar = K.describe(shown.nodes[:topbar])
   @test isempty(bar.children) && !isempty(K.describe(e.nodes[:topbar]).children)
