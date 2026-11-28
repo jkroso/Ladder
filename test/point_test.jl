@@ -86,7 +86,10 @@ changed(a, b, (x, y); by=12) = begin
   a[rows, cols] != b[rows, cols]
 end
 
-at((990, 10))
+# A place with nothing under it: the window's bottom corner. The top corner has the ladder, which opens into a
+# slider while the mouse is on it, so a picture there depends on how long the mouse has been there.
+const nowhere = (990, 2290)
+at(nowhere)
 const plain = shot("point-none.png")
 
 @testset "nothing is pointed at until the mouse is on a thing" begin
@@ -151,7 +154,7 @@ end
 end
 
 @testset "the mouse leaves, and the marks go" begin
-  at((990, 10))
+  at(nowhere)
   @test K.pointed(e) === nothing
   @test shot("point-gone.png") == plain
 end
