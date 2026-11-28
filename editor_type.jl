@@ -588,7 +588,7 @@ const editors = Editor[]
 
 """
 The top of an email, in place of the card of its front matter. It's a part of
-the page with levels of its own. See "the top of an email".
+the page with levels of its own. See "the top of an email" in email_head.jl.
 """
 @def mutable struct EmailHead <: SemanticUI
   rows::Vector{Tuple{Int,String,String}} = Tuple{Int,String,String}[]   # the keys of the front matter: the line, the key and what it's set to

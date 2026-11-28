@@ -1,6 +1,6 @@
 # Tests for the top of an email, which has levels of its own: a click gives it
 # the keyboard, and ⌘E, the ladder or the slider then shows every field of
-# the email's header. See "the top of an email" in main.jl. Run them with
+# the email's header. See "the top of an email" in email_head.jl. Run them with
 # `julia -O0 --project=. test/email_head_test.jl`. They click in a window
 # that isn't on the screen. Set `LADDER_SHOTS` to a folder, and they save
 # pictures of the page there.
@@ -63,7 +63,7 @@ texts(node=rect(head()), out=[]) = (node isa K.ConcreteText ? push!(out, node) :
 has(word) = any(t -> occursin(word, t), words())
 
 @testset "the top of an email is a part with levels of its own" begin
-  @test parentmodule(K.fold) === K   # no function of another module has the name
+  @test parentmodule(K.fold) === parentmodule(K.whole_header)   # the email's own fold: no function of another module has the name
   @test head() isa K.EmailHead && has("RE: Centient production") && has("Sam Lee")
   # Until the top has the keyboard, the ladder is the page's
   @test K.level_part(e) isa K.Document && K.levels(e) != K.HEAD_LEVELS

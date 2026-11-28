@@ -43,7 +43,7 @@ export editor, page_object, object, list_files!, go_folder!, open!, open_folder!
        palette_click!, show_window!, shown_parts, window!, paper_window, todo_box, go_chip!, palette_chips,
        palette, under_palette, startup_page, command_focus, copied!, mark_chips, mark_preview, text_width,
        code_module!, page_value, page_code, show_opened!, toast!, untoast!, site_code_changed!,
-       go_heading!, known_lang, reset_module!
+       go_heading!, known_lang, reset_module!, input
 
 "The editor of the window that `node`, a part of a page, is part of"
 function editor end
@@ -923,3 +923,6 @@ function known_lang end
 
 "Give the file that the window `e` shows a new, empty module for its code, in place of the one it had."
 function reset_module! end
+
+"The field of the window that you type in to find a file, a project or a command"
+function input end
