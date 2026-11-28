@@ -36,6 +36,7 @@ const e = K.build_editor(page)
 const w = Window(e, size=(1000px, 800px))
 const (; frames, at, key) = drive(w, moved=2)
 e.panel || K.toggle_panel!(e)
+e.slid = 0.0   # the sidebar is open at once: the rows of a sidebar that still slides aren't where they come to rest
 frames(3)
 
 right_click(place) = (at(place); onkey(w, KeyPress{Keys.mouse_right}(0, w)); frames())
