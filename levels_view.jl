@@ -44,7 +44,7 @@
 export MODE_W, TITLE_ROOM, SNAKE, snake, level_picture, mode_part, FILE_LEVELS, PAGE_LEVELS, BLOCK_LEVELS,
        LEVELS_KEY, STOP_W, TRACK_W, OPENS_IN, level_part, other_level, click_level, level_names, stop_tip,
        slide!, openness, slider_w, slider_grown, track, go!, plain!, low, block_lang, block_span, page_level!,
-       lower!, widen!, confine!, refill!
+       lower!, widen!, confine!, refill!, LoweredState
 
 const MODE_W = 30px   # the room that the picture takes in the top bar
 const TITLE_ROOM = 160px   # the least room that the file's name keeps in the top bar of a narrow window
@@ -402,10 +402,17 @@ page_level!(e) = begin
   v = full_block(e)
   v === nothing || return lower!(e, v)
   e.plain || return plain!(e, true)
-  kept = lowered(e) === nothing ? nothing : e.nodes[:lowered]
+  kept = lowered(e) === nothing ? nothing : state_of(e, LoweredState).kept
   plain!(e, false)
   kept === nothing || refill!(e, kept)
   e
+end
+
+@use "github.com/jkroso/Prospects.jl" @def
+
+"What a window keeps of a block whose lines fill it as text: see `lower!`"
+@def mutable struct LoweredState
+  kept::Union{Nothing,NamedTuple} = nothing   # the block as `view`, the `path` of its page, and the `offset` that the page was scrolled to. Nothing while no block's lines fill the window.
 end
 
 """
@@ -424,7 +431,7 @@ lower!(e, v) = begin
   b.caret = b.anchor = (min(s + 1, t), 0)
   plain!(e, true)
   hold!(e, nothing)   # the lines start at the top of the window
-  e.nodes[:lowered] = (view=v, path=b.path, offset=e.scroll.offset)
+  state_of(e, LoweredState).kept = (view=v, path=b.path, offset=e.scroll.offset)
   e.scroll.offset = 0px
   touch!(e)
 end
@@ -435,7 +442,7 @@ or nothing. They stop filling it when the block goes, when the page goes up a
 level and when another file shows.
 """
 lowered(e) = begin
-  kept = get(e.nodes, :lowered, nothing)
+  kept = state_of(e, LoweredState).kept
   kept === nothing && return nothing
   b = e.buf
   span = e.plain && kept.path == b.path && !b.fixed ? block_span(b, kept.view) : nothing
@@ -448,8 +455,10 @@ Put the lines that fill the window back among the lines of the page. The page
 is where it was, or as near to that as shows the caret.
 """
 widen!(e) = begin
-  kept = pop!(e.nodes, :lowered, nothing)
+  state = state_of(e, LoweredState)
+  kept = state.kept
   kept === nothing && return e
+  state.kept = nothing
   kept.path == e.buf.path && (e.scroll.offset = kept.offset; e.reveal = true)
   e
 end
@@ -470,7 +479,7 @@ end
 "Make the block whose lines fill the window fill it again. The caret goes onto the block as a whole, and the page under it is where it was."
 refill!(e, kept) = begin
   b = e.buf
-  delete!(e.nodes, :lowered)
+  state_of(e, LoweredState).kept = nothing
   hold!(e, nothing)
   e.scroll.offset = kept.offset
   span = block_span(b, kept.view)

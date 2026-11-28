@@ -50,7 +50,7 @@
 
 export SlideShow, SLIDE_COMMANDS, slideshow, slide_room, page_slides, show_slides!, end_slides!, slides!,
        go_slide!, slide_tick!, own_zoom!, zoom_to!, usual_zoom!, slide_span, span_tall, slide_items,
-       fit_slide!, slide_key!, takes_click, slide_press!, slide_cursor, slides_over
+       fit_slide!, slide_key!, takes_click, slide_press!, slide_cursor, slides_over, SlidesState
 
 "The slides of a page, while they show in a window"
 Base.@kwdef mutable struct SlideShow
@@ -78,8 +78,13 @@ end
 "The commands that do what they always do while the page shows as slides. A key of any other command does nothing."
 const SLIDE_COMMANDS = (:save, :inspector)
 
+"What a window keeps of the slides of a page"
+Base.@kwdef mutable struct SlidesState
+  show::Union{Nothing,SlideShow} = nothing   # the slides that show in the window, or nothing while the page shows
+end
+
 "The slides that show in the window of `e`, or nothing while the page shows"
-slideshow(e) = get(e.nodes, :slides, nothing)
+slideshow(e) = state_of(e, SlidesState).show
 
 "How tall a slide can be before it scrolls: the window's height, less the top bar and the room above and below the page's text"
 slide_room(e) = max(0px, window_size(e)[2] - above_page(e) - PAGE_TOP - page_bottom(e))
@@ -110,8 +115,8 @@ show_slides!(e) = begin
   empty!(b.others)
   e.clicked = (0.0, (0, 0), 0)
   at = Slides.number(list, b.caret[1])
-  e.nodes[:slides] = SlideShow(path=b.path, at=at, first=at, caret=b.caret, zoom=e.zoom, set=e.zoom,
-                               panel=e.panel, offset=e.scroll.offset)
+  state_of(e, SlidesState).show = SlideShow(path=b.path, at=at, first=at, caret=b.caret, zoom=e.zoom, set=e.zoom,
+                                            panel=e.panel, offset=e.scroll.offset)
   # The sidebar goes at once, without sliding
   e.panel, e.slid = false, 0.0
   e.scroll.offset = 0px
@@ -126,8 +131,9 @@ top of the window. When that's the slide that showed first, with the caret in
 it, the caret and the page stay where they were.
 """
 end_slides!(e) = begin
-  s = pop!(e.nodes, :slides, nothing)
+  s = slideshow(e)
   s === nothing && return handled
+  state_of(e, SlidesState).show = nothing
   zoom = own_zoom!(e, s)
   e.zoom == zoom || (e.zoom = zoom; empty!(e.flows); rerun!(e, :zoom))
   e.panel, e.slid = s.panel, 0.0

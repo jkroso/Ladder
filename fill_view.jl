@@ -67,7 +67,8 @@ export ZOOM_EDGE, BAR_ROOM, MODEL_FOOT, MOST_ZOOM, PAGE_COMMANDS, ZoomView, Zoom
        fill_rect, fill_over, button_above, fill_window!, zoom_in!, screening, screen!, screen_video!,
        zoom_out!, zoom_tick!, diagram_code, diagram_block, changing, refit!, write_diagram!, zoom_over,
        BAR_NEAR, bar_near, diagram_buttons, use_tool!, lay_diagram!, subject_size, zoom_edge, bar_room,
-       view_middle, reframe!, fit_now!, zoom_by!, zoom_ink, pdf_ink, picture_spot, let_go!, zoom_key!
+       view_middle, reframe!, fit_now!, zoom_by!, zoom_ink, pdf_ink, picture_spot, let_go!, zoom_key!,
+       FillState, zoom_view
 
 const ZOOM_EDGE = 24.0   # px of room round a picture that fits the window
 const BAR_ROOM = 64px    # the bottom of the window, where the bar of buttons is
@@ -124,6 +125,17 @@ its button beside it.
   expand::Any = nothing       # the FillButton for `also`, once it has shown
 end
 
+"What a window keeps of what fills it, and of the pictures of its page that can"
+@def mutable struct FillState
+  zoom::Union{Nothing,ZoomView} = nothing                 # what fills the window, over the page, or nothing until something first does
+  fills::Dict{UInt,Fillable} = Dict{UInt,Fillable}()      # the Fillable of each node of the page that shows one, by the node
+  laid_scroll::Union{Nothing,px} = nothing                # the scroll of the page that the last layout used, or nothing before the page is first drawn
+  at::Union{Nothing,Tuple{Fillable,Any}} = nothing        # the picture that has the buttons beside it in this frame, and where it is
+end
+
+"The ZoomView of the window of `e`, which shows what fills the window. It's made the first time that it's asked for."
+zoom_view(e) = (s = state_of(e, FillState); s.zoom === nothing && (s.zoom = own!(e, ZoomView())); s.zoom)
+
 "The button beside the top right corner of a Fillable that makes it fill the window"
 @def mutable struct FillButton <: SemanticUI
   rect::NTuple{4,px} = (0px, 0px, 0px, 0px)   # where it was last drawn, to put its tooltip under it
@@ -147,7 +159,7 @@ square_button(icon, lit) =
     Icon(icon, size=12px, color=colours.dim))
 
 "The ZoomView of `e` while it fills the window, or nothing"
-zooming(e) = (v = get(e.nodes, :zoom, nothing); v === nothing || v.what === nothing ? nothing : v)
+zooming(e) = (v = state_of(e, FillState).zoom; v === nothing || v.what === nothing ? nothing : v)
 
 "True when `a` and `b` say the same thing fills the window. A node is the same node, not one like it."
 same_what(a, b) = a !== nothing && b !== nothing && a[1] == b[1] && (a[1] == :node ? a[2] === b[2] : a == b)
@@ -171,7 +183,7 @@ video_wide(p::VideoPlayer) = begin
 end
 
 "The Fillable of each node of the page that shows one, by the node"
-fills(e) = get!(Dict{UInt,Fillable}, e.nodes, :fills)
+fills(e) = state_of(e, FillState).fills
 
 """
 `content`, which `owner` shows, as a Fillable: while the mouse is over it, a
@@ -222,7 +234,7 @@ buttons_tall(f::Fillable) = video_of(f) === nothing && f.also === nothing ? FILL
 "The scroll of the page that the last layout used, which the draw of the page keeps"
 draw(ctx, size, ui::ConcreteRect, p::Page) = begin
   e = editor(p)
-  e.nodes[:laid_scroll] = e.scroll.offset
+  state_of(e, FillState).laid_scroll = e.scroll.offset
   nothing
 end
 
@@ -240,14 +252,14 @@ end
 fill_rect(e, f::Fillable) = begin
   r = rect(f)
   r === nothing && return nothing
-  moved = get(e.nodes, :laid_scroll, e.scroll.offset) - e.scroll.offset
+  moved = something(state_of(e, FillState).laid_scroll, e.scroll.offset) - e.scroll.offset
   (moved == 0px || !scrolls_with_page(e, f)) && return r
   (left=r.left, top=r.top + moved, width=r.width, height=r.height)
 end
 
 "The picture that has the buttons beside it draws again at once when it isn't where they were put for it"
 draw(ctx, size, ui::ConcreteRect, f::Fillable) = begin
-  at = get(editor(f).nodes, :fill_at, nothing)
+  at = state_of(editor(f), FillState).at
   (at === nothing || at[1] !== f) && return
   r = at[2]
   abs(num(ui.left - r.left)) + abs(num(ui.top - r.top)) + abs(num(ui.width - r.width)) + abs(num(ui.height - r.height)) > 0.5 &&
@@ -262,7 +274,7 @@ They show while the mouse is over the picture or the buttons, or between them,
 and while the drop-down of what was said is open.
 """
 fill_over(e) = begin
-  e.nodes[:fill_at] = nothing
+  state_of(e, FillState).at = nothing
   (zooming(e) === nothing && full_block(e) === nothing && e.popup == :none) || return ()
   win = window_of(e)
   win === nothing && return ()
@@ -282,7 +294,7 @@ fill_over(e) = begin
     area = num(r.width) * num(r.height)
     area < least && ((best, spot, least, at) = (f, s, area, r))
   end
-  e.nodes[:fill_at] = best === nothing ? nothing : (best, at)
+  state_of(e, FillState).at = best === nothing ? nothing : (best, at)
   best === nothing && return ()
   b = best.button === nothing ? (best.button = own!(best, FillButton())) : best.button
   buttons = Any[b]
@@ -369,7 +381,7 @@ onpinch(l::Breadcrumb, ev::Pinch) = pinch_open(l, ev)
 
 "Make `what` fill the window. `from` is the node of the page that shows it."
 zoom_in!(e, what, from=nothing) = begin
-  v = node!(ZoomView, e, :zoom)
+  v = zoom_view(e)
   # A pinch goes on to the page until the next frame is drawn, so it would open it again
   same_what(v.what, what) && return handled
   zoom_out!(v, false)
@@ -424,7 +436,7 @@ screen!(v::ZoomView, on::Bool) = begin
 end
 
 "Make the video `p`, which the node `from` shows in the page, fill the screen"
-screen_video!(e, p::VideoPlayer, from=nothing) = (zoom_in!(e, (:node, p), from); screen!(node!(ZoomView, e, :zoom), true))
+screen_video!(e, p::VideoPlayer, from=nothing) = (zoom_in!(e, (:node, p), from); screen!(zoom_view(e), true))
 
 "Put the page back, with a model or a video back in it. `refocus` gives the keyboard back to the text."
 zoom_out!(v::ZoomView, refocus=true) = begin
@@ -525,8 +537,8 @@ end
 "What fills the window, over the page and the sidebar and under the top bar"
 zoom_over(e) = zooming(e) === nothing ? () :
   # A video that fills the screen has the top bar's room too, and black round it
-  screening(e) ? (Box(width(grow=grow), height(grow=grow), background(RGBA(0, 0, 0, 1)), geometry(e.nodes[:zoom])),) :
-  (Box(width(grow=grow), height(grow=grow), padding(above_page(e), 0px, 0px, 0px), background(colours.bg), geometry(e.nodes[:zoom])),)
+  screening(e) ? (Box(width(grow=grow), height(grow=grow), background(RGBA(0, 0, 0, 1)), geometry(state_of(e, FillState).zoom)),) :
+  (Box(width(grow=grow), height(grow=grow), padding(above_page(e), 0px, 0px, 0px), background(colours.bg), geometry(state_of(e, FillState).zoom)),)
 
 "The button of `v` that's kept under `key`, with what it does and shows now"
 button!(v::ZoomView, key, action; icon="", tip="", off=false) = begin

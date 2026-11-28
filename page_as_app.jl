@@ -22,7 +22,7 @@
 @use "./folder_page" exports...
 @use "./views" exports...
 
-export app_tick!, show_as_app!
+export app_tick!, show_as_app!, AppWindow
 
 # --- a page as an app -------------------------------------------------------------------------
 #
@@ -35,8 +35,15 @@ export app_tick!, show_as_app!
 # there. The command, run in that window, makes it a window that changes the
 # page again.
 
+@use "github.com/jkroso/Prospects.jl" @def
+
+"What a window keeps of a page shown as an app"
+@def mutable struct AppWindow
+  on::Bool = false   # the window shows its page as an app
+end
+
 "True when the window of `e` shows its page as an app"
-as_app(e) = get(e.nodes, :as_app, false) === true
+as_app(e) = state_of(e, AppWindow).on
 
 "In each frame of a window that shows its page as an app: keep the caret away, and write what a block changed"
 app_tick!(e) = begin
@@ -51,7 +58,7 @@ end
 "Show the page as an app, in a window of its own: only the page, with no sidebar, no caret and nothing in the top bar. In that window, go back to a window that changes the page."
 show_as_app!(e) = begin
   if as_app(e)
-    delete!(e.nodes, :as_app)
+    state_of(e, AppWindow).on = false
     e.buf.reading = false
     redraw_in!(e, 0)
     return nothing
@@ -63,7 +70,7 @@ show_as_app!(e) = begin
   same_settings!(shown, e)
   shown.remember = false   # what this window sets, like a sidebar that's shut, isn't written to the settings
   shown.panel = false
-  shown.nodes[:as_app] = true
+  state_of(shown, AppWindow).on = true
   shown.buf.reading = true
   by = window_of(e)
   size, at = by === nothing ? (paper_window(screen_room(), 0px), (0px, 0px)) : ((by.size[1], by.size[2]), (by.position[1] + 30px, by.position[2] + 30px))
