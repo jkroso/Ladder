@@ -28,7 +28,7 @@
 export Item, Live, Grid, isspread, Glide, Editor, TopBar, Sidebar, Page, Document, Backdrop, FinderInput,
        ToolButton, TableButton, Mode, Levels, Stop, JuliaCode, Title, CheckCount, ReadOnly, SendButton,
        Paragraph, Heading, List, Quote, CodeBlock, Table, Rule, LiveBlock, SheetBlock, Trouble, Block,
-       FileRow, FileLabel, Entry, EntryLabel, Shown, small_editor, owner_of, owner_key!, docdir, item, hosted, top_editor, button, FileView,
+       FileRow, FileLabel, Entry, EntryLabel, Shown, small_editor, owner_of, owner_key!, state_of, docdir, item, hosted, top_editor, button, FileView,
        Sheet, FileEntry, Crumb, Breadcrumb, FileText, Pages, ChartView, FilterRows, FilterView, SaveView,
        GalleryView, TermSettings, TERM_SETTINGS, ViewBlock, ItemClock, PlainLine, Rect, TranscriptButton,
        FileCheck, DesignSheet, FolderPage, SourceChooser, SearchView, SearchChoice, ChoiceMenu, ChoiceRow,
@@ -325,6 +325,27 @@ Each kind of owner has its own method. This one is for a window's own editor,
 which has no owner, and for an owner that takes no key.
 """
 owner_key!(owner, e, w, K, command, select) = :text
+
+# --- what a feature keeps for a window ----------------------------------------------------
+#
+# A feature that keeps something for a window between frames, like the tabs
+# that are open or the place of a drag, keeps it in a struct of its own, with a
+# field for each thing and a default for each field. The window holds one of
+# each such struct, in `nodes` under the struct's type, and `state_of` gives
+# it. So the fields have types, a name that's spelt wrong is an error, and two
+# features can't take each other's place as they could with a key like :drag.
+#
+#     @def mutable struct TabsState
+#       waiting::Union{Nothing,Float64} = nothing   # when the first key of two was pressed
+#     end
+#     state_of(e, TabsState).waiting = time()
+
+"""
+What the window of the editor `e` keeps of the kind `T`: the one that it has,
+or a new `T()` the first time that it's asked for. `T` is a struct with a
+default for each field.
+"""
+state_of(e, ::Type{T}) where T = get!(T, e.nodes, T)::T
 
 # --- what the parts of a window ask of it ------------------------------------------------
 
