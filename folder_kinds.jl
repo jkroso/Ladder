@@ -40,7 +40,7 @@
 export ask_web_folders!, FOLDER_PAGE_KINDS, folder_page_lines, FOLDER_PAGE_STOPPED,
        FOLDER_PAGES_DUE, FOLDER_PAGES_RAN, folder_pages_tick!, FOLDER_PAGES_WORLD, folder_pages!,
        folder_shown!, found_kind, kind_from, kind_name, kind_page, kind_page_written, KindChoice,
-       OWN_KINDS, page_kind, pages_callable, PLACE_KINDS, run_folder_pages!, run_web_folder_pages!,
+       OWN_KINDS, page_kind, pages_callable, PLACE_KINDS, SITE_KINDS, run_folder_pages!, run_web_folder_pages!,
        show_folder_as!, site_answers, SITE_ANSWERS, SITE_ASKER, site_runs!, sites_file,
        stop_trusting_site!, trust_bar, trust_panel, trust_site!, typed_as, WEB_FOLDER_PAGES,
        web_folders_tick!, web_page, WEB_PAGES_DUE, WebFolderPage
@@ -471,6 +471,8 @@ push!(BLOCK_ICONS, "shield-lock", "shield-slash")
 #     screenshots to and its Trash each have a kind: see "the Mac's own folders"
 #   - ~/News is a folder of news: see "a folder of news"
 #   - ~/web is the browser folder, with a globe for its icon: see "the browser folder"
+#   - the folder of a site in the browser folder, like ~/web/x.com, has the kind
+#     that code gave the site's name in `SITE_KINDS`
 #
 # A kind that code gave the folder by its path comes first, and then the kind
 # that the folder's own page gives it. So a page still makes any of these
@@ -479,9 +481,19 @@ push!(BLOCK_ICONS, "shield-lock", "shield-slash")
 "The kind of each folder that Ladder knows by where it is, by the folder's path. A test adds a folder of its own."
 const PLACE_KINDS = Dict{String,Any}()
 
+"""
+The kind of the folder of each site that has a viewer of its own, by the
+site's name, like "x.com": see "a site with a viewer of its own". The folder
+is the one of that name in the browser folder, wherever the browser folder is.
+Code from the startup page adds a site here.
+"""
+const SITE_KINDS = Dict{String,Any}()
+
 "The kind that Ladder gives the folder at `path` by itself, from where it is or from what's in it. It's `FS.Directory` for a folder of no kind."
 found_kind(path::AbstractString) = begin
   k = get(PLACE_KINDS, path, nothing)
+  k === nothing || return k
+  k = isempty(SITE_KINDS) || dirname(path) != browser_folder() ? nothing : get(SITE_KINDS, basename(path), nothing)
   k === nothing || return k
   path == news_folder() && return NewsDirectory
   path == browser_folder() && return BrowserDirectory

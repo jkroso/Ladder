@@ -271,14 +271,14 @@ end
 # --- a site with a viewer of its own ---
 #
 # A site's folder in the browser folder, like ~/web/x.com, can have a kind,
-# as any folder can. Code gives it one by its path, in `FS.kinds`, or the
-# folder's own page does: a file called `.ladder` that you put in the folder.
+# as any folder can. Code gives it one by the site's name, in `SITE_KINDS`, or
+# the folder's own page does: a file called `.ladder` that you put in the folder.
 # The kind then shows the site its own way, as a kind shows a folder of films
 # as posters. Ladder asks the kind before it asks the site's server, wherever
 # an address of the site comes from: a link, a link card, Navigate, a
 # favourite site, Reload Page.
 #
-#     Ladder.FS.kinds[FSPath(joinpath(Ladder.browser_folder(), "x.com"))] = XDirectory
+#     Ladder.SITE_KINDS["x.com"] = XDirectory
 #     Ladder.open_address!(e, d::XDirectory, address; record=true, reload=false) = begin
 #       path = ...   # the folder of ~/web/x.com that's this address
 #       mkpath(path)
@@ -292,8 +292,8 @@ end
 # folder, with `open!`, and what shows there is the kind's own: `page_view`,
 # `window_view`, `side_menu` and the rest, as for any kind of folder. A site
 # that only gives its pages to a browser that's signed in reads them through
-# hiddenpage.jl. A site has other names, like twitter.com for x.com, when the
-# folder of each name has the kind. The folder of a name needn't be there.
+# hiddenpage.jl. A site has other names, like twitter.com for x.com, when each
+# name has the kind in `SITE_KINDS`. The folder of a name needn't be there.
 
 """
 Show the page at `address` in the window of `e`, for the site whose folder in

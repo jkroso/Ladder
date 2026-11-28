@@ -36,8 +36,8 @@ K.BROWSER[] = url -> (push!(outside, url); nothing)
 @def struct ShopItem <: K.AbstractDirectory end
 FS.kind(::ShopSite, path::FSPath) = ShopItem
 FS.kind(::ShopItem, path::FSPath) = ShopItem
-FS.kinds[FSPath(at("shop.test"))] = ShopSite
-FS.kinds[FSPath(at("www.shop.test"))] = ShopSite
+K.SITE_KINDS["shop.test"] = ShopSite
+K.SITE_KINDS["www.shop.test"] = ShopSite
 const opened = Any[]   # what each call of the kind's method was given
 K.open_address!(e, d::ShopSite, address; record=true, reload=false) = begin
   push!(opened, (string(d.path), address, record, reload))
@@ -77,6 +77,13 @@ drawn(name) = any(r -> hasproperty(r.from, :name) && r.from.name == name, flat(K
   # A site's folder that's there, and plain, has no viewer either
   mkpath(at("plain.test"))
   @test K.site_folder("https://plain.test/a") === nothing
+  # The viewer is the site's, not a path's: it's there when the browser folder is another one
+  K.BROWSER_FOLDER[] = joinpath(dir, "Elsewhere")
+  d = K.site_folder("https://shop.test/a")
+  @test d isa ShopSite && string(d.path) == joinpath(dir, "Elsewhere", "shop.test")
+  # A folder of that name anywhere else is plain
+  @test K.found_kind(joinpath(dir, "shop.test")) == FS.Directory
+  K.BROWSER_FOLDER[] = browser
 end
 
 @testset "an address of the site shows as its kind shows it, and no server is asked" begin
@@ -130,5 +137,5 @@ end
 end
 
 K.BROWSER_FOLDER[], K.PAGE_GETTER[], K.BROWSER[] = was_folder, was_getter, was_browser
-delete!(FS.kinds, FSPath(at("shop.test")))
-delete!(FS.kinds, FSPath(at("www.shop.test")))
+delete!(K.SITE_KINDS, "shop.test")
+delete!(K.SITE_KINDS, "www.shop.test")
