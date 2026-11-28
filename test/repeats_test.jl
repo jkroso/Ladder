@@ -84,9 +84,8 @@ end
   @test R.tick(["- [ ] Other"], 1, true; today) == (["- [x] Other"], 1)
 end
 
-const dir = joinpath(tempdir(), "ladder-repeats-test")
-rm(dir, recursive=true, force=true)
-mkpath(dir)
+# The folder is the test's own each time, so that two test processes that run at once don't write the same files
+const dir = mktempdir()
 K.SETTINGS_FILE[] = joinpath(dir, "settings")
 const page = joinpath(dir, "jobs.md")
 const start = """

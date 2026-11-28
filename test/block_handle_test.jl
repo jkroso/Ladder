@@ -13,9 +13,8 @@
 @use GeometryBasics: Vec2
 const px = K.px
 
-const dir = joinpath(tempdir(), "ladder-block-handle-test")
-rm(dir, recursive=true, force=true)
-mkpath(dir)
+# The folder is the test's own each time, so that two test processes that run at once don't write the same files
+const dir = mktempdir()
 K.SETTINGS_FILE[] = joinpath(dir, "settings")
 const page = joinpath(dir, "handles.md")
 const start = """

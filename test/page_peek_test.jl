@@ -22,9 +22,8 @@ texts(x) = begin
 end
 const px = K.px
 
-# The folder has the same name each time, so that Kip compiles its files once
-const dir = joinpath(tempdir(), "ladder-page-peek-test")
-rm(dir, recursive=true, force=true)
+# The folder is the test's own each time, so that two test processes that run at once don't write the same files
+const dir = mktempdir()
 mkpath(joinpath(dir, ".git"))   # the top of the project
 mkpath(joinpath(dir, "notes"))
 K.SETTINGS_FILE[] = joinpath(dir, "settings")

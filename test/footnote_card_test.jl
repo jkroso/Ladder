@@ -21,10 +21,8 @@ texts(x) = begin
   out
 end
 
-# The folder has the same name each time, so that Kip compiles its files once
-const dir = joinpath(tempdir(), "ladder-footnote-card-test")
-rm(dir, recursive=true, force=true)
-mkpath(dir)
+# The folder is the test's own each time, so that two test processes that run at once don't write the same files
+const dir = mktempdir()
 K.SETTINGS_FILE[] = joinpath(dir, "settings")
 const page = joinpath(dir, "notes.md")
 write(page, """

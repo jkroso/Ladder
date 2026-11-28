@@ -10,8 +10,8 @@
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
 const px = K.px
 
-const dir = joinpath(tempdir(), "ladder-cover-test")
-rm(dir, recursive=true, force=true)
+# The folder is the test's own each time, so that two test processes that run at once don't write the same files
+const dir = mktempdir()
 mkpath(joinpath(dir, "photos"))
 cp(joinpath(@__DIR__, "..", "pages", "photos", "3 roof.png"), joinpath(dir, "photos", "roof.png"))
 K.SETTINGS_FILE[] = joinpath(dir, "settings")
