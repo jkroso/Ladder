@@ -20,7 +20,7 @@ foreach(_ -> Base.invokelatest(frame, w), 1:3)
 K.focus(e)
 
 "The module of commands.jl, which has the list of commands"
-const C = parentmodule(K.add_commands!)
+const C = parentmodule(K.with_added)   # not add_commands!, which additions.jl has
 
 """
 A module with every name of commands.jl's module but its two lists. The test
