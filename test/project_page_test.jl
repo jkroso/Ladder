@@ -70,6 +70,10 @@ end
 end
 
 @testset "what the button says of Centient's answer" begin
+  # No program of Centient's has opened a company's books yet, so the words name no company. A test
+  # that ran before this one in the same process can have left the name of the last company.
+  K.Centient.stop!()
+  K.Centient.server.company = ""
   made = Dict{String,Any}("job" => 12.0, "title" => "12/40 Wattle Street", "tasks" => 1.0, "steps" => 1.0, "added" => 1.0, "existed" => false)
   @test K.job_words(made) == "Centient has the job 12/40 Wattle Street, with 1 task for 1 trade."
   @test K.job_words(merge(made, Dict("existed" => true))) == "Centient added 1 new task to the job 12/40 Wattle Street."
@@ -141,7 +145,9 @@ if Sys.isapple() && Sys.which("ffmpeg") !== nothing
   "The video player that the line that starts with `words` shows, or nothing"
   player(words) = (node = shown(words); node isa K.Shown && node.value isa K.VideoPlayer ? node.value : nothing)
   "What `curl` was asked for the file `name`, once for each time"
-  calls(name) = filter(contains(name), readlines(joinpath(web, "calls")))
+  calls(name) = (file = joinpath(web, "calls"); isfile(file) ? filter(contains(name), readlines(file)) : String[])
+  "Wait until `curl` has written down that it was asked for each of `names`. It does that a moment after Ladder starts it."
+  started(names...) = timedwait(() -> all(name -> !isempty(calls(name)), names), 10) == :ok
 
   @testset "a video and a sound whose copies are on the Mac show their players" begin
     kitchen = player("![Kitchen]")
@@ -154,6 +160,8 @@ if Sys.isapple() && Sys.which("ffmpeg") !== nothing
     K.transcriptions[note.path] = K.Transcription(note.path, nothing, "", "", 1.0, false, "Stop the tap.", "")
     frames()
     @test note.path in K.transcribed && e.buf.lines[line("![A note]") + 2] == "Stop the tap."
+    # Ladder asked for the two files that it lacks, and for neither of the two that it has
+    @test started("later.mov", "lost.m4a")
     @test isempty(calls("walkthrough.mov")) && isempty(calls("note-1.m4a"))
   end
 
@@ -252,5 +260,7 @@ if Sys.isapple() && Sys.which("ffmpeg") !== nothing
     @test K.off(maker()) && K.tip(maker()) == "Centient isn't on this Mac"
     make()
     @test e.nodes[:job_ask] === asked && !K.making(e)
+    # Centient is looked for again, for the tests that share this process
+    Core.eval(K.Centient, :(available() = sidecar() !== nothing))
   end
 end
