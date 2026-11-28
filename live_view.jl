@@ -546,37 +546,11 @@ terminal(l::Breadcrumb, path) = begin
   v
 end
 
-"""
-What the breadcrumb `l` keeps of the file at `path`: what `make(path)` gave, or
-nothing if `make` found nothing to show. It's made again when the file changes.
-`kind` names what's kept, so that two kinds of preview don't take each other's.
-"""
-kept!(make, l::Breadcrumb, path, kind) = begin
-  key = (kind, path, mtime(path))
-  l.read == key || (l.read = key; l.text = something(make(path), false))
-  l.text === false ? nothing : l.text
-end
 
-"The text of the file at `path` for the breadcrumb `l`, or nothing if the file isn't text"
-text!(l::Breadcrumb, path) = kept!(l, path, :text) do path
-  found = reading(path)
-  found === nothing ? nothing : FileText(found...)
-end
 
-"""
-`n` rows that are each `high` tall, `PREVIEW_LINES` of them at a time. The
-wheel scrolls through the rest. `row(i)` makes row `i`. Only the rows in view
-are made, so a long file costs no more than a short one.
-"""
-scrolled(row, scroll::Scroll, n, high=LINE_H) = begin
-  lo = clamp(floor(Int, (scroll.offset - TEXT_PAD) / high), 0, max(0, n - PREVIEW_LINES))
-  hi = min(n, lo + PREVIEW_LINES + 2)
-  Box(width(grow=grow), padding(10px, 0px), radius(5px), background(colours.bg), clip=true,
-    reuse!(scroll, Column(width(grow=grow), Alignment.Start,
-      spacer(TEXT_PAD + high * lo),
-      [row(i) for i in lo+1:hi]...,
-      spacer(TEXT_PAD + high * (n - hi)))))
-end
+
+
+
 
 "For each line of a file's text, the quote of a docstring that's open at its start, or '\\0', worked out once for each FileText"
 const TEXT_OPENS = WeakKeyDict{FileText,Vector{Char}}()

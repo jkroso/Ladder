@@ -36,7 +36,7 @@ export look, table_text, in_browser, web_address, copied_from, julia_own, is_rep
        unchanged, line_end, FOLDER_PAGE, page_key, unescaped, bytes_page, STEP, FILE_VIEWS, JULIA, LIVE,
        TEXT_READ, text_file, SCHEDULE, FILTER, CODE_RUNS, LOAD, FOLDER_PAGES, TIMELOG, HTMLS, TERM_CARETS,
        TERM_PASTS, VIEW_BLOCK, PAGE_MODULES, table_reads, CHART, SAVE, RUN_WAIT, LAST_RUN, fetches,
-       MATTER_TITLES, MATTER_CARDS, PAGE_MEDIA
+       MATTER_TITLES, MATTER_CARDS, PAGE_MEDIA, page_media
 
 # A kind of page or of file decides these, so this file only names them. The
 # file that knows the kind gives each its methods.
@@ -657,3 +657,11 @@ const MATTER_CARDS = Dict{Symbol,Any}()
 # folder. The Finder and the sidebar leave out a name that starts with a dot
 # until you ask for the hidden files.
 const PAGE_MEDIA = ".media"
+
+"The folder for the files that the pages of the folder `dir` make. It's made if it isn't there."
+page_media(dir) = begin
+  media = joinpath(dir, PAGE_MEDIA)
+  # A folder that can't be made leaves the file's own write to say what went wrong
+  try mkpath(media) catch end
+  media
+end

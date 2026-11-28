@@ -19,23 +19,22 @@ export editor, page_object, object, list_files!, go_folder!, open_folder!, show_
        markdown_app, name_at, name_notes, page_covered, page_given, page_text, page_then,
        part_lines, part_texts, plain_name, planned_tasks, redraw_windows!, rows, run_in, run_sum,
        running_code, selected, sheet_given, sheet_html, sheet_work, shown_buffers, standing,
-       text_left, tick!, tick_page!, tip_code, todo_called, todos_then, value_parts, visit!,
-       wiki_offered, wiki_path, worked, write_blocks!, item_room, gallery_buttons, gallery_edges,
-       view_name, side_w, look_key, player, show_crumb!, textview, bytes, model, terminal, scrolled,
-       design, kept!, text!, make_default!, zoom_for, bar_bottom, chart_sources, isfilterable,
-       filter_file, filter_write!, key_panel, error_words, file_start, server_said, keep_key,
-       toggle_source!, tick_item!, block_end, type!, web_browser, sum_name, given_and_sums,
-       carry_sums!, follow_remote!, run_place, value_text, usual_module, own_units, remote_src,
-       finding, filled, todo_at, link_on, close_find!, took, keep_got!, get_page!, site_shows!,
-       browser_path, page_online, changed_here, fetched, email_head!, email_shows, ismouse,
-       file_menu!, page_html, new_page!, build_editor, news_look, web_page_kind, rename!, renaming,
-       copy_text!, renamer, right_w, lens_shapes, theirs, change_diff, right_opened, in_focus,
+       text_left, tick!, tick_page!, tip_code, todos_then, value_parts, visit!, wiki_offered,
+       wiki_path, worked, write_blocks!, item_room, gallery_buttons, gallery_edges, view_name,
+       side_w, look_key, player, show_crumb!, textview, bytes, model, terminal, design,
+       make_default!, zoom_for, bar_bottom, chart_sources, isfilterable, filter_file, filter_write!,
+       key_panel, server_said, keep_key, toggle_source!, tick_item!, block_end, type!, web_browser,
+       sum_name, given_and_sums, follow_remote!, run_place, value_text, usual_module, own_units,
+       remote_src, finding, filled, todo_at, link_on, close_find!, took, keep_got!, get_page!,
+       site_shows!, browser_path, page_online, changed_here, fetched, email_head!, email_shows,
+       ismouse, file_menu!, page_html, new_page!, build_editor, news_look, web_page_kind, rename!,
+       renaming, copy_text!, renamer, right_w, lens_shapes, theirs, right_opened, in_focus,
        right_view, commit_talk, ask_talk!, page_module, detail_view, type_brief, line_rect,
-       declared, detail_wide, sandbox, coloured, show_method!, code_blocks, text_lines, select_all!,
-       add_block!, sources_tick!, from_pick_tick!, page_media, page_span, isword, places, run!,
-       as_app, bar_tint, right_panel, side_part, each_selection!, nofile, scrub_tick!,
-       end_companions!, eased, omni_arc, tabs, preferred_agent!, inline_tick!, unused, is_companion,
-       outline, companion_pane, screen_room, palette_click!, show_window!, shown_parts, window!,
+       declared, detail_wide, sandbox, coloured, show_method!, code_blocks, select_all!, add_block!,
+       sources_tick!, from_pick_tick!, page_span, isword, places, run!, as_app, bar_tint,
+       right_panel, side_part, each_selection!, nofile, scrub_tick!, end_companions!, eased,
+       omni_arc, tabs, preferred_agent!, inline_tick!, unused, is_companion, outline,
+       companion_pane, screen_room, palette_click!, show_window!, shown_parts, window!,
        paper_window, todo_box, go_chip!, palette_chips, palette, under_palette, startup_page,
        command_focus, copied!, mark_chips, mark_preview, text_width, code_module!, page_value,
        page_code, show_opened!, toast!, untoast!, site_code_changed!, go_heading!, known_lang,
@@ -317,8 +316,6 @@ function tick_page! end
 "Lines of code in a tooltip, each a row `high` tall, with the colours that code has in the page"
 function tip_code end
 
-"The to-do item of the page that a schedule calls `key`, or nothing"
-function todo_called end
 
 "The to-do items of the page as they stand on the page's day"
 function todos_then end
@@ -377,17 +374,11 @@ function model end
 "What shows the terminal's file at `path` under a path and in a `view` block"
 function terminal end
 
-"`n` rows that are each `high` tall, `PREVIEW_LINES` of them at a time"
-function scrolled end
 
 "What shows the SolidCraft design at `path` under a path and in a `view` block"
 function design end
 
-"What the breadcrumb `l` keeps of the file at `path`"
-function kept! end
 
-"The text of the file at `path` for the breadcrumb `l`, or nothing if the file isn't text"
-function text! end
 
 "Ask macOS to make Ladder the app that opens Markdown files"
 function make_default! end
@@ -413,11 +404,7 @@ function filter_write! end
 "Ask for the key called `name`, in a panel that hides what you type"
 function key_panel end
 
-"What went wrong, in words, for an error that Julia gives"
-function error_words end
 
-"The first `most` bytes of the file at `path`, as text, or \"\" when it isn't there"
-function file_start end
 
 "What a server said with an answer that says no"
 function server_said end
@@ -446,8 +433,6 @@ function sum_name end
 "`page_given`, and where each name that a sum gives is"
 function given_and_sums end
 
-"Give the page of the HTML file of `v` the sums that a `view` block gave it, when the window went to the file from that block"
-function carry_sums! end
 
 "Follow the link `url` of the page from a web server that `e` shows"
 function follow_remote! end
@@ -554,8 +539,6 @@ function lens_shapes end
 "The runs of lines of the page that were changed from outside, by an agent, since you last sent the page, or since it was opened"
 function theirs end
 
-"The diff of the text `was` of the file `file` to the text `now`, as `git diff` writes it, with the file's whole path"
-function change_diff end
 
 "How far the panel at the right is open, from 0 to 1"
 function right_opened end
@@ -602,8 +585,6 @@ function show_method! end
 "The blocks of Julia code in the window of `e`, in the order of its lines"
 function code_blocks end
 
-"The lines of the file text `s`, as `text` reads them from a file"
-function text_lines end
 
 "What `select_all!` gives"
 function select_all! end
@@ -617,8 +598,6 @@ function sources_tick! end
 "When a file has been clicked in the file picker of `v`, it's where the rows of `v` come from, as a path from the page's folder"
 function from_pick_tick! end
 
-"The folder for the files that the pages of the folder `dir` make"
-function page_media end
 
 "Where the page's space is across the window"
 function page_span end

@@ -69,25 +69,28 @@
 @use "./columns_view" laid_columns
 @use "./agent/kinds" kind_command agent_kind
 
-export GitDirectory, RepoView, GitPanel, follow_words, GIT_RUNS, send_command, SENDING_WORDS, push_or_pull!,
-       diverged, commits_words, git_reason, clashing_files, git_said, git_run_tick!, send_buttons, PULL_LIST,
-       PULL_LIST_W, PULL_WAYS, PullMore, PullList, PullWay, PullEnvelope, pull_list_open, pull_target,
-       open_pull_list!, apart_words, pull_way_words, sending_words, keep_saying!, send_from_palette!,
-       push_branch!, pull_branch!, merge_branch!, rebase_branch!, FileTick, committing, file_tick, tick_file!,
-       commit_button, LOG_LEAST, tree_of_commits, OPEN_MOST, OPEN_ALL, CommitView, shown_commit, show_commit!,
-       close_commit!, CommitLine, LANE_W, TREE_X, COMMIT_PAD, REF_H, dot_y, tree_colour, ref_boxes, bent_line,
-       commit_line, file_tally, open_first!, file_changes, message_by, message_lines, commit_when, touched_words,
-       commit_file, commit_change, unsaved_in, with_windows, commit_file!, commit_part, MESSAGE_COMMAND,
-       MOST_DIFF, message_command, recent_messages, message_prompt, talk_prompt, read_message, clean_message, text_diff, committed_text,
-       with_changes, commit_now!, repo_of, save_for_commit!, ticked_text, commit_scope!, commit_all_files!,
-       commit_staged_files!, commit_ticked!, commit_tick!, commit_staged!, commit_all!, commit_text!,
-       choosing, choose_changes!, tick_key, ticked, TickChange, CommitMore, COMMIT_LIST, COMMIT_WAYS,
+export GitDirectory, RepoView, GitPanel, follow_words, GIT_RUNS, send_command, SENDING_WORDS,
+       push_or_pull!, diverged, commits_words, git_reason, clashing_files, git_said, git_run_tick!,
+       send_buttons, PULL_LIST, PULL_LIST_W, PULL_WAYS, PullMore, PullList, PullWay, PullEnvelope,
+       pull_list_open, pull_target, open_pull_list!, apart_words, pull_way_words, sending_words,
+       keep_saying!, send_from_palette!, push_branch!, pull_branch!, merge_branch!, rebase_branch!,
+       FileTick, committing, file_tick, tick_file!, commit_button, LOG_LEAST, tree_of_commits,
+       OPEN_MOST, OPEN_ALL, CommitView, shown_commit, show_commit!, close_commit!, CommitLine,
+       LANE_W, TREE_X, COMMIT_PAD, REF_H, dot_y, tree_colour, ref_boxes, bent_line, commit_line,
+       file_tally, open_first!, file_changes, message_by, message_lines, commit_when, touched_words,
+       commit_file, commit_change, unsaved_in, with_windows, commit_file!, commit_part,
+       MESSAGE_COMMAND, MOST_DIFF, message_command, recent_messages, message_prompt, talk_prompt,
+       read_message, clean_message, text_diff, committed_text, with_changes, commit_now!, repo_of,
+       save_for_commit!, ticked_text, commit_scope!, commit_all_files!, commit_staged_files!,
+       commit_ticked!, commit_tick!, commit_staged!, commit_all!, commit_text!, choosing,
+       choose_changes!, tick_key, ticked, TickChange, CommitMore, COMMIT_LIST, COMMIT_WAYS,
        COMMIT_LIST_W, COMMIT_GAP, COMMIT_ROUND, CommitList, CommitWay, OwnMessage, commit_list_open,
        commit_target, open_commit_list!, CommitEnvelope, commit_envelope, draw_envelope, way_words,
-       switch_look, diffing, toggle_diff!, show_changes!, change_span, go_change!, change_after, step_change!,
-       next_change!, previous_change!, step_tip, COMMITTED, committed_lines, diff_now, gone_h, inline_diff!,
-       gone_now, gone_rows, gone_under, gone_over, is_new, tint_new, draw_diff_bars, put_change_back!,
-       PutBack, put_back_over, diff_part, BarWords, said_result, unsay_result!, AgentMarks, CommitState, DiffState
+       switch_look, diffing, toggle_diff!, show_changes!, change_span, go_change!, change_after,
+       step_change!, next_change!, previous_change!, step_tip, COMMITTED, committed_lines, diff_now,
+       gone_h, inline_diff!, gone_now, gone_rows, gone_under, gone_over, is_new, tint_new,
+       draw_diff_bars, put_change_back!, PutBack, put_back_over, diff_part, BarWords, said_result,
+       unsay_result!, AgentMarks, CommitState, DiffState, change_diff
 
 "A folder that git keeps: the top folder of a repository, or a folder in one"
 @def struct GitDirectory <: AbstractDirectory end
@@ -2080,3 +2083,17 @@ push!(BLOCK_ICONS, "arrow-counterclockwise")
 works_here(e, ::Val{:show_changes_in_place}) = diffing(e) || commit_change(e, e.buf.path) !== nothing
 works_here(e, ::Val{:next_change}) = commit_change(e, e.buf.path) !== nothing
 works_here(e, ::Val{:previous_change}) = commit_change(e, e.buf.path) !== nothing
+
+"The diff of the text `was` of the file `file` to the text `now`, as `git diff` writes it, with the file's whole path"
+change_diff(file, was, now) = begin
+  dir = mktempdir()
+  a, b = joinpath(dir, "before"), joinpath(dir, "after")
+  write(a, was); write(b, now)
+  out = IOBuffer()
+  try run(pipeline(ignorestatus(`git diff --no-index --no-color -U3 -- $a $b`), stdout=out, stderr=devnull)) catch end
+  rm(dir, recursive=true, force=true)
+  lines = split(String(take!(out)), '\n')
+  k = findfirst(startswith("@@"), lines)
+  k === nothing && return String[]
+  ["--- $file"; "+++ $file"; [String(l) for l in lines[k:end] if !startswith(l, "\\") && !isempty(l)]]
+end

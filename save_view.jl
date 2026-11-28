@@ -162,8 +162,7 @@ save_start(d::FilterRows) = begin
   (startswith(d.name, "the table") ? "Rows" : d.name) * ext
 end
 
-"What went wrong, in words, for an error that Julia gives"
-error_words(err) = err isa SystemError ? Libc.strerror(err.errnum) : String(strip(first(split(sprint(showerror, err), '\n'))))
+
 
 "Write `d`, the rows of `v`, into the file that `v` names. It's written beside it first, so the file is never half there."
 write_rows!(v::SaveView, d) = begin
@@ -189,8 +188,7 @@ if [ -n "$1" ]; then key=$(security find-generic-password -s "$1" -w 2>/dev/null
   curl --silent --show-error --connect-timeout 15 --max-time 120 --proto =http,https -X "$2" -H "Content-Type: $3" -H "Expect:" -H @- --data-binary @"$4" --output "$5" --write-out '%{http_code}' -- "$6"
 """
 
-"The first `most` bytes of the file at `path`, as text, or \"\" when it isn't there"
-file_start(path, most=20_000) = isfile(path) ? String(open(io -> read(io, most), path)) : ""
+
 
 """
 Send the file `body` to the web address `url`, asking with `method`, and tell

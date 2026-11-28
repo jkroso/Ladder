@@ -68,6 +68,7 @@
 @use "../code_thing" exports...
 @use "../showed_before" note_place!
 
+@use "../git_page" change_diff
 export start_agent, asking_words, request_words, agent_step, agent_text, ToChange, page_blocks, FILE_PARTS,
        file_parts, part_choice, drawn_parts, whole_file, thing_words, drawn_rect, shown_words, window_shows,
        part_words, change_ask, change_prompt, AskedChange, AGENT_CHANGES, asked_rect, ask_change!, agent_said,
@@ -548,8 +549,7 @@ end
 
 asked_rect(e, ::Nothing) = nothing
 
-"The lines of the file text `s`, as `text` reads them from a file"
-text_lines(s::AbstractString) = String.(split(replace(s, "\r\n" => "\n"), '\n'))
+
 
 """
 Ask an agent to make the change to the things `places` that `words` say. The
@@ -1933,19 +1933,7 @@ end
 # puts every file of the newest change back as it was before the agent
 # started, and runs its code. Again, it does the same to the change before.
 
-"The diff of the text `was` of the file `file` to the text `now`, as `git diff` writes it, with the file's whole path"
-change_diff(file, was, now) = begin
-  dir = mktempdir()
-  a, b = joinpath(dir, "before"), joinpath(dir, "after")
-  write(a, was); write(b, now)
-  out = IOBuffer()
-  try run(pipeline(ignorestatus(`git diff --no-index --no-color -U3 -- $a $b`), stdout=out, stderr=devnull)) catch end
-  rm(dir, recursive=true, force=true)
-  lines = split(String(take!(out)), '\n')
-  k = findfirst(startswith("@@"), lines)
-  k === nothing && return String[]
-  ["--- $file"; "+++ $file"; [String(l) for l in lines[k:end] if !startswith(l, "\\") && !isempty(l)]]
-end
+
 
 """
 The lines of a `changes` block for each file of the change `a`, with each of

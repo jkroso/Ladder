@@ -377,26 +377,7 @@ go_view!(v::ViewBlock) = begin
   handled
 end
 
-"""
-Give the page of the HTML file of `v` the sums that a `view` block gave it, when
-the window went to the file from that block. A page of the file that opens
-another way gets none.
-"""
-carry_sums!(v::HTMLPage, b) = begin
-  e = editor(v)
-  key = (:carried_sums, v.path)
-  c = get(e.nodes, key, nothing)
-  c === nothing && return v
-  c.page === v || (delete!(e.nodes, key); return v)
-  l = Browsers.live(b)
-  # The page starts as the browser draws, which doesn't lay the page out again. So it looks again soon.
-  (l === nothing || Browsers.loading(b)) && (redraw_in!(v, 0.25); return v)
-  c.given === l && return v
-  l.scripts.js["ladder"] = Dict{String,Any}("sums" => c.sums, "shown" => c.shown)
-  Browsers.Live.fire!(l, "sums")
-  e.nodes[key] = merge(c, (given=l,))
-  v
-end
+
 
 # When a link goes to another page, the block's line changes to say it. It changes once the view has read the line:
 # until then, the line is what the view goes by.

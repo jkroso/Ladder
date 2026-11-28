@@ -45,10 +45,11 @@
 @use "./json_view" exports...
 @use "./schedule_view" exports...
 
-export LOAD_CACHE, LOAD_WAIT, load_dir, load_stem, load_copy, isload_copy, load_url, load_key, load_problem,
-       LOAD_SCRIPT, get_rows, LOAD_GETTER, load_online, load_rows!, when_words, kept_words, load_ext,
-       sentence, loaded!, load_tick!, load_note, load_line, ask_load_key!, picks_file, load_start,
-       load_picker, picker_words, picker_section, toggle_picker!, pick_tick!, LoadBlock
+export LOAD_CACHE, LOAD_WAIT, load_dir, load_stem, load_copy, isload_copy, load_url, load_key,
+       load_problem, LOAD_SCRIPT, get_rows, LOAD_GETTER, load_online, load_rows!, when_words,
+       kept_words, load_ext, sentence, loaded!, load_tick!, load_note, load_line, ask_load_key!,
+       picks_file, load_start, load_picker, picker_words, picker_section, toggle_picker!,
+       pick_tick!, LoadBlock, error_words, file_start
 
 push!(BLOCK_ICONS, "cloud-arrow-down", "file-earmark-arrow-down", "arrow-clockwise")
 
@@ -332,3 +333,9 @@ block_insert(::Type{LoadBlock}) = ("Load", ["```$LOAD", "```", "", ""], (4, 0))
 block_table_kind(::Type{LoadBlock}) = "load block"
 block_tables!(::Type{LoadBlock}, e, i::Int, t::Int, under::AbstractString, out) =
   block_tables!(FilterView, e, i, t, under, out; load=true)
+
+"What went wrong, in words, for an error that Julia gives"
+error_words(err) = err isa SystemError ? Libc.strerror(err.errnum) : String(strip(first(split(sprint(showerror, err), '\n'))))
+
+"The first `most` bytes of the file at `path`, as text, or \"\" when it isn't there"
+file_start(path, most=20_000) = isfile(path) ? String(open(io -> read(io, most), path)) : ""

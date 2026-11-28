@@ -741,13 +741,7 @@ paste!(e) = begin
   put_files!(e, paths, settle(b, b.caret))
 end
 
-"The folder for the files that the pages of the folder `dir` make. It's made if it isn't there."
-page_media(dir) = begin
-  media = joinpath(dir, PAGE_MEDIA)
-  # A folder that can't be made leaves the file's own write to say what went wrong
-  try mkpath(media) catch end
-  media
-end
+
 
 
 

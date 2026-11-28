@@ -69,8 +69,7 @@ end
 "The minutes that the page's time logs have for the task called `name`"
 worked(e, name::AbstractString) = get(page_minutes(e), plain_name(name), 0)
 
-"The to-do item of the page that a schedule calls `key`, or nothing"
-todo_called(e, key) = (items = page_todos(e); k = findfirst(t -> t.key == key, items); k === nothing ? nothing : items[k])
+
 
 "True when the clock of the log `log` runs on the task called `name`"
 clocked(log::TimelogView, name::AbstractString) = begin

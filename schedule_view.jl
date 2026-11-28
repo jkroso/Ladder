@@ -61,7 +61,7 @@ export TASK_H, TASK_BAR, DATES_H, DAY_MOST, DAY_LEAST, DAY_USUAL, TASK_BAR_EDGE,
        time_bar, row_bars, knob_place, knob, time_at, time_words, link_points, away, under, hot_row,
        task_days, task_words, zoom_days!, arrow, draw_days, task_hue, run_done, draw_bar, hot_time,
        draw_bars, draw_links, zoom_x, names_w, page_schedule, todo_line, task_over, task_of,
-       page_log
+       page_log, todo_called
 
 const TASK_H = 30.0        # px: how tall the row of a task is
 const TASK_BAR = 20.0         # and how tall its bar is
@@ -1138,3 +1138,6 @@ page_log(e) = begin
   v.first, v.last = span
   reread!(v, b.lines[span[1]+1:span[2]-1])
 end
+
+"The to-do item of the page that a schedule calls `key`, or nothing"
+todo_called(e, key) = (items = page_todos(e); k = findfirst(t -> t.key == key, items); k === nothing ? nothing : items[k])

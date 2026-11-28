@@ -45,9 +45,10 @@
 @use "./showed_before" note_place!
 @use "./code_thing" code_place settled_line
 
-export SECTION, signature, code_places, definition, definition!, go_to_place!, go_to_definition!, NameAt,
-       own_name, name_uses, rename_in_code!, rename_elsewhere!, rename_tick!, Use, row_words, name_columns,
-       uses_elsewhere, uses_of, whole_name, find_uses!, HeadingLine, go_to!, word_count, CodeNavState
+export SECTION, signature, code_places, definition, definition!, go_to_place!, go_to_definition!,
+       NameAt, own_name, name_uses, rename_in_code!, rename_elsewhere!, rename_tick!, Use,
+       row_words, name_columns, uses_elsewhere, uses_of, whole_name, find_uses!, HeadingLine,
+       go_to!, word_count, CodeNavState, text_lines
 
 "The comment that starts a section of a file of code: three dashes or more, the section's name, and more dashes"
 const SECTION = r"^#+ -{3,}\s+(.+?)\s+-{3,}\s*$"
@@ -578,3 +579,6 @@ word_count(e) = begin
 end
 add_command!(word_count, title="Say how many words the page has, how many characters, and how long it takes to read", kind=:look)
 works_here(e, ::Val{:word_count}) = e.buf.view in (:markdown, :code)
+
+"The lines of the file text `s`, as `text` reads them from a file"
+text_lines(s::AbstractString) = String.(split(replace(s, "\r\n" => "\n"), '\n'))
