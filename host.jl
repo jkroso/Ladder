@@ -8,32 +8,31 @@
 #     go_folder!(e, "/Users/sam")    # list that folder in the sidebar
 #     open_folder!(e, "/Users/sam")  # show it in the page
 
-export editor, page_object, object, list_files!, go_folder!, open_folder!, show_path!, show_beside!,
-       free_path, folder_kind, page_top, file_act!, show_in_finder, above_page, under_bar,
-       page_crumb, bar_corner, touch!, show_line!, page_day, save_settings!, rerun!, page_room,
-       page_tables, layout!, command_of, click_page!, text_object, say_result!, lowered, rewrap!,
-       loaded_module, fillable, diagram_html, outcome_face, calendar_today, marked, chat_page,
-       scroll_page!, keep_talk!, follow_host!, celltext, lowest, component, unscaled, command_kind,
-       another_day, blocks, chat_shown, code_offered, code_start, complete!, design_field_of,
-       escaped, folder_pages, follow_wiki!, hiding_named, same_settings!, ispicture, mark_colour,
-       markdown_app, name_at, name_notes, page_covered, page_given, page_text, page_then,
-       part_lines, part_texts, plain_name, planned_tasks, redraw_windows!, rows, run_in, run_sum,
-       running_code, selected, sheet_given, sheet_html, sheet_work, shown_buffers, standing,
-       text_left, tick!, tick_page!, tip_code, todos_then, value_parts, visit!, wiki_offered,
-       wiki_path, worked, write_blocks!, item_room, gallery_buttons, gallery_edges, view_name,
-       side_w, look_key, player, show_crumb!, textview, bytes, model, terminal, design,
-       make_default!, zoom_for, bar_bottom, chart_sources, isfilterable, filter_file, filter_write!,
-       key_panel, server_said, keep_key, toggle_source!, tick_item!, block_end, type!, web_browser,
-       sum_name, given_and_sums, follow_remote!, run_place, value_text, usual_module, own_units,
-       remote_src, finding, filled, todo_at, link_on, close_find!, took, keep_got!, get_page!,
-       site_shows!, browser_path, page_online, changed_here, fetched, email_head!, email_shows,
-       ismouse, file_menu!, page_html, new_page!, build_editor, news_look, web_page_kind, rename!,
-       renaming, copy_text!, renamer, right_w, lens_shapes, theirs, right_opened, in_focus,
-       right_view, commit_talk, ask_talk!, page_module, detail_view, type_brief, line_rect,
-       declared, detail_wide, sandbox, coloured, show_method!, code_blocks, select_all!, add_block!,
-       sources_tick!, from_pick_tick!, page_span, isword, places, run!, as_app, bar_tint,
-       right_panel, side_part, each_selection!, nofile, scrub_tick!, end_companions!, eased,
-       omni_arc, tabs, preferred_agent!, inline_tick!, unused, is_companion, outline,
+export editor, page_object, object, list_files!, go_folder!, open_folder!, show_path!, free_path,
+       folder_kind, page_top, file_act!, show_in_finder, above_page, under_bar, page_crumb,
+       bar_corner, touch!, show_line!, page_day, save_settings!, rerun!, page_room, page_tables,
+       layout!, command_of, click_page!, text_object, say_result!, lowered, rewrap!, loaded_module,
+       fillable, diagram_html, outcome_face, calendar_today, marked, chat_page, scroll_page!,
+       keep_talk!, follow_host!, lowest, component, unscaled, command_kind, another_day, blocks,
+       chat_shown, code_offered, code_start, complete!, design_field_of, escaped, folder_pages,
+       follow_wiki!, hiding_named, same_settings!, ispicture, mark_colour, markdown_app, name_at,
+       name_notes, page_covered, page_given, page_text, page_then, part_lines, part_texts,
+       plain_name, planned_tasks, redraw_windows!, run_in, run_sum, running_code, selected,
+       sheet_given, sheet_html, sheet_work, shown_buffers, standing, text_left, tick!, tick_page!,
+       tip_code, todos_then, value_parts, visit!, wiki_offered, wiki_path, worked, write_blocks!,
+       item_room, gallery_buttons, gallery_edges, view_name, side_w, look_key, player, show_crumb!,
+       textview, model, terminal, design, make_default!, zoom_for, bar_bottom, chart_sources,
+       isfilterable, filter_file, filter_write!, key_panel, server_said, keep_key, toggle_source!,
+       tick_item!, block_end, type!, web_browser, sum_name, given_and_sums, follow_remote!,
+       run_place, value_text, usual_module, own_units, remote_src, finding, todo_at, link_on,
+       close_find!, took, keep_got!, get_page!, site_shows!, browser_path, page_online,
+       changed_here, fetched, email_head!, email_shows, ismouse, file_menu!, page_html, new_page!,
+       build_editor, news_look, web_page_kind, rename!, renaming, copy_text!, renamer, right_w,
+       lens_shapes, theirs, right_opened, in_focus, right_view, commit_talk, ask_talk!, page_module,
+       detail_view, type_brief, line_rect, declared, detail_wide, sandbox, coloured, show_method!,
+       code_blocks, select_all!, add_block!, sources_tick!, from_pick_tick!, page_span, isword,
+       places, run!, as_app, bar_tint, right_panel, side_part, each_selection!, nofile, scrub_tick!,
+       end_companions!, eased, omni_arc, tabs, preferred_agent!, inline_tick!, unused, is_companion, outline,
        companion_pane, screen_room, palette_click!, show_window!, shown_parts, window!,
        paper_window, todo_box, go_chip!, palette_chips, palette, under_palette, startup_page,
        command_focus, copied!, mark_chips, mark_preview, text_width, code_module!, page_value,
@@ -42,11 +41,10 @@ export editor, page_object, object, list_files!, go_folder!, open_folder!, show_
        close_file!, close_file_or_window!, code_module, delete_lines!, directory, ended_rename!,
        enter_part!, file_tree, fill_selection, fill_tree!, find!, finder_key!, folder_trail,
        inside_path, issettings, job_tip, ladder_runs, load_settings!, make_job!, mark, mark_pointed,
-       move_old_folders!, new_window!, node_name!, nodes_inside, off, omni_label, open_finder!,
-       open_on_folder!, open_projects!, own_page, page_window, palette_key!, palette_plan,
-       panel_theme, paste!, paths_inside, peek!, rename_key!, ring_part, run_startup!, scrub!,
-       settings_page, show_no_file!, startup_page!, toggle_palette!, toggle_settings!,
-       transclusion_item, unlist!, watch_front!, whole_node, window_object, with_others
+       move_old_folders!, new_window!, node_name!, off, omni_label, open_finder!, open_on_folder!,
+       open_projects!, page_window, palette_key!, palette_plan, panel_theme, paste!, peek!,
+       rename_key!, ring_part, run_startup!, scrub!, settings_page, show_no_file!, startup_page!,
+       toggle_palette!, toggle_settings!, transclusion_item, watch_front!, whole_node, window_object
 
 "The editor of the window that `node`, a part of a page, is part of"
 function editor end
@@ -69,8 +67,6 @@ function open_folder! end
 "Show the file or the folder at `path` the way that a click on a link to it does, in the window of the editor `e`"
 function show_path! end
 
-"Show the folder or the file at `path` in the page of the editor `e`, while the sidebar goes on with the folder that it lists"
-function show_beside! end
 
 "A path in the folder `dir` for something new called `base`, with the ending `ending`, that no file and no page of the editor `e` has yet"
 function free_path end
@@ -175,8 +171,6 @@ function keep_talk! end
 "Give the editor of a part the choices of the editor of the page that shows it"
 function follow_host! end
 
-"The text of a cell as the table shows it"
-function celltext end
 
 "How far down the page the lowest of `items` ends"
 function lowest end
@@ -273,8 +267,6 @@ function planned_tasks end
 "Draw each window again with the methods that Julia has now, after code gave a function a new one"
 function redraw_windows! end
 
-"The lines of a Flow, as rows of text"
-function rows end
 
 "Run the code `code` of the page at `path` in the page's module `m`, as `include_string` does, and give the value that it comes to"
 function run_in end
@@ -365,8 +357,6 @@ function show_crumb! end
 "The text of a file"
 function textview end
 
-"A file's size in words, like 6.5 KB"
-function bytes end
 
 "The viewer of the model in the STL, 3MF or glTF file at `path`, or nothing if the file can't be read as a model"
 function model end
@@ -455,8 +445,6 @@ function remote_src end
 "True while the find bar of the editor `e` is open"
 function finding end
 
-"True when something fills the window in place of the page and the sidebar"
-function filled end
 
 "The line of the to-do item whose box is under a point in the window, or nothing"
 function todo_at end
@@ -833,8 +821,6 @@ function new_window! end
 "The name of the block of `b` from line `s` to line `t`, which a link from another page uses, like `prices` in ![[costs#^prices]]."
 function node_name! end
 
-"The keys of the editor's nodes that it keeps for a file by its path, for the files at `at`"
-function nodes_inside end
 
 "True for a button of the top bar that does nothing now: the one that makes the job, when the Mac has no Centient or Centient makes a job, the ones that go back and forward, when they have no file to go to, and one that code from the startup page added, when that code says so"
 function off end
@@ -851,8 +837,6 @@ function open_on_folder! end
 "Open the project picker."
 function open_projects! end
 
-"True when a kind of folder or of file shows the page its own way, as wide as the window has room for"
-function own_page end
 
 "A window that shows the Markdown file or the folder at `path`, with the settings of the editor `like`."
 function page_window end
@@ -869,8 +853,6 @@ function panel_theme end
 "Put what the clipboard holds into the text at the caret."
 function paste! end
 
-"The keys of `d` that are paths of what's at `at`: `at` itself, and what's in it when it's a folder"
-function paths_inside end
 
 "Show the card of the words `found` when the mouse has rested on them for a moment while ⌘ is held, and take it away when the mouse is on other words."
 function peek! end
@@ -905,8 +887,6 @@ function toggle_settings! end
 "What line `i` shows when it holds a link to a part of another page."
 function transclusion_item end
 
-"Take every child out of the document's list."
-function unlist! end
 
 "Have macOS tell `e` when its window `w` comes to the front, and when it stops being the front window."
 function watch_front! end
@@ -917,5 +897,3 @@ function whole_node end
 "The object that the window is about: the file or the folder that it shows."
 function window_object end
 
-"Do `f` with each of the other selections in the main one's place, then put the main one back."
-function with_others end

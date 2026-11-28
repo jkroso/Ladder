@@ -88,9 +88,7 @@ of a row. Each is as wide as its text measures, so the caret lines up with it.
 coloured(tok, f::Face) =
   spared(tok.text, Face(f, color=tok.kind == :plain ? f.color : getfield(colours, tok.kind), style=tok.kind == :comment ? codeslant() : f.style))
 
-"The lines of a Flow, as rows of text. `edge` is the width of a border on its left."
-rows(f::Flow, edge=0px) =
-  [Row(width(grow=grow), height(vl.high), padding(0px, 0px, 0px, vl.x - edge), clip=true, map(describe, vl.segs)...) for vl in f.lines]
+
 
 describe(e::Editor, it::Item) = gone_under(e, it, describe(e, it, it.content))
 

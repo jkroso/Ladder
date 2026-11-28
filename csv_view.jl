@@ -75,16 +75,17 @@
 @use "./folder_page" exports...
 @use "./sketch_view" exports...
 
-export FILE_ROWS, FILE_BYTES, HEAD_H, CELL_PAD, SHEET_LINE, SHEET_ROUND, SHEET_ABOVE, WIDEST_CELL, FEW_VALUES,
-       SHEET_MENU_W, SHEET_KEY, DASH_W, FileSheet, cell_face, file_sheet, KIND_ROWS, spread!, ranged, worth,
-       typed_worth, values_of, in_order, sheet_rows!, sheet_top, shown_cell, sheet_part!, current_sheet!,
-       new_row, blank_row, sheet_view, cell_layer, SheetFrame, SheetHead, SheetMenu, SheetOrder, SheetValue,
-       SheetAction, KIND_ICONS, ORDER_WORDS, close_sheet_menu!, table_edits, table_look, table_level!,
-       sheet_edits, sheet_whole, empty_row, edit_cell!, end_edit!, stop_edit!, put_cell!, table_edit!,
-       add_line!, delete_row!, each_row!, add_column!, delete_column!, show_cell!, cell_at, ROW_MENU,
-       next_cell, edit_on!, CellField, MenuField, SheetField, CELL_TEXT, MENU_TEXT, field_editor!,
-       cell_field!, cell_text, fill_cell!, fill_field!, field_type, follow_cell!,
-       CELL_COMMANDS, cell_key!, COLUMN_ACTIONS, ACTION_WORDS, live, CellStyle
+export FILE_ROWS, FILE_BYTES, HEAD_H, CELL_PAD, SHEET_LINE, SHEET_ROUND, SHEET_ABOVE, WIDEST_CELL,
+       FEW_VALUES, SHEET_MENU_W, SHEET_KEY, DASH_W, FileSheet, cell_face, file_sheet, KIND_ROWS,
+       spread!, ranged, worth, typed_worth, values_of, in_order, sheet_rows!, sheet_top, shown_cell,
+       sheet_part!, current_sheet!, new_row, blank_row, sheet_view, cell_layer, SheetFrame,
+       SheetHead, SheetMenu, SheetOrder, SheetValue, SheetAction, KIND_ICONS, ORDER_WORDS,
+       close_sheet_menu!, table_edits, table_look, table_level!, sheet_edits, sheet_whole,
+       empty_row, edit_cell!, end_edit!, stop_edit!, put_cell!, table_edit!, add_line!, delete_row!,
+       each_row!, add_column!, delete_column!, show_cell!, cell_at, ROW_MENU, next_cell, edit_on!,
+       CellField, MenuField, SheetField, CELL_TEXT, MENU_TEXT, field_editor!, cell_field!,
+       cell_text, fill_cell!, fill_field!, field_type, follow_cell!, CELL_COMMANDS, cell_key!,
+       COLUMN_ACTIONS, ACTION_WORDS, live, CellStyle, celltext
 
 const FILE_ROWS = 100_000       # the most rows of a CSV file that the page reads
 const FILE_BYTES = 40_000_000   # and the most of the file that it reads
@@ -1188,3 +1189,6 @@ block_layout(::Type{LiveBlock}, e, lang::AbstractString, i::Int, n::Int) = begin
   b = e.buf; ks = kinds(b); t = codeblock(b, i)[2]
   !incode(b, i) && t > i && ks[t].kind == Kind.fence && ks[t].level == 1 ? (t, live(e, join(b.lines[i+1:t-1], "\n"))) : nothing
 end
+
+"The text of a cell as the table shows it. A line break in a cell is a space."
+celltext(cell) = occursin('\n', cell) ? replace(cell, r"\s*\n\s*" => " ") : cell

@@ -32,7 +32,7 @@
 export MOST_ZIP, zipped, MOST_COLUMNS, FileTable, tabled, tableview, tablerow, PAGE_ZOOM,
        PAGE_HEIGHT, FilePage, room, filepage, pageview, pager, FILE_ICONS, framed, peek, MOST_LINE,
        MOST_HEX, MOST_BITS, viewed, shown_line, text_look, file_views, hexlines, hex_about,
-       bitlines, bits_about, hex!, preview, scrolled, kept!, text!
+       bitlines, bits_about, hex!, preview, scrolled, kept!, text!, bytes
 
 const MOST_ZIP = 300_000_000   # bytes. A bigger zip isn't read.
 
@@ -472,4 +472,13 @@ end
 text!(l::Breadcrumb, path) = kept!(l, path, :text) do path
   found = reading(path)
   found === nothing ? nothing : FileText(found...)
+end
+
+"A file's size in words, like 6.5 KB"
+bytes(n) = begin
+  n < 1000 && return "$n bytes"
+  for unit in ("KB", "MB", "GB")
+    n /= 1000
+    (n < 1000 || unit == "GB") && return "$(n < 10 ? round(n, digits=1) : round(Int, n)) $unit"
+  end
 end

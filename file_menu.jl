@@ -285,12 +285,9 @@ inside_path(p, at) = p == at || startswith(p, at * "/")
 "The path that `p` gets when what's at `old` gets the path `new`. What's in a folder moves with it."
 repath(p, old, new) = inside_path(p, old) ? new * p[ncodeunits(old)+1:end] : p
 
-"The keys of `d` that are paths of what's at `at`: `at` itself, and what's in it when it's a folder"
-paths_inside(d, at) = [p for p in keys(d) if inside_path(p, at)]
 
-"The keys of the editor's nodes that it keeps for a file by its path, for the files at `at`"
-nodes_inside(e, at; kinds=(:read, :outline, :fileview)) =
-  [k for k in keys(e.nodes) if k isa Tuple{Symbol,String} && k[1] in kinds && inside_path(k[2], at)]
+
+
 
 """
 Give the file or the folder at `old` the path `new`: on the disk, and in

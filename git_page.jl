@@ -103,13 +103,7 @@ push!(BLOCK_ICONS, "git", "arrow-up", "arrow-down")
 entry_marks(e, o::GitDirectory) = git_marks(e, o)
 entry_marks(e, ::GitDirectory, o::FSObject) = git_marks(e, o)
 
-"Show the folder or the file at `path` in the page, like the page of a repository. The sidebar goes on with the folder that it lists."
-show_beside!(e, path) = begin
-  folder = e.folder
-  open!(e, path)
-  e.folder == folder || go_folder!(e, folder)
-  e
-end
+
 
 """
 What the page shows of the top folder of a repository: the table of the

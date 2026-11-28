@@ -48,6 +48,7 @@
 @use "./file_view" exports...
 @use "./live_view" exports...
 @use "./email_view" exports...
+@use "./csv_view" celltext
 
 export Picture, pictures_dir, picture_item, HTML_BLOCK_TAGS, HTML_RAW_TAGS, HTML_OPENS,
        HTML_ATTRIBUTE, HTML_LONE, HTML_CLOSES, HTML_RUNS, html_end, html_runs, html_typed,
@@ -584,8 +585,7 @@ end
 
 tall(g::FileGrid) = isempty(g.heights) ? 0px : g.tops[end] + g.heights[end] + 1px
 
-"The text of a cell as the table shows it. A line break in a cell is a space."
-celltext(cell) = occursin('\n', cell) ? replace(cell, r"\s*\n\s*" => " ") : cell
+
 
 """
 Lay out the table `t` of the file at `path` for the page of `e`, as `grid` lays

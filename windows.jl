@@ -107,21 +107,7 @@ end
 "True if `node` is in the list of the children of `d`"
 listed(d::Document, node) = getfield(node, :prevsibling) !== nothing || getfield(d, :firstchild) === node
 
-"""
-Take every child out of the document's list. Each one keeps the document as
-its parent, so a node that an earlier frame made can still reach the editor.
-"""
-unlist!(d::Document) = begin
-  child = getfield(d, :firstchild)
-  while child !== nothing
-    next = getfield(child, :nextsibling)
-    setfield!(child, :prevsibling, nothing)
-    setfield!(child, :nextsibling, nothing)
-    child = next
-  end
-  setfield!(d, :firstchild, nothing)
-  d
-end
+
 
 "Open the editor on a file, or on the first Markdown file in a folder"
 build_editor(path) = begin
@@ -411,8 +397,7 @@ page_foot(e) = begin
   o === nothing ? nothing : with_theme(() -> page_foot(e, o.parent, o), component_theme(e.zoom))
 end
 
-"True when a kind of folder or of file shows the page its own way, as wide as the window has room for"
-own_page(e) = (o = page_object(e); o !== nothing && page_fills(e, o))
+
 
 "True when the folder or the file that shows covers the page's whole space with a view of its own"
 page_covered(e) = (o = page_object(e); o !== nothing && page_covers(e, o))

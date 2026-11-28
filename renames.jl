@@ -27,7 +27,7 @@
 
 export FileLink, caret_after, could_name, find_chars, found_beside, link_file, link_path_for,
        links_into, named_links, past_path, relink!, spelled_like, trash, trasher, wiki_name_for,
-       with_names
+       with_names, nodes_inside, paths_inside
 
 # --- links that follow a rename ------------------------------------------------------------
 #
@@ -369,3 +369,10 @@ trash!(e, path) = begin
   end
   e
 end
+
+"The keys of the editor's nodes that it keeps for a file by its path, for the files at `at`"
+nodes_inside(e, at; kinds=(:read, :outline, :fileview)) =
+  [k for k in keys(e.nodes) if k isa Tuple{Symbol,String} && k[1] in kinds && inside_path(k[2], at)]
+
+"The keys of `d` that are paths of what's at `at`: `at` itself, and what's in it when it's a folder"
+paths_inside(d, at) = [p for p in keys(d) if inside_path(p, at)]

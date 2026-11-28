@@ -69,7 +69,7 @@ export ZOOM_EDGE, BAR_ROOM, MODEL_FOOT, MOST_ZOOM, PAGE_COMMANDS, ZoomView, Zoom
        changing, refit!, write_diagram!, zoom_over, BAR_NEAR, bar_near, diagram_buttons, use_tool!,
        lay_diagram!, subject_size, zoom_edge, bar_room, view_middle, reframe!, fit_now!, zoom_by!,
        zoom_ink, pdf_ink, picture_spot, let_go!, zoom_key!, FillState, zoom_view, pinch_open,
-       video_wide, fill_what, fill_wide, zoomed_node, held_room, square_button
+       video_wide, fill_what, fill_wide, zoomed_node, held_room, square_button, filled
 
 const ZOOM_EDGE = 24.0   # px of room round a picture that fits the window
 const BAR_ROOM = 64px    # the bottom of the window, where the bar of buttons is
@@ -974,3 +974,9 @@ zoom_key!(v::ZoomView, K, w, command) = begin
   unmodified(w) && v.what[1] == :pdf && K in (Keys.left, Keys.right, Keys.up, Keys.down) && return turn!(v, K in (Keys.left, Keys.up) ? -1 : 1)
   handled
 end
+
+"""
+True when something fills the window in place of the page and the sidebar: a
+takeoff, a schedule or a sketch, the lines of one as text, or a picture.
+"""
+filled(e) = full_block(e) !== nothing || lowered(e) !== nothing || zooming(e) !== nothing

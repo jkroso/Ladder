@@ -23,6 +23,7 @@
 @use "./agent/window" exports...
 @use "./editing" exports...
 
+@use "./fill_view" filled
 export MAC_BUTTONS_W, RIGHT_W, cleared, clearing, mac_buttons_room, right_part, right_slid,
        right_sliding, screen_tick!, RightSlide, toggle_right!
 

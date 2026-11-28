@@ -488,14 +488,7 @@ describe(r::FileEntry) = begin
     (folder ? () : (Box(label(bytes(filesize(r.path)), 12px, color=colours.dim)),))...)
 end
 
-"A file's size in words, like 6.5 KB"
-bytes(n) = begin
-  n < 1000 && return "$n bytes"
-  for unit in ("KB", "MB", "GB")
-    n /= 1000
-    (n < 1000 || unit == "GB") && return "$(n < 10 ? round(n, digits=1) : round(Int, n)) $unit"
-  end
-end
+
 
 const MODEL_HEIGHT = 260px
 "The viewer of the model in the STL, 3MF or glTF file at `path`, or nothing if the file can't be read as a model"

@@ -47,25 +47,27 @@
 @use "./recall" exports...
 @use "../showed_before" note_place!
 
-export PaneField, PaneReply, pane_field!, reply_editor, talk_on_page, talk_zoom, page_symbols, pane_style!, page_inked,
-       pane_layout!, show_reply!, pane_key!, session!, pane_agent!, AGENT_MENU, AGENT_MENU_W,
-       AgentMenu, AgentMenuRow, choose_agent!, pane_model!, MODEL_MENU, MODEL_MENU_W, ModelMenu, ModelMenuRow,
-       EffortButton, EFFORTS, model_effort, model_rows, menu_rows, menu_efforts, effort_wide, model_menu_wide,
-       row_choice, choose_model!, effort_slot, effort_button, text_between, MOST_PICKED, page_context,
-       MOST_PARAGRAPH, html_picked, html_letters, page_letters, html_told, html_outline,
-       send_words!, SLASH_MENU, SLASH_MOST, SLASH_ROW, SLASH_CROWN, SLASH_INSET, SlashMenu, SlashRow,
-       SlashLens, slash_menu, slash_wide, slash_parts, slash_rows, field!, slash_tick!, look_for_sessions!,
-       slash_key!, slash_pick!, run_own!, resume_session!, row_of, attached, AGENT_PICTURES, agent_pictures,
-       made_pictures, attach!, unattach!, paste_for_agent!, give_files!, agent_pane_at, small_picture,
-       attached_row, PICTURE_TALL, new_session!, close_agent!, session_tick!, pane_tick!, reply_tick!,
-       reply_changed, changed_replies, changes_told, send_tip, pane_button, pane_face, pane_head, pane_talk,
-       words_block, code_wrapped, talk_row, step_row, pane_foot, pane_slot, model_shows, pane_model, model_words,
-       model_face, model_wide, MODEL_BUTTON_ROOM, MODEL_GAP, one_line, solid_on_glass, send_button, section_now,
-       section_in_view, OUTLINE_STEP, widen_for_agent!, narrow_from_agent!, agent_mode!, end_agent_session!,
-       CHAT_WIDE, PAGE_TALK, TALK_MARK, chats, pane_wide, pane_context, talk_mark, talk_body, talk_part, talk_parts,
+export PaneField, PaneReply, pane_field!, reply_editor, talk_on_page, talk_zoom, page_symbols,
+       pane_style!, page_inked, pane_layout!, show_reply!, pane_key!, session!, pane_agent!,
+       AGENT_MENU, AGENT_MENU_W, AgentMenu, AgentMenuRow, choose_agent!, pane_model!, MODEL_MENU,
+       MODEL_MENU_W, ModelMenu, ModelMenuRow, EffortButton, EFFORTS, model_effort, model_rows,
+       menu_rows, menu_efforts, effort_wide, model_menu_wide, row_choice, choose_model!,
+       effort_slot, effort_button, text_between, MOST_PICKED, page_context, MOST_PARAGRAPH,
+       html_picked, html_letters, page_letters, html_told, html_outline, send_words!, SLASH_MENU,
+       SLASH_MOST, SLASH_ROW, SLASH_CROWN, SLASH_INSET, SlashMenu, SlashRow, SlashLens, slash_menu,
+       slash_wide, slash_parts, slash_rows, field!, slash_tick!, look_for_sessions!, slash_key!,
+       slash_pick!, run_own!, resume_session!, row_of, attached, AGENT_PICTURES, agent_pictures,
+       made_pictures, attach!, unattach!, paste_for_agent!, give_files!, agent_pane_at,
+       small_picture, attached_row, PICTURE_TALL, new_session!, close_agent!, session_tick!,
+       pane_tick!, reply_tick!, reply_changed, changed_replies, changes_told, send_tip, pane_button,
+       pane_face, pane_head, pane_talk, words_block, code_wrapped, talk_row, step_row, pane_foot,
+       pane_slot, model_shows, pane_model, model_words, model_face, model_wide, MODEL_BUTTON_ROOM,
+       MODEL_GAP, one_line, solid_on_glass, send_button, section_now, section_in_view, OUTLINE_STEP,
+       widen_for_agent!, narrow_from_agent!, agent_mode!, end_agent_session!, CHAT_WIDE, PAGE_TALK,
+       TALK_MARK, chats, pane_wide, pane_context, talk_mark, talk_body, talk_part, talk_parts,
        talk_text, read_talk, load_talk!, chat_part, TALK_SLIDE, TalkRoom, said_nothing, talk_page,
-       talk_greeting, chat_tick!, close_chats!, new_agent_session!, agent_dir, Recall, said_file, pane_dir, on_edge,
-       recall_key!, PaneText, PaneWords, PaneKept, ChatFiles
+       talk_greeting, chat_tick!, close_chats!, new_agent_session!, agent_dir, Recall, said_file,
+       pane_dir, on_edge, recall_key!, PaneText, PaneWords, PaneKept, ChatFiles
 
 "The words that you type to the agent in the pane `pane`, as the owner of the editor of them: see `small_editor`"
 struct PaneField
@@ -2486,3 +2488,4 @@ ask_talk!(p::AgentPane, shown, told) = begin
   isempty(replies) && error("$(s.agent) didn't write a message.")
   last(replies).text
 end
+

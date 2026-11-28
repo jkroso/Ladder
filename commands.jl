@@ -364,22 +364,7 @@ each_selection!(f, e) = begin
   nothing
 end
 
-"Do `f` with each of the other selections in the main one's place, then put the main one back. It's for drawing them."
-with_others(f, b::Buffer) = begin
-  list = copy(others(b))
-  isempty(list) && return
-  main, many = (b.anchor, b.caret), b.many
-  b.many = true
-  try
-    for s in list
-      b.anchor, b.caret = s
-      f()
-    end
-  finally
-    b.anchor, b.caret = main
-    b.many = many
-  end
-end
+
 
 "The columns of each place in `line` that has `text`. With `whole`, only where it's a word by itself."
 places(line::AbstractString, text::AbstractString, whole::Bool) = begin

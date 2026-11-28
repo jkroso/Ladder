@@ -11,8 +11,8 @@
 @use "./markdown" Kind words
 @use "./look" exports...
 
-export Inline, Piece, Seg, VLine, Flow, tall, line_top, line_at, INLINE_GAP, wrap, inset, later_word,
-       words_end, xcol, spot, colat
+export Inline, Piece, Seg, VLine, Flow, tall, line_top, line_at, INLINE_GAP, wrap, inset,
+       later_word, words_end, xcol, spot, colat, rows
 
 # --- a line laid out ---------------------------------------------------------------
 #
@@ -265,3 +265,7 @@ colat(f::Flow, k::Int, x::px) = begin
   # The end of a wrapped line is the start of the next one, so stop a character short
   k < length(f.lines) && col >= vl.to ? max(vl.from, vl.to - 1) : col
 end
+
+"The lines of a Flow, as rows of text. `edge` is the width of a border on its left."
+rows(f::Flow, edge=0px) =
+  [Row(width(grow=grow), height(vl.high), padding(0px, 0px, 0px, vl.x - edge), clip=true, map(describe, vl.segs)...) for vl in f.lines]

@@ -49,6 +49,7 @@
 @use "./views" exports...
 @use "./showed_before" ignored_shown
 
+@use "./flow" rows
 export FolderItem, FolderTable, FolderHead, FolderMenu, FolderOrder, FolderKind, FOLDER_COLUMNS, FOLDER_HEADS,
        FOLDER_ICON_W, FOLDER_COL_W, FOLDER_ROWS_FIRST, FOLDER_MENU_W, FOLDER_KEY, folder_table!,
        folder_items!, folder_sorted, read_size, day_edge, read_when, FOLDER_FIELD_HINTS, folder_field!,

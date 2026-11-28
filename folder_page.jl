@@ -20,19 +20,21 @@
 @use "./folders" => Folders
 @use "./markdown" front_matter
 @use "./look" exports...
+@use "./shared" open!
 @use "./host" exports...
 @use "./pictures" picture
 @use "github.com/jkroso/URI.jl/FS" => FS FSObject
 @use "./remote" => Remote
 
-export own!, node!, MARKDOWN, window_size, PICTURES, MODELS, TERMINALS, CHATS, SOUNDS, VIDEOS, ZIPS, TABLES,
-       MAC_PICTURES, DOCUMENTS, FONTS, CODE, file_icon, SERIES_LIGHT, SERIES_DARK, series_colours, trouble,
-       held_keys, only_held, unmodified, HELD, commas, file_menu, ignore_item, menu_theme, drawn_menu!,
-       workspace, url_path, opener, app_name, PAGE_TITLES, first_answer, email_title, page_title, DESIGNS,
-       PageRow, PAGE_ROW_H, page_row!, page_heading, page_note, PageButton, page_button!, git_colour,
-       favourite_item, ishidden, left_out, on_screen, whole_picture, MEDIA_CACHE, media_dir, tilde, title,
-       held, not_pictures, picture_key, SETTINGS_FILE, settings_file, BROWSER_FOLDER, browser_folder, path_of,
-       HOME, home_folder, go_home!, KEY_KEEPER, PAGE_GETTER, TRUE_PATHS, truepath, PASSING
+export own!, node!, MARKDOWN, window_size, PICTURES, MODELS, TERMINALS, CHATS, SOUNDS, VIDEOS, ZIPS,
+       TABLES, MAC_PICTURES, DOCUMENTS, FONTS, CODE, file_icon, SERIES_LIGHT, SERIES_DARK,
+       series_colours, trouble, held_keys, only_held, unmodified, HELD, commas, file_menu,
+       ignore_item, menu_theme, drawn_menu!, workspace, url_path, opener, app_name, PAGE_TITLES,
+       first_answer, email_title, page_title, DESIGNS, PageRow, PAGE_ROW_H, page_row!, page_heading,
+       page_note, PageButton, page_button!, git_colour, favourite_item, ishidden, left_out,
+       on_screen, whole_picture, MEDIA_CACHE, media_dir, tilde, title, held, not_pictures,
+       picture_key, SETTINGS_FILE, settings_file, BROWSER_FOLDER, browser_folder, path_of, HOME,
+       home_folder, go_home!, KEY_KEEPER, PAGE_GETTER, TRUE_PATHS, truepath, PASSING, show_beside!
 
 "A node that belongs to `e` and is kept for as long as `e` is"
 own!(e, node) = (node.parent === nothing && setfield!(node, :parent, e); node)
@@ -376,3 +378,11 @@ truepath(path) = get!(() -> ispath(path) ? realpath(path) : abspath(path), TRUE_
 
 # The folders that macOS keeps temporary files in, and empties by itself
 const PASSING = ("/private/var/folders/", "/var/folders/", "/private/tmp/", "/tmp/")
+
+"Show the folder or the file at `path` in the page, like the page of a repository. The sidebar goes on with the folder that it lists."
+show_beside!(e, path) = begin
+  folder = e.folder
+  open!(e, path)
+  e.folder == folder || go_folder!(e, folder)
+  e
+end

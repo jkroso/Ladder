@@ -40,7 +40,8 @@
 @use "./editing" exports...
 @use "./tabs" side_least
 
-export PLAIN_KINDS, keep_plain!, page_margin, page_x, reveal!, sheet_page, text_inset, right_room
+export PLAIN_KINDS, keep_plain!, page_margin, page_x, reveal!, sheet_page, text_inset, right_room,
+       own_page, unlist!
 
 # --- the page's lines, laid out ----------------------------------------------------
 #
@@ -388,4 +389,23 @@ reveal!(e) = begin
     bottom = top + it.content.heights[r]
   end
   scroll_into_view!(e.scroll, PAGE_TOP + top - 30px, PAGE_TOP + bottom + 40px)
+end
+
+"True when a kind of folder or of file shows the page its own way, as wide as the window has room for"
+own_page(e) = (o = page_object(e); o !== nothing && page_fills(e, o))
+
+"""
+Take every child out of the document's list. Each one keeps the document as
+its parent, so a node that an earlier frame made can still reach the editor.
+"""
+unlist!(d::Document) = begin
+  child = getfield(d, :firstchild)
+  while child !== nothing
+    next = getfield(child, :nextsibling)
+    setfield!(child, :prevsibling, nothing)
+    setfield!(child, :nextsibling, nothing)
+    child = next
+  end
+  setfield!(d, :firstchild, nothing)
+  d
 end

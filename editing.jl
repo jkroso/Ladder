@@ -43,7 +43,8 @@ export CLOSING, ENDING, OPENERS, OPENING, PAIRS, PAIR_REACH, SLIDE_TIME, backste
        bracket_runs, caret_pair, carry, copy_selection!, erase!, glow_bracket_pair, in_empty_pair,
        in_long_string, indent!, indent_lines!, neighbour, newline!, next_cell!, opened, pair!,
        parts_of, pass, quotes, screen_edge, shift_lines!, sidebar_room!, sliding, surround!,
-       text_size, typed_code, word_step, zoom!, BracketsState, after, opens, toggle_panel!
+       text_size, typed_code, word_step, zoom!, BracketsState, after, opens, toggle_panel!,
+       with_others
 
 # --- editing -----------------------------------------------------------------------------
 
@@ -831,3 +832,20 @@ end
 
 "How far the sidebar is open, from 0 to 1"
 opened(e) = eased(e.slid_from, e.panel ? 1.0 : 0.0, e.slid)
+
+"Do `f` with each of the other selections in the main one's place, then put the main one back. It's for drawing them."
+with_others(f, b::Buffer) = begin
+  list = copy(others(b))
+  isempty(list) && return
+  main, many = (b.anchor, b.caret), b.many
+  b.many = true
+  try
+    for s in list
+      b.anchor, b.caret = s
+      f()
+    end
+  finally
+    b.anchor, b.caret = main
+    b.many = many
+  end
+end

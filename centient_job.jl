@@ -210,11 +210,7 @@ bar that's over the sidebar.
 """
 history_buttons(e) = e.panel || agent_shows(e) ? (button(e, :back, "arrow-left"), button(e, :forward, "arrow-right")) : ()   # in agent mode they're at the end of the agent's heading
 
-"""
-True when something fills the window in place of the page and the sidebar: a
-takeoff, a schedule or a sketch, the lines of one as text, or a picture.
-"""
-filled(e) = full_block(e) !== nothing || lowered(e) !== nothing || zooming(e) !== nothing
+
 
 # In agent mode the two ends of the bar lie over the dark panes, so they have the panes' colours. The middle is over the page's card.
 # Over a web page the bar has the page's colours. See `bar_inks`.
