@@ -855,8 +855,10 @@ end
   @test v.asking === nothing && v.data.measures[floor].name == "Kitchen floor"
   @test any(l -> startswith(l, "area | Kitchen floor"), block())
   K.tool!(v, :select)
+  # Centient is looked for again. This is in the testset so that it's done when a check above fails too: the
+  # tests that share this process need it.
+  @eval K.Centient available() = sidecar() !== nothing
 end
-@eval K.Centient available() = sidecar() !== nothing
 
 @testset "what's written reads back" begin
   again = P.takeoff(block())
