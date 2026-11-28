@@ -14,7 +14,9 @@
 #
 # The browser lists the origin, the bodies, the sketches and the construction
 # planes. The eye at the end of a line shows or hides what the line names, and
-# the eye of a folder does that for everything in it. The origin's point,
+# the eye of a folder does that for everything in it. A click on the browser's
+# title closes it to the title alone, and gives the design the room of its
+# list. Another click opens it again. The origin's point,
 # axes and planes are hidden in a new design, as in SolidCraft.
 #
 # The view takes Fusion 360's mouse:
@@ -316,6 +318,7 @@ Form(spec, step=nothing, inputs=Any[]) = Form(spec, Dict{String,Any}(), Dict{Str
   described::Dict{String,Any} = Dict{String,Any}() # what SolidCraft says of the parameters of a command
   spots::Vector{Any} = Any[]          # where the last frame drew things to click in the picture: each a box and what it is
   closed::Set{String} = Set{String}(["Document Settings", "Named Views", "Origin"]) # the folders of the browser that are closed
+  browsing::Bool = true               # the browser shows its list. A click on its title closes it to the title alone.
   clicked::Float64 = 0.0              # when the picture was last clicked, to tell two clicks
   marks::Bool = true                  # the marks of a sketch's constraints show
   sizes::Bool = true                  # and its dimensions
@@ -1218,8 +1221,24 @@ show_origin!(v::DesignView, name, visible) = begin
   Designs.show!(m, false; items=Any[n for (n, _) in ORIGIN_ROWS if n != name])
 end
 
+"The browser's title, which a click opens and closes as a folder's line does"
+browser_title(v::DesignView) = begin
+  t = theme(v)
+  press!(v, :browser_title; act=e -> (v.browsing = !v.browsing), tip=v.browsing ? "Hide the list" : "Show the list") do hovered
+    Row(width(grow=grow), height(36px), padding(12px, 0px), child_gap=7px,
+        (v.browsing ? (border(1px, :solid, Ink.faded(t.line, 0.7))[:bottom],) : ())...,
+      Glyph(v.browsing ? "chevron-down" : "chevron-right", size=10px, color=hovered ? t.text : t.dim),
+      Box(words("Browser", 13px, weight="Semibold")), Box(width(grow=grow)))
+  end
+end
+
 browser(v::DesignView) = begin
   t = theme(v)
+  title = browser_title(v)
+  # Closed, it's the title alone
+  v.browsing || return card!(v, :browser) do
+    Column(width(BROWSER_W), panel_look(t, panel_round(v))..., Alignment.Start, title)
+  end
   m = v.model
   active = Designs.editing(m)
   rows = Any[]
@@ -1298,8 +1317,7 @@ browser(v::DesignView) = begin
   scroll = get!(() -> Scroll(width(grow=grow), height(grow=grow)), v.parts, :browser_scroll)
   card!(v, :browser) do
     Column(width(BROWSER_W), panel_look(t, panel_round(v))..., Alignment.Start,
-      Row(width(grow=grow), height(36px), padding(12px, 0px), border(1px, :solid, Ink.faded(t.line, 0.7))[:bottom],
-        Box(words("Browser", 13px, weight="Semibold")), Box(width(grow=grow))),
+      title,
       Box(width(grow=grow), height(px(tall)), Alignment.Start,
         reuse!(scroll, Column(width(grow=grow), padding(4px), Alignment.Start, in_sight(rows, num(scroll.offset), tall)...))))
   end

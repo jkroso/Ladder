@@ -1061,6 +1061,18 @@ else
     Models.change!(m, "body.rename", JSON.Object("body" => long, "name" => "Block"))
     settle()
     @test v.parts[(:body, "Block")].tip == ""
+    # A click on the browser's title closes it to the title alone, as tall as the buttons under
+    # the design, and as wide as before. Another click opens it again, as it was.
+    open = rect(v.parts[:browser])
+    click(v.parts[:browser_title])
+    settle()
+    shut = rect(v.parts[:browser])
+    @test !v.browsing && K.num(shut.height) == 38 && shut.width == open.width && shut.top == open.top
+    shot("design-browser-closed.png")
+    click(v.parts[:browser_title])
+    settle()
+    again = rect(v.parts[:browser])
+    @test v.browsing && (again.left, again.top, again.width, again.height) == (open.left, open.top, open.width, open.height)
     # The history rolls back and on
     click(v.parts[:back])
     settle()
