@@ -11,7 +11,7 @@
 @use "github.com/jkroso/UI.jl/Interface/draw" frame
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
 @use GeometryBasics: Vec2
-@use "./drive" drive
+@use "./drive" drive middle
 const px = K.px
 
 const dir = mktempdir()
@@ -85,7 +85,6 @@ const w = Window(e, size=(1000px, 1100px))
 const (; frames, at, press, release, click, shot) = drive(w)
 frames()
 
-middle(r) = (K.num(r[1] + r[3] / 2), K.num(r[2] + r[4] / 2))
 view(lang, n) = e.nodes[(:block, lang, page, n)]
 "Scroll the page until the top of the `n`th block in `lang` is near the top of the window, and it has been laid out and drawn"
 show_block(lang, n) = begin

@@ -11,6 +11,7 @@
 @use "github.com/jkroso/MiniFB.jl" Window
 @use "github.com/jkroso/UI.jl/Interface/draw" frame
 @use "github.com/jkroso/URI.jl/FSPath" FSPath
+@use "./drive" drive
 const px = K.px
 
 const dir = realpath(mktempdir())
@@ -31,7 +32,7 @@ write(bare, "x = 1\n")
 const e = K.build_editor(joinpath(jobs, "one.md"))
 const w = Window(e, size=(1000px, 700px))
 # Each frame is drawn with the newest code, as the window's loop draws it
-frames(n=3) = foreach(_ -> Base.invokelatest(frame, w), 1:n)
+const (; frames) = drive(w, frames=3, latest=true)
 frames()
 
 const page = joinpath(jobs, ".ladder")

@@ -9,6 +9,7 @@
 @use "../main" => K
 @use "github.com/jkroso/MiniFB.jl" Window
 @use "github.com/jkroso/UI.jl/Interface/draw" frame
+@use "./drive" drive
 const px = K.px
 
 const dir = mktempdir()
@@ -35,7 +36,7 @@ K.SITE_ASKER[] = site -> (push!(trusts, site); trust[])
 const problems_before = length(K.problems)
 const e = K.blank_editor()
 const w = Window(e, size=(1000px, 800px))
-frames(n=3) = foreach(_ -> frame(w), 1:n)
+const (; frames) = drive(w, frames=3)
 frames()
 
 const site = "https://sums.example.com"

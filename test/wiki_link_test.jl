@@ -11,6 +11,7 @@
 @use "github.com/jkroso/MiniFB.jl" Window KeyPress KeyRelease MouseMove Keys onkey onmouse Typed ontype
 @use "github.com/jkroso/UI.jl/Interface/draw" frame
 @use GeometryBasics: Vec2
+@use "./drive" drive
 const px = K.px
 
 "The spans of `text` as (text, markup, link)"
@@ -69,7 +70,7 @@ write(joinpath(top, "data", "prices.csv"), "a,b\n1,2\n")
 
 const e = K.build_editor(joinpath(top, "home.md"))
 const w = Window(e, size=(900px, 700px))
-frames(n=3) = foreach(_ -> frame(w), 1:n)
+const (; frames) = drive(w, frames=3)
 frames()
 K.focus(e)
 home!() = (K.open!(e, joinpath(top, "home.md")); frames())
@@ -164,7 +165,7 @@ end
 
 @testset "the list of pages while you type a wiki link's name" begin
   type(text) = (foreach(c -> ontype(e, Typed(c, w)), text); frame(w))
-  key(k) = (onkey(w, KeyPress{k}(0, w)); frame(w))
+  (; key) = drive(w, frames=1)
   names() = (found = K.suggestion(e); found === nothing ? nothing : found[3])
   K.open!(e, joinpath(top, "typing.md")); frames(); K.focus(e)
   type("See ")

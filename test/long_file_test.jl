@@ -10,6 +10,7 @@
 @use "../main" => K
 @use "github.com/jkroso/MiniFB.jl" Window Typed Keys ontype
 @use "github.com/jkroso/UI.jl/Interface/draw" frame
+@use "./drive" drive
 const px = K.px
 
 # The folder is the test's own each time, so that two test processes that run at once don't write the same files
@@ -35,7 +36,7 @@ const start = joinpath(dir, "start.md")
 write(start, "# Start\n")
 const e = K.build_editor(start)
 const w = Window(e, size=(1000px, 700px))
-frames(n=2) = foreach(_ -> Base.invokelatest(frame, w), 1:n)
+const (; frames) = drive(w, latest=true)
 frames()
 K.open!(e, long)
 frames()

@@ -9,6 +9,7 @@
 @use "../main" => K
 @use "github.com/jkroso/MiniFB.jl" Window KeyPress Keys onkey Typed ontype
 @use "github.com/jkroso/UI.jl/Interface/draw" frame
+@use "./drive" drive
 const px = K.px
 
 const dir = mktempdir()
@@ -17,17 +18,8 @@ const page = joinpath(dir, "page.md")
 write(page, "# A page\n\nSome words.\n")
 const e = K.build_editor(page)
 const w = Window(e, size=(700px, 500px))
-frames(n=2) = foreach(_ -> Base.invokelatest(frame, w), 1:n)
+const (; frames, typed, key) = drive(w, latest=true)
 frames(3)
-
-"Press the key `k` with the keys `held` down"
-press(k, held...) = begin
-  foreach(h -> w.keys |= h, held)
-  onkey(w, KeyPress{k}(0, w))
-  foreach(h -> w.keys ⊻= h, held)
-  frames()
-end
-typed(s) = (foreach(c -> ontype(w, Typed(c, w)), s); frames())
 
 "A kind of owner that only these tests have. It notes each key that it's asked about. Return is its own, and esc goes on to the page."
 struct Field
@@ -67,18 +59,18 @@ end
   typed("ab")
   @test sub.buf.lines == ["ab"] && isempty(f.keys)   # a character is the text's, and no key press
   # The owner took Return, so the editor starts no new line
-  press(Keys.enter)
+  key(Keys.enter)
   @test f.keys == Any[(Keys.enter, nothing)] && sub.buf.lines == ["ab"] && w.focus === sub
   # The owner says that ⌫ is the text's, and the editor does its command
-  press(Keys.backspace)
+  key(Keys.backspace)
   @test first(last(f.keys)) == Keys.backspace && last(last(f.keys)) isa Symbol && sub.buf.lines == ["a"]
   # Esc goes on to the page that the field is in, which takes the keyboard back. The field's editor does nothing with it.
-  press(Keys.escape)
+  key(Keys.escape)
   @test first(last(f.keys)) == Keys.escape && w.focus === e && sub.buf.lines == ["a"] && !sub.buf.reading
   # The window's own editor has no owner: Return starts a new line in the page
   n = length(e.buf.lines)
   e.buf.reading = false
   e.buf.caret = e.buf.anchor = (3, 0)
-  press(Keys.enter)
+  key(Keys.enter)
   @test length(e.buf.lines) == n + 1 && length(f.keys) == 3
 end

@@ -10,6 +10,7 @@
 @use "github.com/jkroso/UI.jl/Interface/draw" frame rect
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
 @use GeometryBasics: Vec2
+@use "./drive" drive middle
 
 const px = K.px
 const G = K.Git
@@ -37,19 +38,11 @@ run(pipeline(`git clone $hub $other`, stdout=devnull, stderr=devnull))
 
 const e = K.build_editor(joinpath(repo, "Readme.md"))
 const w = Window(e, size=(1100px, 700px))
-frames(n=3) = foreach(_ -> Base.invokelatest(frame, w), 1:n)
+const (; frames, at, click, shot) = drive(w, frames=3, pressed=1, latest=true)
 "Draw until git has answered, and then what it said is on the screen"
 settle() = (frames(2); G.wait!(); frames(2); G.wait!(); frames(2))
 "Ask git again now, as the window does after some seconds"
 again() = (G.forget!(); settle())
-shot(name) = haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], "push-pull-$name.png"), w)
-at((x, y)) = (w.mouse = typeof(w.mouse)(px(x), px(y)); onmouse(w, MouseMove(Vec2{px}(px(x), px(y)), w)); frames(1))
-click(place) = begin
-  at(place)
-  w.keys |= Keys.mouse_left; onkey(w, KeyPress{Keys.mouse_left}(0, w)); frames(1)
-  w.keys ⊻= Keys.mouse_left; onkey(w, KeyRelease{Keys.mouse_left}(0, w)); frames(2)
-end
-middle(node) = (r = rect(node); (K.num(r.left) + K.num(r.width) / 2, K.num(r.top) + K.num(r.height) / 2))
 button(what) = e.nodes[(:git_button, repo, what)]
 "Draw until git has finished. It gives what Ladder said under the top bar."
 finish() = begin
@@ -108,7 +101,7 @@ settle()
   @test rect(button(:pull)) !== nothing && rect(button(:push)) !== nothing
   @test button(:pull).words == "Pull" && button(:push).words == "Push"
   @test !button(:pull).off && !button(:push).off
-  shot("buttons")
+  shot("push-pull-buttons")
 end
 
 @testset "Push sends the branch's new commits to the branch that it follows" begin
@@ -169,7 +162,7 @@ end
   @test K.pull_way_words(rows[1]) == ("Merge origin/main into main", "adds a commit")
   @test K.pull_way_words(rows[2]) == ("Rebase main onto origin/main", "rewrites 1 commit")
   @test K.apart_words(G.state(repo)) == "main has 1 commit that origin/main hasn't got, and origin/main has 1 that main hasn't got."
-  shot("ways")
+  shot("push-pull-ways")
   # A click on the arrow again takes the list away
   click(middle(arrow()))
   @test !K.pull_list_open(e)

@@ -11,6 +11,7 @@
 @use "github.com/jkroso/UI.jl/Interface/draw" frame
 @use "github.com/jkroso/Prospects.jl" @def
 @use "github.com/jkroso/URI.jl/FSPath" FSPath
+@use "./drive" drive
 const px = K.px
 const FS = K.FS
 
@@ -73,7 +74,7 @@ K.window_view(e, d::KioskDirectory) = K.Stack(K.width(grow=K.grow), K.height(gro
 
 const e = K.build_editor(joinpath(dir, "page.md"))
 const w = Window(e, size=(1000px, 700px))
-frames(n=3) = foreach(_ -> frame(w), 1:n)
+const (; frames) = drive(w, frames=3)
 e.panel || K.toggle_panel!(e)
 frames(30)   # the sidebar slides open
 

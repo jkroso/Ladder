@@ -13,6 +13,7 @@
 @use "github.com/jkroso/UI.jl/Interface/draw" frame rect
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
 @use GeometryBasics: Vec2
+@use "./drive" drive
 const px = K.px
 
 # Wednesday 18 November 2026 counts as today
@@ -38,9 +39,8 @@ write(page, "# A job\n\n- [x] Dig the trench\n- [x] Lay the pipe\n- [ ] Fill the
 
 const e = K.build_editor(page)
 const w = Window(e, size=(1000px, 900px))
-frames(n=3) = foreach(_ -> frame(w), 1:n)
+const (; frames, shot) = drive(w, frames=3)
 frames()
-shot(name) = haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], name), w)
 const day = e.nodes[(:block, K.DAY_BLOCK, page, 1)]
 const board = e.nodes[(:block, K.BOARD, page, 1)]
 "Show the page on the day `d`, as the slider does"

@@ -10,6 +10,7 @@
 @use "../markdown" Kind
 @use "github.com/jkroso/MiniFB.jl" Window Typed ontype
 @use "github.com/jkroso/UI.jl/Interface/draw" frame
+@use "./drive" drive
 const px = K.px
 
 const dir = mktempdir()
@@ -44,7 +45,7 @@ write(page, "---\ntitle: A long page\n---\n\n# A long page\n\n" * join(section.(
 
 const e = K.build_editor(page)
 const w = Window(e, size=(1000px, 700px))
-frames(n=2) = foreach(_ -> Base.invokelatest(frame, w), 1:n)
+const (; frames) = drive(w, latest=true)
 frames(3)
 const b = e.buf
 kept() = e.flows[(:plain, b.path)]

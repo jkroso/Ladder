@@ -8,6 +8,7 @@ K.RUN_WAIT[] = Inf   # the code runs in a thread of its own, and each result is 
 @use "github.com/jkroso/MiniFB.jl" Window KeyPress Keys onkey Typed ontype
 @use "github.com/jkroso/UI.jl/Interface/draw" frame
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
+@use "./drive" drive
 const px = K.px
 
 const dir = mktempdir()
@@ -41,7 +42,7 @@ write(page, TEXT)
 const e = K.build_editor(page)
 const w = Window(e, size=(1000px, 800px))
 const b = e.buf
-frames(n=2) = foreach(_ -> frame(w), 1:n)
+const (; frames, typed, key, shot) = drive(w)
 frames()
 
 "Put the text back as it was, with the caret at `line` and `col`"
@@ -53,13 +54,6 @@ fresh!(line, col=0) = begin
   caret!(line, col)
 end
 caret!(line, col=0) = (b.caret = b.anchor = (line, col); frames())
-key(k, held...) = begin
-  foreach(h -> w.keys |= h, held)
-  onkey(w, KeyPress{k}(0, w))
-  foreach(h -> w.keys ⊻= h, held)
-  frames()
-end
-typed(s) = (foreach(c -> ontype(w, Typed(c, w)), s); frames())
 "The names in the list that shows, or nothing when no list shows"
 names() = (found = K.suggestion(e); found === nothing ? nothing : found[3])
 "True when the window draws the list"
@@ -71,9 +65,6 @@ said(name) = begin
   k = findfirst(==(name), found[3])
   k === nothing ? nothing : K.name_notes(e, found[1], found[3])[k]
 end
-
-const shots = get(ENV, "NAMES_SHOTS", "")
-shot(name) = isempty(shots) || save_png(joinpath(shots, name * ".png"), w)
 
 @testset "a list of the page's names shows as a name is typed" begin
   fresh!(9)

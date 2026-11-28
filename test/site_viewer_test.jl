@@ -11,6 +11,7 @@
 @use "github.com/jkroso/UI.jl/Interface/draw" frame
 @use "github.com/jkroso/Prospects.jl" @def
 @use "github.com/jkroso/URI.jl/FSPath" FSPath
+@use "./drive" drive
 const px = K.px
 const FS = K.FS
 
@@ -53,7 +54,7 @@ K.page_view(e, d::Union{ShopSite,ShopItem}) = K.Box(K.Text("The shop's $(d.path.
 write(joinpath(dir, "mine.md"), "# Mine\n\nAn [item](https://shop.test/items/4) and a card:\n\n![An item](https://www.shop.test/items/5)\n")
 const e = K.build_editor(joinpath(dir, "mine.md"))
 const w = Window(e, size=(1000px, 700px))
-frames(n=3) = foreach(_ -> frame(w), 1:n)
+const (; frames) = drive(w, frames=3)
 frames()
 
 "Each Text in the layout `node`, in the order they read"

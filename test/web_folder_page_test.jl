@@ -11,6 +11,7 @@
 @use "../remote" => Remote
 @use "github.com/jkroso/MiniFB.jl" Window
 @use "github.com/jkroso/UI.jl/Interface/draw" frame
+@use "./drive" drive
 const px = K.px
 
 const dir = mktempdir()
@@ -78,7 +79,7 @@ page!("https://plain.test/a/b.md", "# B\n")
 const e = K.blank_editor()
 const w = Window(e, size=(1000px, 800px))
 # A page's code runs after a frame, and the next frame must see what it made, as MiniFB's own loop does
-frames(n=4) = foreach(_ -> Base.invokelatest(frame, w), 1:n)
+const (; frames) = drive(w, frames=4, latest=true)
 frames()
 ladders() = filter(endswith("/.ladder"), asked)
 

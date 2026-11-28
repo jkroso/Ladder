@@ -11,6 +11,7 @@
 @use "github.com/jkroso/UI.jl/Interface/draw" frame rect popups
 @use GeometryBasics: Vec2
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
+@use "./drive" drive middle
 const px = K.px
 
 const dir = mktempdir()
@@ -133,16 +134,8 @@ page!("https://example.com/code.md", """
 
 const e = K.blank_editor()
 const w = Window(e, size=(1000px, 800px))
-frames(n=3) = foreach(_ -> frame(w), 1:n)
+const (; frames, at, typed, key, shot) = drive(w, frames=3)
 frames()
-shot(name) = haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], name), w)
-press(k, held...) = begin
-  foreach(h -> w.keys |= h, held)
-  onkey(w, KeyPress{k}(0, w))
-  foreach(h -> w.keys ⊻= h, held)
-  frames()
-end
-typed(s) = (foreach(c -> ontype(w, Typed(c, w)), s); frames())
 said() = something(K.said_result(e), ("", 0.0))[1]
 
 @testset "addresses" begin
@@ -280,9 +273,9 @@ end
   @test K.Browsers.title_of(v.browser.html) == "A site"
   # It has the levels of an HTML file, the page at the top. ⌘E goes to its HTML and back.
   @test K.levels(e)[end] == "the page that the HTML makes" && K.level(e) == length(K.levels(e))
-  press(Keys.e, Keys.cmd)
+  key(Keys.e, Keys.cmd)
   @test e.buf.view == :text && e.buf.lines[1] == "<!DOCTYPE html><title>A site</title>" && !K.html_shown(e)
-  press(Keys.e, Keys.cmd)
+  key(Keys.e, Keys.cmd)
   b = e.buf
   @test b.view == :file && K.html_shown(e)
   # A click on a link of the page goes where Ladder goes: a page of Markdown shows, and ⌘⌥← comes back
@@ -321,11 +314,11 @@ end
   @test browsed == ["https://example.com/site/report.pdf"] && address() == "https://example.com/site/"
   empty!(browsed)
   # Reload Page asks again, and the page shows what came, at the level that showed
-  press(Keys.e, Keys.cmd)
+  key(Keys.e, Keys.cmd)
   page!("https://example.com/site/", "<!DOCTYPE html><title>Again</title><p>New words</p>", type="text/html")
   K.reload_page!(e); frames()
   @test e.buf.view == :text && e.buf.lines[1] == "<!DOCTYPE html><title>Again</title><p>New words</p>"
-  press(Keys.e, Keys.cmd)
+  key(Keys.e, Keys.cmd)
   @test K.html_shown(e) && e.nodes[(:html, e.buf.path)].browser.html == "<!DOCTYPE html><title>Again</title><p>New words</p>"
 end
 
@@ -418,11 +411,11 @@ end
   empty!(browsed); K.open_in_browser!(e)
   @test browsed == ["https://example.com/top.md"]
   # ⌘O takes an address: the list says what Return does, and Return asks for the page
-  press(Keys.o, Keys.cmd)
+  key(Keys.o, Keys.cmd)
   @test e.popup == :finder
   typed("example.com/prices.md")
   @test K.finder_address(e) == "https://example.com/prices.md" && K.picker_none(e) == "Press Return to open example.com/prices.md"
-  press(Keys.enter)
+  key(Keys.enter)
   @test e.popup == :none && address() == "https://example.com/prices.md"
   # A window that's opened on an address shows its page
   e2 = K.build_editor("https://example.com/notes.md")
@@ -435,7 +428,7 @@ end
   rows() = K.palette_rows(e, K.palette(e))
   K.navigate!(e, "example.com/notes.md"); frames()
   # An address that's typed in the list of commands has Navigate first, with where Return goes
-  press(Keys.p, Keys.cmd, Keys.shft)
+  key(Keys.p, Keys.cmd, Keys.shft)
   @test e.popup == :commands && "Navigate" in [r.name for r in rows()]
   typed("example.com/prices.md")
   @test K.palette_address(e, K.palette(e)) == "https://example.com/prices.md"
@@ -443,35 +436,35 @@ end
   @test count(r -> r.name == "Navigate", rows()) == 1
   shot("remote_navigate.png")
   # Return goes there at once, and the palette closes
-  press(Keys.enter)
+  key(Keys.enter)
   @test e.popup == :none && address() == "https://example.com/prices.md"
   # Navigate by its name asks for the address, and goes when Return gives it one, with no press of Run
-  press(Keys.p, Keys.cmd, Keys.shft)
+  key(Keys.p, Keys.cmd, Keys.shft)
   typed("navig")
   @test first(rows()).name == "Navigate" && K.palette_address(e, K.palette(e)) === nothing
-  press(Keys.enter)
+  key(Keys.enter)
   p = K.palette(e)
   @test e.popup == :commands && p.command.name == :navigate && [K.chip_name(c) for c in K.palette_chips(p)] == ["Address"]
   typed("example.com/top.md")
   shot("remote_navigate_chip.png")
-  press(Keys.enter)
+  key(Keys.enter)
   @test e.popup == :none && address() == "https://example.com/top.md"
   # ⌘L is Navigate's key: it asks for the address, as taking Navigate from the list does
   K.navigate!(e, "example.com/notes.md"); frames()
-  press(Keys.l, Keys.cmd)
+  key(Keys.l, Keys.cmd)
   p = K.palette(e)
   @test e.popup == :commands && p.command !== nothing && p.command.name == :navigate
   typed("example.com/prices.md")
-  press(Keys.enter)
+  key(Keys.enter)
   @test e.popup == :none && address() == "https://example.com/prices.md"
   # ... and the line is selected with ⌘⇧L now
   keys = K.keys_now(e).of
   @test K.caps(first(keys[:navigate])) == "⌘L" && K.caps(first(keys[:select_line])) == "⌘⇧L"
   # Letters that are no address list the commands as they always do
-  press(Keys.p, Keys.cmd, Keys.shft)
+  key(Keys.p, Keys.cmd, Keys.shft)
   typed("theme")
   @test first(rows()).name == "Theme" && K.palette_address(e, K.palette(e)) === nothing
-  press(Keys.escape); press(Keys.escape)
+  key(Keys.escape); key(Keys.escape)
   @test e.popup == :none
   # The command is there for a page that only shows a file or a folder, too
   K.open!(e, dir); frames()
@@ -490,8 +483,6 @@ end
   @test address() == "https://example.com/docs/my%20guide/start.md"
   # The bar shows the page's own name, as it shows a file's name, and the path has the rest
   @test K.bar_name(e) == "start.md"
-  at((x, y)) = (w.mouse = typeof(w.mouse)(px(x), px(y)); onmouse(w, MouseMove(Vec2{px}(px(x), px(y)), w)); frames(1))
-  middle(node) = (r = rect(node); (K.num(r.left) + K.num(r.width) / 2, K.num(r.top) + K.num(r.height) / 2))
   showing() = any(p -> p.key == :title_trail, popups(w))
   # The palette of the tests above slides away for a moment after it closes, and until it has gone it's over the
   # top bar, so the mouse isn't on the file's name. Quick frames get here before it has gone.
@@ -523,8 +514,6 @@ end
   page!("https://example.com/guide.md", "# Guide\n\nIntro.\n\n## Tea\n\n" * "Words.\n\n"^60 * "## Milk\n\nThe milk is cold.\n\n- [ ] Buy milk\n")
   K.navigate!(e, "example.com/guide.md"); frames()
   @test address() == "https://example.com/guide.md" && K.searchable(e)
-  at((x, y)) = (w.mouse = typeof(w.mouse)(px(x), px(y)); onmouse(w, MouseMove(Vec2{px}(px(x), px(y)), w)); frames(1))
-  middle(node) = (r = rect(node); (K.num(r.left) + K.num(r.width) / 2, K.num(r.top) + K.num(r.height) / 2))
   mouse_click() = (w.keys |= Keys.mouse_left; onkey(w, KeyPress{Keys.mouse_left}(0, w)); frames(1); w.keys ⊻= Keys.mouse_left; onkey(w, KeyRelease{Keys.mouse_left}(0, w)); frames(2))
   at(middle(e.nodes[:title])); sleep(K.TT_WAIT + 0.05); frames()
   v = e.nodes[:title_trail]
@@ -539,7 +528,7 @@ end
   # Words find the lines that have them, and Return goes to the line
   typed("cold")
   @test [r.m.text for r in s.rows if r.kind == :thing] == ["The milk is cold."]
-  press(Keys.enter)
+  key(Keys.enter)
   @test !any(p -> p.key == K.TS_KEY, popups(w))
   @test address() == "https://example.com/guide.md" && e.buf.caret[1] == findfirst(==("The milk is cold."), e.buf.lines)
   shot("remote_search_found.png")
@@ -551,7 +540,7 @@ end
   s = e.nodes[:title_search]
   s.wants = [:todo]; frames()
   @test [r.m.text for r in s.rows if r.kind == :thing] == ["Buy milk"]
-  press(Keys.escape)
+  key(Keys.escape)
   at((5, 400))
 end
 
@@ -809,20 +798,20 @@ end
   @test address() == "https://example.com/notes.md" && occursin("isn't a file, a folder or a web address", said())
   # A path that's typed in the list of commands has Navigate first, and Return goes there
   rows() = K.palette_rows(e, K.palette(e))
-  press(Keys.p, Keys.cmd, Keys.shft)
+  key(Keys.p, Keys.cmd, Keys.shft)
   typed(plan)
   @test first(rows()).name == "Navigate" && first(rows()).note == "Go to " * K.tilde(plan)
-  press(Keys.enter)
+  key(Keys.enter)
   @test e.popup == :none && e.buf.path == plan
   # A name from the page's folder there is no path, so the commands list as they always do
-  press(Keys.p, Keys.cmd, Keys.shft)
+  key(Keys.p, Keys.cmd, Keys.shft)
   typed("other.md")
   @test K.palette_address(e, K.palette(e)) === nothing
-  press(Keys.escape); press(Keys.escape)
+  key(Keys.escape); key(Keys.escape)
   # ⌘L takes a path, as it takes a web address
-  press(Keys.l, Keys.cmd)
+  key(Keys.l, Keys.cmd)
   typed(folder * "/other.md")
-  press(Keys.enter)
+  key(Keys.enter)
   @test e.popup == :none && e.buf.path == other
 end
 

@@ -7,6 +7,7 @@
 @use "../main" => K
 @use "github.com/jkroso/MiniFB.jl" Window
 @use "github.com/jkroso/UI.jl/Interface/draw" frame
+@use "./drive" drive
 const px = K.px
 
 @testset "the links in a page's lines that name a file" begin
@@ -68,7 +69,7 @@ write(joinpath(top, "plain.md"), "# Plain\n")
 const home = joinpath(top, "home.md")
 const e = K.build_editor(home)
 const w = Window(e, size=(900px, 700px))
-frames(n=3) = foreach(_ -> frame(w), 1:n)
+const (; frames) = drive(w, frames=3)
 frames()
 
 "The line of the page at `path` that starts with `start`, as the file has it"

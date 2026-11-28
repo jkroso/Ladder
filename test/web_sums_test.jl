@@ -9,6 +9,7 @@
 @use "github.com/jkroso/UI.jl/Interface/draw" frame
 @use "github.com/jkroso/Units.jl" m mm g kg kW W yr Percent J
 @use "github.com/jkroso/Units.jl/Money" => Cash
+@use "./drive" drive
 const px = K.px
 
 # Nothing here needs the web, so what stands in for `curl` gets nothing
@@ -38,7 +39,7 @@ Under the block, the wing and its twin span !`both = span * 2`.
 
 const e = K.build_editor(page)
 const w = Window(e, size=(900px, 700px))
-frames(n=3) = foreach(_ -> frame(w), 1:n)
+const (; frames) = drive(w, frames=3)
 frames()
 const b = e.nodes[(:block, K.VIEW_BLOCK, page, 1)].browser
 live(code) = K.Browsers.Live.evaluate(b.view.live, code)

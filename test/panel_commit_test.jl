@@ -11,6 +11,7 @@
 @use "github.com/jkroso/UI.jl/Interface/draw" frame rect
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
 @use GeometryBasics: Vec2
+@use "./drive" drive middle
 
 const px = K.px
 const G = K.Git
@@ -43,18 +44,10 @@ const me = Dict("GIT_AUTHOR_NAME" => "Test", "GIT_AUTHOR_EMAIL" => "test@example
 const e = K.build_editor(joinpath(repo, "Readme.md"))
 e.own = false   # Claude writes the message
 const w = Window(e, size=(1100px, 700px))
-frames(n=3) = foreach(_ -> Base.invokelatest(frame, w), 1:n)
+const (; frames, at, click, shot) = drive(w, frames=3, pressed=1, latest=true)
 "Draw until git has answered, and then what it said is on the screen"
 settle() = (frames(2); G.wait!(); frames(2); G.wait!(); frames(2))
 again() = (G.forget!(); settle())
-shot(name) = haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], "panel-commit-$name.png"), w)
-at((x, y)) = (w.mouse = typeof(w.mouse)(px(x), px(y)); onmouse(w, MouseMove(Vec2{px}(px(x), px(y)), w)); frames(1))
-click(place) = begin
-  at(place)
-  w.keys |= Keys.mouse_left; onkey(w, KeyPress{Keys.mouse_left}(0, w)); frames(1)
-  w.keys ⊻= Keys.mouse_left; onkey(w, KeyRelease{Keys.mouse_left}(0, w)); frames(2)
-end
-middle(node) = (r = rect(node); (K.num(r.left) + K.num(r.width) / 2, K.num(r.top) + K.num(r.height) / 2))
 tick(rel) = e.nodes[(:file_tick, repo, rel)]
 button() = e.nodes[(:git_button, repo, :commit)]
 "The files that git has for the next commit"
@@ -98,7 +91,7 @@ end
   # A file that git doesn't keep yet goes in too, and comes out again as a file that git doesn't keep
   tick!("c.md")
   @test staged() == ["a.md", "c.md"] && button().words == "Commit 2"
-  shot("ticked")
+  shot("panel-commit-ticked")
   tick!("c.md")
   @test staged() == ["a.md"] && button().words == "Commit 1"
   @test G.state(repo).changes["c.md"] == :new

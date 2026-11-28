@@ -3,7 +3,7 @@
 # pages that choose the weights, and the settings file. See "the weights of the
 # page's text and of code" in main.jl. Run them with `julia -O0
 # --project=. test/weight_test.jl`. They use windows that aren't on the screen, and they don't
-# write the settings file. With WEIGHT_SHOTS set to a folder, they save
+# write the settings file. With LADDER_SHOTS set to a folder, they save
 # pictures of the page there.
 
 @use Test: @test, @testset, @test_throws
@@ -12,6 +12,7 @@
 @use "github.com/jkroso/UI.jl/Interface/draw" frame draw scene
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
 @use Skia
+@use "./drive" drive
 const px = K.px
 
 const dir = mktempdir()
@@ -36,7 +37,7 @@ x = 1   # a comment
 
 const e = K.build_editor(file)
 const w = Window(e, size=(900px, 600px))
-frames(n=2) = foreach(_ -> frame(w), 1:n)
+const (; frames, shot) = drive(w)
 # The caret goes on the last line, which is empty, so the other lines hide their markup
 e.buf.caret = e.buf.anchor = (length(e.buf.lines), 0)
 frames()
@@ -64,9 +65,6 @@ ink() = begin
   page = green(out[W - 5, H - 5])   # a corner of the window has no text
   sum(p -> max(0, page - green(p)), out[:, 150:end])   # under the heading, which is bold in every weight
 end
-
-const shots = get(ENV, "WEIGHT_SHOTS", "")
-shot(name) = isempty(shots) || save_png(joinpath(shots, name * ".png"), w)
 
 "The names of the weights of `family` that text can be in"
 labels(family) = [w.label for w in K.text_weights(family)]

@@ -21,7 +21,7 @@ write(joinpath(dir, "taken.md"), "# Taken\n")
 
 const e = K.build_editor(page)
 const w = Window(e, size=(1000px, 800px))
-const (; frames, at, typed, key) = drive(w, moved=2)
+const (; frames, at, typed, key, shot) = drive(w, moved=2)
 frames()
 
 right_click(place) = (at(place); onkey(w, KeyPress{Keys.mouse_right}(0, w)); frames())
@@ -39,9 +39,6 @@ choose(name) = begin
   key(Keys.enter)
 end
 renaming() = K.renaming(e, :title)
-
-const shots = get(ENV, "TITLE_SHOTS", "")
-shot(name) = isempty(shots) || save_png(joinpath(shots, name * ".png"), w)
 
 @testset "a right-click on the file's name shows the file's menu" begin
   r = rect(title())

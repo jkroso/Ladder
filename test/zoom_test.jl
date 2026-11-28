@@ -2,7 +2,7 @@
 # of a PDF file or a model. See "a picture, a diagram or a page that fills the
 # window" in main.jl. Run them with `julia -O0 --project=. test/zoom_test.jl`. They
 # click, pinch and type in a window that isn't on the screen. Set the
-# environment variable ZOOM_SHOTS to a folder to keep a picture of each step.
+# environment variable LADDER_SHOTS to a folder to keep a picture of each step.
 
 @use Test: @test, @testset
 @use "github.com/jkroso/MiniFB.jl" Window KeyPress KeyRelease MouseMove Keys onkey onmouse Typed ontype onscroll
@@ -52,11 +52,8 @@ The end.
 
 const e = K.build_editor(page)
 const w = Window(e, size=(1000px, 1400px))
-const (; frames, at, press, release, click, key) = drive(w, moved=2)
+const (; frames, at, press, release, click, key, shot) = drive(w, moved=2)
 frames()
-
-const shots = get(ENV, "ZOOM_SHOTS", "")
-shot(name) = isempty(shots) || save_png(joinpath(shots, name * ".png"), w)
 
 command(k) = (w.keys |= Keys.cmd; key(k); w.keys ⊻= Keys.cmd)
 "A place `dx` px in from the right edge of `r` and `dy` px down from its top"

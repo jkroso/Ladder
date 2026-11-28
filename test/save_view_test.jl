@@ -13,7 +13,7 @@
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
 @use GeometryBasics: Vec2
 @use Sockets
-@use "./drive" drive
+@use "./drive" drive middle
 const px = K.px
 
 const dir = mktempdir()
@@ -112,7 +112,6 @@ const w = Window(e, size=(1000px, 1100px))
 const (; frames, at, press, release, click, shot) = drive(w)
 frames()
 
-middle(r) = (K.num(r[1] + r[3] / 2), K.num(r[2] + r[4] / 2))
 view(n) = e.nodes[(:block, K.SAVE, page, n)]
 "Scroll the page until the top of the `n`th save block is near the top of the window, and it has been laid out and drawn"
 show_save(n) = begin

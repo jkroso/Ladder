@@ -10,6 +10,7 @@
 @use "github.com/jkroso/MiniFB.jl" Window Keys
 @use "github.com/jkroso/UI.jl/Interface/draw" frame popups
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
+@use "./drive" drive
 "The words of each Text in the layout `x`, from the top"
 texts(x) = begin
   hasfield(typeof(x), :content) && getfield(x, :content) isa AbstractString && return Any[x]
@@ -77,7 +78,7 @@ Back to [[#Second]].
 
 const e = K.build_editor(home)
 const w = Window(e, size=(1000px, 800px))
-frames(n=3) = foreach(_ -> Base.invokelatest(frame, w), 1:n)
+const (; frames) = drive(w, frames=3, latest=true)
 frames()
 const b = e.buf
 line(words) = findfirst(l -> occursin(words, l), b.lines)

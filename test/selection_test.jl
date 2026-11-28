@@ -6,6 +6,7 @@
 @use "../main" => K
 @use "github.com/jkroso/MiniFB.jl" Window
 @use "github.com/jkroso/UI.jl/Interface/draw" frame
+@use "./drive" drive
 const px = K.px
 
 const dir = mktempdir()
@@ -25,7 +26,7 @@ height = 3.6
 
 const e = K.build_editor(file)
 const w = Window(e, size=(1000px, 800px))
-frames(n=2) = foreach(_ -> frame(w), 1:n)
+const (; frames) = drive(w)
 frames()
 
 "The boxes of the selection on line `i`, as the page draws them, from the left edge of the page's text"
