@@ -116,7 +116,10 @@ ladder_folder() = begin
   found = LADDER_FOLDER[]
   found === nothing || return found
   place = code_place(first(methods(ladder_folder)))
-  LADDER_FOLDER[] = place === nothing ? "" : dirname(place[1])
+  # This file can sit in a folder under the one that holds main.jl.
+  dir = place === nothing ? "" : dirname(place[1])
+  isempty(dir) || isfile(joinpath(dir, "main.jl")) || (dir = dirname(dir))
+  LADDER_FOLDER[] = dir
 end
 
 """
