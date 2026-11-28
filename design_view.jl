@@ -55,7 +55,8 @@
 
 export DesignFile, design_part, DesignField, FIELD_PAD, FIELD_ROOM, FIELD_BOX_COLS, follow_page!,
        field_outcome!, box_room, FIELD_H, field_key, SHEET_OPEN, mend!, sheet_key, leave_design!,
-       designs, unsaved_designs, close_designs!, closes!, CloseAsk, close_now!, save_and_close!, watch_close!
+       designs, unsaved_designs, close_designs!, closes!, CloseAsk, close_now!, save_and_close!, watch_close!,
+       FieldStyle, CloseAnyway
 
 const DesignFile = Union{FS.File{:sc},FS.File{:SC},FS.File{:solidcraft}}
 push!(BLOCK_ICONS, "arrow-counterclockwise", "arrow-clockwise", "save", "x-lg", "x", "check-lg", "chevron-down", "chevron-right", "eye", "eye-slash",
@@ -126,6 +127,11 @@ end
 "The field of a SolidCraft design that the editor `e` is the text of, or its sheet of parameters, or nothing for any other editor"
 design_field_of(e) = (f = owner_of(e); f isa Union{DesignField,DesignSheet} ? f : nothing)
 
+"The size and the font that the text of a design's field, or of its sheet of parameters, was last laid out at"
+@def mutable struct FieldStyle
+  key::Union{Nothing,Tuple} = nothing   # the field's zoom and font, or nothing before its first layout
+end
+
 """
 Give the editor of the field `f` the colours and the keys of the page that
 shows the design, and the size of a field's text. Its lines wrap at the
@@ -142,7 +148,8 @@ follow_page!(f::DesignField) = begin
   sub.zoom = f.code ? size / (num(TEXT_SIZE) * sub.code_scale) : size / num(TEXT_SIZE)
   # Text that was laid out at another size is laid out again
   key = (sub.zoom, sub.font)
-  get(sub.nodes, :field_style, nothing) == key || (sub.nodes[:field_style] = key; empty!(sub.flows))
+  style = state_of(sub, FieldStyle)
+  style.key == key || (style.key = key; empty!(sub.flows))
   f
 end
 
@@ -361,7 +368,8 @@ follow_page!(s::DesignSheet) = begin
   # `sheetgrid` makes a sheet's text 0.86 times as big as the page's
   sub.zoom = num(Designs.sheet_size(s.parent)) / (num(TEXT_SIZE) * 0.86)
   key = (sub.zoom, sub.font)
-  get(sub.nodes, :field_style, nothing) == key || (sub.nodes[:field_style] = key; empty!(sub.flows))
+  style = state_of(sub, FieldStyle)
+  style.key == key || (style.key = key; empty!(sub.flows))
   v = s.parent
   version = v.model === nothing ? -1 : v.model.version
   if s.names === nothing || s.names[1] != version
@@ -557,6 +565,11 @@ close_designs!(e) = begin
   nothing
 end
 
+"A window that closes with designs that have changes, after the answer Don't Save"
+@def mutable struct CloseAnyway
+  on::Bool = false   # the window closes with no more questions
+end
+
 """
 Can the window `w` of `e` close now? It can't while a design in it has changes
 that aren't saved: this asks about them, and the window closes when the
@@ -564,7 +577,7 @@ answer is Save or Don't Save.
 """
 closes!(e, w) = begin
   waiting = unsaved_designs(e)
-  (isempty(waiting) || get(e.nodes, :close_anyway, false) === true) && return true
+  (isempty(waiting) || state_of(e, CloseAnyway).on) && return true
   ask = CloseAsk(of=e, window=w)
   wide = 380px
   popup!(w, ask, anchor=((w.size[1] - wide) / 2, 120px, 0px, 0px), placement=:below, width=wide, key=:close_ask, theme=component_theme(e.zoom))
@@ -584,7 +597,7 @@ end
 "Close the window of the question `a` with no more questions"
 close_now!(a::CloseAsk) = begin
   close_popup!(a.window, :close_ask)
-  a.of.nodes[:close_anyway] = true
+  state_of(a.of, CloseAnyway).on = true
   close(a.window)
   nothing
 end

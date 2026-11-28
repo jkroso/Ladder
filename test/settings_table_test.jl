@@ -101,9 +101,9 @@ end
 
 "What the name `n` gives the code of a page of `e`, and the settings that it noted the running live block read"
 got(e, n) = begin
-  e.nodes[:running] = :probe
+  K.state_of(e, K.RunningBlock).key = :probe
   v = Base.invokelatest(Base.invokelatest(getglobal, K.sandbox(e), n))
-  delete!(e.nodes, :running)
+  K.state_of(e, K.RunningBlock).key = nothing
   read = sort!(Symbol[k[2] for (k, s) in e.nodes if k isa Tuple && length(k) == 2 && k[1] === :readers && :probe in s])
   foreach(s -> delete!(e.nodes, (:readers, s)), read)
   v => read

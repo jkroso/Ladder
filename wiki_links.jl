@@ -24,7 +24,7 @@
 @use "./levels_view" exports...
 @use "./sheet_view" LinkNotes
 
-export PROJECT_MARKS, find_named, project_root, wiki_file, wiki_names
+export PROJECT_MARKS, find_named, project_root, wiki_file, wiki_names, WikiOffer
 
 # --- wiki links ---------------------------------------------------------------------------
 #
@@ -134,6 +134,13 @@ end
 # the rest of the name and the ]] that ends the link. Two pages with the same
 # name are each written with their folders, like notes/Ideas.
 
+@use "github.com/jkroso/Prospects.jl" @def
+
+"What a window keeps of the wiki link that's being typed"
+@def mutable struct WikiOffer
+  offered::Union{Nothing,Tuple} = nothing   # the text and the place of the caret that pages were last looked for at, and what was found
+end
+
 """
 The pages that the name being typed in a wiki link could be: the line, the
 column where the name starts, and the names. Nothing when the caret isn't in
@@ -144,10 +151,11 @@ wiki_offered(e) = begin
   i, col = b.caret
   key = (b.path, b.version, b.caret)
   just_typed(e) || return nothing
-  kept = get(e.nodes, :wiki_offered, nothing)
+  s = state_of(e, WikiOffer)
+  kept = s.offered
   kept !== nothing && kept[1] == key && return kept[2]
   found = wiki_names(e, i, col)
-  e.nodes[:wiki_offered] = (key, found)
+  s.offered = (key, found)
   found
 end
 

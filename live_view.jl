@@ -40,7 +40,7 @@
 export USUAL, share!, reads!, default_app!, text_size!, NARROWEST, WIDEST, page_width!, font!, weight!,
        problems, present, present_inline, note, redescribe!, swap!, OpenButton, Listing, list!, MOST_FILES,
        entry, steps, listing, contents, CRUMB_GAP, ARROW_W, DOTS_W, LONGEST_NAME, short, fitting,
-       MODEL_HEIGHT, TEXT_OPENS, codeline, DefaultAsked
+       MODEL_HEIGHT, TEXT_OPENS, codeline, DefaultAsked, RunningBlock
 
 "The modules whose names a live block can use with no line that loads them"
 const USUAL = ("github.com/jkroso/UI.jl/Interface/Semantic", "github.com/jkroso/UI.jl/Interface/Geometric")
@@ -56,13 +56,18 @@ share!(m, path) = begin
   end
 end
 
+"The live block of a window's page that runs now"
+@def mutable struct RunningBlock
+  key::Any = nothing   # the key of what the block makes in the window's nodes, or nothing while no block runs
+end
+
 """
 Note that the live block that's running now asked for a setting of the page:
 `:theme`, `:zoom` or `:font`. Such a block is run again when the setting changes, so
 what it shows stays true.
 """
 reads!(e, setting::Symbol) = begin
-  key = get(e.nodes, :running, nothing)
+  key = state_of(e, RunningBlock).key
   key === nothing || push!(get!(() -> Set{Any}(), e.nodes, (:readers, setting)), key)
   nothing
 end
@@ -157,7 +162,7 @@ evaluate(e, code::String; key=(:live, e.buf.path, code), inline=false) = begin
   # The code can load the drawing methods of a node, and the frame that runs it
   # can't call them yet. So the window draws one more frame soon after.
   one_more_frame!(e)
-  e.nodes[:running] = key
+  state_of(e, RunningBlock).key = key
   try
     # Kip finds a path like "./widgets.jl" from the folder of the document, and so does a relative FSPath
     cd(isdir(docdir(e)) ? docdir(e) : pwd()) do
@@ -175,7 +180,7 @@ evaluate(e, code::String; key=(:live, e.buf.path, code), inline=false) = begin
     # A line of text has room for the first line of what went wrong
     inline ? (said(first(split(sprint(showerror, err), '\n'))), true) : note(sprint(showerror, err), colours.accent)
   finally
-    delete!(e.nodes, :running)
+    state_of(e, RunningBlock).key = nothing
     CODE_RUNS[] += 1   # the page's `check` blocks run again
   end
 end

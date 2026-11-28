@@ -41,7 +41,7 @@ export CLOSING, ENDING, OPENERS, OPENING, PAIRS, PAIR_REACH, SLIDE_TIME, backste
        bracket_runs, caret_pair, carry, copy_selection!, erase!, glow_bracket_pair, in_empty_pair,
        in_long_string, indent!, indent_lines!, neighbour, newline!, next_cell!, opened, pair!,
        parts_of, pass, quotes, screen_edge, shift_lines!, sidebar_room!, sliding, surround!,
-       text_size, typed_code, word_step, zoom!
+       text_size, typed_code, word_step, zoom!, BracketsState
 
 # --- editing -----------------------------------------------------------------------------
 
@@ -533,14 +533,22 @@ bracket_pair(b::Buffer) = begin
   nothing
 end
 
+@use "github.com/jkroso/Prospects.jl" @def
+
+"What a window keeps of the brackets that the caret is between"
+@def mutable struct BracketsState
+  pair::Union{Nothing,Tuple} = nothing   # the text and the place of the caret that the brackets were last looked for at, and what was found
+end
+
 "The two brackets that the caret is between. They're looked for once for each place of the caret in each version of the text."
 caret_pair(e) = begin
   b = e.buf
   key = (b.path, b.version, b.caret, b.anchor)
-  kept = get(e.nodes, :bracket_pair, nothing)
+  s = state_of(e, BracketsState)
+  kept = s.pair
   kept !== nothing && kept[1] == key && return kept[2]
   found = bracket_pair(b)
-  e.nodes[:bracket_pair] = (key, found)
+  s.pair = (key, found)
   found
 end
 

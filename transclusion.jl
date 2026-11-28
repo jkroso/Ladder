@@ -35,7 +35,8 @@
 export DEEPEST_PART, KEEP_PART, LiveCover, PART_NOTE_H, PART_TAB, PartSource, TRANSCLUSION,
        Transclusion, block_link!, copy_link_to_block!, enter_shown!, heading_lines, heading_words,
        host_paths, keep_shown!, leave_part!, live_cover, open_part!, part_editor, part_tall,
-       reveal_part!, show_part!, transclusion_blocks, transclusion_lines, transclusions
+       reveal_part!, show_part!, transclusion_blocks, transclusion_lines, transclusions, HostStyle,
+       PartLines, PartToShow
 
 # --- a part of another page ----------------------------------------------------------------
 #
@@ -270,7 +271,8 @@ show_part!(v::Transclusion, e, target::String) = begin
   refresh!(b)   # a change that something else made to the other page's file shows here too
   w = window_of(e)
   typing = w !== nothing && w.focus === sub
-  kept = get(sub.nodes, :kept, nothing)
+  lines = state_of(sub, PartLines)
+  kept = lines.kept
   span = if typing && kept !== nothing
     # Every change while it types is in the part, so its last line moves down as lines are added
     (s, t), had = kept
@@ -281,7 +283,7 @@ show_part!(v::Transclusion, e, target::String) = begin
   span === nothing && return note("$shown has no $(isempty(part) ? "lines" : part)")
   v.note = ""
   span!(sub, span)
-  sub.nodes[:kept] = (span, length(b.lines))
+  lines.kept = (span, length(b.lines))
   # While no part of this page has the other page's caret, every line of the part shows as it reads
   (w !== nothing && w.focus isa Editor && w.focus.buf === b) || (b.reading = true; sub.plain = false)
   follow_host!(sub, e)
@@ -289,6 +291,11 @@ show_part!(v::Transclusion, e, target::String) = begin
   v.tall = isempty(sub.layout) ? 0px : lowest(sub, sub.layout)
   typing && sub.reveal && keep_shown!(v, e)
   v
+end
+
+"The lines that a part of another page showed in the last frame, kept in the part's editor"
+@def mutable struct PartLines
+  kept::Union{Nothing,Tuple} = nothing   # the first and the last line of the part, and how many lines its page had then
 end
 
 "An editor of the page at `path`, for the part of it that `v` shows on the page of `e`. It edits the lines that the window has open for that page."
@@ -299,6 +306,11 @@ part_editor(v::Transclusion, e, path) = begin
   sub
 end
 
+"The choices of its page that the text of a small editor was last laid out with"
+@def mutable struct HostStyle
+  key::Union{Nothing,Tuple} = nothing   # the page's theme, look, fonts, weights and sizes, or nothing before the first layout
+end
+
 "Give the editor of a part the choices of the editor of the page that shows it: its colours, font, text size and keys"
 follow_host!(sub, e) = begin
   # FOLLOWED has the settings. The look of a blog's page and the window's size are no settings, and the part has those too.
@@ -307,8 +319,14 @@ follow_host!(sub, e) = begin
   end
   # Text that was laid out in another font or at another size is laid out again
   key = (e.theme, e.look, e.font, e.weight, e.zoom, e.code_scale, e.code_font, e.code_weight)
-  get(sub.nodes, :style, nothing) == key || (sub.nodes[:style] = key; empty!(sub.flows))
+  style = state_of(sub, HostStyle)
+  style.key == key || (style.key = key; empty!(sub.flows))
   sub
+end
+
+"The part of another page whose caret the window's page scrolls to, once the page is laid out"
+@def mutable struct PartToShow
+  place::Union{Nothing,Tuple} = nothing   # the line of the page that the part is on, and the top and the height of the caret's line in the part. Nothing when no part asks.
 end
 
 "Scroll the page of `e` so that the caret of the part that `v` shows is in the window"
@@ -323,12 +341,14 @@ keep_shown!(v::Transclusion, e) = begin
     top, high = it.top + line_top(it.content, k), it.content.lines[k].high
   end
   # The page's own layout isn't done, so the place of the part on it is found after it is
-  e.nodes[:show_part] = (v.line, top, high)
+  state_of(e, PartToShow).place = (v.line, top, high)
 end
 
 "Scroll the window's page to the caret of a part of another page that it shows, once the page is laid out"
 reveal_part!(e) = begin
-  kept = pop!(e.nodes, :show_part, nothing)
+  shows = state_of(e, PartToShow)
+  kept = shows.place
+  shows.place = nothing
   (kept === nothing || isempty(e.layout)) && return
   line, top, high = kept
   at = item(e, line).top + LIVE_GAP + PART_TAB + top

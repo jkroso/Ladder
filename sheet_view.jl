@@ -44,7 +44,8 @@
 export SPREAD_Y, gridrows, cellnames, spreadgrid, spreadsheet, ring, spreadop!, droprow!, SpreadBlock,
        SHEET_GAP, SHEET_X, SHEET_Y, RAISE, RESULT_X, load_sheet_font, drawn, exprpieces, chip_w, sheet_case,
        sheetgrid, row_top, expr_x, cellflow, cellunder, rowunder, place, sheetseg, sheetlines, next_row!,
-       sheet_tab!, erase_row!, isnamechar, offered, suggesting, suggestion, suggest_key!, suggestbox, LinkNotes
+       sheet_tab!, erase_row!, isnamechar, offered, suggesting, suggestion, suggest_key!, suggestbox, LinkNotes,
+       Suggesting
 
 const SPREAD_Y = 5px   # above and below the text of a cell
 
@@ -707,17 +708,26 @@ offered(e) = begin
   nothing
 end
 
-"Which name of the list is chosen, and the list that esc hid. Each is kept with the place its list is for."
-suggesting(e) = get!(() -> Ref{Any}((at=(0, 0), chosen=1, hidden=(0, 0))), e.nodes, :suggesting)
+@use "github.com/jkroso/Prospects.jl" @def
+
+"Which name of the list of names is chosen, and the list that esc hid. Each is kept with the place its list is for."
+@def mutable struct Suggesting
+  at::Tuple{Int,Int} = (0, 0)       # the line, and the column where the name starts, of the list that `chosen` is for
+  chosen::Int = 1                   # which name of that list is chosen
+  hidden::Tuple{Int,Int} = (0, 0)   # the same place of the list that esc hid, or (0, 0)
+end
+
+"Which name of the list is chosen, and the list that esc hid, for the window of `e`"
+suggesting(e) = state_of(e, Suggesting)
 
 "The list of names to show now: the line, the column where the name starts, the names and which one is chosen. Or nothing."
 suggestion(e) = begin
   caretless(e.buf) && return nothing
   found = offered(e)
-  state = suggesting(e)[]
+  state = suggesting(e)
   # A list that esc hid stays hidden while its name is being typed, and no longer
   if state.hidden != (0, 0) && (found === nothing || state.hidden != (found[1], found[2]))
-    state = suggesting(e)[] = (at=state.at, chosen=state.chosen, hidden=(0, 0))
+    state.hidden = (0, 0)
   end
   found === nothing && return nothing
   i, start, names = found
@@ -732,11 +742,11 @@ suggest_key!(e, K) = begin
   i, start, names, chosen = found
   state = suggesting(e)
   if K == Keys.down || K == Keys.up
-    state[] = (at=(i, start), chosen=mod1(chosen + (K == Keys.down ? 1 : -1), length(names)), hidden=(0, 0))
+    state.at, state.chosen, state.hidden = (i, start), mod1(chosen + (K == Keys.down ? 1 : -1), length(names)), (0, 0)
   elseif K == Keys.enter || K == Keys.tab
     complete!(e, i, start, names[chosen])
   elseif K == Keys.escape
-    state[] = (at=(0, 0), chosen=1, hidden=(i, start))
+    state.at, state.chosen, state.hidden = (0, 0), 1, (i, start)
   else
     return false
   end

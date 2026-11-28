@@ -84,7 +84,7 @@ export FILE_ROWS, FILE_BYTES, HEAD_H, CELL_PAD, SHEET_LINE, SHEET_ROUND, SHEET_A
        add_line!, delete_row!, each_row!, add_column!, delete_column!, show_cell!, cell_at, ROW_MENU,
        next_cell, edit_on!, CellField, MenuField, SheetField, CELL_TEXT, MENU_TEXT, field_editor!,
        cell_field!, cell_text, fill_cell!, fill_field!, field_type, follow_cell!,
-       CELL_COMMANDS, cell_key!, COLUMN_ACTIONS, ACTION_WORDS, live
+       CELL_COMMANDS, cell_key!, COLUMN_ACTIONS, ACTION_WORDS, live, CellStyle
 
 const FILE_ROWS = 100_000       # the most rows of a CSV file that the page reads
 const FILE_BYTES = 40_000_000   # and the most of the file that it reads
@@ -1005,6 +1005,11 @@ fill_field!(f::MenuField, text, words) = (fill_cell!(f, text); b = f.sub.buf; b.
 field_type(f::CellField) = (CELL_TEXT, f.heading ? 600 : 400)
 field_type(::MenuField) = (MENU_TEXT, 400)
 
+"The size and the font that the text of a cell's field was last laid out at"
+@def mutable struct CellStyle
+  key::Union{Nothing,Tuple} = nothing   # the field's zoom, font and weight, or nothing before its first layout
+end
+
 "Give the editor of the field `f` the colours and the keys of the page, and the font and the size of the table's text"
 follow_cell!(f::SheetField) = begin
   sub = f.sub
@@ -1017,7 +1022,8 @@ follow_cell!(f::SheetField) = begin
   sub.zoom = num(size) / num(TEXT_SIZE)
   # Text that was laid out at another size or weight is laid out again
   key = (sub.zoom, sub.font, sub.weight)
-  get(sub.nodes, :cell_style, nothing) == key || (sub.nodes[:cell_style] = key; empty!(sub.flows))
+  style = state_of(sub, CellStyle)
+  style.key == key || (style.key = key; empty!(sub.flows))
   f
 end
 

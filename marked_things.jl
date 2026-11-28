@@ -28,7 +28,7 @@
 @use "./timelog_view" exports...
 @use "./chart_view" exports...
 
-export item_table, named_rows, pointed_line, row_name
+export item_table, named_rows, pointed_line, row_name, PointedThing
 
 # --- one thing in many parts of the page -------------------------------------------------------
 #
@@ -156,6 +156,13 @@ pointed_line(e) = begin
   nothing
 end
 
+@use "github.com/jkroso/Prospects.jl" @def
+
+"The thing that the mouse is on in a window, as the last frame found it"
+@def mutable struct PointedThing
+  found::Union{Nothing,Tuple{Int,String}} = nothing   # the line of the page's text that the mouse is on, or 0, and the thing's name. Nothing when it's on no thing.
+end
+
 """
 Find the thing that the mouse is on, before the page is laid out: in the
 page's text, or else in the first part of the page that says so. `pointed(e)`
@@ -169,12 +176,12 @@ point_tick!(e) = begin
       name === nothing || (found = (0, name); break)
     end
   end
-  e.nodes[:pointed] = found === nothing ? nothing : (found[1], plain_name(found[2]))
+  state_of(e, PointedThing).found = found === nothing ? nothing : (found[1], plain_name(found[2]))
   e
 end
 
 "The name of the thing that the mouse is on, in any part of the page that shows, or nothing"
-pointed(e::Editor) = (p = get(e.nodes, :pointed, nothing); p === nothing ? nothing : p[2])
+pointed(e::Editor) = (p = state_of(e, PointedThing).found; p === nothing ? nothing : p[2])
 
 "True while the mouse is on a thing called `name`, in any part of the page"
 marked(e::Editor, name::AbstractString) = (p = pointed(e); p !== nothing && p == plain_name(name))
@@ -186,7 +193,7 @@ box behind each to-do item and each row of a table that has its name. The line
 that the mouse is on has none. The page's text is at `ui`.
 """
 mark_pointed(ctx, e, ui) = begin
-  p = get(e.nodes, :pointed, nothing)
+  p = state_of(e, PointedThing).found
   p === nothing && return
   from, name = p
   fill = tint(colours.accent, MARK_FILL)

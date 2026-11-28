@@ -30,7 +30,7 @@
 @use "./page_extras" exports...
 @use "./day_view" exports...
 
-export LineAsked, day_words, history_words, line_history!, line_tick!
+export LineAsked, day_words, history_words, line_history!, line_tick!, LineHistory
 
 # --- when a line last changed ---------------------------------------------------------------
 #
@@ -61,6 +61,11 @@ end
   before::Vector{String} = String[]
 end
 
+"What a window keeps of the history of a line"
+@def mutable struct LineHistory
+  asked::Union{Nothing,LineAsked} = nothing   # what was asked of git about the line whose number was clicked, or nothing
+end
+
 "Ask git which commit last changed line `i` of the page. True when git keeps the page, so there's something to ask."
 line_history!(e, i::Int) = begin
   b = e.buf
@@ -72,7 +77,7 @@ line_history!(e, i::Int) = begin
   catch
     return false
   end
-  e.nodes[:line_asked] = asked
+  state_of(e, LineHistory).asked = asked
   redraw_in!(e, 0)
   true
 end
@@ -99,8 +104,8 @@ end
 
 "In each frame: read what git said about a line, show it beside the line's number, and take it away after the next click, key or scroll"
 line_tick!(e) = begin
-  a = get(e.nodes, :line_asked, nothing)
-  a isa LineAsked || return nothing
+  a = state_of(e, LineHistory).asked
+  a === nothing && return nothing
   w, b = window_of(e), e.buf
   if a.found === nothing
     yield()   # git's end is noticed by a task, which gets its turn here
@@ -112,7 +117,7 @@ line_tick!(e) = begin
   end
   if w === nothing || a.stays != (b.path, b.version, b.caret, e.scroll.offset) || !(1 <= a.line <= length(e.layout))
     w === nothing || close_popup!(w, :line_asked)
-    delete!(e.nodes, :line_asked)
+    state_of(e, LineHistory).asked = nothing
     return nothing
   end
   it = item(e, a.line)

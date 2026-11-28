@@ -103,7 +103,7 @@ export OUTCOME_GAP, OUTCOME_LINES, OUTCOME_COLS, OUTCOME_NODE_W, OUTCOME_EDGE, M
        brief_text, member_lines, unfolded, printed_rest, member_cols, outcome_line, outcome_wide, outcomes,
        outcome!, SPIN_TURN, SPIN_FRAME, CodeRun, run_pieces!, run_piece, run_tick!, came_back!, run_here!,
        sum_code_at, run_sum_here!, in_its_sum, sum_box_place, run_all!, bring_failed!, follow_outcomes!,
-       forget_outcomes!, outcome_over, value_row, isvalue, members_view, Spinner, inside_corner
+       forget_outcomes!, outcome_over, value_row, isvalue, members_view, Spinner, inside_corner, CodeRuns
 
 const OUTCOME_GAP = 14px        # between the end of a line of code and the box of what it came to
 const OUTCOME_LINES = 30        # the most lines of a value that Julia writes
@@ -574,6 +574,11 @@ mutable struct CodeRun
   after::Any               # what to do when every piece has come back, or nothing
 end
 
+"The code of a window's pages that runs now, in threads of its own"
+@def mutable struct CodeRuns
+  list::Vector{CodeRun} = CodeRun[]   # one for each run that has pieces still to come back
+end
+
 """
 Run the code on the lines of each range in `rs` of the page, one piece after
 another, and show what each piece comes to after its last line. `codes` are the
@@ -614,7 +619,7 @@ run_pieces!(e, rs::AbstractVector, codes::AbstractVector; stop=false, after=noth
     end
   end
   LAST_RUN[] = task
-  push!(get!(() -> CodeRun[], e.nodes, :runs), CodeRun(e, (:outcomes, b.path), path, made, String.(codes), came, task, 0, after))
+  push!(state_of(e, CodeRuns).list, CodeRun(e, (:outcomes, b.path), path, made, String.(codes), came, task, 0, after))
   while !istaskdone(task) && time() < asked + RUN_WAIT[]
     sleep(0.002)
   end
@@ -661,8 +666,8 @@ piece that came back shows what it came to, and while a piece still runs, the
 window draws again soon, which turns the spinners.
 """
 run_tick!(e) = begin
-  runs = get(e.nodes, :runs, nothing)
-  (runs === nothing || isempty(runs)) && return
+  runs = state_of(e, CodeRuns).list
+  isempty(runs) && return
   for run in copy(runs)
     # It's asked whether the task ended before what it sent is taken, so nothing comes after the last take
     ended = istaskdone(run.task)

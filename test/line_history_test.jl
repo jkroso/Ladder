@@ -64,12 +64,12 @@ click_number(i) = begin
   onkey(w, KeyRelease{Keys.mouse_left}(0, w))
   # git answers in a later frame
   from = time()
-  while (a = get(e.nodes, :line_asked, nothing)) !== nothing && a.found === nothing && time() - from < 10
+  while (a = K.state_of(e, K.LineHistory).asked) !== nothing && a.found === nothing && time() - from < 10
     frames(1)
     sleep(0.02)
   end
   frames()
-  get(e.nodes, :line_asked, nothing)
+  K.state_of(e, K.LineHistory).asked
 end
 shown() = any(p -> p.key == :line_asked, popups(w))
 "Each Text in the layout `x`"
@@ -99,7 +99,7 @@ end
   K.focus(e)
   ontype(e, Typed('x', w))
   frames()
-  @test !shown() && !haskey(e.nodes, :line_asked)
+  @test !shown() && K.state_of(e, K.LineHistory).asked === nothing
   # The line that was typed in is in no commit
   a = click_number(e.buf.caret[1])
   @test isempty(a.found.hash) && shown()
