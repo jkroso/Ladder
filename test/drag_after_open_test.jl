@@ -11,6 +11,7 @@
 @use "github.com/jkroso/MiniFB.jl" Window MouseMove onmouse Keys
 @use "github.com/jkroso/UI.jl/Interface/draw" frame
 @use GeometryBasics: Vec2
+@use "./drive" drive
 const px = K.px
 
 const dir = mktempdir()
@@ -22,7 +23,7 @@ write(short, join(["x$i = $i" for i in 1:81], "\n"))
 
 const e = K.build_editor(long)
 const w = Window(e, size=(900px, 600px))
-frames(n=2) = foreach(_ -> Base.invokelatest(frame, w), 1:n)
+const (; frames) = drive(w, latest=true)
 frames(3)
 
 "Move the mouse to `(x, y)` with its button down, as a drag does"

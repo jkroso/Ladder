@@ -11,6 +11,7 @@
 @use "github.com/jkroso/UI.jl/Interface/draw" frame rect popups
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
 @use GeometryBasics: Vec2
+@use "./drive" drive
 
 const px = K.px
 const dir = mktempdir()
@@ -21,9 +22,7 @@ write(page, "# A page\n\nSome words near the top of the window.\n")
 const e = K.build_editor(page)
 e.panel = false
 const w = Window(e, size=(900px, 600px))
-frames(n=3) = foreach(_ -> Base.invokelatest(frame, w), 1:n)
-at((x, y)) = (w.mouse = typeof(w.mouse)(px(x), px(y)); onmouse(w, MouseMove(Vec2{px}(px(x), px(y)), w)); frames(1))
-shot(name) = haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], "hide-bar-$name.png"), w)
+const (; frames, at, shot) = drive(w, frames=3, latest=true)
 wait_for(seconds) = (sleep(seconds + 0.05); frames())
 "Wait until the bar has slid all the way in or out"
 settle() = wait_for(K.SLIDE_TIME)
@@ -55,7 +54,7 @@ end
   put_away!()
   @test shown() == 0
   @test bar() === nothing   # the window doesn't show it at all
-  shot("hidden")
+  shot("hide-bar-hidden")
 end
 
 @testset "Resting the mouse at the top edge brings the bar out over the page" begin
@@ -67,7 +66,7 @@ end
   @test shown() == 1
   @test K.num(bar().top) == 0
   @test page_top() == 0   # the bar lies over the page, and the page doesn't move
-  shot("out")
+  shot("hide-bar-out")
   # It stays while the mouse is on it
   at(ON_BAR); wait_for(K.BAR_STAYS)
   @test K.bar_out(e)
@@ -119,7 +118,7 @@ end
   @test !any(p -> p.key == :title_trail, popups(w))
   at(AT_EDGE); wait_for(K.BAR_WAIT); settle(); frames()
   @test any(p -> p.key == :title_trail, popups(w))
-  shot("pinned")
+  shot("hide-bar-pinned")
   put_away!()
   @test !any(p -> p.key == :title_trail, popups(w))
   e.pinned = false

@@ -13,6 +13,7 @@
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
 @use "github.com/jkroso/URI.jl/FSPath" FSPath
 @use GeometryBasics: Vec2
+@use "./drive" drive
 const px = K.px
 
 const dir = realpath(mktempdir())
@@ -36,9 +37,8 @@ write(joinpath(blog, "pics", "a.png"), read(joinpath(K.pages_dir[], "photos", "2
 const e = K.build_editor(hello)
 const w = Window(e, size=(1000px, 800px))
 # Each frame is drawn with the newest code, as the window's loop draws it
-frames(n=3) = foreach(_ -> Base.invokelatest(frame, w), 1:n)
+const (; frames, shot) = drive(w, frames=3, latest=true)
 frames()
-shot(name) = haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], name), w)
 folder() = K.FS.get(FSPath(blog))
 "Draw frames until the blog is published, as the window does while Publish works"
 publish(folder=blog) = begin

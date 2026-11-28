@@ -1,7 +1,7 @@
 # Tests for changing a diagram while it fills the window. See "a picture, a
 # diagram or a page that fills the window" in main.jl. Run them with
 # `julia -O0 --project=. test/diagram_edit_test.jl`. They click and type in a
-# window that isn't on the screen. Set the environment variable DIAGRAM_SHOTS
+# window that isn't on the screen. Set the environment variable LADDER_SHOTS
 # to a folder to keep a picture of each step.
 
 @use Test: @test, @testset
@@ -38,14 +38,10 @@ Some words under it.
 const e = K.build_editor(page)
 e.remember = false
 const w = Window(e, size=(1100px, 800px))
-const (; frames, at, press, release, click, key) = drive(w, moved=2)
+const (; frames, at, press, release, click, typed, key, shot) = drive(w, moved=2)
 frames()
 
-const shots = get(ENV, "DIAGRAM_SHOTS", "")
-shot(name) = isempty(shots) || save_png(joinpath(shots, name * ".png"), w)
-
 command(k, more...) = (foreach(m -> w.keys |= m, (Keys.cmd, more...)); key(k); foreach(m -> w.keys ⊻= m, (Keys.cmd, more...)))
-type(s) = (foreach(c -> ontype(w, Typed(c, w)), s); frames())
 view() = K.zooming(e)
 "The lines of the page's `mermaid` block, as one text"
 block() = K.diagram_code(e.buf, 1)
@@ -103,7 +99,7 @@ end
   click(spot((:box, "A")))
   @test m.typing == (:box, "A") && w.focus === m.field && m.field.text == "Write a page"
   command(Keys.a)
-  type("Draft it")
+  typed("Draft it")
   shot("3-typing")
   key(Keys.enter)
   @test m.typing === nothing
@@ -125,7 +121,7 @@ end
   @test m.typing === nothing
   key(Keys.enter)
   @test m.typing == (:box, "A")
-  type("x")
+  typed("x")
   key(Keys.escape)
   @test m.typing === nothing && block() == CODE && view() !== nothing
 end
@@ -136,7 +132,7 @@ end
   click(middle(rect(tool_button(:add))))
   @test m.picked == (:box, "E") && m.typing == (:box, "E")
   @test endswith(block(), "\n  C --> E[New box]")
-  type("Print it")
+  typed("Print it")
   key(Keys.enter)
   @test endswith(block(), "\n  C --> E[Print it]")
   shot("4-added")
@@ -236,7 +232,7 @@ end
   click(middle(rect(tool_button(:message))))
   click(spot((:person, "A")))
   @test m.typing == (:message, 2) && m.field.text == "Message"
-  type("Hi")
+  typed("Hi")
   shot("5-sequence")
   key(Keys.enter)
   @test endswith(block(), "\n  B->>A: Hi")
@@ -256,7 +252,7 @@ end
   @test tool_names() == [:add, :join, :start, :stop, :note, :delete]
   click(middle(rect(tool_button(:add))))
   @test m.typing == (:state, "S1")
-  type("Stopped")
+  typed("Stopped")
   shot("6-state")
   key(Keys.enter)
   @test endswith(block(), "\n  Moving --> S1\n  S1 : Stopped")
@@ -273,7 +269,7 @@ end
   @test tool_names() == [:line, :join, :add, :note, :delete]
   click(middle(rect(tool_button(:line))))
   @test m.typing == (:member, ("Dog", 1))
-  type("+bark()")
+  typed("+bark()")
   key(Keys.enter)
   @test endswith(block(), "\n  Dog : +bark()")
   # A click on a line of a class selects the line, and a click on the name selects the class
@@ -282,7 +278,7 @@ end
   click(spot((:class, "Dog")))
   key(Keys.enter)
   command(Keys.a)
-  type("Hound")
+  typed("Hound")
   shot("7-class")
   key(Keys.enter)
   @test occursin("Animal <|-- Hound", block()) && occursin("Hound : +bark()", block()) && m.picked == (:class, "Hound")
@@ -297,12 +293,12 @@ end
   key(Keys.enter)
   @test m.field.text == "Cats: 10"
   command(Keys.a)
-  type("Birds: 25")
+  typed("Birds: 25")
   shot("8-pie")
   key(Keys.enter)
   @test block() == "pie title Pets\n  \"Dogs\" : 30\n  \"Birds\" : 25"
   click(middle(rect(tool_button(:add))))
-  type("Fish: 5")
+  typed("Fish: 5")
   key(Keys.enter)
   @test endswith(block(), "\n  \"Fish\" : 5")
   key(Keys.escape); key(Keys.escape)

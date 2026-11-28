@@ -11,6 +11,7 @@
 @use "github.com/jkroso/MiniFB.jl" Window
 @use "github.com/jkroso/UI.jl/Interface/draw" frame rect
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
+@use "./drive" drive
 const px = K.px
 
 const dir = mktempdir()
@@ -19,10 +20,9 @@ write(page, "# Notes\n\nSome words.\n")
 
 const e = K.build_editor(page)
 const w = Window(e, size=(1000px, 700px))
-frames(n=2) = foreach(_ -> frame(w), 1:n)
+const (; frames, shot) = drive(w)
 e.panel = true   # the sidebar shows
 frames(3)
-shot(name) = haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], name), w)
 
 "How far the left edge of the button that shows the sidebar is from the left edge of the window"
 panel_left() = K.num(rect(e.nodes[:panel]).left)

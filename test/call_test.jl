@@ -38,7 +38,7 @@ write(page, TEXT)
 const e = K.build_editor(page)
 const w = Window(e, size=(1000px, 800px))
 const b = e.buf
-const (; frames, typed, key) = drive(w)
+const (; frames, typed, key, shot) = drive(w)
 frames()
 
 "Put the text back as it was, with the caret at `line` and `col`"
@@ -65,9 +65,6 @@ lit() = begin
 end
 "True when the window draws the box"
 drawn() = !isempty(K.callbox(e))
-
-const shots = get(ENV, "CALL_SHOTS", "")
-shot(name) = isempty(shots) || save_png(joinpath(shots, name * ".png"), w)
 
 @testset "the ( of a call shows what one of Julia's functions takes" begin
   fresh!()
@@ -369,7 +366,7 @@ end
   foreach(c -> ontype(w2, Typed(c, w2)), "length(")
   foreach(_ -> frame(w2), 1:2)
   @test only(K.callbox(e2)).padding.top < line_y(e2)
-  isempty(shots) || save_png(joinpath(shots, "no room.png"), w2)
+  drive(w2).shot("no room")
   close(w2)
 end
 

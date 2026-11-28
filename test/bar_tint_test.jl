@@ -12,6 +12,7 @@
 @use GeometryBasics: Vec2
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
 @use "github.com/jkroso/UI.jl/Interface/testing" pixels
+@use "./drive" drive
 const px = K.px
 
 const dir = mktempdir()
@@ -35,10 +36,9 @@ const notes = file("notes.md", "# Notes\n\nSome words.\n")
 
 const e = K.build_editor(site)
 const w = Window(e, size=(1000px, 800px))
-frames(n=3) = foreach(_ -> frame(w), 1:n)
+const (; frames, shot) = drive(w, frames=3)
 e.panel = false   # the sidebar is closed, with no slide
 frames()
-shot(name) = haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], name * ".png"), w)
 
 browser() = e.nodes[(:html, e.buf.path)].browser
 "Draw frames until the page has had its last layout: a slow page rests after each layout"

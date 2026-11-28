@@ -9,6 +9,7 @@
 @use "../remote" => Remote
 @use "github.com/jkroso/MiniFB.jl" Window
 @use "github.com/jkroso/UI.jl/Interface/draw" frame
+@use "./drive" drive
 const px = K.px
 
 const dir = mktempdir()
@@ -76,7 +77,7 @@ page!("https://example.com/other.md", "# Other\n")
 
 const e = K.blank_editor()
 const w = Window(e, size=(1000px, 800px))
-frames(n=3) = foreach(_ -> frame(w), 1:n)
+const (; frames) = drive(w, frames=3)
 frames()
 said() = something(K.said_result(e), ("", 0.0))[1]
 at(p) = joinpath(browser, p)

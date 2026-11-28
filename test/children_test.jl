@@ -8,6 +8,7 @@
 @use "../main" => K
 @use "github.com/jkroso/MiniFB.jl" Window
 @use "github.com/jkroso/UI.jl/Interface/draw" frame
+@use "./drive" drive
 const px = K.px
 
 # The folder is the test's own each time, so that two test processes that run at once don't write the same files
@@ -54,7 +55,7 @@ dig the trench
 
 const e = K.build_editor(page)
 const w = Window(e, size=(1000px, 900px))
-frames(n=2) = foreach(_ -> frame(w), 1:n)
+const (; frames) = drive(w)
 frames()
 doc() = e.nodes[:document]
 children() = collect(doc().children)

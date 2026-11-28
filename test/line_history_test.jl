@@ -11,6 +11,7 @@
 @use "github.com/jkroso/MiniFB.jl" Window KeyPress KeyRelease MouseMove Typed Keys onkey onmouse ontype
 @use "github.com/jkroso/UI.jl/Interface/draw" frame popups
 @use GeometryBasics: Vec2
+@use "./drive" drive
 const px = K.px
 
 const repo = realpath(mktempdir())
@@ -49,7 +50,7 @@ end
 
 const e = K.build_editor(file)
 const w = Window(e, size=(900px, 600px))
-frames(n=2) = foreach(_ -> Base.invokelatest(frame, w), 1:n)
+const (; frames) = drive(w, latest=true)
 frames(4)
 "Click the number of line `i`"
 click_number(i) = begin

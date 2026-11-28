@@ -2,7 +2,7 @@
 # the shade of the caret's line, the line-length guide, the indent, and the font
 # and size of code. See "A line of a file of code or of text that's too long for the
 # window" in main.jl. Run them with `julia -O0 --project=. test/code_settings_test.jl`.
-# They use a window that isn't on the screen. With CODE_SHOTS set to a folder,
+# They use a window that isn't on the screen. With LADDER_SHOTS set to a folder,
 # they save pictures of it there.
 
 @use Test: @test, @testset, @test_throws
@@ -30,7 +30,7 @@ write(notes, "# Notes\n\n```julia\n$LONG\n```\n")
 const e = K.build_editor(file)
 const w = Window(e, size=(1000px, 700px))
 const Vec2 = typeof(w.mouse)   # a place in the window, or a move of two fingers
-const (; frames, typed, key) = drive(w)
+const (; frames, typed, key, shot) = drive(w)
 frames()
 K.focus(e)
 
@@ -59,9 +59,6 @@ pixels() = begin
 end
 "How far down the window the middle of line `i` is"
 middle(i) = round(Int, K.num(e.origin[2] + K.item(e, i).top + K.item(e, i).tall / 2))
-
-const shots = get(ENV, "CODE_SHOTS", "")
-shot(name) = isempty(shots) || save_png(joinpath(shots, name * ".png"), w)
 
 @testset "a long line of code wraps at the edge of the window, one indent further in than it starts" begin
   @test e.wrap && K.wraps(e)

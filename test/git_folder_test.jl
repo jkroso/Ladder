@@ -11,6 +11,7 @@
 @use "github.com/jkroso/UI.jl/Interface/draw" frame rect
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
 @use GeometryBasics: Vec2
+@use "./drive" drive middle
 
 const px = K.px
 const G = K.Git
@@ -38,21 +39,13 @@ write(joinpath(repo, "new.md"), "# New\n")
 const e = K.build_editor(joinpath(repo, "Readme.md"))
 e.panel = true   # the sidebar is open, with no slide
 const w = Window(e, size=(1100px, 760px))
-frames(n=3) = foreach(_ -> Base.invokelatest(frame, w), 1:n)
+const (; frames, at, click, shot) = drive(w, frames=3, pressed=1, latest=true)
 "Draw until git has answered, and then what it said is on the screen"
 settle() = (frames(2); G.wait!(); frames(2))
 "Ask git again now, as the window does after some seconds"
 again() = (G.forget!(); settle())
 settle()
 
-shot(name) = haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], "git-$name.png"), w)
-at((x, y)) = (w.mouse = typeof(w.mouse)(px(x), px(y)); onmouse(w, MouseMove(Vec2{px}(px(x), px(y)), w)); frames(1))
-click(place) = begin
-  at(place)
-  w.keys |= Keys.mouse_left; onkey(w, KeyPress{Keys.mouse_left}(0, w)); frames(1)
-  w.keys ⊻= Keys.mouse_left; onkey(w, KeyRelease{Keys.mouse_left}(0, w)); frames(2)
-end
-middle(node) = (r = rect(node); (K.num(r.left) + K.num(r.width) / 2, K.num(r.top) + K.num(r.height) / 2))
 "The name in the trail at the top of the sidebar of the folder at `path`"
 trail_name(path) = only(n for n in values(e.nodes) if n isa K.TrailName && n.path == path && rect(n) !== nothing)
 "The words of every Text in the geometry `g`"
@@ -73,7 +66,7 @@ end
   @test marks(joinpath(repo, "new.md")) == ["U"]
   @test marks(joinpath(repo, "Readme.md")) == []
   @test marks(joinpath(repo, "src")) == ["dot"]
-  shot("sidebar")
+  shot("git-sidebar")
 end
 
 @testset "the sidebar has no line of git's over its list, and a saved file gets its letter" begin
@@ -132,7 +125,7 @@ end
   # The file's name in the top bar is over the middle of the list, not of the space beside the sidebar
   t = rect(e.nodes[:title])
   @test K.num(t.left) + K.num(t.width) / 2 ≈ K.num(r.left) + K.num(r.width) / 2 atol=40
-  shot("page")
+  shot("git-page")
 end
 
 @testset "a click on a row of the repository's page shows its file, or opens its folder" begin
@@ -181,7 +174,7 @@ end
   @test K.num(q.left) >= K.num(page.left) + K.num(page.width) - 1
   @test K.num(q.left) + K.num(q.width) ≈ 1100 atol=1
   @test sort!([k[2] for k in keys(p.rows) if k[1] == :change]) == ["Readme.md", "new.md", "notes.md", "src/deep/b.jl"]
-  shot("folder-panel")
+  shot("git-folder-panel")
   # A folder further down has it too
   deep = joinpath(src, "deep")
   K.open_folder!(e, deep)
@@ -193,7 +186,7 @@ end
   @test K.shown_commit(e, repo) == hash
   @test rect(e.nodes[(:commit, repo)]) !== nothing
   @test e.buf.path == deep
-  shot("folder-commit")
+  shot("git-folder-commit")
   K.go_back!(e)
   frames()
   @test K.shown_commit(e, repo) == ""
@@ -248,7 +241,7 @@ end
   frames()
   y = K.num(K.PAGE_TOP + K.item(e, 399).top - e.scroll.offset)
   @test 0 < y < 300   # near the top of the window, so the lines under it show too
-  shot("file-changes")
+  shot("git-file-changes")
   K.go_back!(e)
   git("checkout", "--", "story.md")   # the tests after this count the files with changes
   again()
@@ -284,7 +277,7 @@ end
   # The list has the room that the panel had
   @test K.num(rect(e.nodes[(:repo, repo)]).width) > wide + 200
   @test K.tip(b) == "Show git's panel"
-  shot("panel-hidden")
+  shot("git-panel-hidden")
   # The palette has the command too
   @test K.works_here(e, Val(:right_panel))
   click(middle(b))
@@ -310,7 +303,7 @@ end
   settle()
   @test marks(repo) == ["main", "4"]
   @test marks(joinpath(hold, "plain")) == []
-  shot("list")
+  shot("git-list")
 end
 
 @testset "a window that's opened on a repository shows its first page of text" begin

@@ -8,6 +8,7 @@
 @use "../main" => K
 @use "github.com/jkroso/MiniFB.jl" Window
 @use "github.com/jkroso/UI.jl/Interface/draw" frame
+@use "./drive" drive
 const px = K.px
 
 const dir = mktempdir()
@@ -31,7 +32,7 @@ done = share("70%")
 
 const e = K.build_editor(file)
 const w = Window(e, size=(900px, 600px))
-frames(n=2) = foreach(_ -> Base.invokelatest(frame, w), 1:n)
+const (; frames) = drive(w, latest=true)
 frames()
 const b = e.buf
 

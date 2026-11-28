@@ -32,15 +32,12 @@ write(joinpath(dir, "bytes.jl"), UInt8[0x6a, 0x00, 0x01, 0x02, 0xff, 0x0a])
 
 const e = K.build_editor(file)
 const w = Window(e, size=(1000px, 800px))
-const (; frames, typed, key) = drive(w)
+const (; frames, typed, key, shot) = drive(w)
 frames()
 K.focus(e)
 
 caret!(line, col=0) = (e.buf.caret = e.buf.anchor = (line, col); frames())
 outcome(line) = (k = findfirst(o -> o.last == line, K.outcomes(e)); k === nothing ? nothing : K.outcomes(e)[k])
-
-const shots = get(ENV, "CODE_FILE_SHOTS", "")
-shot(name) = isempty(shots) || save_png(joinpath(shots, name * ".png"), w)
 
 @testset "a Julia file opens as code that the page changes" begin
   b = e.buf

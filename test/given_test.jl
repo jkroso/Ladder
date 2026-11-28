@@ -9,6 +9,7 @@
 @use "../sheet" tally known name_values needed
 @use "github.com/jkroso/MiniFB.jl" Window
 @use "github.com/jkroso/UI.jl/Interface/draw" frame
+@use "./drive" drive
 const px = K.px
 
 @testset "a sheet with names from outside it" begin
@@ -90,7 +91,7 @@ The tiles cost this much of the budget: !`ProgressBar(value = price / 24)`. A sw
 
 const e = K.build_editor(page)
 const w = Window(e, size=(1000px, 1500px))
-frames(n=2) = foreach(_ -> frame(w), 1:n)
+const (; frames) = drive(w)
 frames()
 sheet(n) = K.item(e, findall(==("```sheet"), e.buf.lines)[n] + 1).content
 results(n) = [r.text for r in sheet(n).results]

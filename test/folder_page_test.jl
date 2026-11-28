@@ -9,6 +9,7 @@
 @use "github.com/jkroso/MiniFB.jl" Window
 @use "github.com/jkroso/UI.jl/Interface/draw" frame popups
 @use "github.com/jkroso/URI.jl/FSPath" FSPath
+@use "./drive" drive
 const px = K.px
 const FS = K.FS
 
@@ -59,7 +60,7 @@ page!(notes, notes_page("box"))
 const e = K.build_editor(joinpath(dir, "page.md"))
 const w = Window(e, size=(1000px, 700px))
 # Each frame is drawn with the newest code, as the window's loop draws it: a page that ran in one frame loaded code for the next
-frames(n=3) = foreach(_ -> Base.invokelatest(frame, w), 1:n)
+const (; frames) = drive(w, frames=3, latest=true)
 e.panel || K.toggle_panel!(e)
 
 "The name of the kind of the folder at `path`"

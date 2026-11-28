@@ -10,6 +10,7 @@
 @use "github.com/jkroso/UI.jl/Interface/draw" frame rect popups
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
 @use GeometryBasics: Vec2
+@use "./drive" drive
 
 const px = K.px
 const D = K.Desks
@@ -42,33 +43,20 @@ const e = K.build_editor(joinpath(dir, "page.md"))
 e.remember = true   # the places of the icons are written, to the folder of these tests
 const w = Window(e, size=(1100px, 760px))
 # Each frame is drawn with the newest code, as the window's loop draws it: the folder's page ran in an earlier frame
-frames(n=3) = foreach(_ -> Base.invokelatest(frame, w), 1:n)
+const (; frames, at, press, release, click, typed, key, shot) = drive(w, frames=3, pressed=1, latest=true)
 frames()
 
-shot(name) = haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], "desktop-$name.png"), w)
 view() = e.nodes[(:desktop, desk)]
 "Where the middle of the icon `name` is in the window"
 icon(name) = (r = rect(view()); s = view().spots[name]; (K.num(r.left) + s[1], K.num(r.top) + s[2]))
 "A place on the wallpaper that no icon in a cell of the grid covers: it's between four cells"
 empty_spot(x=245.0, y=325.0) = (r = rect(view()); (K.num(r.left) + x, K.num(r.top) + y))
-at((x, y)) = (w.mouse = typeof(w.mouse)(px(x), px(y)); onmouse(w, MouseMove(Vec2{px}(px(x), px(y)), w)); frames(1))
-# The window keeps the buttons that are down, as the real mouse makes it do
-down(place) = (at(place); w.keys |= Keys.mouse_left; onkey(w, KeyPress{Keys.mouse_left}(0, w)); frames(1))
-up() = (w.keys ⊻= Keys.mouse_left; onkey(w, KeyRelease{Keys.mouse_left}(0, w)); frames(1))
-click(place) = (down(place); up())
 drag(from, to) = begin
-  down(from)
+  press(from)
   foreach(t -> at(from .+ (to .- from) .* t), (0.3, 0.6, 1.0))
-  up()
+  release()
 end
 right_click(place) = (at(place); onkey(w, KeyPress{Keys.mouse_right}(0, w)); frames())
-key(k, held...) = begin
-  foreach(h -> w.keys |= h, held)
-  onkey(w, KeyPress{k}(0, w))
-  foreach(h -> w.keys ⊻= h, held)
-  frames()
-end
-typed(s) = (foreach(c -> ontype(w, Typed(c, w)), s); frames())
 "The menu that Ladder drew, or nothing"
 menu() = (ps = [p for p in popups(w) if p.key == :menu]; isempty(ps) ? nothing : only(ps).content)
 "Choose the item called `name` in the menu that Ladder drew, with ↓ and Return"
@@ -131,7 +119,7 @@ end
   @test K.num(r.top) ≈ K.num(K.TOPBAR_H)
   @test K.num(r.left + r.width) ≈ 1100
   @test K.num(r.top + r.height) ≈ 760
-  shot("sorted")
+  shot("desktop-sorted")
 end
 
 @testset "a sorted desktop fills the grid in its order" begin
@@ -158,7 +146,7 @@ end
   click(icon("Projects"))
   w.keys ⊻= Keys.cmd
   @test chosen() == ["Projects", "notes.md"]
-  shot("chosen")
+  shot("desktop-chosen")
   # A click on one of the two, with no drag, chooses only that one
   click(icon("Projects"))
   @test chosen() == ["Projects"]
@@ -170,11 +158,11 @@ end
   a, b = icon("Projects"), icon("Archive")
   from = (min(a[1], b[1]) - 60, min(a[2], b[2]) - 40)
   to = (max(a[1], b[1]) + 10, max(a[2], b[2]) + 10)
-  down(from)
+  press(from)
   at(from .+ (to .- from) .* 0.5)
   at(to)
-  shot("band")
-  up()
+  shot("desktop-band")
+  release()
   @test "Projects" in chosen() && "Archive" in chosen()
   click(empty_spot())
 end
@@ -194,7 +182,7 @@ end
   choose("Sort By  ›")
   frames()
   @test menu().items == ["None", "Snap to Grid", "Name", "✓ Kind", "Date Modified", "Date Created", "Size"]
-  shot("menu")
+  shot("desktop-menu")
   choose("Name")
   @test kept().order == :name
   g = D.grid(view().area, D.Look())
@@ -218,7 +206,7 @@ end
   r = rect(view())
   @test all(isapprox.(view().spots["notes.md"], (to[1] - K.num(r.left), to[2] - K.num(r.top)), atol=0.5))
   @test haskey(D.load(K.desktop_file(desk)).places, "notes.md")
-  shot("moved")
+  shot("desktop-moved")
   # Clean Up puts it in the nearest cell of the grid
   right_click(empty_spot(95.0, 475.0))
   @test "Clean Up" in menu().items
@@ -272,7 +260,7 @@ end
   @test isdir(path)
   @test K.renaming(e, :desktop) == path
   @test w.focus === K.renamer(e)
-  shot("rename")
+  shot("desktop-rename")
   key(Keys.a, Keys.cmd)
   typed("Plans")
   key(Keys.enter)
@@ -314,8 +302,8 @@ end
 
 @testset "two clicks open an icon in the page: a file, or a folder" begin
   click(icon("notes.md"))
-  down(icon("notes.md"))
-  up()
+  press(icon("notes.md"))
+  release()
   frames()
   @test e.buf.path == joinpath(desk, "notes.md")
   @test !K.page_covered(e)
@@ -328,8 +316,8 @@ end
   sleep(K.SLIDE_TIME + 0.05)
   frames()
   click(icon("Projects"))
-  down(icon("Projects"))
-  up()
+  press(icon("Projects"))
+  release()
   frames()
   @test e.buf.path == joinpath(desk, "Projects")
   @test e.folder == joinpath(desk, "Projects")
@@ -353,7 +341,7 @@ end
   @test K.num(part.width.preferred) ≈ 1200 && K.num(part.height.preferred) ≈ 600
   @test K.num(part.offset_x) ≈ -150 && K.num(part.offset_y) ≈ 0
   frames()
-  shot("wallpaper")
+  shot("desktop-wallpaper")
   D.papers[] = () -> ""
   K.WALLPAPER[] = (0.0, "", nothing)
 end

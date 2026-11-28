@@ -8,6 +8,7 @@
 @use "github.com/jkroso/MiniFB.jl" Window
 @use "github.com/jkroso/UI.jl/Interface/draw" frame rect scene draw draw_tool window_tool
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
+@use "./drive" drive
 const px = K.px
 
 # The folder is the test's own each time, so that two test processes that run at once don't write the same files
@@ -28,7 +29,7 @@ The new bench goes in on Monday.""")
 
 const e = K.build_editor(page)
 const w = Window(e, size=(900px, 700px))
-frames(n=2) = foreach(_ -> Base.invokelatest(frame, w), 1:n)
+const (; frames) = drive(w, latest=true)
 frames(4)
 e.buf.anchor = e.buf.caret = (8, 0); K.touch!(e); frames(3)
 top() = K.item(e, 1).content.node

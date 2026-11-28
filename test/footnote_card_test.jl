@@ -8,6 +8,7 @@
 @use "github.com/jkroso/MiniFB.jl" Window Keys MouseMove onmouse
 @use "github.com/jkroso/UI.jl/Interface/draw" frame popups
 @use GeometryBasics: Vec2
+@use "./drive" drive
 const px = K.px
 
 "The words of each Text in the layout `x`, from the top"
@@ -37,7 +38,7 @@ The end.
 
 const e = K.build_editor(page)
 const w = Window(e, size=(900px, 600px))
-frames(n=3) = foreach(_ -> Base.invokelatest(frame, w), 1:n)
+const (; frames) = drive(w, frames=3, latest=true)
 frames()
 const b = e.buf
 

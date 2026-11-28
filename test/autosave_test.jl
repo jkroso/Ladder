@@ -7,6 +7,7 @@
 @use "../main" => K
 @use "github.com/jkroso/MiniFB.jl" Window
 @use "github.com/jkroso/UI.jl/Interface/draw" frame
+@use "./drive" drive
 const px = K.px
 
 const dir = mktempdir()
@@ -17,7 +18,7 @@ write(other, "# Other\n")
 
 const e = K.build_editor(page)
 const w = Window(e, size=(1000px, 800px))
-frames(n=2) = foreach(_ -> frame(w), 1:n)
+const (; frames) = drive(w)
 frames()
 "Type `text` at the end of the page that shows"
 add!(text) = (K.edit!(e.buf, K.line_end(e.buf, length(e.buf.lines)), K.line_end(e.buf, length(e.buf.lines)), text); frames())

@@ -11,6 +11,7 @@
 @use "github.com/jkroso/UI.jl/Interface/draw" frame rect
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
 @use GeometryBasics: Vec2
+@use "./drive" drive middle
 
 const px = K.px
 const G = K.Git
@@ -50,18 +51,10 @@ const first_commit = strip(read(`git -C $repo rev-parse --short "HEAD~1"`, Strin
 const e = K.build_editor(joinpath(repo, "Readme.md"))
 e.panel = true   # the sidebar is open, with no slide
 const w = Window(e, size=(1300px, 800px))
-frames(n=3) = foreach(_ -> Base.invokelatest(frame, w), 1:n)
+const (; frames, at, click, shot) = drive(w, frames=3, pressed=1, latest=true)
 "Draw until git has answered, and then what it said is on the screen"
 settle() = (frames(2); G.wait!(); frames(2); G.wait!(); frames(2))
 
-shot(name) = haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], "commit-$name.png"), w)
-at((x, y)) = (w.mouse = typeof(w.mouse)(px(x), px(y)); onmouse(w, MouseMove(Vec2{px}(px(x), px(y)), w)); frames(1))
-click(place) = begin
-  at(place)
-  w.keys |= Keys.mouse_left; onkey(w, KeyPress{Keys.mouse_left}(0, w)); frames(1)
-  w.keys ⊻= Keys.mouse_left; onkey(w, KeyRelease{Keys.mouse_left}(0, w)); frames(2)
-end
-middle(node) = (r = rect(node); (K.num(r.left) + K.num(r.width) / 2, K.num(r.top) + K.num(r.height) / 2))
 "The words of every Text in the geometry `g`"
 texts(g) = g isa K.Text ? [String(g.content)] : reduce(vcat, map(texts, try collect(g.children) catch; Any[] end), init=String[])
 "The line of git's panel for the commit `hash`"
@@ -127,7 +120,7 @@ end
   r = rect(a)
   @test K.num(r.width) ≈ v.wide - 2 atol=1
   @test K.num(rect(e.nodes[(:git_panel, repo)]).left) >= K.num(r.left) + K.num(r.width)
-  shot("page")
+  shot("commit-page")
 end
 
 @testset "each file of the commit has a row, and its lines, unless they're too many" begin
@@ -160,7 +153,7 @@ end
   @test haskey(v.views, k("src/big.jl"))
   # Its lines show under its row, and they're as many as the file has
   @test K.num(rect(v.views[k("src/big.jl")].parts[(:hunk, 1)]).height) > (K.OPEN_MOST + 10) * K.DIFF_ROW
-  shot("big-file")
+  shot("commit-big-file")
   click(middle(v.rows[(:file, k("src/big.jl"))]))
   @test !v.open[k("src/big.jl")]
   v.scroll.offset = 0px
@@ -227,7 +220,7 @@ end
   s = G.shown(repo, second)
   c = v.views[findfirst(f -> f.path == "src/a.jl", s.files)]
   @test K.laid(c, 1).beside
-  shot("beside")
+  shot("commit-beside")
   click(middle(v.parts[(:button, :under)]))
   @test !e.beside
   frames()

@@ -8,6 +8,7 @@
 @use "../main" => K
 @use "github.com/jkroso/MiniFB.jl" Window
 @use "github.com/jkroso/UI.jl/Interface/draw" frame
+@use "./drive" drive
 const px = K.px
 
 const dir = mktempdir()
@@ -22,7 +23,7 @@ write(joinpath(dir, "My mail", "Inbox", "note.md"), "# A note\n")
 
 const e = K.build_editor(joinpath(dir, "pages", "home.md"))
 const w = Window(e, size=(900px, 700px))
-frames(n=3) = foreach(_ -> frame(w), 1:n)
+const (; frames) = drive(w, frames=3)
 frames()
 
 @testset "a link to a folder shows the folder in the page, and the sidebar stays closed" begin
