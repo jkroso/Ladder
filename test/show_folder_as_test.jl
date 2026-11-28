@@ -41,7 +41,7 @@ choice(name) = only(filter(k -> k.name == name, K.choices_for(K.KindChoice, e)))
 as!(k) = (Base.invokelatest(K.show_folder_as!, e, folder(), k); frames())
 
 @testset "the kinds that the command offers" begin
-  @test [k.name for k in K.choices_for(K.KindChoice, e)] == ["Desktop", "Notes", "Blog", "Downloads", "Pictures", "Screenshots", "Plain"]
+  @test [k.name for k in K.choices_for(K.KindChoice, e)] == ["Desktop", "Notes", "Blog", "Downloads", "Pictures", "Screenshots", "News", "Plain"]
   @test choice("Notes").from === K.NotesDirectory && choice("Plain").from === nothing
   # The address of a repository is typed, as it is or as a browser shows it
   for text in ("github.com/jkroso/Media.lad", "https://github.com/jkroso/Media.lad", " github.com/jkroso/Media.lad/ ", "https://github.com/jkroso/Media.lad.git")
