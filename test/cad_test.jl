@@ -272,7 +272,15 @@ end
     fbo3 = v.parts[:over].fbo
     @test V.GLs.glIsFramebuffer(fbo3) == V.GLs.GL_TRUE
     V.GLs.setcurrent(was)
-    @test !V.stage!(v, C_NULL) && !haskey(v.parts, :over) && V.GLs.current() == was
+    # A picture for a file, like the one that an agent looks at, has no context to share. The view keeps its stage and the
+    # framebuffer, which the window's next frame uses, and reads the picture's pixels back.
+    kept = v.stage
+    @test !V.stage!(v, C_NULL) && v.stage === kept && v.parts[:over].fbo == fbo3 && V.GLs.current() == was
+    @test (V.GLs.setcurrent(screen.cgl); V.GLs.glIsFramebuffer(fbo3) == V.GLs.GL_TRUE)
+    V.GLs.setcurrent(was)
+    # A window that's drawn with another context gives the view a new stage, and the old framebuffer goes
+    other = V.GLs.Stage()
+    @test V.stage!(v, other.cgl) && v.stage !== kept && !haskey(v.parts, :over) && V.GLs.current() == was
     V.GLs.setcurrent(screen.cgl)
     try
       @test V.GLs.glIsFramebuffer(fbo3) == V.GLs.GL_FALSE
