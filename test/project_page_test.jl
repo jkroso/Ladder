@@ -10,6 +10,7 @@
 @use "github.com/jkroso/MiniFB.jl" Window KeyPress KeyRelease MouseMove Keys onkey onmouse
 @use "github.com/jkroso/UI.jl/Interface/draw" frame rect popups
 @use GeometryBasics: Vec2
+@use "./drive" drive
 
 const dir = mktempdir()
 
@@ -128,13 +129,9 @@ if Sys.isapple() && Sys.which("ffmpeg") !== nothing
 
   const e = K.build_editor(page)
   const w = Window(e, size=(1000px, 1200px))
-  frames(n=2) = foreach(_ -> frame(w), 1:n)
+  const (; frames, at, press, release, click) = drive(w, moved=0)
   frames()
 
-  at((x, y)) = (w.mouse = typeof(w.mouse)(px(x), px(y)); onmouse(w, MouseMove(Vec2{px}(px(x), px(y)), w)))
-  press(place) = (at(place); w.keys |= Keys.mouse_left; onkey(w, KeyPress{Keys.mouse_left}(0, w)))
-  release() = (w.keys ⊻= Keys.mouse_left; onkey(w, KeyRelease{Keys.mouse_left}(0, w)); frames())
-  click(place) = (press(place); release())
   "Draw frames until `done()`, as the window would while it waits for something"
   settle(done, most=30) = (t = time(); while !done() && time() - t < most; frames(1); sleep(0.02); end; done())
 

@@ -11,6 +11,7 @@
 @use GeometryBasics: Vec2
 
 @use "../main" => K
+@use "./drive" drive
 const px = K.px
 
 @testset "a link names part of a file" begin
@@ -61,7 +62,7 @@ if Sys.isapple() && Sys.which("ffmpeg") !== nothing
   """)
   const e = K.build_editor(page)
   const w = Window(e, size=(1000px, 1200px))
-  frames(n=2) = foreach(_ -> frame(w), 1:n)
+  const (; frames) = drive(w)
   frames()
 
   "Move the mouse of `win` to `(x, y)`"

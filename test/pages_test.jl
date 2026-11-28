@@ -11,6 +11,7 @@
 @use "github.com/jkroso/UI.jl/Interface/draw" frame
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
 @use GeometryBasics: Vec2
+@use "./drive" drive
 const px = K.px
 
 const pages = K.pages_dir[]
@@ -62,7 +63,7 @@ end
 @testset "a link that names a heading goes to it" begin
   e = K.build_editor(hub)
   w = Window(e, size=(1000px, 800px))
-  frames() = foreach(_ -> frame(w), 1:3)
+  (; frames) = drive(w, frames=3)
   frames()
   haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], "welcome.png"), w)
   # A click on a link with ⌘ held follows it

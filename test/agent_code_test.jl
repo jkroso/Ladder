@@ -17,6 +17,7 @@
 @use "github.com/jkroso/JSON.jl" => JSON
 @use "github.com/jkroso/MiniFB.jl" Window KeyPress Keys onkey Typed ontype
 @use "github.com/jkroso/UI.jl/Interface/draw" frame
+@use "./drive" drive
 const px = K.px
 
 const dir = realpath(mktempdir())
@@ -175,7 +176,7 @@ else
 
   const e = K.build_editor(file)
   const w = Window(e, size=(1300px, 860px))
-  frames(n=2) = foreach(_ -> Base.invokelatest(frame, w), 1:n)
+  const (; frames) = drive(w, latest=true)
   view() = e.nodes[(:design, file)]
   "Draw frames until `f()` is true, for `limit` seconds at the most"
   until(f; limit=60) = begin

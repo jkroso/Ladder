@@ -9,6 +9,7 @@
 @use "github.com/jkroso/MiniFB.jl" Window KeyPress KeyRelease MouseMove Keys onkey onmouse
 @use "github.com/jkroso/UI.jl/Interface/draw" frame rect
 @use GeometryBasics: Vec2
+@use "./drive" drive middle
 const px = K.px
 
 const dir = mktempdir()
@@ -37,13 +38,8 @@ K.Timelogs.CLOCK[] = () -> clock[]
 try
   e = K.build_editor(page)
   w = Window(e, size=(1000px, 800px))
-  frames(n=2) = foreach(_ -> frame(w), 1:n)
+  (; frames, at, press, release, click) = drive(w, moved=2, pressed=1)
   frames()
-  at((x, y)) = (w.mouse = typeof(w.mouse)(px(x), px(y)); onmouse(w, MouseMove(Vec2{px}(px(x), px(y)), w)); frames())
-  press(place) = (at(place); w.keys |= Keys.mouse_left; onkey(w, KeyPress{Keys.mouse_left}(0, w)); frames(1))
-  release() = (w.keys ⊻= Keys.mouse_left; onkey(w, KeyRelease{Keys.mouse_left}(0, w)); frames())
-  click(place) = (press(place); release())
-  middle(r) = (K.num(r.left + r.width / 2), K.num(r.top + r.height / 2))
   line(text) = findfirst(==(text), e.buf.lines)
   line_at(i) = (it = K.item(e, i); (K.num(e.origin[1]) + 120.0, K.num(e.origin[2] + it.top + it.tall / 2)))
   log() = (s = K.block_lines(e.buf, K.TIMELOG, 1); e.buf.lines[s[1]+1:s[2]-1])

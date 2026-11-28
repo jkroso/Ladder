@@ -13,6 +13,7 @@
 @use "github.com/jkroso/UI.jl/Interface/draw" frame rect
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
 @use GeometryBasics: Vec2
+@use "./drive" drive middle
 const px = K.px
 const M = K.Maps
 
@@ -63,7 +64,7 @@ try
   """)
   e = K.build_editor(page)
   w = Window(e, size=(1000px, 1300px))
-  frames(n=2) = foreach(_ -> frame(w), 1:n)
+  (; frames, at, press, release, shot) = drive(w, moved=2, pressed=1)
   frames()
   view(n) = e.nodes[(:block, K.MAP, page, n)]
   # Draw frames until both maps have their pictures and their places, for 10 seconds at most
@@ -73,11 +74,6 @@ try
   end
   frames()
   contacts = e.nodes[(:block, K.CONTACT, page, 1)]
-  shot(name) = haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], name), w)
-  at((x, y)) = (w.mouse = typeof(w.mouse)(px(x), px(y)); onmouse(w, MouseMove(Vec2{px}(px(x), px(y)), w)); frames())
-  press(place) = (at(place); w.keys |= Keys.mouse_left; onkey(w, KeyPress{Keys.mouse_left}(0, w)); frames(1))
-  release() = (w.keys ⊻= Keys.mouse_left; onkey(w, KeyRelease{Keys.mouse_left}(0, w)); frames())
-  middle(r) = (K.num(r.left + r.width / 2), K.num(r.top + r.height / 2))
   "The head of the pin of the place called `name` on map `n`, in the window"
   pin(n, name) = (v = view(n); o = only(o for o in K.map_others(v) if o.name == name); p = K.other_point(v, o); (v.box[1] + p[1], v.box[2] + p[2] - 26))
 

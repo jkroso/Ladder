@@ -21,6 +21,7 @@
 @use Skia
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
 @use GeometryBasics: Vec2
+@use "./drive" drive
 const px = K.px
 const V = K.Designs
 K.RUN_WAIT[] = Inf   # what ⌘Return runs in a field has come back when the key's handler ends
@@ -43,7 +44,7 @@ else
 
   const e = K.build_editor(file)
   const w = Window(e, size=(1300px, 860px))
-  shot(name) = haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], name), w)
+  const (; at, press, release, click, key, shot) = drive(w, frames=1)
   view() = e.nodes[(:design, file)]
   "Draw frames until SolidCraft's program has answered everything"
   settle() = begin
@@ -54,18 +55,6 @@ else
       frame(w)
     end
     frame(w); frame(w)
-  end
-  at((x, y)) = (p = Vec2{px}(px(x), px(y)); onmouse(w, MouseMove(p, w)); w.mouse = p; frame(w))
-  press(place) = (at(place); w.keys |= Keys.mouse_left; onkey(w, KeyPress{Keys.mouse_left}(0, w)))
-  release() = (w.keys ⊻= Keys.mouse_left; onkey(w, KeyRelease{Keys.mouse_left}(0, w)); frame(w))
-  click(place) = (press(place); release())
-  click(node::K.SemanticUI) = click(rect_middle(node))
-  key(k, held...) = begin
-    was = w.keys
-    foreach(h -> w.keys |= h, held)
-    onkey(w, KeyPress{k}(0, w)); onkey(w, KeyRelease{k}(0, w))
-    w.keys = was
-    frame(w)
   end
   rect_middle(node) = (r = rect(node); (K.num(r.left + r.width / 2), K.num(r.top + r.height / 2)))
   "Hold the keys `held` while `f` runs"

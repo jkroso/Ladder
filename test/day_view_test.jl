@@ -11,6 +11,7 @@
 @use "github.com/jkroso/UI.jl/Interface/draw" frame rect
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
 @use GeometryBasics: Vec2
+@use "./drive" drive middle
 const px = K.px
 
 const TODAY = Date(2026, 11, 20)   # a Friday
@@ -54,20 +55,14 @@ K.calendar_day[] = TODAY
 try
   e = K.build_editor(page)
   w = Window(e, size=(1000px, 1900px))
-  frames(n=2) = foreach(_ -> frame(w), 1:n)
+  (; frames, at, press, release, click, shot) = drive(w, pressed=1)
   frames()
   block(lang) = e.nodes[(:block, lang, page, 1)]
   v, board, calendar, hours, chart, schedule = block(K.DAY_BLOCK), block(K.BOARD), block(K.CALENDAR), block(K.TIMELOG), block(K.CHART), block(K.SCHEDULE)
-  shot(name) = haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], name), w)
-  at((x, y)) = (w.mouse = typeof(w.mouse)(px(x), px(y)); onmouse(w, MouseMove(Vec2{px}(px(x), px(y)), w)); frames(1))
-  press(place) = (at(place); w.keys |= Keys.mouse_left; onkey(w, KeyPress{Keys.mouse_left}(0, w)); frames(1))
-  release() = (w.keys ⊻= Keys.mouse_left; onkey(w, KeyRelease{Keys.mouse_left}(0, w)); frames())
-  middle(r) = (K.num(r.left + r.width / 2), K.num(r.top + r.height / 2))
   spot(d) = (K.day_spot(v, findfirst(==(d), v.days)), v.box[2] + 30)
   lines() = (s = K.block_lines(e.buf, K.DAY_BLOCK, 1); e.buf.lines[s[1]+1:s[2]-1])
   names(c) = [t.name for t in K.columns!(board)[c]]
   button(key) = middle(rect(v.parts[(:button, key)]))
-  click(place) = (press(place); release())
   rows() = K.shown!(chart)
   line(words) = findfirst(l -> occursin(words, l), e.buf.lines)
   "What the box of the item with `words` shows: true for a tick"
