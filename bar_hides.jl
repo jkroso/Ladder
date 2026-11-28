@@ -183,7 +183,7 @@ bar_back(e) = begin
               Box(fixed(side), height(grow=grow)), Box(width(grow=grow), height(grow=grow), background(tint)), Box(fixed(right), height(grow=grow))),)
   end
   # Over a page that shows the path itself the bar is only its left end: over the sidebar, and as far past it as its buttons reach
-  inpage && return (Row(fixed(side_w(e) + get(e.nodes, :bar_past_side, 0px)), height(TOPBAR_H), Alignment.Start, offset_y=bar_top(e),
+  inpage && return (Row(fixed(side_w(e) + bar_space(e).past_side), height(TOPBAR_H), Alignment.Start, offset_y=bar_top(e),
                         background(colours.bg), line[:bottom],
                       (side > 0px ? (Box(fixed(side), height(grow=grow), background(colours.panel), line[:right]),) : ())...),)
   middle = tint === nothing ? () : (background(tint), border(1px, :solid, tint_colours!(tint).line)[:bottom])

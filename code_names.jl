@@ -87,7 +87,7 @@ A page whose code hasn't run has Julia's own names. The lists are kept until
 something makes a new name.
 """
 scope_names(e) = begin
-  m = something(made_workspace(e), get(e.nodes, :sandbox, nothing), Some(nothing))
+  m = something(made_workspace(e), window_modules(e).sandbox, Some(nothing))
   world = Base.get_world_counter()
   kept = get(e.nodes, :scope, nothing)
   kept !== nothing && kept[1] === m && kept[2] == world && return kept[3]
@@ -773,7 +773,7 @@ caret_brackets(e) = begin
 end
 
 "The module whose names the page's Julia code can use: the one that the code runs in, or Julia's own before any code ran"
-scope(e) = something(made_workspace(e), get(e.nodes, :sandbox, nothing), Base)
+scope(e) = something(made_workspace(e), window_modules(e).sandbox, Base)
 
 "The value that code in the module `m` calls `name`, like `length` or `Base.length`. Nothing when it has no such name."
 named_value(m::Module, name::AbstractString) = begin

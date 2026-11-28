@@ -430,8 +430,8 @@ opens into its path, as the top bar has it. It has `room` at most, and it lies
 on the colour `ground`, which a pinned path has under it too.
 """
 page_crumb(e, room, ground) = begin
-  e.nodes[:title_room] = room
-  e.nodes[:title_ground] = ground
+  bar_space(e).title = room
+  bar_space(e).ground = ground
   bread_crumb(e, window_object(e))
 end
 
@@ -441,7 +441,7 @@ page: the room of the Mac's close, minimise and zoom buttons and of the bar's
 own buttons, while the sidebar is too narrow for them. A page that shows the
 path itself leaves this room at its top left. A bar that hides takes none.
 """
-bar_corner(e) = hides_bar(e) ? 0px : get(e.nodes, :bar_past_side, 0px)
+bar_corner(e) = hides_bar(e) ? 0px : bar_space(e).past_side
 
 "True when the page that shows has changes that aren't in its file: see `page_edited(e, o)`"
 page_edited(e) = (o = page_object(e); o !== nothing && page_edited(e, o))

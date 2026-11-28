@@ -183,7 +183,7 @@ file runs its live blocks and its inline code again, in the new module. What
 """
 reset_module!(e) = begin
   path = e.buf.path
-  isempty(path) && delete!(e.nodes, :workspace)
+  isempty(path) && (window_modules(e).workspace = nothing)
   key = isempty(path) ? "" : page_key(path)
   isempty(key) || (delete!(PAGE_MODULES, key); delete!(PAGES_RUN, key))
   for w in unique!(Any[e; editors])

@@ -148,7 +148,7 @@ end
   @test K.window_object(e).parent isa ShopDirectory && string(K.window_object(e).parent.path) == joinpath(shop, "sales")
   @test texts(side()) == ["Sales", "Bank", "Shop settings"] && "Shop › june.md" in bar()
   # the kind's path has all the room from the sidebar's edge to the buttons at the bar's right end
-  room[] = e.nodes[:title_room]
+  room[] = K.bar_space(e).title
   @test room[] > 400px
 end
 
@@ -158,7 +158,7 @@ end
   @test K.files_listed(e) && K.hidden_button(e) != ()
   @test K.bar_name(e) in bar() && !any(t -> startswith(t, "Shop ›"), bar())
   # Ladder's own name is in the middle of the bar, so the bar's left end takes as much room as its right end
-  @test e.nodes[:title_room] < room[] - 100px
+  @test K.bar_space(e).title < room[] - 100px
 end
 
 @testset "a kind of folder makes the whole window" begin

@@ -80,7 +80,7 @@ describe(t::Title) = begin
   end
   edited = title_edited(e)
   # A name that's too long for its room in the bar ends in …, so that its start still shows
-  room = get(e.nodes, :title_room, 10_000px) - (edited ? 70px : 16px)
+  room = something(bar_space(e).title, 10_000px) - (edited ? 70px : 16px)
   named = bar_name(e)
   # The headings over the caret and the component that it's on follow the name, as the path does. The name
   # stays in the middle while they change, so as much room as they take is empty before it. When there's
@@ -435,7 +435,7 @@ show_title_trail!(e, t, w, path) = begin
   start = mac_buttons_room(e) + 4px
   # In a page that shows the path itself, like a design's toolbar, the path has the room that the page gives the name
   inpage = crumb_in_page(e)
-  room = inpage ? min(get(e.nodes, :title_room, wide), wide - 8px - start) : wide - 8px - start
+  room = inpage ? min(something(bar_space(e).title, wide), wide - 8px - start) : wide - 8px - start
   all = trail_steps(path)
   all[end] = (bar_name(e), path)   # the file's name as the bar shows it
   parts = focus_parts(e)
@@ -526,7 +526,7 @@ trail_view(v::TitleTrail) = begin
 end
 
 "What the path lies on: the page's colour, as the bar has, or in a page that shows the path itself, the colour of its place there (see `page_crumb`)"
-trail_ground(e) = crumb_in_page(e) ? get(e.nodes, :title_ground, colours.bg) : colours.bg
+trail_ground(e) = crumb_in_page(e) ? something(bar_space(e).ground, colours.bg) : colours.bg
 
 # A name is shaded only while the mouse is over it, so a pinned path doesn't look as if its file were chosen
 describe(c::TitleCrumb) =

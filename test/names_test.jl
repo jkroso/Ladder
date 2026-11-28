@@ -175,7 +175,7 @@ end
 end
 
 @testset "Julia code gets Julia's own names, before any code has run" begin
-  @test !haskey(e.nodes, :sandbox)
+  @test K.window_modules(e).sandbox === nothing
   fresh!(9)
   typed("len")
   @test first(names()) == "length"
@@ -194,7 +194,7 @@ end
   typed("wi")
   @test first(names()) == "width" && "widen" in names()
   @test length(names()) <= K.NAMES_SHOWN
-  @test !haskey(e.nodes, :sandbox)   # the list doesn't start the page's module
+  @test K.window_modules(e).sandbox === nothing   # the list doesn't start the page's module
   # Code in another language doesn't get them
   fresh!(16)
   typed("len")
@@ -309,7 +309,7 @@ end
     ask(text)
     @test (name, said(name)) == (name, words)
   end
-  @test !haskey(e.nodes, :sandbox)   # the words don't start the page's module
+  @test K.window_modules(e).sandbox === nothing   # the words don't start the page's module
   # Code in another language has no words
   fresh!(16)
   typed("wa")

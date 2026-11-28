@@ -291,7 +291,7 @@ now. What it comes to shows after the code, in the field.
 """
 Designs.run_field!(v::Designs.DesignView, f::DesignField) = begin
   sub = f.sub
-  sub.nodes[:workspace] = Designs.workspace!(v)
+  window_modules(sub).workspace = Designs.workspace!(v)
   run_here!(sub)
   v
 end

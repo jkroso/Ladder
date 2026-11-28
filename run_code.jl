@@ -218,11 +218,15 @@ The module that the `julia` code blocks of the page run in: the page's own,
 which each window that shows the page uses. See `page_module`. A page with no
 file has one in its window.
 """
-workspace(e) = isempty(e.buf.path) ? get!(() -> usual_module(e, Symbol("⭒untitled")), e.nodes, :workspace) :
-               page_module(e, e.buf.path)
+workspace(e) = begin
+  isempty(e.buf.path) || return page_module(e, e.buf.path)
+  own = window_modules(e)
+  own.workspace === nothing && (own.workspace = usual_module(e, Symbol("⭒untitled")))
+  own.workspace::Module
+end
 
 "The module of the page's `julia` code, or nothing when it has none yet"
-made_workspace(e) = isempty(e.buf.path) ? get(e.nodes, :workspace, nothing) : get(PAGE_MODULES, page_key(e.buf.path), nothing)
+made_workspace(e) = isempty(e.buf.path) ? window_modules(e).workspace : get(PAGE_MODULES, page_key(e.buf.path), nothing)
 
 """
 A new module called `name`, with what a Julia file that Kip loads has, like

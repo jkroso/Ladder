@@ -51,7 +51,9 @@ loads them, in a module of the window. No code runs in this module. Each
 page's module has its names (see `usual_module`), and a name that acts on a
 window, like `page_theme!`, acts on this window when it calls this module's.
 """
-sandbox(e) = get!(e.nodes, :sandbox) do
+sandbox(e) = begin
+  made = window_modules(e).sandbox
+  made === nothing || return made
   m = Module(Symbol("⭒window"))
   # Kip by the module that's loaded here, not by name. A built app can't find a package by name.
   Core.eval(m, :(const Kip = $Kip))
@@ -137,5 +139,5 @@ sandbox(e) = get!(e.nodes, :sandbox) do
   # They come in with `using`, so a name that a block makes or loads for itself wins over a unit with that name.
   Core.eval(m, :(const SheetUnits = $(units())))
   Core.eval(m, :(using .SheetUnits))
-  m
+  window_modules(e).sandbox = m
 end

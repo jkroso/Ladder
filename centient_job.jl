@@ -274,12 +274,12 @@ bar_row(t::TopBar, inks=(nothing, nothing, nothing)) = begin
   own = !inpage && !(crumb isa Title)
   left = own || inpage ? max(need - room, 0px) :
                          max(150px * (1 - showing), need - room, min(side, wide - room - side - TITLE_ROOM))
-  e.nodes[:bar_past_side] = left   # the page that shows the path leaves this room at its top left: see `bar_corner`
+  bar_space(e).past_side = left   # the page that shows the path leaves this room at its top left: see `bar_corner`
   # The slider never pushes the right end out of a narrow window, so the ladder stays under the mouse. The words
   # before the slider lose their start then: see `said_part`.
   side = min(side, max(side - grown, wide - room - left))
   beside > 0px && (side = max(side, min(left, wide - room - left)))
-  inpage || (e.nodes[:title_room] = wide - room - left - side)   # the name is cut short to fit in it. In the page, the page says how much room it has.
+  inpage || (bar_space(e).title = wide - room - left - side)   # the name is cut short to fit in it. In the page, the page says how much room it has.
   # The path that Ladder's own name opens into goes when a kind of folder shows something else there
   own && (w = window_of(e); w !== nothing && any(p -> p.key == :title_trail, popups(w)) && close_popup!(w, :title_trail))
   # The top bar lies over the top of the sidebar. The file's name is in the
@@ -337,7 +337,7 @@ the mouse is over it. A kind of folder has a method of this to show its own
 path there: `bread_crumb(e, d)` for the folder, and `bread_crumb(e, d, o)`
 for each thing `o` that it holds. Its room starts where the buttons over the
 sidebar end, which is the sidebar's edge while the sidebar is open, and ends
-at the buttons of the bar's right end. `e.nodes[:title_room]` is how wide
+at the buttons of the bar's right end. `bar_space(e).title` is how wide
 that was in the last frame.
 """
 bread_crumb(e, o) = bread_crumb(e, o.parent, o)

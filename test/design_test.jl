@@ -121,7 +121,7 @@ else
     @test abs(middle_x(rect(title)) - middle_x(rect(grip))) <= 1
     @test K.num(rect(grip).left) > K.num(rect(v.parts[(:tab, "Inspect")]).left) && K.num(rect(grip).left + rect(grip).width) <= K.num(rect(v.parts[:undo]).left)
     # The name has room for the ring after it, and as much before it
-    @test e.nodes[:title_room] == rect(grip).width - 2(V.RING + 6px)
+    @test K.bar_space(e).title == rect(grip).width - 2(V.RING + 6px)
     # While SolidCraft works, a ring turns after the file's name, in line with it. The empty room before the name keeps it
     # in the middle, so the name doesn't move when the ring comes and goes.
     rings(r, out=Any[]) = (hasproperty(r.from, :name) && r.from.name == "Spinner" && push!(out, r);

@@ -34,7 +34,7 @@ export Item, Live, Grid, isspread, Glide, Editor, TopBar, Sidebar, Page, Documen
        FileCheck, DesignSheet, FolderPage, SourceChooser, SearchView, SearchChoice, ChoiceMenu, ChoiceRow,
        editors, EmailHead, EACH_FRAME, AT_QUIT, BAR_PARTS, BUTTONS, AgentKind, WebFolder, WebPage,
        PAGE_WINDOWS, OutcomeBody, Bound, AgentPane, FileBlock, Things, each_thing, CodePicker,
-       Ties, ties, host!, shown_span, span!, WindowParts, window_parts,
+       Ties, ties, host!, shown_span, span!, WindowParts, window_parts, WindowModules, window_modules, BarSpace, bar_space,
        NextFrame, next_frame, one_more_frame!
 
 # --- what a window holds ---------------------------------------------------------
@@ -391,6 +391,25 @@ end
 
 "The parts of the window of `e` that more than one file asks for: see `WindowParts`"
 window_parts(e) = state_of(e, WindowParts)
+
+"The modules that a window has of its own"
+@def mutable struct WindowModules
+  workspace::Union{Nothing,Module} = nothing   # the module of the `julia` code of a page with no file: see `workspace`
+  sandbox::Union{Nothing,Module} = nothing     # the module with the names that the window gives the code of its pages: see `sandbox`
+end
+
+"The modules that the window of `e` has of its own, each nothing until it's made: see `WindowModules`"
+window_modules(e) = state_of(e, WindowModules)
+
+"What the layout of the top bar found in the last frame, for the parts that draw in the bar or beside it"
+@def mutable struct BarSpace
+  title::Union{Nothing,px} = nothing   # how wide the room of the file's name is. A page that shows the path itself says how much it has: see `page_crumb`.
+  ground::Any = nothing                # the colour that the path lies on in such a page
+  past_side::px = 0px                  # how far the bar's buttons reach past the sidebar: see `bar_corner`
+end
+
+"What the layout of the top bar of the window of `e` found: see `BarSpace`"
+bar_space(e) = state_of(e, BarSpace)
 
 "What the parts of a window ask of its next frame. The frame takes each thing once."
 @def mutable struct NextFrame
