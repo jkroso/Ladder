@@ -155,8 +155,12 @@ end
   was = v.at
   onscroll(w, Vec2{px}(px(-1), px(0))); frames()
   @test v.at[1] ≈ was[1] + 30 / v.zoom atol=0.01
-  # However far it's dragged, its edge stops near the edge of the view
+  # However far it's dragged, its edge stops near the edge of the view. The drag starts under the diagram: the middle
+  # of the view is now on the point of a box, and a drag from there draws a line from the box.
+  m = (m[1], m[2] + 300)
+  @test K.changing(v).joining === nothing
   press(m)
+  @test v.grab !== nothing
   at((m[1] + 5000, m[2]))
   release()
   @test v.at[1] ≈ -K.ZOOM_EDGE / v.zoom
