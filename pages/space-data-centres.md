@@ -115,13 +115,9 @@ The separate radiator needs pipes over a small area, not over the back of every 
 
 ## The satellite
 
-The fleet is many copies of one satellite. Each copy is built for !`sat = 150kW` of computers. The fleet needs !`nsat = ceil(Int, compute / sat)` copies. Each copy runs !`one = compute / nsat` of the computers.
+The fleet is many copies of one satellite. Each copy is built for !`sat = 150kW` of computers. At that size the fleet needs !`nsat = ceil(Int, compute / sat)` satellites. Starmind AI1 is a satellite of about this power. Its wings span 70 metres, and it has 110 square metres of radiators for 150 kilowatts.[^4]
 
-The fleet's panels cover !`array_area = round(panels / (sunlight * float(eff)) / m^2)` square metres. Each copy has a body, wings of cells, and two radiators. The cells on one copy cover !`round(Int, array_area / nsat)` square metres. The radiators' area is worked out with the pipes, below.
-
-Starmind AI1 is a satellite of about this power. Its wings span 70 metres, and it has 110 square metres of radiators for 150 kilowatts.[^4]
-
-Here is a model, drawn from the parameters on this page. It changes as you change them: the span of the wings, the pipes, the radiators, the height. Drag it to turn it. Pinch it, or scroll with ⌘ held, to come nearer.
+Here is my model, drawn from the parameters on this page. It changes as you change them: the span of the wings, the pipes, the radiators, the height. Drag it to turn it. Pinch it, or scroll with ⌘ held, to come nearer.
 
 ```columns
 2
@@ -136,23 +132,7 @@ aspect: 16:9
 satellite.jl
 aspect: 16:9
 ```
-
-```mermaid
-flowchart LR
-  Cells -->|electricity| Converters
-  Converters --> Chips
-  Chips -->|heat, in the liquid| Pumps
-  Pumps --> Pipes[The loops of tube]
-  Pipes -->|some heat, as light| Space
-  Pipes --> Radiator[The radiators]
-  Radiator -->|the rest, as light| Space
-  Aim[Attitude control] -->|wings on the Sun| Cells
-  Aim -->|radiators edge-on| Radiator
-  Thrusters -->|the last burn| Lower[A lower orbit]
-  Radios -->|a laser| Neighbour[The next satellite]
-```
-
-The chips sit in the body. The wings feed them. The loops of tube and the radiators cool them. Nobody goes up to repair a satellite.
+The chips sit in the body. The loops of tube and the radiators cool them. The solar panels roll out since they use fabric as a substrate and the radiators also roll out since they are made from 2 sheets of aluminium that have been seam welded in a pattern that create channels for the cooling water to flow through. Everything is held in tension by the cooling loop which itself is held in tension by the water pressure inside them.
 
 ## Weight and cost
 
@@ -320,11 +300,11 @@ The low reading is the spot rent. It is what a customer pays for an hour of a ma
 
 The chips draw !`h100_w = 700W`, !`b200_w = 1000W` and !`b300_w = 1400W`. At those draws, !`compute` of each kind is this many chips, and the floor is this much:
 
-| Chip | Chips in this fleet | An hour | A year |
-|---|---|---|---|
-| H100 | !`round(Int, compute / h100_w)` | !`h100_rent = h100_hr / h100_w * compute` | !`h100_rent * 1yr` |
-| B200 | !`round(Int, compute / b200_w)` | !`b200_rent = b200_hr / b200_w * compute` | !`b200_rent * 1yr` |
-| B300 | !`round(Int, compute / b300_w)` | !`b300_rent = b300_hr / b300_w * compute` | !`b300_rent * 1yr` |
+| Chip | Chips in this fleet | An hour |
+| --- | --- | --- |
+| H100 | !`round(Int, compute / h100_w)` | !`h100_rent = h100_hr / h100_w * compute` |
+| B200 | !`round(Int, compute / b200_w)` | !`b200_rent = b200_hr / b200_w * compute` |
+| B300 | !`round(Int, compute / b300_w)` | !`b300_rent = b300_hr / b300_w * compute` |
 
 ```chart
 kind: bars
