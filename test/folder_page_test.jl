@@ -23,8 +23,10 @@ mkpath(joinpath(dir, "plain"))
 write(joinpath(notes, "one.md"), "# One\n")
 write(joinpath(dir, "page.md"), "# A page\n")
 
-const RUNS = Ref(0)        # how many times the page of the notes ran
-const CLICKS = String[]    # the folders of films that a click or a link opened
+# The pages' code names these two as Main's, since a page's code runs in a module of its own. They get names of
+# their own there, for when the test runs in a module that isn't Main, as it does in test/hot.
+const RUNS = Core.eval(Main, :(folder_page_test_runs = Ref(0)))          # how many times the page of the notes ran
+const CLICKS = Core.eval(Main, :(folder_page_test_clicks = String[]))    # the folders of films that a click or a link opened
 
 "Write `text` as the page of `folder`, with a time of its own, as a page that's saved again has"
 const saved = Ref(time() - 100)
@@ -41,7 +43,7 @@ notes_page(icon) = """
   These are my notes.
 
   ```julia
-  Main.RUNS[] += 1
+  Main.folder_page_test_runs[] += 1
   Ladder.@def struct NotesDirectory <: Ladder.AbstractDirectory end
   Ladder.entry_icon(::NotesDirectory) = "$icon"
   ```
@@ -136,7 +138,7 @@ end
   page!(films, """
     ```julia
     Ladder.@def struct FilmsDirectory <: Ladder.AbstractDirectory end
-    Ladder.open!(e, d::FilmsDirectory; record=true) = (push!(Main.CLICKS, d.path.name); Ladder.go_folder!(e, string(d.path)))
+    Ladder.open!(e, d::FilmsDirectory; record=true) = (push!(Main.folder_page_test_clicks, d.path.name); Ladder.go_folder!(e, string(d.path)))
     FilmsDirectory
     ```
     """)
