@@ -33,7 +33,7 @@ export ASKING_AGENT, PACKAGE_AGENT, PACKAGE_ASKER, PACKAGE_CHECKS, PACKAGE_DOWNL
        SANDBOX_BLOCKS, SANDBOX_NO, SANDBOX_YES, ask_package!, ask_sandbox!, check_package!,
        package_agent, package_checks_dir, package_checks_tick!, package_command, package_panel,
        package_prompt, package_repo, package_verdict, run_check!, sandbox_answer, sandbox_answer!,
-       sandbox_file, sandbox_of, sandbox_panel, sandbox_site, sandbox_yes
+       sandbox_file, sandbox_of, sandbox_panel, sandbox_site, sandbox_yes, SandboxAsking
 
 # --- the sandbox ------------------------------------------------------------------------------
 #
@@ -181,6 +181,13 @@ const SANDBOX_ASKER = Ref{Function}(sandbox_panel)
 "The name of the agent that would read a package for the window that asks now, for the panel's words"
 const ASKING_AGENT = Ref("Claude")
 
+@use "github.com/jkroso/Prospects.jl" @def
+
+"What a window keeps of the sandbox's questions"
+@def mutable struct SandboxAsking
+  shown::String = ""   # the page that the last frame showed before a question about its code, or "" when no question waits
+end
+
 """
 Ask you whether the code of the page that `e` shows may do what the sandbox
 stopped it doing, when it waits for your answer. The page shows first:
@@ -201,12 +208,13 @@ ask_sandbox!(e) = begin
   i = isempty(site) ? nothing : findfirst(w -> w[1] == site, SANDBOX_ASKS)
   i === nothing && return nothing
   (SANDBOX_ASKER[] !== sandbox_panel || on_screen(e)) || return nothing
-  if get(e.nodes, :sandbox_ask, "") != e.buf.path
-    e.nodes[:sandbox_ask] = e.buf.path   # this frame shows the page, and the next asks
+  s = state_of(e, SandboxAsking)
+  if s.shown != e.buf.path
+    s.shown = e.buf.path   # this frame shows the page, and the next asks
     redraw_in!(e, 0.05)
     return nothing
   end
-  delete!(e.nodes, :sandbox_ask)
+  s.shown = ""
   _, a = popat!(SANDBOX_ASKS, i)
   sandbox_answer(site, a.key) === nothing || return nothing
   any(c -> c.site == site && c.action.key == a.key, PACKAGE_CHECKS) && return nothing   # an agent reads it now

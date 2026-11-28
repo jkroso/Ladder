@@ -30,7 +30,7 @@
 @use "./toasts" exports...
 
 export A4, NSSize, PRINT_TEXT, PRINT_X, PRINT_Y, breaks, clip!, listener, paper_size, print!,
-       print_listener, print_panel!, print_pdf, printed
+       print_listener, print_panel!, print_pdf, printed, PrintedPDF
 
 # --- printing ------------------------------------------------------------------------------
 #
@@ -207,6 +207,13 @@ print_pdf(e, paper=paper_size()) = begin
   end
 end
 
+@use "github.com/jkroso/Prospects.jl" @def
+
+"What a window keeps of its printing"
+@def mutable struct PrintedPDF
+  pdf::Ptr{Cvoid} = C_NULL   # the PDFDocument that the print panel last showed, kept until the next one
+end
+
 """
 Show the Mac's print panel over window `w`, with the PDF in `bytes`. It slides
 down from the top of the window, and the window waits until you print or cancel.
@@ -222,9 +229,9 @@ print_panel!(e, w, bytes, title) = begin
     pdf = msg(msg(cls("PDFDocument"), "alloc"), "initWithData:", data)
     pdf == C_NULL && return
     # The panel may still need the last PDF until it closes, so it's kept until the next one
-    last = get(e.nodes, :printed, C_NULL)
-    last == C_NULL || msg(last, "release")
-    e.nodes[:printed] = pdf
+    s = state_of(e, PrintedPDF)
+    s.pdf == C_NULL || msg(s.pdf, "release")
+    s.pdf = pdf
     # The PDF has its own margins, so the panel adds none
     info = msg(msg(msg(cls("NSPrintInfo"), "sharedPrintInfo"), "copy"), "autorelease")
     foreach(side -> send(info, "set$(side)Margin:", 0.0), ("Top", "Bottom", "Left", "Right"))

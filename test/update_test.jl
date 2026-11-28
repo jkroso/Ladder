@@ -420,7 +420,7 @@ end
     K.save!(o.buf)
     @test !K.unsaved()
     # With them saved, every window closes, and the quit that follows opens the new version
-    delete!(e.nodes, :update_held)
+    K.state_of(e, K.UpdatesState).held = false
     ask(:update!)
     @test u.again
     @test isempty(K.editors)
@@ -648,7 +648,7 @@ end
     @test !x.again
     @test startswith(ask(:extension_news), "Save your changes first.")
     K.save!(o.buf)
-    delete!(e.nodes, :extensions_held)
+    K.state_of(e, K.UpdatesState).extensions_held = false
     # With them saved, every window closes, and the quit that follows moves the clone and opens Ladder again
     ask(:update_extensions!)
     @test x.again

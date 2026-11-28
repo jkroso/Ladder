@@ -212,7 +212,7 @@ if Sys.isapple() && Sys.which("ffmpeg") !== nothing
 
   @testset "a click asks Centient for the job and says what it made" begin
     make()
-    asked = e.nodes[:job_ask]
+    asked = K.state_of(e, K.JobState).ask
     r = asked.request
     @test r.tool == "make_job_from_page" && !K.Centient.finished(r)
     # While Centient works, the words are under the button, and the button does nothing
@@ -230,10 +230,10 @@ if Sys.isapple() && Sys.which("ffmpeg") !== nothing
     # Centient has the job the next time. It says what it added, and then that there was nothing to add.
     make()
     @test settle(() -> !K.making(e))
-    @test e.nodes[:job_ask].said == "Centient added 2 new tasks to the job 12/40 Wattle Street."
+    @test K.state_of(e, K.JobState).ask.said == "Centient added 2 new tasks to the job 12/40 Wattle Street."
     make()
     @test settle(() -> !K.making(e))
-    @test e.nodes[:job_ask].said == "Centient has this job already: 12/40 Wattle Street." && !e.nodes[:job_ask].wrong
+    @test K.state_of(e, K.JobState).ask.said == "Centient has this job already: 12/40 Wattle Street." && !K.state_of(e, K.JobState).ask.wrong
     # The words are about the page that Centient was asked for, and no other
     K.open!(e, partly); frames()
     @test !bubble() && K.tip(maker()) == "Make job in Centient"
@@ -244,7 +244,7 @@ if Sys.isapple() && Sys.which("ffmpeg") !== nothing
     @test K.job_args(e) == Dict("progress" => "http://unreachable:9330/walkthrough/projects/7/tasks?key=cd34", "title" => "3 Far Road", "page" => far)
     make()
     @test settle(() -> !K.making(e))
-    asked = e.nodes[:job_ask]
+    asked = K.state_of(e, K.JobState).ask
     @test asked.wrong && asked.said == "Couldn't reach the walkthrough service. Check the internet connection."
     @test bubble() && K.tip(maker()) == asked.said
   end
@@ -252,11 +252,11 @@ if Sys.isapple() && Sys.which("ffmpeg") !== nothing
   @testset "on a Mac that has no Centient the button does nothing, and says why" begin
     K.Centient.stop!()
     Core.eval(K.Centient, :(available() = false))
-    asked = e.nodes[:job_ask]
+    asked = K.state_of(e, K.JobState).ask
     frames()
     @test K.off(maker()) && K.tip(maker()) == "Centient isn't on this Mac"
     make()
-    @test e.nodes[:job_ask] === asked && !K.making(e)
+    @test K.state_of(e, K.JobState).ask === asked && !K.making(e)
     # Centient is looked for again, for the tests that share this process
     Core.eval(K.Centient, :(available() = sidecar() !== nothing))
   end

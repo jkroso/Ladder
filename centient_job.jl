@@ -42,7 +42,8 @@
 @use "./right_panel" exports...
 
 export JOB_SHOWS, JobAsk, bar_row, bread_crumb, hidden_button, history_buttons, job, job_args,
-       job_part, job_tick!, job_words, making, matter_value, progress_address, said_face, said_part
+       job_part, job_tick!, job_words, making, matter_value, progress_address, said_face, said_part,
+       JobState
 
 # --- a job in Centient from the page ------------------------------------------------------
 #
@@ -97,11 +98,18 @@ job_args(e) = begin
   args
 end
 
+@use "github.com/jkroso/Prospects.jl" @def
+
+"What a window keeps of the job that Centient makes from a page"
+@def mutable struct JobState
+  ask::Union{Nothing,JobAsk} = nothing   # what Ladder last asked Centient to make, or nothing
+end
+
 "What Ladder asked Centient to make from the page that shows, or nothing"
-job(e) = (j = get(e.nodes, :job_ask, nothing); j !== nothing && j.path == e.buf.path ? j : nothing)
+job(e) = (j = state_of(e, JobState).ask; j !== nothing && j.path == e.buf.path ? j : nothing)
 
 "True while Centient makes a job"
-making(e) = (j = get(e.nodes, :job_ask, nothing); j !== nothing && j.request !== nothing)
+making(e) = (j = state_of(e, JobState).ask; j !== nothing && j.request !== nothing)
 
 """
 True for a button of the top bar that does nothing now: the one that makes the
@@ -129,7 +137,7 @@ end
 "Ask Centient to make the page's job. Centient answers later, and `job_tick!` takes the answer."
 make_job!(e) = begin
   (progress_address(e) === nothing || !Centient.available() || making(e)) && return
-  e.nodes[:job_ask] = JobAsk(e.buf.path, Centient.ask("make_job_from_page", job_args(e)), "Making the job in Centient…", false, time(), false)
+  state_of(e, JobState).ask = JobAsk(e.buf.path, Centient.ask("make_job_from_page", job_args(e)), "Making the job in Centient…", false, time(), false)
   nothing
 end
 
@@ -151,7 +159,7 @@ the words about it show under the button while Centient works and for a few
 seconds after it answers.
 """
 job_tick!(e) = begin
-  j = get(e.nodes, :job_ask, nothing)
+  j = state_of(e, JobState).ask
   j === nothing && return
   r = j.request
   if r !== nothing

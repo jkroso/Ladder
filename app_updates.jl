@@ -18,7 +18,7 @@
 @use "./live_view" reads!
 @use "./design_view" unsaved_designs
 
-export updates!, unsaved, extensions_tick!, extensions_news, extensions_act!, update_act!
+export updates!, unsaved, extensions_tick!, extensions_news, extensions_act!, update_act!, UpdatesState
 
 # --- the app's own updates ------------------------------------------------------------------
 #
@@ -31,6 +31,16 @@ export updates!, unsaved, extensions_tick!, extensions_news, extensions_act!, up
 # same box turns that off. The new code loads the next time that Ladder opens.
 # The settings page has a line that says which extensions have new code, and a
 # button that looks for it now or restarts Ladder to load it.
+
+@use "github.com/jkroso/Prospects.jl" @def
+
+"What a window keeps of the app's update and of its extensions' new code"
+@def mutable struct UpdatesState
+  seen::Int = -1                 # the app's update as the window last saw it: its `changed`
+  held::Bool = false             # a restart for the app's update waits, since a page has changes that aren't saved
+  extensions_seen::Int = -1      # the extensions' new code as the window last saw it: its `changed`
+  extensions_held::Bool = false  # a restart for the extensions' new code waits, for the same reason
+end
 
 "Turn on or off whether the app gets a newer version, and its extensions' new code, without being asked"
 updates!(e, on::Bool) = begin
@@ -55,9 +65,10 @@ update_tick!(e) = begin
   u = Update.own()
   u.auto = e.updates
   wait = Update.tick!(u)
-  if get(e.nodes, :update_seen, -1) != u.changed
-    e.nodes[:update_seen] = u.changed
-    delete!(e.nodes, :update_held)
+  s = state_of(e, UpdatesState)
+  if s.seen != u.changed
+    s.seen = u.changed
+    s.held = false
     rerun!(e, :update)
   end
   isfinite(wait) && redraw_in!(e, wait)   # while it checks or downloads, the window looks again soon
@@ -74,9 +85,10 @@ extensions_tick!(e) = begin
   x = Update.extensions()
   x.auto = e.updates
   wait = Update.tick!(x)
-  if get(e.nodes, :extensions_seen, -1) != x.changed
-    e.nodes[:extensions_seen] = x.changed
-    delete!(e.nodes, :extensions_held)
+  s = state_of(e, UpdatesState)
+  if s.extensions_seen != x.changed
+    s.extensions_seen = x.changed
+    s.extensions_held = false
     rerun!(e, :extensions)
   end
   isfinite(wait) && redraw_in!(e, wait)   # while it fetches, the window looks again soon
@@ -87,7 +99,7 @@ end
 extensions_news(e) = begin
   reads!(e, :updates)
   reads!(e, :extensions)
-  get(e.nodes, :extensions_held, false) && return "Save your changes first. A page has changes that aren't in its file, and a restart would lose them."
+  state_of(e, UpdatesState).extensions_held && return "Save your changes first. A page has changes that aren't in its file, and a restart would lose them."
   Update.says(Update.extensions())
 end
 
@@ -100,7 +112,7 @@ while a page has changes that aren't saved.
 extensions_act!(e) = begin
   x = Update.extensions()
   if Update.action(x) === :restart && unsaved()
-    e.nodes[:extensions_held] = true
+    state_of(e, UpdatesState).extensions_held = true
     return rerun!(e, :extensions)
   end
   Update.act!(x)
@@ -113,7 +125,7 @@ end
 update_news(e) = begin
   reads!(e, :updates)
   reads!(e, :update)
-  get(e.nodes, :update_held, false) && return "Save your changes first. A page has changes that aren't in its file, and a restart would lose them."
+  state_of(e, UpdatesState).held && return "Save your changes first. A page has changes that aren't in its file, and a restart would lose them."
   Update.says(Update.own())
 end
 
@@ -126,7 +138,7 @@ that aren't saved.
 update_act!(e) = begin
   u = Update.own()
   if Update.action(u) === :restart && unsaved()
-    e.nodes[:update_held] = true
+    state_of(e, UpdatesState).held = true
     return rerun!(e, :update)
   end
   Update.act!(u)
