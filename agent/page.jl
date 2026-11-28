@@ -30,6 +30,8 @@ export waiters, agents, elsewhere, send!, hand_over!, agent_part, toggle_marks!,
   waiters::Tuple{Float64,Vector{Agent.Waiter}} = (0.0, Agent.Waiter[])   # when the folder that lists the agents that wait was last read, and every agent that it listed, for any page
   sent::Union{Nothing,Tuple{String,Int,String}} = nothing                # the page that was last sent to an agent, its version then, and the agent's name
   last::String = "the agent"                                             # the name of the agent that last waited for a page that the window showed
+  # What the lines that an agent changed were last worked out for, and the runs of those lines: see `theirs`
+  changed::Union{Nothing,Tuple{Tuple{UInt,UInt,Int},Vector{UnitRange{Int}}}} = nothing
 end
 
 "What the window of `e` keeps about the agents that its page is shared with: see `PageAgents`"
@@ -122,8 +124,8 @@ theirs(e) = begin
   (readonly(b) || b.sent === b.told) && return none
   # They're worked out again when the text changes, or what the agent knows
   key = (objectid(b.sent), objectid(b.told), b.version)
-  kept = get(e.nodes, :theirs, nothing)
-  kept !== nothing && kept[1] == key && return kept[2]::Vector{UnitRange{Int}}
+  kept = page_agents(e).changed
+  kept !== nothing && kept[1] == key && return kept[2]
   mine = changes(b.told, b.lines)   # your own changes since, which move the agent's lines down or up
   runs = UnitRange{Int}[]
   for (_, new) in changes(b.sent, b.told)
@@ -131,7 +133,7 @@ theirs(e) = begin
     lo, hi = follow(mine, first(new)), follow(mine, last(new))
     push!(runs, min(lo, hi):max(lo, hi))
   end
-  e.nodes[:theirs] = (key, runs)
+  page_agents(e).changed = (key, runs)
   runs
 end
 

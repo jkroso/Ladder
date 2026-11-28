@@ -141,14 +141,21 @@ shows, which `pane_foot` makes on each frame.
 end
 describe(s::PaneSlot) = s.inside
 
-"The agent's pane of the window of `e`. It's kept while the window is open, with its session, so leaving agent mode loses nothing."
-agent_pane(e) = node!(AgentPane, e, :agent_pane)
-
-"What a window keeps of agent mode: whether it's in it, and the room that the mode gives and takes"
+"What a window keeps of agent mode: whether it's in it, the agent's pane, the room that the mode gives and takes, and the glass behind its panes"
 @def mutable struct AgentMode
   on::Bool = false                                           # the window is in agent mode
+  pane::Union{Nothing,AgentPane} = nothing                   # the agent's pane, once it has been asked for: see `agent_pane`
   menu_room::px = 0px                                        # how much of the agent's pane the side menu covers: see `menu_room`
   grew::Union{Nothing,NamedTuple{(:grew, :moved)}} = nothing   # how much wider the window grew for the sidebar, and how far it moved: see `sidebar_room!`
+  see_through::Bool = false                                  # the window is see-through behind its panes
+  glass_set::Union{Nothing,RGBA{Float64}} = nothing          # the colour that the window was last given for its own colour, while it's see-through
+end
+
+"The agent's pane of the window of `e`. It's kept while the window is open, with its session, so leaving agent mode loses nothing."
+agent_pane(e) = begin
+  s = state_of(e, AgentMode)
+  s.pane === nothing && (s.pane = own!(e, AgentPane()))
+  s.pane::AgentPane
 end
 
 "True while the window of `e` is in agent mode"
@@ -432,7 +439,7 @@ const GLASS_ALPHA = 1.0    # how much of the glass's own colour shows. At 1 the 
 const GLASS_BLUR = 30      # how far what's behind the window is blurred, in px
 
 "True while the window of `e` is see-through behind its panes"
-see_through(e) = get(e.nodes, :see_through, false) === true
+see_through(e) = state_of(e, AgentMode).see_through
 
 const SURFACE_OPACITY = 236   # the number that AppKit has for how solid what OpenGL draws is: NSOpenGLContextParameterSurfaceOpacity
 
@@ -443,7 +450,7 @@ again. The window draws with OpenGL, so both the window and what OpenGL
 draws are told. A window that isn't on the screen stays solid.
 """
 see_through!(e, w, on::Bool) = begin
-  e.nodes[:see_through] = false
+  state_of(e, AgentMode).see_through = false
   (Sys.isapple() && w !== nothing && !isempty(w.glfw)) || return nothing
   try
     win = nswindow(w)
@@ -457,8 +464,8 @@ see_through!(e, w, on::Bool) = begin
       blur_behind!(win, on ? GLASS_BLUR : 0)
       msg(win, "invalidateShadow")
     end
-    e.nodes[:see_through] = on
-    delete!(e.nodes, :glass_set)
+    state_of(e, AgentMode).see_through = on
+    state_of(e, AgentMode).glass_set = nothing
     on && glass_window!(e)
   catch err
     @warn "Ladder couldn't make the window see-through" exception=(err, catch_backtrace())
@@ -474,7 +481,7 @@ window fills a screen of its own, so each frame of agent mode asks.
 glass_window!(e) = begin
   see_through(e) || return nothing
   c = glass_colour(e)
-  get(e.nodes, :glass_set, nothing) == c && return nothing
+  state_of(e, AgentMode).glass_set == c && return nothing
   w = window_of(e)
   (w === nothing || isempty(w.glfw)) && return nothing
   with_pool() do
@@ -482,7 +489,7 @@ glass_window!(e) = begin
                    cls("NSColor"), sel("colorWithSRGBRed:green:blue:alpha:"), c.r, c.g, c.b, c.alpha)
     msg(nswindow(w), "setBackgroundColor:", colour)
   end
-  e.nodes[:glass_set] = c
+  state_of(e, AgentMode).glass_set = c
   nothing
 end
 

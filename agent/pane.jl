@@ -1349,7 +1349,7 @@ end
 
 "End the session of the window of `e`: the window has closed"
 close_agent!(e) = begin
-  p = get(e.nodes, :agent_pane, nothing)
+  p = state_of(e, AgentMode).pane
   p isa AgentPane && p.session !== nothing && close!(p.session)
   nothing
 end
@@ -1360,7 +1360,7 @@ again when the session of the window of `e` has something new. While the
 agent works, that's twenty times a second.
 """
 session_tick!(e) = begin
-  p = get(e.nodes, :agent_pane, nothing)
+  p = state_of(e, AgentMode).pane
   p isa AgentPane && pane_tick!(p, e)
   nothing
 end
@@ -2422,7 +2422,7 @@ add_command!(new_agent_session!; group="The file or the folder in focus", title=
 "The pane of the conversation beside the page of `e`, while agent mode shows and you have said something in it, or nothing"
 commit_talk(e) = begin
   agent_shows(e) || return nothing
-  p = get(e.nodes, :agent_pane, nothing)
+  p = state_of(e, AgentMode).pane
   p isa AgentPane && p.session !== nothing && any(it -> it isa YouSaid, p.session.items) ? p : nothing
 end
 
