@@ -15,6 +15,7 @@
 @use "github.com/jkroso/UI.jl/Interface/draw" frame rect
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
 @use GeometryBasics: Vec2
+@use "./drive" drive
 
 const px = K.px
 const G = K.Git
@@ -38,18 +39,11 @@ git("commit", "-q", "-m", "The first commit")
 
 const e = K.build_editor(page)
 const w = Window(e, size=(1000px, 760px))
-frames(n=3) = foreach(_ -> Base.invokelatest(frame, w), 1:n)
+const (; frames, click, typed, shot) = drive(w, frames=3, pressed=1, latest=true)
 "Draw until git has answered, and then what it said is on the screen"
 again() = (G.forget!(); frames(2); G.wait!(); frames(2))
 "The diff button of the top bar, or nothing"
 button() = (b = get(e.nodes, :diff, nothing); b !== nothing && !isempty(K.diff_part(e)) ? b : nothing)
-typed(s) = (foreach(c -> ontype(w, Typed(c, w)), s); frames())
-click(r) = begin
-  x, y = r.left + r.width / 2, r.top + r.height / 2
-  w.mouse = typeof(w.mouse)(x, y); onmouse(w, MouseMove(Vec2{px}(x, y), w)); frames(1)
-  w.keys |= Keys.mouse_left; onkey(w, KeyPress{Keys.mouse_left}(0, w)); frames(1)
-  w.keys ⊻= Keys.mouse_left; onkey(w, KeyRelease{Keys.mouse_left}(0, w)); frames(2)
-end
 "The words of every Text that the last frame drew in the rectangle `r`, one after another"
 drawn(r) = (out = String[]; walk(x) = (x.from isa K.Text ? push!(out, String(x.from.content)) : foreach(walk, x.children)); walk(r); join(out))
 "Each line that went from the file, as the last frame drew it in the rectangle `r`"
@@ -59,7 +53,6 @@ gone_lines(r) = (out = String[]; walk(x) = (x.from isa K.Column && x.from.name =
 top(i) = K.num(K.item(e, i).top)
 "The plain layout of the page: where each line would be with no room for the lines that went"
 plain_tops() = (items = K.layout!(e); Dict(it.first => K.num(it.top) for it in items))
-shot(name) = haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], "diff-$name.png"), w)
 again()
 
 @testset "a file with no change has no diff button" begin
@@ -111,7 +104,7 @@ end
   p = e.nodes[(:put_back, 1)]
   @test rect(p) !== nothing
   @test K.num(rect(p).left + rect(p).width) > 800
-  shot("page")
+  shot("diff-page")
 end
 
 @testset "while what changed shows, two chevrons are beside the diff button, one over the other" begin
@@ -262,7 +255,7 @@ end
   @test gone.after[2] == ["sub(a, b) = a - b"]
   @test gone_lines(rect(e.nodes[:document])) == ["sub(a, b) = a - b", "mul(a, b) = a * b"]
   @test K.is_new(gone, K.item(e, 3))
-  shot("code")
+  shot("diff-code")
 end
 
 @testset "the chevrons scroll to each change, and the palette's command shows what changed first" begin
@@ -324,7 +317,7 @@ end
   @test e.buf.caret == e.buf.anchor == (3, 4)
   # The block shows as the day picker, and not as its ``` lines
   @test !K.incode(e.buf, 5) && !occursin("```", drawn(rect(e.nodes[:document])))
-  shot("put-back-block")
+  shot("diff-put-back-block")
   # A caret after the change moves with its line
   K.undo!(e.buf); frames()
   e.buf.caret = e.buf.anchor = (9, 2)

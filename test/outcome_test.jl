@@ -44,7 +44,7 @@ write(page, TEXT)
 const e = K.build_editor(page)
 const w = Window(e, size=(1000px, 800px))
 const b = e.buf
-const (; frames, at, typed, key) = drive(w)
+const (; frames, at, click, typed, key, shot) = drive(w)
 frames()
 
 "Put the text back as it was, with no outcomes, and the caret at `line` and `col`"
@@ -59,12 +59,8 @@ end
 caret!(line, col=0) = (b.caret = b.anchor = (line, col); frames())
 run!() = key(Keys.enter, Keys.cmd)
 step!() = key(Keys.enter, Keys.shft)
-click(place) = (at(place); w.keys |= Keys.mouse_left; onkey(w, KeyPress{Keys.mouse_left}(0, w)); w.keys ⊻= Keys.mouse_left; frames())
 "The outcome whose code ends on `line`, or nothing"
 outcome(line) = (k = findfirst(o -> o.last == line, K.outcomes(e)); k === nothing ? nothing : K.outcomes(e)[k])
-
-const shots = get(ENV, "OUTCOME_SHOTS", "")
-shot(name) = isempty(shots) || save_png(joinpath(shots, name * ".png"), w)
 
 @testset "the pieces of a block of code" begin
   @test K.statements(["x = 1 + 2", "y = x * 10", "", "# doubles a number", "double(n) = begin", "  2n", "end", "", "m = [1 2; 3 4]"]) ==

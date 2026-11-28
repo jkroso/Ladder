@@ -10,6 +10,7 @@
 @use "github.com/jkroso/UI.jl/Interface/draw" frame rect
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
 @use GeometryBasics: Vec2
+@use "./drive" drive middle
 
 const px = K.px
 
@@ -30,17 +31,9 @@ write(joinpath(dir, "plain", "Other.md"), "# Other\n")
 const e = K.build_editor(home)
 e.panel = true   # the sidebar is open, with no slide
 const w = Window(e, size=(1100px, 760px))
-frames(n=3) = foreach(_ -> Base.invokelatest(frame, w), 1:n)
+const (; frames, at, click, shot) = drive(w, frames=3, pressed=1, latest=true)
 frames()
 
-shot(name) = haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], "notes-$name.png"), w)
-at((x, y)) = (w.mouse = typeof(w.mouse)(px(x), px(y)); onmouse(w, MouseMove(Vec2{px}(px(x), px(y)), w)); frames(1))
-click(place) = begin
-  at(place)
-  w.keys |= Keys.mouse_left; onkey(w, KeyPress{Keys.mouse_left}(0, w)); frames(1)
-  w.keys ⊻= Keys.mouse_left; onkey(w, KeyRelease{Keys.mouse_left}(0, w)); frames(2)
-end
-middle(node) = (r = rect(node); (K.num(r.left) + K.num(r.width) / 2, K.num(r.top) + K.num(r.height) / 2))
 "The pages that the list under the text of the page that shows has, or nothing when the page has no list"
 linked() = begin
   f = get(e.nodes, (:linked_from, e.buf.path), nothing)
@@ -65,7 +58,7 @@ end
   # The list is under the last line of the text, and as wide as the text
   @test K.num(r.width) == K.num(e.width)
   @test K.num(r.top) > 150
-  shot("page")
+  shot("notes-page")
   # A click on a page of the list shows it
   click(middle(f.rows[(:from, ideas)]))
   @test e.buf.path == ideas
@@ -102,7 +95,7 @@ end
   @test sort!([basename(k[2]) for k in keys(v.rows) if k[1] == :latest]) == ["Alone.md", "Garden.md", "Home.md", "Ideas.md"]
   @test [k[2] for k in keys(v.rows) if k[1] == :wanted] == ["A trip"]
   @test [basename(k[2]) for k in keys(v.rows) if k[1] == :loose] == ["Alone.md"]   # it links to a page, and no page links to it
-  shot("folder")
+  shot("notes-folder")
 end
 
 @testset "a click on a name with no page starts the page" begin

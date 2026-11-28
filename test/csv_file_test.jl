@@ -11,6 +11,7 @@
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
 @use "github.com/jkroso/UI.jl/Interface/testing" pixels
 @use GeometryBasics: Vec2
+@use "./drive" drive middle
 const px = K.px
 
 const dir = mktempdir()
@@ -27,21 +28,10 @@ const page = file("job.md", "# A job\n\nSome words.\n")
 
 const e = K.build_editor(page)
 const w = Window(e, size=(1400px, 900px))
-frames(n=2) = foreach(_ -> frame(w), 1:n)
+const (; frames, at, click, typed, key, shot) = drive(w)
 frames()
 K.focus(e)
-shot(name) = haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], name * ".png"), w)
 
-key(k, held...) = begin
-  foreach(h -> w.keys |= h, held)
-  onkey(w, KeyPress{k}(0, w))
-  foreach(h -> w.keys ⊻= h, held)
-  frames()
-end
-typed(s) = (foreach(c -> ontype(w, Typed(c, w)), s); frames())
-at((x, y)) = (w.mouse = typeof(w.mouse)(px(x), px(y)); onmouse(w, MouseMove(Vec2{px}(px(x), px(y)), w)); frames(1))
-click(place) = (at(place); w.keys |= Keys.mouse_left; onkey(w, KeyPress{Keys.mouse_left}(0, w)); w.keys ⊻= Keys.mouse_left; frames())
-middle(r) = (K.num(r.left) + K.num(r.width) / 2, K.num(r.top) + K.num(r.height) / 2)
 press(node) = (onkey(node, KeyPress{Keys.mouse_left}(0, w)); frames())
 menu() = any(p -> p.key == K.SHEET_KEY, popups(w))
 "The colour of the window's picture at a place in the window, as red, green and blue"

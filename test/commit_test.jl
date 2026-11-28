@@ -10,6 +10,7 @@
 @use "github.com/jkroso/MiniFB.jl" Window KeyPress KeyRelease MouseMove Keys onkey onmouse Typed ontype
 @use "github.com/jkroso/UI.jl/Interface/draw" frame rect
 @use GeometryBasics: Vec2
+@use "./drive" drive
 
 const px = K.px
 const G = K.Git
@@ -35,20 +36,11 @@ K.MESSAGE_COMMAND[] = `/usr/bin/false`
 
 const e = K.build_editor(page)
 const w = Window(e, size=(1000px, 700px))
-frames(n=3) = foreach(_ -> Base.invokelatest(frame, w), 1:n)
+const (; frames, click, typed, key) = drive(w, frames=3, pressed=1, latest=true, slide=false)
 "Draw until git has answered, and then what it said is on the screen"
 again() = (G.forget!(); frames(2); G.wait!(); frames(2))
 "The button of the top bar that commits, or nothing"
 button() = (b = get(e.nodes, :commit, nothing); b !== nothing && !isempty(K.commit_part(e)) ? b : nothing)
-press(k, held...) = (foreach(h -> w.keys |= h, held); onkey(w, KeyPress{k}(0, w)); foreach(h -> w.keys ⊻= h, held);
-                     haskey(e.nodes, :palette) && (e.nodes[:palette].moved = 0.0); frames())
-typed(s) = (foreach(c -> ontype(w, Typed(c, w)), s); frames())
-click(r) = begin
-  x, y = r.left + r.width / 2, r.top + r.height / 2
-  w.mouse = typeof(w.mouse)(x, y); onmouse(w, MouseMove(Vec2{px}(x, y), w)); frames(1)
-  w.keys |= Keys.mouse_left; onkey(w, KeyPress{Keys.mouse_left}(0, w)); frames(1)
-  w.keys ⊻= Keys.mouse_left; onkey(w, KeyRelease{Keys.mouse_left}(0, w)); frames(2)
-end
 subjects() = split(chomp(git("log", "--format=%s")), '\n')
 status() = strip(git("status", "--porcelain"))
 again()
@@ -72,8 +64,8 @@ end
   @test e.popup == :commands && p.command.name == :commit && [K.chip_name(c) for c in K.palette_chips(p)] == ["Message"] && p.at == 1
   @test w.focus === K.input(e)
   typed("Say what it's for")
-  press(Keys.enter)   # to the Run button
-  press(Keys.enter)
+  key(Keys.enter)   # to the Run button
+  key(Keys.enter)
   @test e.popup == :none && isempty(p.fault)
   @test subjects() == ["Say what it's for", "The first commit"]
   # The other file still has its change, and the page has none, so the button goes

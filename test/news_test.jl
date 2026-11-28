@@ -14,6 +14,7 @@
 @use "github.com/jkroso/URI.jl/FSPath" FSPath
 @use GeometryBasics: Vec2
 @use Dates: Dates, DateTime, Date, Day
+@use "./drive" drive middle
 
 const px = K.px
 const N = K.News
@@ -73,10 +74,9 @@ The model reads a million words at once, its makers said.
 const e = K.build_editor(joinpath(dir, "page.md"))
 e.panel = true
 const w = Window(e, size=(1200px, 900px))
-frames(n=3) = foreach(_ -> Base.invokelatest(frame, w), 1:n)
+const (; frames, at, click, shot) = drive(w, frames=3, pressed=1, latest=true)
 frames()
 
-shot(name) = haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], "news-$name.png"), w)
 front(path=news) = e.nodes[(:news, path)]
 "Read the folder again now, as two seconds do"
 again(path=news) = (front(path).read = 0.0; frames())
@@ -103,17 +103,6 @@ finish() = begin
   end
   frames()
 end
-at((x, y)) = (w.mouse = typeof(w.mouse)(px(x), px(y)); onmouse(w, MouseMove(Vec2{px}(px(x), px(y)), w)); frames(1))
-click(place) = begin
-  at(place)
-  w.keys |= Keys.mouse_left
-  onkey(w, KeyPress{Keys.mouse_left}(0, w))
-  frames(1)
-  w.keys ⊻= Keys.mouse_left
-  onkey(w, KeyRelease{Keys.mouse_left}(0, w))
-  frames(2)
-end
-middle(node) = (r = rect(node); (K.num(r.left) + K.num(r.width) / 2, K.num(r.top) + K.num(r.height) / 2))
 today() = joinpath(news, Dates.format(Dates.today(), "yyyy-mm-dd"))
 
 @testset "the facts of a folder of news" begin
@@ -193,7 +182,7 @@ end
   @test isempty(K.NEWS_WORKING) && isempty(K.NEWS_WAITING)
   # The top bar's Get the News does nothing while no section says anything
   @test getter() isa K.ToolButton && K.off(getter())
-  shot("empty")
+  shot("news-empty")
   # Interests, in the top bar, makes Interests.md, which says what it's for and has no sections yet, and shows it
   click(middle(bar_button(:news_interests)))
   @test e.buf.path == joinpath(news, N.INTERESTS) && read(e.buf.path, String) == N.INTERESTS_PAGE && isempty(N.interests(news))
@@ -211,7 +200,7 @@ end
   again()
   # The front page asked for the news of each section that says something, as none had its news today
   @test sort([r.interest.name for r in K.news_runs(news)]) == ["AI", "Space"]
-  shot("working")
+  shot("news-working")
   finish()
   v = front()
   isempty(v.editions) && @show K.NEWS_SAID
@@ -234,7 +223,7 @@ end
   # The sidebar lists the days first, and then the pages
   listed = K.entries(e, K.FS.get(FSPath(news)))
   @test listed[1] isa K.NewsDay && K.entry_name(listed[1]) == basename(today())
-  shot("front")
+  shot("news-front")
 end
 
 @testset "a click on a story shows its article, with a newspaper's look" begin
@@ -246,7 +235,7 @@ end
   @test e.look == :news
   h = e.nodes[:news_head]
   @test h.said["title"] == "A rocket lands on its tower: a first" && h.said["section"] == "Space"
-  shot("article")
+  shot("news-article")
   # A day's folder shows as that day's front page
   K.open_folder!(e, today())
   frames()
@@ -271,7 +260,7 @@ end
   finish()
   @test K.NEWS_SAID[section_key("Gardens")] == (:note, "Claude found no news of Gardens.")
   @test K.NEWS_SAID[section_key("Broken")] == (:problem, "Claude wrote no articles for Broken: The network is down.")
-  shot("said")
+  shot("news-said")
   want!("Gardens"); want!("Broken")
   want!("Slow", "Slow news.")
   again()
@@ -295,7 +284,7 @@ end
   @test N.keep_days() == 0 && Base.invokelatest(Core.eval, m, :(news_days())) == 0
   again()
   @test length(front().editions) == 2 && isfile(joinpath(folder, "Old news.md"))
-  shot("earlier")
+  shot("news-earlier")
   Base.invokelatest(Core.eval, m, :(news_days!(7)))
   again()
   @test !ispath(folder) && length(front().editions) == 1
@@ -325,7 +314,7 @@ end
   again()
   lead = front().editions[1].articles[1]
   @test lead.title == "A story from another agent" && lead.by == "Grok"
-  shot("other-agent")
+  shot("news-other-agent")
 end
 
 @testset "AGENTS.md tells an agent of your own what to write, and isn't a kind of news" begin
@@ -372,7 +361,7 @@ end
   click(middle(liked))
   @test occursin("\nliked: yes\n", read(a.path, String)) && N.article(a.path).liked === true
   @test liked.on && !disliked.on && row(a.path).liked === true
-  shot("article-marked")
+  shot("news-article-marked")
   # Didn't like it gives the other mark, and a click on a mark that's on takes it off
   click(middle(disliked))
   @test occursin("\nliked: no\n", read(a.path, String)) && !occursin("liked: yes", read(a.path, String))
@@ -384,7 +373,7 @@ end
   again()
   s = only(filter(s -> s[1] == a.by, N.scores(news)))
   @test s[2] == 1 && s[3] == 0 && s[4] >= 1 && s[5] >= s[4]
-  shot("marks")
+  shot("news-marks")
   # A mark stays in feedback.csv after its article has gone
   rm(a.path)
   again()
@@ -443,7 +432,7 @@ end
   again()
   @test length(got) == 2
   @test getter() isa K.ToolButton && !K.off(getter())
-  shot("feeds")
+  shot("news-feeds")
   # A post that you deleted doesn't come back
   rm(posts[1].path)
   K.news_now!(e, news)

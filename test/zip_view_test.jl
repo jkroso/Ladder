@@ -10,6 +10,7 @@
 @use "github.com/jkroso/UI.jl/Interface/draw" frame rect
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
 @use GeometryBasics: Vec2
+@use "./drive" drive middle
 
 const px = K.px
 const Z = K.Zips
@@ -34,17 +35,9 @@ cd(() -> run(pipeline(`zip -q $(two) Readme.md house/notes.md`, stdout=devnull, 
 const e = K.build_editor(joinpath(work, "page.md"))
 e.panel = true   # the sidebar is open, with no slide
 const w = Window(e, size=(1100px, 760px))
-frames(n=3) = foreach(_ -> Base.invokelatest(frame, w), 1:n)
+const (; frames, at, click, shot) = drive(w, frames=3, pressed=1, latest=true)
 frames()
 
-shot(name) = haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], "zip-$name.png"), w)
-at((x, y)) = (w.mouse = typeof(w.mouse)(px(x), px(y)); onmouse(w, MouseMove(Vec2{px}(px(x), px(y)), w)); frames(1))
-click(place) = begin
-  at(place)
-  w.keys |= Keys.mouse_left; onkey(w, KeyPress{Keys.mouse_left}(0, w)); frames(1)
-  w.keys ⊻= Keys.mouse_left; onkey(w, KeyRelease{Keys.mouse_left}(0, w)); frames(2)
-end
-middle(node) = (r = rect(node); (K.num(r.left) + K.num(r.width) / 2, K.num(r.top) + K.num(r.height) / 2))
 view(path=file) = e.nodes[(:zip, path)]
 "The names of the lines that the list shows, from the top"
 lines(path=file) = [en.name for en in K.ZipPages.zip_lines(view(path))]
@@ -63,7 +56,7 @@ end
   frames()
   @test e.buf.path == file
   @test lines() == ["plans/", "plans/house/", "plans/Readme.md"]
-  shot("list")
+  shot("zip-list")
 end
 
 @testset "a click on a folder opens it, and one more closes it" begin
@@ -71,7 +64,7 @@ end
   @test lines() == ["plans/", "plans/house/", "plans/house/old/", "plans/house/notes.md", "plans/Readme.md"]
   click(middle(view().rows["plans/house/old/"]))
   @test lines()[3:4] == ["plans/house/old/", "plans/house/old/first.txt"]
-  shot("open")
+  shot("zip-open")
   click(middle(view().rows["plans/house/"]))
   @test lines() == ["plans/", "plans/house/", "plans/Readme.md"]
   click(middle(view().rows["plans/house/"]))
@@ -123,7 +116,7 @@ end
   frames()
   @test view(bad).zip isa String
   @test rect(view(bad)) !== nothing
-  shot("bad")
+  shot("zip-bad")
 end
 
 close(w)

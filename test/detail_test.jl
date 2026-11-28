@@ -43,12 +43,11 @@ Some words.
 const e = K.build_editor(page)
 const w = Window(e, size=(1000px, 800px))
 const b = e.buf
-const (; frames, at, typed, key) = drive(w)
+const (; frames, at, click, typed, key, shot) = drive(w)
 frames()
 K.focus(e)
 
 caret!(line, col=0) = (b.caret = b.anchor = (line, col); frames())
-click(place) = (at(place); w.keys |= Keys.mouse_left; onkey(w, KeyPress{Keys.mouse_left}(0, w)); w.keys ⊻= Keys.mouse_left; frames())
 outcome(line) = (k = findfirst(o -> o.last == line, K.outcomes(e)); k === nothing ? nothing : K.outcomes(e)[k])
 "Run the code on `line`, and open the box of what it comes to. Returns what the open box shows."
 opened!(line) = begin
@@ -67,9 +66,6 @@ texts(node, out=String[]) = begin
   node isa K.Text ? push!(out, node.content) : node isa K.GeometricUI && foreach(n -> texts(n, out), node.children)
   out
 end
-
-const shots = get(ENV, "DETAIL_SHOTS", "")
-shot(name) = isempty(shots) || save_png(joinpath(shots, name * ".png"), w)
 
 @testset "the box of a function opens to its documentation and its methods" begin
   caret!(4)

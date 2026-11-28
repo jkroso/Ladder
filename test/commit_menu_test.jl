@@ -12,6 +12,7 @@
 @use "github.com/jkroso/UI.jl/Interface/draw" frame rect popups
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
 @use GeometryBasics: Vec2
+@use "./drive" drive
 
 const px = K.px
 const G = K.Git
@@ -43,19 +44,11 @@ K.MESSAGE_COMMAND[] = WRITES
 
 const e = K.build_editor(page)
 const w = Window(e, size=(1000px, 760px))
-frames(n=3) = foreach(_ -> Base.invokelatest(frame, w), 1:n)
+const (; frames, click, typed, key, shot) = drive(w, frames=3, pressed=1, latest=true, slide=false)
 "Draw until git has answered, and then what it said is on the screen"
 again() = (G.forget!(); frames(2); G.wait!(); frames(2))
 "Draw until the message has come and the commit is made, for 10 seconds at the most"
 committed() = (t = time(); while haskey(e.nodes, :writing) && time() - t < 10; frames(1); sleep(0.01) end; again())
-click(r) = begin
-  x, y = r.left + r.width / 2, r.top + r.height / 2
-  w.mouse = typeof(w.mouse)(x, y); onmouse(w, MouseMove(Vec2{px}(x, y), w)); frames(1)
-  w.keys |= Keys.mouse_left; onkey(w, KeyPress{Keys.mouse_left}(0, w)); frames(1)
-  w.keys ⊻= Keys.mouse_left; onkey(w, KeyRelease{Keys.mouse_left}(0, w)); frames(1)
-end
-key(k) = (onkey(w, KeyPress{k}(0, w)); haskey(e.nodes, :palette) && (e.nodes[:palette].moved = 0.0); frames())
-typed(s) = (foreach(c -> ontype(w, Typed(c, w)), s); frames())
 "True while the list under the chevron shows"
 list_open() = any(p -> p.key == K.COMMIT_LIST, popups(w))
 "Click the chevron, and click the row of the way `way` in its list: :file, :part or :all"
@@ -66,7 +59,6 @@ subjects() = split(chomp(git("log", "--format=%s")), '\n')
 "Close the palette, and draw until it has slid away"
 close_palette() = (K.close_palette!(e); t = time(); while K.palette_shows(e) && time() - t < 2; frames(1); sleep(0.02) end; frames())
 status() = strip(git("status", "--porcelain"))
-shot(name) = haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], "commit-$name.png"), w)
 again()
 
 @testset "a click on the Commit button commits the file, with the message that Claude writes" begin
@@ -79,7 +71,7 @@ again()
   # The chevron is just right of the button
   @test 0 <= K.num(rect(e.nodes[:commit_more]).left - (rect(b).left + rect(b).width)) <= 4
   @test K.tip(b) == "Commit Readme.md, with a message that Claude writes"
-  shot("button")
+  shot("commit-button")
   click(rect(b))
   committed()
   @test subjects() == ["Say what the page is for", "The first commit"]
@@ -109,7 +101,7 @@ end
   @test !isempty(K.commit_part(e)) && rect(commit_button()) !== nothing
   spins(r) = (hasproperty(r.from, :name) && r.from.name == "Spinner") || any(spins, try collect(r.children) catch; [] end)
   @test spins(rect(commit_button()))
-  shot("writing")
+  shot("commit-writing")
   # A second click while Claude writes starts nothing more
   K.commit_now!(e, :file)
   committed()
@@ -145,12 +137,12 @@ end
   outline, inside, closed = K.commit_envelope((x=K.num(l.left), y=K.num(l.top), w=K.num(l.width), h=K.num(l.height)), t)
   @test minimum(last, outline) ≈ t.y + 0.5 atol=1
   @test maximum(last, outline) ≈ K.num(l.top + l.height) atol=1
-  shot("list")
+  shot("commit-list")
   # The switch turns on, and the list stays for another click
   @test !e.own
   click(rect(e.nodes[:own_message]))
   @test e.own && list_open()
-  shot("list-own")
+  shot("commit-list-own")
   # A way then asks for your words in the palette
   click(rect(e.nodes[(:commit_way, :file)]))
   @test !list_open()
@@ -213,7 +205,7 @@ end
   e.scroll.offset = 0px
   frames()
   @test K.tip(commit_button()) == "Commit the 2 ticked changes, with a message that Claude writes"
-  shot("ticks")
+  shot("commit-ticks")
   # A tick stays with its change while the lines above it move
   K.focus(e)
   e.buf.caret = e.buf.anchor = (1, 0)

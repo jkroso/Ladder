@@ -19,6 +19,7 @@ include(joinpath(@__DIR__, "png_fake.jl"))   # `write_png` writes a small pictur
 const px = K.px
 @use "../macfolders" => M
 @use "../picture_words" => W
+@use "./drive" drive
 
 const dir = mktempdir()
 K.SETTINGS_FILE[] = joinpath(dir, "settings")
@@ -68,18 +69,15 @@ write(joinpath(pics, ".hidden.png"), "hidden")
 const e = K.build_editor(joinpath(dir, "page.md"))
 e.panel = true   # the sidebar is open, with no slide
 const w = Window(e, size=(1100px, 760px))
-frames(n=3) = foreach(_ -> Base.invokelatest(frame, w), 1:n)
+const (; frames, at, press, release, typed, key, shot) = drive(w, frames=3, pressed=1, latest=true)
 frames()
 
-shot(name) = haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], "pictures-$name.png"), w)
 view(folder=pics) = e.nodes[(:tiles, folder)]
 again(folder=pics) = (view(folder).read = 0.0; frames())
-at((x, y)) = (w.mouse = typeof(w.mouse)(px(x), px(y)); onmouse(w, MouseMove(Vec2{px}(px(x), px(y)), w)); frames(1))
-press() = (w.keys |= Keys.mouse_left; onkey(w, KeyPress{Keys.mouse_left}(0, w)); frames(1); w.keys ⊻= Keys.mouse_left; onkey(w, KeyRelease{Keys.mouse_left}(0, w)); frames(2))
-# A click here is one click, however soon it comes after the last one. Two clicks are `click` and then `press`.
+# A click here is one click, however soon it comes after the last one. Two clicks are `click`, and then `press` and `release`.
 click(place, held...) = begin
   foreach(v -> v isa K.MacPages.TilesView && (v.clicked = (0.0, "")), values(e.nodes))
-  at(place); foreach(h -> w.keys |= h, held); press(); foreach(h -> w.keys ⊻= h, held); frames(1)
+  press(place, held...); release(held...)
 end
 "Where the middle of the square of `name` is in the window"
 square(name, folder=pics) = begin
@@ -89,13 +87,6 @@ square(name, folder=pics) = begin
   r = rect(v)
   (K.num(r.left) + (k - 0.5) * v.side + (k - 1) * K.MacPages.TILE_GAP, K.num(r.top) + K.MacPages.TILES_HEAD_H + v.tops[i] + v.side / 2)
 end
-key(k, held...) = begin
-  foreach(h -> w.keys |= h, held)
-  onkey(w, KeyPress{k}(0, w))
-  foreach(h -> w.keys ⊻= h, held)
-  frames()
-end
-typed(s) = (foreach(c -> ontype(w, Typed(c, w)), s); frames())
 "What the grid shows, from the top: the words over each group, and the names of each row"
 shown(folder=pics) = [l isa Vector ? [t.name for t in l] : l for l in view(folder).lines]
 chosen(folder=pics) = K.MacPages.tiles_chosen(view(folder))
@@ -119,7 +110,7 @@ end
   @test v.side >= K.MacPages.TILE_SIDE
   # Each picture has a small picture of its own, and a file that isn't a picture has the Finder's icon
   @test K.MacPages.TILE_PICTURES[joinpath(pics, "beach.png")][2] !== nothing
-  shot("grid")
+  shot("pictures-grid")
 end
 
 @testset "a click chooses a square, and ⌘ or ⇧ with a click chooses more" begin
@@ -130,7 +121,7 @@ end
   click(square("beach.png"))
   click(square("wall.png"), Keys.shft)
   @test chosen() == ["beach.png", "garden.png", "wall.png"]
-  shot("chosen")
+  shot("pictures-chosen")
   # A click between the squares chooses nothing
   r = rect(view())
   click((K.num(r.left) + K.num(r.width) - 3, K.num(r.top) + K.MacPages.TILES_HEAD_H + 8))
@@ -154,7 +145,7 @@ end
   K.focus(v.field)
   typed("SAN")
   @test shown() == [M.month_name(time() - 41day), ["sand.png"]]
-  shot("found")
+  shot("pictures-found")
   typed("zzz")
   @test shown() == []
   v.field.text = ""
@@ -164,7 +155,7 @@ end
 
 @testset "two clicks show a picture, and ⌘⌫ moves what's chosen to the Trash" begin
   click(square("beach.png"))
-  at(square("beach.png")); press()
+  press(square("beach.png")); release()
   @test e.buf.path == joinpath(pics, "beach.png")
   K.go_back!(e)
   frames()
@@ -184,7 +175,7 @@ end
 
 @testset "two clicks on a folder show it as a grid of its own" begin
   click(square("Holiday"))
-  at(square("Holiday")); press()
+  press(square("Holiday")); release()
   frames(6)
   holiday = joinpath(pics, "Holiday")
   @test e.buf.path == holiday && e.folder == holiday
@@ -199,7 +190,7 @@ end
   @test K.directory(e) isa K.ScreenshotsDirectory
   @test view(shots).days
   @test shown(shots) == ["Today", ["Screenshot 1.png"], "Yesterday", ["Screenshot 2.png", "Screenshot 3.png"]]
-  shot("screenshots")
+  shot("pictures-screenshots")
 end
 
 "Draw until every picture that waits has been read"
@@ -222,7 +213,7 @@ end
   @test shown(shots) == ["Yesterday", ["Screenshot 2.png"]]
   # Each picture of the folder was read once. The pictures of the Pictures folder were read by the check before.
   @test sort(filter(startswith("Screenshot"), asked)) == ["Screenshot 1.png", "Screenshot 2.png", "Screenshot 3.png"]
-  shot("words")
+  shot("pictures-words")
   # The words are in small letters with one space between them, whatever the picture has
   @test W.words(joinpath(shots, "Screenshot 2.png")) == "invoice 1042 total \$310.00"
   v.field.text = "TOTAL \$310"
@@ -297,7 +288,7 @@ end
   pins = Dict(name => (x, y) for (name, x, y) in v.pins)
   @test length(pins) == 2
   @test pins["beach.png"][1] > pins["garden.png"][1] && pins["beach.png"][2] < pins["garden.png"][2]
-  shot("map")
+  shot("pictures-map")
   # A click on a dot chooses its photo
   i = findfirst(==(:map), v.lines)
   # The grid scrolls to a photo that's chosen, so the map is looked for again before each click

@@ -17,6 +17,7 @@ include(joinpath(@__DIR__, "dsstore_fake.jl"))   # `store` makes the bytes of a 
 const px = K.px
 @use "../macfolders" => M
 @use "../trash" => T
+@use "./drive" drive middle
 
 const dir = mktempdir()
 K.SETTINGS_FILE[] = joinpath(dir, "settings")
@@ -61,33 +62,23 @@ write(joinpath(bin, ".DS_Store"), store([
 const e = K.build_editor(joinpath(dir, "page.md"))
 e.panel = true   # the sidebar is open, with no slide
 const w = Window(e, size=(1100px, 760px))
-frames(n=3) = foreach(_ -> Base.invokelatest(frame, w), 1:n)
+const (; frames, at, press, release, key, shot) = drive(w, frames=3, pressed=1, latest=true)
 frames()
 
-shot(name) = haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], "downloads-$name.png"), w)
 view(folder=down) = e.nodes[(:filelist, folder)]
 "Read the folder again now, as a second does"
 again(folder=down) = (view(folder).read = 0.0; frames())
-at((x, y)) = (w.mouse = typeof(w.mouse)(px(x), px(y)); onmouse(w, MouseMove(Vec2{px}(px(x), px(y)), w)); frames(1))
-press() = (w.keys |= Keys.mouse_left; onkey(w, KeyPress{Keys.mouse_left}(0, w)); frames(1); w.keys ⊻= Keys.mouse_left; onkey(w, KeyRelease{Keys.mouse_left}(0, w)); frames(2))
-# A click here is one click, however soon it comes after the last one. Two clicks are `click` and then `press`.
+# A click here is one click, however soon it comes after the last one. Two clicks are `click`, and then `press` and `release`.
 click(place, held...) = begin
   foreach(v -> v isa K.MacPages.FileList && (v.clicked = (0.0, "")), values(e.nodes))
-  at(place); foreach(h -> w.keys |= h, held); press(); foreach(h -> w.keys ⊻= h, held); frames(1)
+  press(place, held...); release(held...)
 end
-middle(node) = (r = rect(node); (K.num(r.left) + K.num(r.width) / 2, K.num(r.top) + K.num(r.height) / 2))
 "Where the middle of the line of `name` is in the window"
 line(name, folder=down) = begin
   v = view(folder)
   i = findfirst(l -> l isa K.MacPages.ListItem && l.name == name, v.lines)
   r = rect(v)
   (K.num(r.left) + 200, K.num(r.top) + K.MacPages.filelist_head_h(v) + K.MacPages.LIST_ROW_H * (i - 0.5))
-end
-key(k, held...) = begin
-  foreach(h -> w.keys |= h, held)
-  onkey(w, KeyPress{k}(0, w))
-  foreach(h -> w.keys ⊻= h, held)
-  frames()
 end
 "What the list shows, from the top: the words over each group, and each name"
 shown(folder=down) = [l isa K.MacPages.ListItem ? l.name : "— " * l for l in view(folder).lines]
@@ -109,7 +100,7 @@ end
                     "— " * M.month_name(time() - 400day), "ancient.zip"]
   # The sidebar lists the folder the same way, and neither shows a hidden file
   @test basename.(e.listed) == ["form.pdf", "photo.png", "installer.dmg", "old", "notes.md", "ancient.zip"]
-  shot("list")
+  shot("downloads-list")
   K.hidden!(e, true)
   again()
   @test shown()[2] == ".hidden"
@@ -127,7 +118,7 @@ end
   click(line("form.pdf"))
   click(line("installer.dmg"), Keys.shft)
   @test chosen() == ["form.pdf", "photo.png", "installer.dmg"]
-  shot("chosen")
+  shot("downloads-chosen")
   # A click on the words of a group chooses nothing
   r = rect(view())
   click((K.num(r.left) + 200, K.num(r.top) + K.MacPages.filelist_head_h(view()) + K.MacPages.LIST_ROW_H * 0.5))
@@ -148,7 +139,7 @@ end
 
 @testset "two clicks show a file, and Return does too" begin
   click(line("notes.md"))
-  at(line("notes.md")); press()
+  press(line("notes.md")); release()
   @test e.buf.path == joinpath(down, "notes.md")
   K.go_back!(e)
   frames()
@@ -196,7 +187,7 @@ end
   @test v.origins["plan.pdf"] == T.Origin(folder=desk, name="plan.pdf")
   @test v.origins["notes 10.42.07 am.md"].name == "notes.md"
   @test !haskey(v.origins, "stray.txt")
-  shot("trash")
+  shot("downloads-trash")
 end
 
 @testset "the Trash's page has no buttons, and its first line is right under its name" begin

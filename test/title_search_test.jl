@@ -53,12 +53,9 @@ K.HOME[] = dir   # the path starts with ~ for this folder
 const e = K.build_editor(plan)
 e.panel = false   # the sidebar is hidden: the top bar is the way round
 const w = Window(e, size=(1100px, 760px))
-const (; frames, at, typed, key) = drive(w, frames=3, latest=true)
+const (; frames, at, click, typed, key, shot) = drive(w, frames=3, pressed=1, latest=true)
 frames()
 
-shot(name) = haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], "title-search-$name.png"), w)
-press() = (w.keys |= Keys.mouse_left; onkey(w, KeyPress{Keys.mouse_left}(0, w)); frames(1); w.keys ⊻= Keys.mouse_left; onkey(w, KeyRelease{Keys.mouse_left}(0, w)); frames(2))
-click(place) = (at(place); press())
 showing(k) = any(p -> p.key == k, popups(w))
 trail() = e.nodes[:title_trail]
 "Hold the mouse over the file's name until the path shows"
@@ -101,7 +98,7 @@ end
   # The file's name is where the bar had it, after the room that the bar keeps empty before it
   t = rect(e.nodes[:title])
   @test abs(K.num(rect(trail().crumbs[plan]).left) + K.num(K.TT_PAD) - K.num(t.left) - K.num(e.nodes[:title_lead])) <= 2
-  shot("heading")
+  shot("title-search-heading")
 end
 
 @testset "on a component, the path has each heading over it and the component, which has no ›" begin
@@ -112,7 +109,7 @@ end
   @test rect(drop(2)).left < rect(trail().marks[3]).left
   r = rect(trail().marks[3])
   @test !haskey(trail().drops, 3) || rect(drop(3)) === nothing || rect(drop(3)).left < r.left
-  shot("component")
+  shot("title-search-component")
   # Under the block, the caret is on no component
   caret!(11)
   hover!()
@@ -147,7 +144,7 @@ end
   r = rect(e.nodes[:title])
   @test abs(K.num(r.width) - K.num(bare.width) - (2K.num(K.parts_wide(K.focus_parts(e))) + 12)) <= 1
   @test abs(K.num(r.left) + K.num(r.width) / 2 - (K.num(bare.left) + K.num(bare.width) / 2)) <= 1
-  shot("bar")
+  shot("title-search-bar")
 end
 
 @testset "the › after the file's name lists its headings and components, under the ›" begin
@@ -161,7 +158,7 @@ end
   # It hangs under the ›
   r, ra = rect(s), rect(drop(0))
   @test r.top > ra.top + ra.height && r.left <= ra.left && ra.left + ra.width <= r.left + r.width
-  shot("file")
+  shot("title-search-file")
   # A click on one goes to it
   click(middle(s.parts[(:row, 2)]))
   @test !showing(K.TS_KEY)
@@ -189,7 +186,7 @@ end
   @test found() == ["After the sheet."]
   @test K.search_summary(search()) == "1 thing in plan.md."
   @test search().rows[search().pick].kind == :thing
-  shot("words")
+  shot("title-search-words")
   key(Keys.escape)
   open!(1)
   typed("intro")
@@ -211,7 +208,7 @@ end
   @test search().wants == [:sheet]
   @test showing(K.TS_MENU)
   f = m.parts[:field]; f.text = ""; f.anchor = f.cursor = 0; frames()
-  shot("kinds-list")
+  shot("title-search-kinds-list")
   # Esc goes back to the search's field
   key(Keys.escape)
   @test !showing(K.TS_MENU) && showing(K.TS_KEY)
@@ -220,7 +217,7 @@ end
   @test found() == ["Costs"]
   @test search().rows[1].as == :sheet
   @test haskey(search().parts, (:chip, :sheet))
-  shot("kinds")
+  shot("title-search-kinds")
 end
 
 @testset "a click on a chip, or Backspace in an empty field, takes a kind away" begin
@@ -269,7 +266,7 @@ end
   @test s.arrow === drop(0) && s.under == 0
   @test w.focus === K.search_field(s) && K.search_field(s).text == ""
   @test found() == ["part Plan", "part   Costs", "part     Sheet"]
-  shot("cmd-f")
+  shot("title-search-cmd-f")
   # ⌘F again selects the words in the field, and the search stays
   typed("sheet")
   key(Keys.f, Keys.cmd)
@@ -324,7 +321,7 @@ end
   # Nothing follows it: it ends the path, inside the path's own room at its end
   r, v = rect(trail().marks[2]), rect(trail())
   @test 0 <= K.num(v.left + v.width) - K.num(r.left + r.width) <= K.num(K.TT_EDGE) + 2
-  shot("run")
+  shot("title-search-run")
   # On the heading's line, the caret is on no run
   b = e.buf; b.caret = b.anchor = (1, 3); frames()
   @test [x.title for x in K.focus_parts(e)] == ["Runs"]
@@ -359,7 +356,7 @@ end
   frames()
   hover!()
   @test K.cursor(trail().marks[1]) == :arrow   # in the page, the last part is where the caret is
-  shot("unzoomed")
+  shot("title-search-unzoomed")
   # A heading chosen in the search under the › after the file's name goes back to the page too
   K.zoom_in!(e, (:diagram, code)); frames()
   open!(0)

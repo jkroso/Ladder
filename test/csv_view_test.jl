@@ -9,6 +9,7 @@
 @use "github.com/jkroso/MiniFB.jl" Window KeyPress Keys onkey Typed ontype
 @use "github.com/jkroso/UI.jl/Interface/draw" frame rect
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
+@use "./drive" drive
 const px = K.px
 
 const dir = mktempdir()
@@ -63,10 +64,9 @@ The end.
 
 const e = K.build_editor(page)
 const w = Window(e, size=(1000px, 900px))
-frames(n=2) = foreach(_ -> frame(w), 1:n)
+const (; frames, click, key, shot) = drive(w)
 frames()
 K.focus(e)
-shot(name) = haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], name), w)
 
 "The line of the page that holds `text`"
 line(text) = findfirst(l -> occursin(text, l), e.buf.lines)
@@ -76,21 +76,6 @@ shown(text) = K.item(e, line(text)).content.node
 goto(text) = (e.scroll.offset = max(0px, K.item(e, line(text)).top - 60px); frames(3))
 "Scroll the page until the end of what the line that holds `text` shows is in the window"
 goto_end(text) = (it = K.item(e, line(text)); e.scroll.offset = max(0px, it.top + it.tall - 500px); frames(3))
-press(k, held...) = begin
-  foreach(h -> w.keys |= h, held)
-  onkey(w, KeyPress{k}(0, w))
-  foreach(h -> w.keys ⊻= h, held)
-  frames()
-end
-click(node) = begin
-  r = rect(node)
-  w.mouse = typeof(w.mouse)(r.left + r.width / 2, r.top + r.height / 2)
-  frame(w)
-  w.keys |= Keys.mouse_left
-  onkey(w, KeyPress{Keys.mouse_left}(0, w))
-  w.keys ⊻= Keys.mouse_left
-  frames()
-end
 caret!(i, col=0) = (e.buf.caret = e.buf.anchor = (i, col); K.touch!(e); frames())
 "The text of each line on screen of a cell"
 words(flow) = [join(seg.text for seg in vl.segs) for vl in flow.lines]
@@ -175,14 +160,14 @@ end
 @testset "the caret goes onto the table as a whole" begin
   i = line("prices.csv")
   caret!(i - 2, 0)
-  press(Keys.down); press(Keys.down)
+  key(Keys.down); key(Keys.down)
   @test e.buf.caret == (i, 0) && K.picked(e.buf) == (i, i)
   @test K.item(e, i).content isa K.Live
   shot("csv-picked.png")
   # ↓ goes on to the line after it, and ↑ comes back onto it
-  press(Keys.down)
+  key(Keys.down)
   @test e.buf.caret[1] == i + 1 && K.picked(e.buf) === nothing
-  press(Keys.up)
+  key(Keys.up)
   @test K.picked(e.buf) == (i, i)
   # A click on the table puts the caret on it as a whole
   caret!(1, 0)
@@ -199,16 +184,16 @@ end
   # The line shows as text while it's typed, and as a table when the caret leaves it
   foreach(c -> ontype(e, Typed(c, w)), " "); frames()
   @test K.item(e, i).content isa K.Flow
-  press(Keys.z, Keys.cmd)
+  key(Keys.z, Keys.cmd)
   @test e.buf.lines[i] == "![Prices](prices.csv)"
   caret!(1, 0)
   @test shown("prices.csv") isa K.TableLine
   # ⌫ on the table as a whole takes its line away, and ⌘Z brings it back
   caret!(i, 0)
   @test K.picked(e.buf) == (i, i)
-  press(Keys.backspace)
+  key(Keys.backspace)
   @test line("prices.csv") === nothing
-  press(Keys.z, Keys.cmd)
+  key(Keys.z, Keys.cmd)
   @test line("prices.csv") == i
   caret!(1, 0)
 end

@@ -9,6 +9,7 @@
 @use "github.com/jkroso/UI.jl/Interface/draw" frame rect
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
 @use GeometryBasics: Vec2
+@use "./drive" drive
 const px = K.px
 
 const dir = mktempdir()
@@ -27,30 +28,10 @@ mkpath(joinpath(folder, ".git"))
 const e = K.build_editor(page)
 e.panel = true
 const w = Window(e, size=(1000px, 700px))
-frames(n=2) = foreach(_ -> frame(w), 1:n)
+const (; frames, click, key, shot) = drive(w, moved=2)
 frames()
 
 names() = basename.(e.listed)
-click(node) = begin
-  r = rect(node)
-  x, y = r.left + r.width / 2, r.top + r.height / 2
-  w.mouse = typeof(w.mouse)(x, y)
-  onmouse(w, MouseMove(Vec2{px}(x, y), w))
-  frames()
-  w.keys |= Keys.mouse_left
-  onkey(w, KeyPress{Keys.mouse_left}(0, w))
-  w.keys ⊻= Keys.mouse_left
-  frames()
-end
-press(k, held...) = begin
-  foreach(h -> w.keys |= h, held)
-  onkey(w, KeyPress{k}(0, w))
-  foreach(h -> w.keys ⊻= h, held)
-  frames()
-end
-
-const shots = get(ENV, "MEDIA_SHOTS", "")
-shot(name) = isempty(shots) || save_png(joinpath(shots, name * ".png"), w)
 
 @testset "a picture that's pasted goes in the .media folder beside the page" begin
   path = K.keep_pasted(e, "png", UInt8[1, 2, 3])
@@ -113,9 +94,9 @@ end
   click(b)
   @test !e.hidden && !(".media" in names())
   @test K.tip(b) == "Show hidden and ignored files  ⌘⇧."
-  press(Keys.period, Keys.cmd, Keys.shft)
+  key(Keys.period, Keys.cmd, Keys.shft)
   @test e.hidden
-  press(Keys.period, Keys.cmd, Keys.shft)
+  key(Keys.period, Keys.cmd, Keys.shft)
   @test !e.hidden
 end
 

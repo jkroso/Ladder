@@ -13,6 +13,7 @@
 @use "github.com/jkroso/UI.jl/Interface/draw" frame rect popups
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
 @use GeometryBasics: Vec2
+@use "./drive" drive middle
 
 const px = K.px
 const H = K.Folders
@@ -115,24 +116,12 @@ K.HOME[] = home
 const e = K.build_editor(page)
 e.panel = true   # the sidebar is open
 const w = Window(e, size=(1100px, 760px))
-frames(n=3) = foreach(_ -> Base.invokelatest(frame, w), 1:n)
+const (; frames, at, click, typed, key, shot) = drive(w, frames=3, pressed=1, latest=true)
 frames()
 
-shot(name) = haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], "folders-$name.png"), w)
-at((x, y)) = (w.mouse = typeof(w.mouse)(px(x), px(y)); onmouse(w, MouseMove(Vec2{px}(px(x), px(y)), w)); frames(1))
-press() = (w.keys |= Keys.mouse_left; onkey(w, KeyPress{Keys.mouse_left}(0, w)); frames(1); w.keys ⊻= Keys.mouse_left; onkey(w, KeyRelease{Keys.mouse_left}(0, w)); frames(2))
-click(place) = (at(place); press())
-middle(node) = (r = rect(node); (K.num(r.left) + K.num(r.width) / 2, K.num(r.top) + K.num(r.height) / 2))
-key(k, held...) = begin
-  foreach(h -> w.keys |= h, held)
-  onkey(w, KeyPress{k}(0, w))
-  foreach(h -> w.keys ⊻= h, held)
-  frames()
-end
 menu() = (ps = [p for p in popups(w) if p.key == :menu]; isempty(ps) ? nothing : only(ps).content)
 choose(name) = (m = menu(); foreach(_ -> key(Keys.down), 1:findfirst(==(name), m.items)); key(Keys.enter))
 right_click(place) = (at(place); onkey(w, KeyPress{Keys.mouse_right}(0, w)); frames())
-typed(s) = (foreach(c -> ontype(w, Typed(c, w)), s); frames())
 "Sort the folder table `t` by the column `k` from its heading's menu, Z, the largest or the newest first when `desc` is true"
 sort_by(t, k, desc) = (click(middle(t.heads[k])); click(middle(t.parts[(:order, desc)])); K.close_folder_menu!(t); frames())
 "True when the menu of a column of a folder's table shows"
@@ -156,7 +145,7 @@ trail_name(path) = only(n for n in values(e.nodes) if n isa K.TrailName && n.pat
   click(middle(t))
   @test e.buf.path == home && e.folder == home
   @test e.nodes[(:folder_page, home)] isa K.FolderPage && rect(e.nodes[(:folder_table, home)]) !== nothing
-  shot("home")
+  shot("folders-home")
   K.open!(e, page)
   frames()
 end
@@ -218,7 +207,7 @@ end
   # The rows show in that order, from the top
   tops = [K.num(rect(row(n)).top) for n in order]
   @test issorted(tops) && allunique(tops)
-  shot("table")
+  shot("folders-table")
   # A click on a heading sorts the table by its column, and a second click sorts it the other way
   by_name = ["Alpha", "Beta", "Code", "Desktop", "Gamma", "Library", "list.csv", "Mail", "page.md"]
   sort_by(v, :name, false)
@@ -241,13 +230,13 @@ end
   @test v.sort == :when && v.desc && names() == order
   sort_by(v, :when, false)
   @test !v.desc && names() == reverse(order)
-  shot("table-oldest")
+  shot("folders-table-oldest")
   sort_by(v, :when, true)
   @test v.desc
   # A new file deep in a folder puts the folder first, as soon as macOS tells of it
   made("Mail/Inbox/2.eml", "Subject: hello\n\nhello\n")
   @test wait_until(() -> (v.read = 0.0; frames(1); names()[1] == "Mail"))
-  shot("table-change")
+  shot("folders-table-change")
   # A right-click shows the row's menu, with no Rename
   right_click(middle(row("Code")))
   @test menu() !== nothing && "Show in Finder" in menu().items && !("Rename" in menu().items)
@@ -265,7 +254,7 @@ end
   @test K.holds_words(t) == "1 folder  ·  " * K.Zips.size_words(bytes_in(code))
   @test t.sort == :when && t.desc
   @test rect(t.rows[(:item, app)]) !== nothing && rect(t.heads[:when]) !== nothing
-  shot("folder-table")
+  shot("folders-folder-table")
   # Its folder's time is when anything in it changed: the newest file in app is main.jl
   @test wait_until(() -> (t.read = 0.0; frames(1); only(t.items).known))
   @test isapprox(only(t.items).when, now - 0.5hour, atol=1)
@@ -292,7 +281,7 @@ end
   # The name's menu has a field for words that a name holds, and it has the keyboard
   click(middle(v.heads[:name]))
   @test column_menu() && v.asking == :name && w.focus === v.fields[:name]
-  shot("name-menu")
+  shot("folders-name-menu")
   typed("a")
   @test names() == Set(["page.md", "Mail", "Alpha", "Beta", "Gamma", "Library"])
   @test K.narrowed(v, :name) && K.narrowed(v)
@@ -302,7 +291,7 @@ end
   # Return keeps what's typed, and a line over the rows has a button that shows every row again
   click(middle(v.heads[:name])); typed("a"); key(Keys.enter)
   @test !column_menu() && names() == Set(["page.md", "Mail", "Alpha", "Beta", "Gamma", "Library"])
-  shot("name-filtered")
+  shot("folders-name-filtered")
   click(middle(v.buttons[:clear]))
   @test !K.narrowed(v) && names() == everything
   # The size has two ends. A folder's size counts, and a folder that isn't read has none.
@@ -314,7 +303,7 @@ end
   @test w.focus === v.fields[:size_hi]
   typed("1 KB")
   @test names() == Set(["page.md", "Mail"])
-  shot("size-menu")
+  shot("folders-size-menu")
   # Words that aren't a size don't count, and the field says so
   v.fields[:size_lo].text = "ten"
   frames()
@@ -327,7 +316,7 @@ end
   @test names() == Set(["page.md", "Mail", "Code", "Desktop"])
   key(Keys.tab); typed("1 h ago")
   @test names() == Set(["Desktop"])
-  shot("when-menu")
+  shot("folders-when-menu")
   key(Keys.enter)
   K.clear_filters!(v); frames()
   # The menu of the kinds has a tick for each kind, with its icon and how many there are
@@ -335,7 +324,7 @@ end
   @test v.parts[(:kind, "Folder")].count == 7
   click(middle(v.parts[(:kind, "Folder")]))
   @test v.kinds == Set(["Folder"]) && names() == Set(["Code", "Desktop", "Mail", "Alpha", "Beta", "Gamma", "Library"])
-  shot("kind-menu")
+  shot("folders-kind-menu")
   # The menu's orders sort by its column
   click(middle(v.parts[(:order, false)]))
   @test v.sort == :kind && !v.desc

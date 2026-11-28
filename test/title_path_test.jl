@@ -33,12 +33,9 @@ K.HOME[] = dir   # the path starts with ~ for this folder
 const e = K.build_editor(a)
 e.panel = false   # the sidebar is hidden: the top bar is the way round
 const w = Window(e, size=(1100px, 760px))
-const (; frames, at, typed, key) = drive(w, frames=3, latest=true)
+const (; frames, at, click, typed, key, shot) = drive(w, frames=3, pressed=1, latest=true)
 frames()
 
-shot(name) = haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], "title-$name.png"), w)
-press() = (w.keys |= Keys.mouse_left; onkey(w, KeyPress{Keys.mouse_left}(0, w)); frames(1); w.keys ⊻= Keys.mouse_left; onkey(w, KeyRelease{Keys.mouse_left}(0, w)); frames(2))
-click(place) = (at(place); press())
 menu() = (ps = [p for p in popups(w) if p.key == :menu]; isempty(ps) ? nothing : only(ps).content)
 "The lists of folders that show, from the one under the › on"
 lists() = K.folder_lists(w)
@@ -74,7 +71,7 @@ bar_places() = Dict(k => place(n) for (k, n) in e.nodes if n isa K.ToolButton &&
   @test K.num(rect(crumb(plain)).left) < K.num(rect(crumb(a)).left)
   # The bar's own parts are where they were
   @test place(e.nodes[:title]) == title_at && bar_places() == places
-  shot("path")
+  shot("title-path")
 end
 
 @testset "it goes when the mouse leaves it" begin
@@ -97,7 +94,7 @@ end
   @test e.buf.path == plain && e.folder == plain
   @test e.nodes[(:folder_page, plain)] isa K.FolderPage
   @test !e.panel   # the sidebar stays hidden
-  shot("folder")
+  shot("title-folder")
   # The folder's name has a › after it, which lists what's in the folder, and a second click takes the list away
   hover!()
   @test haskey(trail().arrows, plain) && K.num(rect(arrow(plain)).left) > K.num(rect(crumb(plain)).left)
@@ -119,7 +116,7 @@ end
   r, ra = rect(l), rect(arrow(plain))
   @test r.top > ra.top + ra.height && r.left < ra.left && ra.left + ra.width < r.left + r.width
   @test w.focus === l.parts[:field]
-  shot("list")
+  shot("title-list")
   # The path stays while the list shows, with the mouse somewhere else
   at((550, 400))
   @test showing() && list() === l
@@ -139,7 +136,7 @@ end
   r, ri = rect(l), rect(inner)
   @test K.num(ri.left) >= K.num(r.left + r.width)
   @test abs(K.num(rect(row(inner, "c.md")).top) - K.num(rect(row(l, "Sub")).top)) <= 1
-  shot("beside")
+  shot("title-beside")
   # A rest on a file takes it away again
   rest!(l, "a.md")
   @test length(lists()) == 1
@@ -162,7 +159,7 @@ end
   @test list().names == ["Sub", "b.md"] && list().names[list().pick] == "b.md"
   typed("zz")
   @test isempty(list().names)
-  shot("none")
+  shot("title-none")
   foreach(_ -> key(Keys.backspace), 1:3)
   @test list().names == ["Sub", "a.md", "b.md"]
   # → opens the picked folder beside, ← takes it away, and Return takes the picked row
@@ -279,7 +276,7 @@ end
   @test showing()   # it stays when the mouse leaves it
   @test off_middle() <= 2
   @test shade(crumb(a)) == shade(crumb(plain))   # and isn't when the mouse leaves it, so it doesn't look chosen
-  shot("pinned")
+  shot("title-pinned")
   # It stays while you go from folder to folder with it
   click(middle(crumb(plain)))
   @test e.buf.path == plain
