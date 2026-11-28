@@ -263,3 +263,27 @@ draw(ctx, size, ui::ConcreteRect, g::Glyph) = begin
   t = theme(g)
   icon(ctx, g.name, flt(ui.left), flt(ui.top), flt(ui.width), g.color === nothing ? t.text : g.color, g.accent === nothing ? t.accent : g.accent)
 end
+
+"How many seconds the ring of a `Spinner` takes to go round once"
+const SPIN_TURN = 0.9
+
+"""
+A ring that turns, `size` across, as a sign that something works: a faint
+ring with a quarter of it darker, which goes round once in `SPIN_TURN`
+seconds. It looks as Ladder's own spinner does. It turns only while the window
+draws, so whatever shows it asks for frames.
+"""
+@def mutable struct Spinner <: SemanticUI
+  size::px = 12px
+  color::Any = nothing   # the theme's dim colour when nothing
+end
+
+describe(s::Spinner) = Box(width(min=s.size, preferred=s.size), height(min=s.size, preferred=s.size), name="Spinner")
+draw(ctx, size, ui::ConcreteRect, s::Spinner) = begin
+  c = s.color === nothing ? theme(s).dim : s.color
+  wide = max(flt(s.size) / 7, 1.5)
+  r = (min(flt(ui.width), flt(ui.height)) - wide) / 2
+  middle = (flt(ui.left) + flt(ui.width) / 2, flt(ui.top) + flt(ui.height) / 2)
+  circle(ctx, middle, r, faded(c, 0.3), wide)
+  arc(ctx, middle, r, 360 * mod(time(), SPIN_TURN) / SPIN_TURN, 90, c, wide)
+end

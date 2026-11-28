@@ -120,7 +120,29 @@ else
     @test title.parent === e && within(rect(title), rect(grip)) && within(rect(grip), rect(ribbon))
     @test abs(middle_x(rect(title)) - middle_x(rect(grip))) <= 1
     @test K.num(rect(grip).left) > K.num(rect(v.parts[(:tab, "Inspect")]).left) && K.num(rect(grip).left + rect(grip).width) <= K.num(rect(v.parts[:undo]).left)
-    @test e.nodes[:title_room] == rect(grip).width
+    # The name has room for the ring after it, and as much before it
+    @test e.nodes[:title_room] == rect(grip).width - 2(V.RING + 6px)
+    # While SolidCraft works, a ring turns after the file's name, in line with it. The empty room before the name keeps it
+    # in the middle, so the name doesn't move when the ring comes and goes.
+    rings(r, out=Any[]) = (hasproperty(r.from, :name) && r.from.name == "Spinner" && push!(out, r);
+                           hasproperty(r, :children) && foreach(c -> rings(c, out), r.children); out)
+    # SolidCraft answered for the last time a while ago, so there's no ring
+    @test !Models.busy(v.model)
+    v.parts[:worked] = time() - V.RING_STAYS - 0.01
+    frame(w)
+    still = rect(title)
+    @test isempty(rings(rect(grip))) && abs(middle_y(still) - middle_y(rect(grip))) <= 0.5
+    # SolidCraft answered a moment ago: the ring stays a little after its last answer, so it doesn't blink between answers
+    v.parts[:worked] = time() - V.RING_STAYS / 2
+    frame(w)
+    ring = only(rings(rect(grip)))
+    @test rect(title).left == still.left && rect(title).top == still.top && rect(title).width == still.width
+    @test K.num(ring.left) >= K.num(rect(title).left + rect(title).width) && abs(middle_y(ring) - middle_y(rect(title))) <= 0.5
+    shot("design-working.png")
+    # Then it goes, and the name stays where it is
+    v.parts[:worked] = time() - V.RING_STAYS - 0.01
+    frame(w)
+    @test isempty(rings(rect(grip))) && rect(title).left == still.left && rect(title).top == still.top
     # A tab's pill is 3px under the toolbar's border: 1px under the top of its place, which is as tall as the buttons
     # beside it. Its corners have the same middle as the toolbar's corner.
     @test K.num(rect(v.parts[(:tab, "Model")]).top + 1px - rect(ribbon).top) == 4

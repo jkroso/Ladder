@@ -99,7 +99,7 @@
 @use "./gl" => GLs
 @use "./sketch" => Sketching
 @use "./ink" => Ink
-@use "./ink" Glyph
+@use "./ink" Glyph Spinner
 @use "./commands" => Commands
 @use "./preview" => Previews
 @use "./pieces" => Pieces
@@ -1072,11 +1072,42 @@ corner_round(v, i) = (r = edge_rounds(v); r === nothing ? 9px : max(r[i] - panel
 panel_round(v) = edge_rounds(v) === nothing ? 9px : maximum(i -> corner_round(v, i), 1:4)
 
 
-"The part of the toolbar's top row that has the file's name or path in its middle, on the colour `ground`, and that moves the window"
+"How wide the ring after the file's name is, which turns while SolidCraft works on the design"
+const RING = 12px
+"How long the ring stays after SolidCraft's last answer, in seconds, so that it doesn't blink on and off between answers"
+const RING_STAYS = 0.4
+
+"""
+True while SolidCraft works on the design, and for `RING_STAYS` seconds
+after, so the ring after the file's name shows. The window draws again while
+it does, so the ring turns, and goes when its time is up.
+"""
+working(v::DesignView) = begin
+  m = v.model
+  Designs.busy(m) && !m.trying && (v.parts[:worked] = time())
+  on = time() - get(v.parts, :worked, -Inf) < RING_STAYS
+  on && redraw_in!(v, 1 / 30)
+  on
+end
+
+"""
+The part of the toolbar's top row that has the file's name or path in its
+middle, on the colour `ground`, and that moves the window. A ring after the
+name turns while SolidCraft works. The name has as much empty room before it,
+so it stays in the middle, and nothing moves when the ring comes and goes.
+"""
 grip!(v::DesignView, ground) = begin
   g = part!(Grip, v, :grip)
   r = rect(g)
-  g.inside = file_part(v, r === nothing ? 10_000px : r.width, ground)
+  gap = 6px
+  room = r === nothing ? 10_000px : max(r.width - 2(RING + gap), 0px)
+  # The room on each side is as tall as the row, so the name is in the row's middle as it was without them. A Row
+  # doesn't move a child that's only 1.5px out of its middle.
+  side(inside...) = Box(width(RING), height(28px), Alignment.Center, justify=Alignment.Center, inside...)
+  g.inside = Row(Alignment.Center, child_gap=gap,
+    side(),
+    file_part(v, room, ground),
+    working(v) ? side(Spinner(size=RING, color=theme(v).dim)) : side())
   g
 end
 
@@ -1121,7 +1152,6 @@ ribbon(v::DesignView) = begin
         (corner > 0px ? (Box(width(corner), height(28px)),) : ())...,
         tab.(tabs)...,
         grip!(v, panel_colour(t)),
-        (Designs.busy(m) && !m.trying ? (Box(padding(8px, 0px), words("Working…", 11.5px, color=t.dim)),) : ())...,
         icon_button(v, :undo, "arrow-counterclockwise", "Undo (⌘Z)"; act=e -> undo!(v), off=get(doc, "undo", 0) == 0),
         icon_button(v, :redo, "arrow-clockwise", "Redo (⇧⌘Z)"; act=e -> redo!(v), off=Designs.redoable(m) == 0),
         icon_button(v, :save, "save", "Save (⌘S)"; act=e -> save!(v), off=!Designs.edited(m))),
