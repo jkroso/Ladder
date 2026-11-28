@@ -2045,17 +2045,17 @@ agent_mode!(e) = begin
   p = agent_pane(e)
   w = window_of(e)
   if agent_mode(e)
-    e.nodes[:agent_mode] = false
+    state_of(e, AgentMode).on = false
     see_through!(e, w, false)
     narrow_from_agent!(e, w, p)
-    delete!(e.nodes, :sidebar_grew)   # the room that the window grew by for the sidebar stays with the sidebar: see `sidebar_room!`
+    state_of(e, AgentMode).grew = nothing   # the room that the window grew by for the sidebar stays with the sidebar: see `sidebar_room!`
     e.slid = 0.0   # the sidebar is where it was at once
     focus(e)
   else
     e.slid = 0.0
     side_was = side_w(e)   # the sidebar stays as it is, open or closed: only you show it and hide it
     p.was = (;)
-    e.nodes[:agent_mode] = true
+    state_of(e, AgentMode).on = true
     widen_for_agent!(e, w, p, side_was)
     see_through!(e, w, GLASS_ALPHA < 1)
     p.field === nothing && pane_field!(p)

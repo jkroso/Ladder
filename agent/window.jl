@@ -63,7 +63,7 @@ export SOON, AGENT_W, AGENT_MIN, OUTLINE_W, PAGE_CARD_GAP, PAGE_CARD_ROUND, WIND
        page_card!, page_card_span, page_card_round, glass_colour, glass, on_glass, PANE_COLOURS, PAGE_KEPT, colours_over,
        pane_dark, over_colours!, with_colours, with_pane_colours, PaneColours, ColourMark, pane_mark,
        agent_body, GLASS_ALPHA, GLASS_BLUR, see_through, SURFACE_OPACITY, see_through!, glass_window!,
-       blur_behind!
+       blur_behind!, AgentMode
 
 # A wait of 0 would leave the window waiting for a key or the mouse: its loop reads a wake of 0 as no wake at all
 const SOON = 0.001                       # seconds: the wait for a frame that should come at once
@@ -144,8 +144,15 @@ describe(s::PaneSlot) = s.inside
 "The agent's pane of the window of `e`. It's kept while the window is open, with its session, so leaving agent mode loses nothing."
 agent_pane(e) = node!(AgentPane, e, :agent_pane)
 
+"What a window keeps of agent mode: whether it's in it, and the room that the mode gives and takes"
+@def mutable struct AgentMode
+  on::Bool = false                                           # the window is in agent mode
+  menu_room::px = 0px                                        # how much of the agent's pane the side menu covers: see `menu_room`
+  grew::Union{Nothing,NamedTuple{(:grew, :moved)}} = nothing   # how much wider the window grew for the sidebar, and how far it moved: see `sidebar_room!`
+end
+
 "True while the window of `e` is in agent mode"
-agent_mode(e) = get(e.nodes, :agent_mode, false) === true
+agent_mode(e) = state_of(e, AgentMode).on
 
 "True while the window of `e` shows the agent's pane, the page's card and the outline. Something that fills the window, slides and a page shown as an app have it all."
 agent_shows(e) = agent_mode(e) && lowered(e) === nothing && !as_app(e) && slideshow(e) === nothing
@@ -159,7 +166,7 @@ the agent's pane: all of its width while it's open and while it slides, and
 none while it's closed. A side menu that a kind of folder has in the
 sidebar's place has the same. `side_tick!` finds it at the start of each frame.
 """
-menu_room(e) = get(e.nodes, :menu_room, 0px)
+menu_room(e) = state_of(e, AgentMode).menu_room
 
 """
 How wide the agent's pane is: all of the window that the sidebar, the page's

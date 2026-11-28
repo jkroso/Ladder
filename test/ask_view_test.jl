@@ -114,7 +114,7 @@ end
   # This process stands in for a script that waits for the page
   K.Agent.place[] = mktempdir()
   write(joinpath(K.Agent.folder(), "$(getpid()).wait"), realpath(page) * "\nClaude\n")
-  delete!(e.nodes, :agents); frames()
+  K.forget_waiters!(e); frames()
   # A question has no button of its own that sends: the bell in the top bar does that, and ⌘Return
   @test !any(key -> key isa Tuple && first(key) == :button, keys(ask(1).parts))
   K.send!(e); frames()

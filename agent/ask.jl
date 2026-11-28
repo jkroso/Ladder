@@ -1687,7 +1687,7 @@ end
 hand_change!(e, a::AskedChange) = begin
   b = e.buf
   b.path == a.page || return false
-  delete!(e.nodes, :agents)
+  forget_waiters!(e)
   ws = agents(e)
   # With no agent that waits for the page, an article of a folder of news has the folder's reading companion, which gets one request at a time
   p = isempty(ws) ? companion_pane(e, b.path) : nothing
@@ -1718,7 +1718,7 @@ sharer_tick!(e, t::CodePicker, a::AskedChange) = begin
   if a.stopped
     t.asked = nothing
     # It never got the change, and may never wait again, so the next change goes to a new agent
-    a.sent || delete!(e.nodes, :sent)
+    a.sent || (page_agents(e).sent = nothing)
   elseif !a.sent
     hand_change!(e, a)
   elseif !isempty(a.reply) && isfile(a.reply) && time() - mtime(a.reply) > 0.3

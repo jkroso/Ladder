@@ -177,21 +177,21 @@ end
   e.panel && sidebar!()
   # The agents of this test are in a folder of its own. With none there, the button has no dot.
   K.Agent.place[] = mktempdir()
-  delete!(e.nodes, :agents); frames()
+  K.forget_waiters!(e); frames()
   button = e.nodes[:panel]
   plain = rect(button)
   @test isempty(K.elsewhere(e)) && K.num(plain.width) == 30
   # This process stands in for an agent that waits for a page that isn't showing
   write(joinpath(dir, "waiting.md"), "# A page that an agent waits for\n")
   write(joinpath(K.Agent.folder(), "$(getpid()).wait"), realpath(joinpath(dir, "waiting.md")) * "\nClaude\n")
-  delete!(e.nodes, :agents); frames()
+  K.forget_waiters!(e); frames()
   @test length(K.elsewhere(e)) == 1
   # The button is whole, and so is the dot: 30px, 4px between them, and 7px
   r = rect(button)
   @test K.num(r.width) == 41 && K.num(r.left) == K.num(plain.left)
   # The dot goes when the agent stops waiting
   rm(joinpath(K.Agent.folder(), "$(getpid()).wait"))
-  delete!(e.nodes, :agents); frames()
+  K.forget_waiters!(e); frames()
   @test K.num(rect(button).width) == 30
   K.Agent.place[] = ""
 end

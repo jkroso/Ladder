@@ -5,6 +5,7 @@
 # saves the file and tells the agent which lines you changed. ⌘Return does the
 # same. The agent can change the file while you type, and the page keeps both.
 
+@use "github.com/jkroso/Prospects.jl" @def
 @use "github.com/jkroso/MiniFB.jl"... onfiledrop onscroll
 @use "github.com/jkroso/UI.jl/Interface/Geometric"...
 @use "github.com/jkroso/UI.jl/Interface/Specific"...
@@ -20,16 +21,30 @@
 @use "../host" exports...
 @use "../folder_page" exports...
 @use "./kinds" exports...
+@use "../git_page" AgentMarks
 
-export waiters, agents, elsewhere, send!, hand_over!, agent_part, toggle_marks!, whose, sharer
+export waiters, agents, elsewhere, send!, hand_over!, agent_part, toggle_marks!, whose, sharer, PageAgents, page_agents, forget_waiters!
+
+"What a window keeps about the agents that its page is shared with"
+@def mutable struct PageAgents
+  waiters::Tuple{Float64,Vector{Agent.Waiter}} = (0.0, Agent.Waiter[])   # when the folder that lists the agents that wait was last read, and every agent that it listed, for any page
+  sent::Union{Nothing,Tuple{String,Int,String}} = nothing                # the page that was last sent to an agent, its version then, and the agent's name
+  last::String = "the agent"                                             # the name of the agent that last waited for a page that the window showed
+end
+
+"What the window of `e` keeps about the agents that its page is shared with: see `PageAgents`"
+page_agents(e) = state_of(e, PageAgents)
+
+"Read the folder that lists the agents that wait again, the next time that the window of `e` asks for them"
+forget_waiters!(e) = (page_agents(e).waiters = (0.0, Agent.Waiter[]); nothing)
 
 "Every agent that waits, for any page. The folder that lists them is read twice a second."
 waiters(e) = begin
-  at, found = get(e.nodes, :agents, (0.0, Agent.Waiter[]))::Tuple{Float64,Vector{Agent.Waiter}}
+  at, found = page_agents(e).waiters
   time() - at < 0.5 && return found
   Agent.announce()
   found = Agent.waiters()
-  e.nodes[:agents] = (time(), found)
+  page_agents(e).waiters = (time(), found)
   found
 end
 
@@ -55,7 +70,7 @@ end
 "Save the page and tell each agent that waits for it what you changed. Nothing happens if no agent waits."
 send!(e) = begin
   b = e.buf
-  delete!(e.nodes, :agents)
+  forget_waiters!(e)
   ws = agents(e)
   isempty(ws) && return
   save!(b)
@@ -69,9 +84,9 @@ hand_over!(e, ws, text) = begin
   foreach(w -> Agent.send(w, text), ws)
   # The agent knows the page as it is now, and none of the lines are its changes any more
   b.sent = b.told = copy(b.lines)
-  delete!(e.nodes, :marking)
-  e.nodes[:sent] = (b.path, b.version, first(ws).name)
-  delete!(e.nodes, :agents)
+  state_of(e, AgentMarks).page = ""
+  page_agents(e).sent = (b.path, b.version, first(ws).name)
+  forget_waiters!(e)
   nothing
 end
 
@@ -83,10 +98,10 @@ beside the diff button (see `diff_part`).
 agent_part(e) = begin
   b = e.buf
   ws = agents(e)
-  sent = get(e.nodes, :sent, nothing)
+  sent = page_agents(e).sent
   if !isempty(ws)
-    delete!(e.nodes, :sent)
-    e.nodes[:agent] = first(ws).name
+    page_agents(e).sent = nothing
+    page_agents(e).last = first(ws).name
     (node!(SendButton, e, :send),)
   elseif sent !== nothing && sent[1] == b.path && sent[2] == b.version
     # The button shows that the page was sent, until the agent waits again or the text changes
@@ -121,12 +136,12 @@ theirs(e) = begin
 end
 
 "True while the bars beside the agent's changes stay on the page that's showing"
-marking(e) = get(e.nodes, :marking, "") == e.buf.path
+marking(e) = state_of(e, AgentMarks).page == e.buf.path
 
 "Show the bars beside the agent's changes until this is called again. The page goes to the first change if none is on screen."
 toggle_marks!(e) = begin
-  marking(e) && return delete!(e.nodes, :marking)
-  e.nodes[:marking] = e.buf.path
+  marking(e) && return (state_of(e, AgentMarks).page = ""; nothing)
+  state_of(e, AgentMarks).page = e.buf.path
   runs = theirs(e)
   (isempty(runs) || isempty(e.layout)) && return
   touches(it) = any(r -> first(r) <= it.last && last(r) >= it.first, runs)
@@ -139,7 +154,7 @@ toggle_marks!(e) = begin
 end
 
 "The name of the agent that works on the page, as the owner of something: \"Claude's\""
-whose(e) = get(e.nodes, :agent, "the agent")::String * "'s"
+whose(e) = page_agents(e).last * "'s"
 
 "The name of the agent that the page of `e` is shared with: the one that waits for it, or the last that it was sent to. It's \"\" when there's neither."
 sharer(e) = begin
@@ -148,8 +163,8 @@ sharer(e) = begin
   # An article of a folder of news has the folder's reading companion
   p = readonly(e.buf) ? nothing : companion_pane(e, e.buf.path)
   p === nothing || return p.session.agent
-  sent = get(e.nodes, :sent, nothing)
-  sent !== nothing && sent[1] == e.buf.path ? sent[3]::String : ""
+  sent = page_agents(e).sent
+  sent !== nothing && sent[1] == e.buf.path ? sent[3] : ""
 end
 
 # The button is the logo of the agent, or a bell for an agent that Ladder has no

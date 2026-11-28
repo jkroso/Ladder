@@ -876,11 +876,12 @@ sidebar_room!(e) = begin
     grow = px(round(num(clamp(screen.size[1] - wide, 0px, clamp(e.side, PANEL_MIN, PANEL_MAX)))))
     grow > 0px || return nothing
     left = px(round(num(clamp(x - grow, screen.position[1], max(screen.position[1], screen.position[1] + screen.size[1] - wide - grow)))))
-    e.nodes[:sidebar_grew] = (grew=grow, moved=left - x)
+    state_of(e, AgentMode).grew = (grew=grow, moved=left - x)
     w.position = typeof(w.position)(left, y)
     w.size = typeof(w.size)(wide + grow, tall)
   else
-    was = pop!(e.nodes, :sidebar_grew, nothing)
+    mode = state_of(e, AgentMode)
+    was, mode.grew = mode.grew, nothing
     was === nothing && return nothing
     w.size = typeof(w.size)(max(wide - was.grew, 400px), tall)
     w.position = typeof(w.position)(x - was.moved, y)

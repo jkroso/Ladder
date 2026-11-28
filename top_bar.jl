@@ -243,7 +243,7 @@ end
 tip(s::SendButton) = begin
   e = editor(s)
   ws = agents(e)
-  isempty(ws) ? "Nudged $(get(e.nodes, :agent, "the agent"))" : "Nudge $(first(ws).name) with what you changed" * hint(e, :run)
+  isempty(ws) ? "Nudged $(page_agents(e).last)" : "Nudge $(first(ws).name) with what you changed" * hint(e, :run)
 end
 
 tip(::ReadOnly) = "Read only"

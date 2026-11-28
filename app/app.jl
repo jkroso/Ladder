@@ -362,13 +362,13 @@ warm_up() = begin
   # script, and the files that the two talk through go in a folder of their own.
   Agent.place[] = mktempdir()
   write(joinpath(Agent.place[], "$(getpid()).wait"), realpath(file) * "\nthe agent\n")
-  delete!(e.nodes, :agents)
+  K.forget_waiters!(e)
   frame(w)
   press(Keys.enter, Keys.cmd)
   isfile(joinpath(Agent.place[], "$(getpid()).sent")) || error("The page wasn't sent to the agent that waited for it")
   rm(Agent.place[], recursive=true)
   Agent.place[] = ""
-  delete!(e.nodes, :agents)
+  K.forget_waiters!(e)
   # The app's own update: a look for a newer version, and a download that finds no file. Both read this
   # folder, so nothing goes over a network, and they leave the app and its own folder alone.
   write(joinpath(dir, "latest.txt"), "version=2.0.0\nfile=none.zip\nsha256=$(repeat('0', 64))\n")

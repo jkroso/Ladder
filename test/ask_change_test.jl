@@ -754,7 +754,7 @@ end
   K.show_answer!(e, K.AskedChange(words="and now?", places=[gone]), "Still blue.")
   @test isempty(K.ask_boxes(e)) && picker().about.answer == "Still blue."
   picker().about = nothing
-  delete!(e.nodes, :sent)
+  K.page_agents(e).sent = nothing
   K.Agent.place[] = ""
 end
 

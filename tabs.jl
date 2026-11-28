@@ -433,7 +433,7 @@ side_tick!(e) = begin
   e.nodes[:side_least] = least
   # In agent mode the agent's pane is beside the side menu, and it gives the menu its room: see `menu_room`. While the
   # menu slides, the pane is as wide as it is beside the open menu, so its words don't wrap again in each frame.
-  e.nodes[:menu_room] = !agent_shows(e) ? 0px : e.panel || sliding(e) ? panel_w(e) : least
+  state_of(e, AgentMode).menu_room = !agent_shows(e) ? 0px : e.panel || sliding(e) ? panel_w(e) : least
   agent_shows(e) && sliding(e) && redraw_in!(e, 0)   # one more frame after the slide ends gives the pane its room back
   nothing
 end

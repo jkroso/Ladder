@@ -85,7 +85,7 @@ export GitDirectory, RepoView, GitPanel, follow_words, GIT_RUNS, send_command, S
        switch_look, diffing, toggle_diff!, show_changes!, change_span, go_change!, change_after, step_change!,
        next_change!, previous_change!, step_tip, COMMITTED, committed_lines, diff_now, gone_h, inline_diff!,
        gone_now, gone_rows, gone_under, gone_over, is_new, tint_new, draw_diff_bars, put_change_back!,
-       PutBack, put_back_over, diff_part, BarWords, said_result, unsay_result!
+       PutBack, put_back_over, diff_part, BarWords, said_result, unsay_result!, AgentMarks
 
 "A folder that git keeps: the top folder of a repository, or a folder in one"
 @def struct GitDirectory <: AbstractDirectory end
@@ -1716,6 +1716,15 @@ push!(BLOCK_ICONS, "chevron-down", "square", "check2-square")
 # only for the layout that it made, so printing and slides, which lay the page
 # out again, never have them.
 
+"""
+The page whose changes by the agent keep their bars beside them, which the
+window keeps: see `marking` and `toggle_marks!`. It's here, and not with the
+agent's page, since hiding what changed in a file hides the bars too.
+"""
+@def mutable struct AgentMarks
+  page::String = ""   # the path of the page, or "" for none
+end
+
 "True while the window shows what changed in its file since the last commit, in the file itself"
 diffing(e) = !isempty(e.buf.path) && get(e.nodes, :diffing, "") == e.buf.path
 
@@ -1724,7 +1733,7 @@ Show what changed in the file since the last commit, in the file itself, or
 hide it again. Hiding it hides the bars beside the agent's changes too, since
 their button goes with it.
 """
-toggle_diff!(e) = (diffing(e) ? (delete!(e.nodes, :diffing); delete!(e.nodes, :marking)) : (e.nodes[:diffing] = e.buf.path); redraw_in!(e, 0); e)
+toggle_diff!(e) = (diffing(e) ? (delete!(e.nodes, :diffing); state_of(e, AgentMarks).page = "") : (e.nodes[:diffing] = e.buf.path); redraw_in!(e, 0); e)
 add_command!(toggle_diff!, name=:show_changes_in_place, title="Show or hide what changed in the file since the last commit, in the file itself")
 
 BUTTONS[:diff] = (run=toggle_diff!, off=e -> false, strong=false, on=diffing,
