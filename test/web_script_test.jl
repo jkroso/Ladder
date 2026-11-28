@@ -48,12 +48,14 @@ lines(l, level=:log) = [text for (lv, text) in l.scripts.log if lv == level]
   @test group(c) != group(quick)
   close(quick)
   # A context that's dropped is closed by the next call from the main task, after Julia frees it
-  drop() = (dropped = JS.Context(); JS.evaluate(dropped, "({a: 1})")["a"]; nothing)
-  drop()
-  open = length(JS.CONTEXTS)
+  # The test looks for its own context, by its number. A count of the open contexts would be wrong when tests share a
+  # process, since the same call closes the contexts of the pages that earlier tests dropped.
+  drop() = (dropped = JS.Context(); JS.evaluate(dropped, "({a: 1})")["a"]; dropped.ref)
+  ref = drop()
+  @test haskey(JS.CONTEXTS, ref)
   GC.gc(); GC.gc()
   JS.evaluate(c, "1")
-  @test length(JS.CONTEXTS) == open - 1 && isempty(JS.DROPPED)
+  @test !haskey(JS.CONTEXTS, ref) && isempty(JS.DROPPED)
   # In a task with a stack of its own, JavaScriptCore would end the program: it's an error there
   @test_throws TaskFailedException fetch(@async JS.evaluate(c, "1"))
   close(c)
