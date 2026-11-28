@@ -66,7 +66,7 @@ export SOURCE_FILES, drawn_by, BUILT_JULIA, JULIA_CODE, code_under, TextRun, pic
        shown_now, PICK_LINE, LABEL_CLOSE, close_spot, pick_mark, PULSE_TIME, spin_ring, BlockDrag, block_drag,
        drop_tried, whole_block, HANDLE_WIDE, HANDLE_TALL, draw_handle, grab_block!, Drop, SIDE_DEAD,
        alone_line, column_of, empty_line, take_out!, put_in!, place_of, shares_text, rearranged, drop_target,
-       drop_block!, rearrange!, window_beside, LADDER_FOLDER, ladder_folder, ladder_file, MadePicker, made_picker
+       drop_block!, rearrange!, window_beside, LADDER_FOLDER, ladder_folder, ladder_file, MadePicker, made_picker, DropsTried
 
 "Where the source of a file of code is on this Mac, by where it was on the Mac that built the app. The app fills it in when it starts: see app/app.jl."
 const SOURCE_FILES = Dict{String,String}()
@@ -508,8 +508,13 @@ end
 
 block_drag(e) = state_of(e, BlockDrag)
 
+"What a window keeps of the places that a drag of a block came over: what each would make of the page"
+@def mutable struct DropsTried
+  made::Dict{Any,Any} = Dict{Any,Any}()
+end
+
 "What each place that a drag of a block came over would make of the page, so that it's worked out once in a drag"
-drop_tried(e) = get!(() -> Dict{Any,Any}(), e.nodes, :drop_tried)::Dict{Any,Any}
+drop_tried(e) = state_of(e, DropsTried).made
 
 "True while a block of the page in the window of the picker `t` is dragged by its handle"
 dragging(t::CodePicker) = block_drag(t.editor).lines !== nothing

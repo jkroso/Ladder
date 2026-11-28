@@ -17,6 +17,7 @@
 # headings of a page: each section that a comment like `# --- name ---` starts,
 # and each name that the code makes at its top, with what its line says of it.
 
+@use "github.com/jkroso/Prospects.jl" @def
 @use "github.com/jkroso/MiniFB.jl"... onfiledrop onscroll
 @use "github.com/jkroso/UI.jl/Interface/Geometric"...
 @use "github.com/jkroso/UI.jl/Interface/Specific"...
@@ -44,7 +45,7 @@
 
 export SECTION, signature, code_places, definition, definition!, go_to_place!, go_to_definition!, NameAt,
        own_name, name_uses, rename_in_code!, rename_elsewhere!, rename_tick!, Use, row_words, name_columns,
-       uses_elsewhere, uses_of, whole_name, find_uses!, HeadingLine, go_to!, word_count
+       uses_elsewhere, uses_of, whole_name, find_uses!, HeadingLine, go_to!, word_count, CodeNavState
 
 "The comment that starts a section of a file of code: three dashes or more, the section's name, and more dashes"
 const SECTION = r"^#+ -{3,}\s+(.+?)\s+-{3,}\s*$"
@@ -314,7 +315,7 @@ rename_in_code!(e, name::NameAt, new_name::String) = begin
   edit!(b, (lo, 0), (hi, length(b.lines[hi])), join(lines[lo:hi], "\n"))
   # A name of a whole file of Julia code changes in the other Julia files of its git folder too. ⌘Z takes those back as well.
   was = whole ? rename_elsewhere!(e, name, new_name) : Dict{String,String}()
-  isempty(was) || (e.nodes[:renamed] = (before=v, after=b.version, was=was, now=Dict(f => read(f, String) for f in keys(was)), seen=b.version))
+  isempty(was) || (state_of(e, CodeNavState).renamed = (before=v, after=b.version, was=was, now=Dict{String,String}(f => read(f, String) for f in keys(was)), seen=b.version))
   nothing
 end
 add_command!(rename_in_code!, title="Give a name of the page's Julia code another name, wherever it means the same thing", kind=:edit)
@@ -351,10 +352,10 @@ those files back as they were, and when ⌘⇧Z made it again, change them again
 A file that changed since stays as it is.
 """
 rename_tick!(e) = begin
-  r = get(e.nodes, :renamed, nothing)
+  r = state_of(e, CodeNavState).renamed
   (r === nothing || r.seen == e.buf.version) && return nothing
   v = e.buf.version
-  e.nodes[:renamed] = (; r..., seen=v)
+  state_of(e, CodeNavState).renamed = (; r..., seen=v)
   from, to = v == r.before ? (r.now, r.was) : v == r.after ? (r.was, r.now) : (nothing, nothing)
   from === nothing && return nothing
   for (f, t) in to
@@ -387,6 +388,14 @@ struct Use
   note::String
 end
 worded(u::Use) = u.words
+
+"What a window keeps of the names of its page's code, between frames: a rename that changed other files too, and the uses that were last found"
+@def mutable struct CodeNavState
+  # The page's version before the rename and after it, the text that each other file had before and has now, and
+  # the version that `rename_tick!` last saw. Nothing when no rename changed another file.
+  renamed::Union{Nothing,@NamedTuple{before::Int, after::Int, was::Dict{String,String}, now::Dict{String,String}, seen::Int}} = nothing
+  found::Union{Nothing,Tuple{Tuple{Int,NameAt},Vector}} = nothing   # the page's version and the name that the uses were last found for, and the uses
+end
 sidenote(u::Use) = u.note
 
 "A line of code as a row of a list shows it: without the spaces at its ends, and at most 90 characters"
@@ -465,10 +474,10 @@ choices_for(::Type{Use}, e) = begin
   n = own_name(e, e.buf.caret)
   n === nothing && return Use[]
   key = (e.buf.version, n)
-  was = get(e.nodes, :uses, nothing)
+  was = state_of(e, CodeNavState).found
   was !== nothing && was[1] == key && return was[2]
   found = uses_of(e, n)
-  e.nodes[:uses] = (key, found)
+  state_of(e, CodeNavState).found = (key, found)
   found
 end
 
