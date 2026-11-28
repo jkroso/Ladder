@@ -1,7 +1,7 @@
 # A page from a web server: how Ladder gets it and shows it, the browser folder that keeps it, and the web address of each of its files
 #
 # Ladder shows a page of Markdown that a web server sends, as a browser shows
-# a page of HTML, and keeps it as a file of the browser folder, ~/Browser.
+# a page of HTML, and keeps it as a file of the browser folder, ~/web.
 # Each section below says more. sandbox.jl has the sandbox that the page's
 # code runs in. The commands Navigate, Reload Page and Open In Browser are in
 # main.jl.
@@ -154,7 +154,7 @@ end
 # --- the browser folder ---
 #
 # Each page and file that Ladder gets from the web goes in the browser folder,
-# ~/Browser, at its place on its site: https://example.com/notes/plans.md is
+# ~/web, at its place on its site: https://example.com/notes/plans.md is
 # example.com/notes/plans.md there. The window shows that file. Being in the
 # folder is what makes the file act as a page of the web: its links and
 # pictures are from its web address, a click on a link opens it, the path in
@@ -270,7 +270,7 @@ end
 
 # --- a site with a viewer of its own ---
 #
-# A site's folder in the browser folder, like ~/Browser/x.com, can have a kind,
+# A site's folder in the browser folder, like ~/web/x.com, can have a kind,
 # as any folder can. Code gives it one by its path, in `FS.kinds`, or the
 # folder's own page does: a file called `.ladder` that you put in the folder.
 # The kind then shows the site its own way, as a kind shows a folder of films
@@ -280,7 +280,7 @@ end
 #
 #     Ladder.FS.kinds[FSPath(joinpath(Ladder.browser_folder(), "x.com"))] = XDirectory
 #     Ladder.open_address!(e, d::XDirectory, address; record=true, reload=false) = begin
-#       path = ...   # the folder of ~/Browser/x.com that's this address
+#       path = ...   # the folder of ~/web/x.com that's this address
 #       mkpath(path)
 #       Ladder.open!(e, path; record)
 #       true

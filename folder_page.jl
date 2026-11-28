@@ -346,11 +346,11 @@ const SETTINGS_FILE = Ref("")
 
 settings_file() = isempty(SETTINGS_FILE[]) ? joinpath(homedir(), "Library", "Application Support", "Ladder", "settings") : SETTINGS_FILE[]
 
-"The browser folder of a test, or \"\" for ~/Browser"
+"The browser folder of a test, or \"\" for ~/web"
 const BROWSER_FOLDER = Ref("")
 
 "The folder that keeps each page and file that Ladder gets from the web, at its place on its site"
-browser_folder() = isempty(BROWSER_FOLDER[]) ? joinpath(home_folder(), "Browser") : BROWSER_FOLDER[]
+browser_folder() = isempty(BROWSER_FOLDER[]) ? joinpath(home_folder(), "web") : BROWSER_FOLDER[]
 
 "The path of the file or the folder `o` as text, with no / at its end"
 path_of(o::FSObject) = (path = string(o.path); length(path) > 1 ? String(rstrip(path, '/')) : path)

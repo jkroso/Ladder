@@ -470,7 +470,7 @@ push!(BLOCK_ICONS, "shield-lock", "shield-slash")
 #   - the Mac's Downloads folder, its Pictures folder, the folder that it saves
 #     screenshots to and its Trash each have a kind: see "the Mac's own folders"
 #   - ~/News is a folder of news: see "a folder of news"
-#   - ~/Browser is the browser folder, with a globe for its icon: see "the browser folder"
+#   - ~/web is the browser folder, with a globe for its icon: see "the browser folder"
 #
 # A kind that code gave the folder by its path comes first, and then the kind
 # that the folder's own page gives it. So a page still makes any of these

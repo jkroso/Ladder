@@ -685,7 +685,7 @@ end
 
 # --- the browser folder: a desktop of your favourite sites ------------------------------------
 #
-# The browser folder, ~/Browser, has a globe for its icon, and its page is a
+# The browser folder, ~/web, has a globe for its icon, and its page is a
 # desktop of the sites that you chose as favourites, in place of its folders
 # and files. Each site is an icon on the Mac's wallpaper, with its name under
 # it. The icon is the one that the site has for a phone's home screen, or else
