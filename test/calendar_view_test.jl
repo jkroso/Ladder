@@ -58,6 +58,12 @@ shot(name, win=w) = haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER
 "Press the mouse at one place, move it to another by way of the place between, and let go"
 drag(from, to) = (press(from); at(((from[1] + to[1]) / 2, (from[2] + to[2]) / 2)); at(to); release())
 button(name) = click(middle(rect(v.parts[(:button, name)])))
+"""
+Two clicks at one place. The calendar takes them as two clicks in one place when the second comes within 0.35
+seconds of the first, and on a busy Mac the frames between them take longer. So the first click's time is now
+when the second comes.
+"""
+twice(place) = (click(place); v.clicked = (time(), v.clicked[2], v.clicked[3]); click(place))
 block() = (s = K.block_lines(e.buf, K.CALENDAR, 1); e.buf.lines[s[1]+1:s[2]-1])
 line(words) = e.buf.lines[findfirst(l -> occursin(words, l), e.buf.lines)]
 "The days that show, and the things that show on each, as the last frame drew them"
@@ -115,14 +121,14 @@ end
   click(empty(nov(10)))
   @test v.picked === nothing
   place = middle(rect(chip(nov(19), "Dig the trench")))
-  click(place); click(place)
+  twice(place)
   @test e.buf.caret[1] == findfirst(==("- [x] Dig the trench"), e.buf.lines) && w.focus === e
   place = middle(rect(chip(nov(20), "Book the digger")))
-  click(place); click(place)
+  twice(place)
   @test e.buf.lines[e.buf.caret[1]] == "- [x] Book the digger (2026-11-20)"
   # An event's line is in the block, so the block shows its lines
   place = middle(rect(chip(nov(27), "Council inspection")))
-  click(place); click(place)
+  twice(place)
   @test e.buf.lines[e.buf.caret[1]] == "2026-11-27 | Council inspection"
   e.buf.caret = e.buf.anchor = (1, 0); frames()
 end
@@ -188,7 +194,7 @@ end
 end
 
 @testset "two clicks on a day add an event" begin
-  click(empty(nov(10))); click(empty(nov(10)))
+  twice(empty(nov(10)))
   @test v.adding == nov(10) && w.focus === K.calendar_input(v)
   typed("Scaffold up")
   shot("calendar-typing.png")
@@ -198,12 +204,12 @@ end
   @test block()[end] == "2026-11-27 | Council inspection" && isempty(words(nov(10)))
   # Esc leaves the words out, and so does Return with no words
   before = block()
-  click(empty(nov(11))); click(empty(nov(11))); typed("Not this"); key(Keys.escape)
+  twice(empty(nov(11))); typed("Not this"); key(Keys.escape)
   @test v.adding === nothing && block() == before
-  click(empty(nov(11))); click(empty(nov(11))); key(Keys.enter)
+  twice(empty(nov(11))); key(Keys.enter)
   @test v.adding === nothing && block() == before
   # A click somewhere else keeps the words that were typed
-  click(empty(nov(12))); click(empty(nov(12))); typed("Plumber"); click(empty(nov(3)))
+  twice(empty(nov(12))); typed("Plumber"); click(empty(nov(3)))
   @test v.adding === nothing && block()[end] == "2026-11-12 | Plumber"
   K.undo!(e.buf); frames()
 end
