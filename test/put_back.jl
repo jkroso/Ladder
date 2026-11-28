@@ -69,3 +69,61 @@ put_back_env!(before) = begin
   end
   sort!(done)
 end
+
+# A test leaves other things too, which the next test in the process would
+# meet. These go back whether or not the test's text names them: hot.jl calls
+# `left_now` before a test and `clear_left!` after it.
+#
+#   - What every window shows: the toasts, what live blocks said went wrong,
+#     and the changes that agents made. The next test's window would show a
+#     toast that it didn't make, and Undo Change would undo an older test's change.
+#   - A window that the test opened as Ladder opens its own and didn't close.
+#     It stays in the list of the open windows, which other tests count.
+
+"The lists of main.jl that every window shows from"
+const SHOWN_LISTS = (:TOASTS, :problems, :AGENT_CHANGES)
+
+"What a test can leave behind, as it is now: the lists and the open windows of `ladder`, the module of main.jl"
+left_now(ladder) = (lists=[copy(getglobal(ladder, name)) for name in SHOWN_LISTS], windows=copy(ladder.editors))
+
+"""
+Put back what `left_now` noted in `before`: each list gets what it held, and
+each window that has opened since then closes. What went back is returned, as
+words.
+"""
+clear_left!(ladder, before) = begin
+  done = String[]
+  for (name, was) in zip(SHOWN_LISTS, before.lists)
+    list = getglobal(ladder, name)
+    list == was || (empty!(list); append!(list, was); push!(done, String(name)))
+  end
+  for e in copy(ladder.editors)
+    any(o -> o === e, before.windows) && continue
+    w = ladder.window_of(e)
+    w === nothing || close(w)
+    filter!(o -> o !== e, ladder.editors)
+    push!(done, "the window of $(isempty(e.buf.path) ? "a page with no file" : basename(e.buf.path))")
+  end
+  sort!(done)
+end
+
+"""
+Make UI.jl forget what it keeps for every window: its popups, its last frame,
+the node under the mouse. `draw` is UI.jl's Interface/draw, which keeps each
+of these in a table by the window's id, and forgets a window's when the window
+closes. Most tests never close their windows. Julia gives a later window the
+id of one that it has freed, so a test's new window would start with the popups
+of an old one. How many windows were forgotten is returned.
+"""
+forget_windows!(draw) = begin
+  tables = Dict[]
+  for name in names(draw, all=true)
+    isdefined(draw, name) && isconst(draw, name) || continue
+    t = getglobal(draw, name)
+    t isa Dict && keytype(t) === UInt && push!(tables, t)
+  end
+  ids = Set{UInt}()
+  foreach(t -> union!(ids, keys(t)), tables)
+  foreach(empty!, tables)
+  length(ids)
+end

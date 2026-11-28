@@ -25,12 +25,14 @@
 #   - Every test shares the one process. When a test ends, each Ref that its
 #     text sets, like `K.SETTINGS_FILE[] = ...` or `K.AGENT_COMMAND[] = ...`,
 #     gets back the value it had before the test, and so does the environment:
-#     see put_back.jl. Other things
-#     stay as the test left them: the open windows, what's in a table of
-#     Ladder's, a function that a test defined again with `@eval K`. So a test
-#     can fail here and pass by itself. Run a test that fails here once in a
-#     process of its own, and do the same with the tests of what you changed
-#     before you call the work done:
+#     see put_back.jl. So do the toasts, the problems and the agents' changes
+#     that every window shows. A window that the test left open closes. UI.jl
+#     forgets the test's windows, so a later window doesn't get their popups.
+#     Other things stay as the test left them: what's in another table of
+#     Ladder's, a function that a test defined again with `@eval K`, a program
+#     that it started. So a test can fail here and pass by itself. Run a test
+#     that fails here once in a process of its own, and do the same with the
+#     tests of what you changed before you call the work done:
 #     `KIP_FROZEN=1 julia -O0 --project=. test/board_view_test.jl`.
 #   - A test that saves pictures reads `LADDER_SHOTS` from this process, so
 #     set it when you start the process.
@@ -67,6 +69,8 @@ reload_all!() =
 # Ladder is loaded before the first test, so that its Refs are known, with their values, before
 # a test sets them. Then the first test's Refs go back too.
 @use "../main" => Ladder
+# UI.jl's tables of what it keeps for each window: see `forget_windows!` in put_back.jl
+@use "github.com/jkroso/UI.jl/Interface/draw" => Draw
 track!()
 
 "What a test file's own `exit()` throws here, so that the process stays open"
@@ -79,11 +83,12 @@ run_test(path, log) = open(log, "w") do io
   redirect_stdio(stdout=io, stderr=io) do
     t = time()
     m = Module(:HotTest)
-    before = nothing
+    before = left = nothing
     env = env_now()
     ok = try
       reload_all!()
       before = refs_now()
+      left = left_now(Ladder)
       Core.eval(m, :(using Kip))
       Core.eval(m, :(include(path) = Base.include($m, path)))
       Core.eval(m, :(exit(code=0) = throw($Ended(code))))
@@ -108,6 +113,17 @@ run_test(path, log) = open(log, "w") do io
     # So does the environment
     back = put_back_env!(env)
     isempty(back) || println("Put back in the environment: ", join(back, ", "))
+    # So do the lists that every window shows from, and the windows that it left open close
+    if left !== nothing
+      try
+        back = Base.invokelatest(clear_left!, Ladder, left)
+        isempty(back) || println("Put back: ", join(back, ", "))
+      catch e
+        println(stderr, "Couldn't put back what the test left: ", sprint(showerror, e))
+      end
+    end
+    # UI.jl forgets the test's windows, which the test is done with, so that a later window doesn't get their popups
+    try forget_windows!(Draw) catch e; println(stderr, "Couldn't make UI.jl forget the test's windows: ", sprint(showerror, e)) end
     # Watch the files that this test loaded, as they are now, so that a change that's saved later is seen
     track!()
     println(ok ? "PASS " : "FAIL ", path, " in ", round(time() - t, digits=1), " s")
