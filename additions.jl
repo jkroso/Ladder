@@ -9,7 +9,7 @@
 #     add_command!(push_branch!, name=:push, title="Send the branch's new commits")   # git_page.jl
 #     each_frame!(publish_tick!)                                                       # blog_page.jl
 
-@use "./host" open_palette!
+@use "./shared" open_palette!
 
 export ADDED_COMMANDS, Command, FRAME_TICKS, add_command!, add_commands!, each_frame!, first_words,
        frame_ticks!, list_commands!

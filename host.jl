@@ -8,12 +8,12 @@
 #     go_folder!(e, "/Users/sam")    # list that folder in the sidebar
 #     open_folder!(e, "/Users/sam")  # show it in the page
 
-export editor, page_object, object, list_files!, go_folder!, open!, open_folder!, show_path!,
-       show_beside!, free_path, folder_kind, page_top, trash!, file_act!, show_in_finder,
+export editor, page_object, object, list_files!, go_folder!, open_folder!, show_path!,
+       show_beside!, free_path, folder_kind, page_top, file_act!, show_in_finder,
        above_page, under_bar, page_crumb, bar_corner, touch!, show_line!, page_day, save_settings!,
        rerun!, page_room, page_tables, layout!, command_of, click_page!, text_object, say_result!,
        lowered, rewrap!, reload_changed!, loaded_module, fillable, diagram_html, outcome_face,
-       julia_code, calendar_today, marked, chat_page, scroll_page!, keep_talk!, follow_host!,
+       calendar_today, marked, chat_page, scroll_page!, keep_talk!, follow_host!,
        celltext, lowest, component, unscaled, command_kind, another_day, blocks, chat_shown,
        code_offered, code_start, complete!, def_call, definition_of, design_field_of, escaped,
        folder_pages, follow_wiki!, hiding_named, same_settings!, ispicture, keep_copy, keep_pasted,
@@ -22,19 +22,19 @@ export editor, page_object, object, list_files!, go_folder!, open!, open_folder!
        planned_tasks, redraw_windows!, rows, run_in, run_sum, running_code, selected, sheet_given,
        sheet_html, sheet_work, shown_buffers, standing, text_left, thing_name, tick!, tick_page!,
        tip_code, todo_called, todos_then, value_parts, visit!, wiki_offered, wiki_path, worked,
-       write_blocks!, item_room, gallery_buttons, gallery_edges, go_view!, view_name, side_w,
+       write_blocks!, item_room, gallery_buttons, gallery_edges, view_name, side_w,
        look_key, player, show_crumb!, textview, bytes, model, terminal, scrolled, design, kept!,
        text!, make_default!, zoom_for, bar_bottom, chart_sources, isfilterable, filter_file,
        filter_write!, key_panel, error_words, file_start, server_said, keep_key, toggle_source!,
        tick_item!, block_end, type!, web_browser, sum_name, given_and_sums, carry_sums!,
-       follow_remote!, run_place, value_text, usual_module, own_units, remote_src, finding, follow!,
-       filled, todo_at, link_on, close_find!, took, page_bottom, keep_got!, get_page!, site_shows!,
+       follow_remote!, run_place, value_text, usual_module, own_units, remote_src, finding,
+       filled, todo_at, link_on, close_find!, took, keep_got!, get_page!, site_shows!,
        browser_path, page_online, changed_here, fetched, email_head!, email_shows, ismouse,
-       file_menu!, holds_words, page_html, new_page!, build_editor, news_look, web_page_kind,
-       rename!, renaming, copy_text!, renamer, move!, right_w, open_palette!, lens_shapes, theirs,
+       file_menu!, page_html, new_page!, build_editor, news_look, web_page_kind,
+       rename!, renaming, copy_text!, renamer, right_w, lens_shapes, theirs,
        change_diff, right_opened, in_focus, right_view, commit_talk, ask_talk!, page_module,
        detail_view, type_brief, line_rect, declared, detail_wide, sandbox, coloured, show_method!,
-       code_blocks, text_lines, show_code!, select_all!, add_block!, sources_tick!, from_pick_tick!,
+       code_blocks, text_lines, select_all!, add_block!, sources_tick!, from_pick_tick!,
        page_media, page_span, isword, places, run!, as_app, bar_tint, right_panel, side_part,
        each_selection!, nofile, scrub_tick!, end_companions!, eased, omni_arc, tabs,
        preferred_agent!, inline_tick!, unused, is_companion, outline, companion_pane, screen_room,
@@ -67,9 +67,6 @@ function list_files! end
 "Show the folders and the files of `folder` in the sidebar of the editor `e`"
 function go_folder! end
 
-"Show the file or the folder at `path` in the page of the editor `e`"
-function open! end
-
 "Open the folder at `path` in the page of the editor `e`"
 function open_folder! end
 
@@ -87,9 +84,6 @@ function folder_kind end
 
 "How far down the page of the editor `e` its text starts, under the top bar and what the page shows over its text"
 function page_top end
-
-"Move the file or the folder at `path` to the Trash, and take it out of the sidebar of the editor `e`"
-function trash! end
 
 "Do to the file or the folder at `path` what the item `name` of its menu says, in the editor `e`"
 function file_act! end
@@ -168,9 +162,6 @@ function diagram_html end
 
 "The font of what code came to, which is the font of the code, at `size` and in the colour `ink`"
 function outcome_face end
-
-"The first and last line of the code of the `julia` code block that line `i` is in, or nothing when the line isn't in one"
-function julia_code end
 
 "The day that counts as today: the real one, unless a test names another"
 function calendar_today end
@@ -382,9 +373,6 @@ function gallery_buttons end
 "The arrows at the left and the right edge of a file of a gallery that fills the window, in the middle of the window's height"
 function gallery_edges end
 
-"Show the file of the `view` block `v` in the window, as a click on a link to it does"
-function go_view! end
-
 "What a tooltip calls the file or the page at `target`"
 function view_name end
 
@@ -505,9 +493,6 @@ function remote_src end
 "True while the find bar of the editor `e` is open"
 function finding end
 
-"Open a link"
-function follow! end
-
 "True when something fills the window in place of the page and the sidebar"
 function filled end
 
@@ -522,9 +507,6 @@ function close_find! end
 
 "True when the node that has the keyboard is something other than the text, and the click that is happening now is on that node, or on a part of it, or on a node that holds it"
 function took end
-
-"The room under the last line of the page"
-function page_bottom end
 
 "Put `bytes`, what the server sent for `address`, in the file at `path` of the browser folder, marked with the address and the fingerprint of the bytes"
 function keep_got! end
@@ -559,9 +541,6 @@ function ismouse end
 "Show the menu of the file or the folder at `path`"
 function file_menu! end
 
-"How many folders and files the table `t`, a `FolderTable`, lists, in words, and what the folder holds, once that's known"
-function holds_words end
-
 "The document as a page of HTML"
 function page_html end
 
@@ -589,14 +568,8 @@ function copy_text! end
 "The text field that a file's new name is typed in"
 function renamer end
 
-"Move the caret to `p`, which was reached by going in the direction `by`"
-function move! end
-
 "How wide the panel at the right is when it's open"
 function right_w end
-
-"Open the command palette on the command called `name`, to ask for what it takes"
-function open_palette! end
 
 "The outline of a list and what it hangs over, as the places along it, and the outline of what's filled with the list's colour"
 function lens_shapes end
@@ -654,9 +627,6 @@ function code_blocks end
 
 "The lines of the file text `s`, as `text` reads them from a file"
 function text_lines end
-
-"Show the method `m` in a window beside the window of `e`"
-function show_code! end
 
 "What `select_all!` gives"
 function select_all! end

@@ -15,7 +15,8 @@ export drop!, dragging, click_twice!, settle!, answer!, commit!, stop_asking!, f
        add_to_favourites!, page_covers, remove_from_favourites!, choices_for, put_back!, runs_at_once,
        sidenote, worded, matter_view, on_own_page, table_view, web_kind, table_item, page_side, page_outline, side_name,
        page_back!, wide_words, chip_click, chip_kind, chip_start, look!, look_of, put_look!, shown_at, drag!,
-       hint, head_in_charge, compact_width, chip_wider
+       hint, head_in_charge, compact_width, chip_wider, open!, trash!, julia_code, go_view!, follow!,
+       page_bottom, holds_words, move!, open_palette!, show_code!
 
 "A drag on the part `v` ended: what moved is written down"
 function drop! end
@@ -300,3 +301,33 @@ function compact_width end
 
 "`chip_wider(x, e)` gives the thing of the same type as `x` that holds it in the window of `e`, like the block that a paragraph is in, or nothing"
 function chip_wider end
+
+"Show the file or the folder at `path` in the page of the editor `e`"
+function open! end
+
+"Move the file or the folder at `path` to the Trash, and take it out of the sidebar of the editor `e`"
+function trash! end
+
+"The first and last line of the code of the `julia` code block that line `i` is in, or nothing when the line isn't in one"
+function julia_code end
+
+"Show the file of the `view` block `v` in the window, as a click on a link to it does"
+function go_view! end
+
+"Open a link"
+function follow! end
+
+"The room under the last line of the page"
+function page_bottom end
+
+"How many folders and files the table `t`, a `FolderTable`, lists, in words, and what the folder holds, once that's known"
+function holds_words end
+
+"Move the caret to `p`, which was reached by going in the direction `by`"
+function move! end
+
+"Open the command palette on the command called `name`, to ask for what it takes"
+function open_palette! end
+
+"Show the method `m` in a window beside the window of `e`"
+function show_code! end
