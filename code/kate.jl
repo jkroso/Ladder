@@ -17,7 +17,7 @@
 # without the folder. Kip doesn't see a change to an XML file, so change this
 # file too after one.
 
-@use "./xml" Element element elements text parse_xml
+@use "../xml" Element element elements text parse_xml
 
 # --- the definitions ---------------------------------------------------------------------------
 
@@ -251,7 +251,7 @@ end
 "Every rule, by its number"
 const RULES = Rule[]
 
-load!(joinpath(@__DIR__, "syntax"))
+load!(normpath(joinpath(@__DIR__, "..", "syntax")))
 
 # --- what's open at the end of a line -----------------------------------------------------------
 

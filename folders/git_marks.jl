@@ -14,7 +14,7 @@
 @use "github.com/jkroso/UI.jl/Interface/Semantic/Icon" Icon
 @use "github.com/jkroso/URI.jl/FS" => FS FSObject AbstractDirectory
 @use "./git" => Git
-@use "./base" exports...
+@use "../base" exports...
 
 export GIT_TOPS, git_top, watch_git!, GIT_LETTERS, GIT_WORDS, GIT_LIST_FRESH, git_marks, GitBar, changes_words
 

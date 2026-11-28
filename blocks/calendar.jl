@@ -34,7 +34,7 @@
 # works out the days of each task.
 
 @use Dates: Dates, Date, Day
-@use "./dates" day ISO
+@use "../dates" day ISO
 @use "./schedule" Todo Planned works
 
 "The language of a code block that is a calendar"

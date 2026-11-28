@@ -53,7 +53,7 @@
 
 @use "github.com/jkroso/Units.jl" => Units
 @use "github.com/jkroso/Units.jl/Money" => Cash
-@use "./numbers" number isnumber tight
+@use "../numbers" number isnumber tight
 
 "The language of a code block that is a chart"
 const CHART = "chart"

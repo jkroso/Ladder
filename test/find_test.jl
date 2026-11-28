@@ -1,7 +1,7 @@
 # Tests for find.jl. Run them with `julia -O0 --project=. test/find_test.jl`.
 
 @use Test: @test, @testset
-@use "../find" => F
+@use "../blocks/find" => F
 
 const PAGE = ["---", "title: Call the plumber", "---",
               "# The **Kitchen** job", "",

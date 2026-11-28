@@ -43,15 +43,15 @@
 @use "github.com/jkroso/UI.jl/Interface/Semantic/Mermaid" Mermaid
 @use "github.com/jkroso/UI.jl/Interface/Semantic/Mermaid" => Diagrams
 @use "github.com/jkroso/UI.jl/Interface/media" picture_size
-@use "./pictures" natural pdf_pages pdf_page pdf_size
-@use "./sheet" parts
-@use "./spreadsheet" moved
-@use "./web/browser" => Browsers
-@use "./cad/view" => Designs
+@use "../files/pictures" natural pdf_pages pdf_page pdf_size
+@use "../blocks/sheet" parts
+@use "../blocks/spreadsheet" moved
+@use "../web/browser" => Browsers
+@use "../cad/view" => Designs
 @use Colors: RGBA
-@use "./base" exports...
-@use "./math_view" exports...
-@use "./takeoff_view" exports...
+@use "../base" exports...
+@use "../blocks/math_view" exports...
+@use "../blocks/takeoff_view" exports...
 
 export ZOOM_EDGE, BAR_ROOM, MODEL_FOOT, MOST_ZOOM, PAGE_COMMANDS, ZoomView, ZoomArea, Fillable,
        FillButton, button_what, FILL_GAP, zooming, same_what, fills, fill_spot, video_of,

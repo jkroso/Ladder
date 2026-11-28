@@ -7,7 +7,7 @@
 
 @use Test: @test, @testset
 @use "../main" => K
-@use "../map" => M0
+@use "../blocks/map" => M0
 @use "./map_fake" => Fake
 @use "github.com/jkroso/MiniFB.jl" Window KeyPress KeyRelease MouseMove Keys onkey onmouse
 @use "github.com/jkroso/UI.jl/Interface/draw" frame rect

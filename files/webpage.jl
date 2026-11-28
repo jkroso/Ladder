@@ -34,9 +34,9 @@
 # seconds, and keeps the program in a folder of the Mac's caches. That needs
 # Swift, which comes with Xcode and its command line tools.
 
-@use "./swift" target programs kept!
-@use "./swift" => Swift
-@use "./web/select" => Select
+@use "../swift" target programs kept!
+@use "../swift" => Swift
+@use "../web/select" => Select
 
 const SOURCE = joinpath(@__DIR__, "webpage.swift")
 

@@ -4,7 +4,7 @@
 
 @use Test: @test, @testset
 @use Dates: Date
-@use "../repeats" => R
+@use "../blocks/repeats" => R
 @use "../main" => K
 @use "github.com/jkroso/MiniFB.jl" Window
 @use "github.com/jkroso/UI.jl/Interface/draw" frame

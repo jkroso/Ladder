@@ -34,7 +34,7 @@
 
 using Kip
 @use "./app/facts" => Facts
-@use "./update" => Update
+@use "./window/update" => Update
 include("app/build.jl")   # defines `Build` (with `Build.Bundle` and `Build.build_ladder`)
 
 "Run `cmd` in Ladder's folder and give back what it prints"

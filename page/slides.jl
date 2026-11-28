@@ -15,7 +15,7 @@
 # It also works out how much bigger than the page's text a slide's text is,
 # so that the slide suits the window. It draws nothing.
 
-@use "./markdown" Kind Line classify front_matter
+@use "../markdown" Kind Line classify front_matter
 
 "One slide of a page"
 struct Slide

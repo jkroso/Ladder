@@ -19,18 +19,18 @@
 @use "github.com/jkroso/UI.jl/Interface/Semantic/Icon" Icon
 @use "github.com/jkroso/UI.jl/Interface/Semantic/STLViewer" STLViewer Mesh load!
 @use "github.com/jkroso/UI.jl/Interface/Semantic/Player" AudioPlayer VideoPlayer pause!
-@use "./highlight" tokens left_open
+@use "../code/highlight" tokens left_open
 @use "./sheet" parts shown
-@use "./term/view" => Terms
-@use "./cad/view" => Designs
-@use "./folders" => Folders
+@use "../term/view" => Terms
+@use "../cad/view" => Designs
+@use "../folders/folders" => Folders
 @use "github.com/jkroso/URI.jl/FSPath" FSPath
-@use "./base" exports...
-@use "./additions" exports...
+@use "../base" exports...
+@use "../additions" exports...
 @use "./sketch_view" exports...
-@use "./file_view" exports...
-@use "./terminal_view" term_look!
-@use "./fill_view" fill_what fill_wide zoomed_node held_room square_button
+@use "../files/file_view" exports...
+@use "../term/terminal_view" term_look!
+@use "../window/fill_view" fill_what fill_wide zoomed_node held_room square_button
 
 export USUAL, share!, reads!, default_app!, text_size!, NARROWEST, WIDEST, page_width!, font!, weight!,
        problems, present, present_inline, note, redescribe!, swap!, OpenButton, Listing, list!, MOST_FILES,

@@ -10,7 +10,7 @@
 #     site(path)                              # "github.com", the site that a downloaded file came from, or ""
 
 @use "github.com/jkroso/UI.jl/Interface/objc" libobjc cls sel msg get_value nsstring jstring with_pool
-@use "./web/url" site_name
+@use "../web/url" site_name
 
 const Object = Ptr{Cvoid}
 

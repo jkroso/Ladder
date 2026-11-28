@@ -33,13 +33,13 @@
 @use "github.com/jkroso/UI.jl/Interface/draw" ui draw ishovered cursor rect with_clip
 @use "github.com/jkroso/UI.jl/Interface/Semantic/Icon" Icon
 @use "github.com/jkroso/UI.jl/Interface/Semantic/TextInput" TextInput
-@use "./html" escape
-@use "./markdown" words
-@use "./highlight" tokens
+@use "../html" escape
+@use "../markdown" words
+@use "../code/highlight" tokens
 @use "./sheet" parts shown folded
 @use "./changes" => Diffs
 @use Colors: RGBA
-@use "./base" exports...
+@use "../base" exports...
 @use "./ask_view" exports...
 
 export CHANGES, DIFF_ROW, DIFF_SIZE, BESIDE_LEAST, NOTE_ROW, NOTE_FIELD, ChangesView, HunkArea,

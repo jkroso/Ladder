@@ -63,8 +63,8 @@
 
 @use "github.com/jkroso/Prospects.jl" @def
 @use Dates: Dates, Date, DateTime, Day, Hour, Minute
-@use "./markdown" front_matter matter_keys
-@use "./csv" cells records
+@use "../markdown" front_matter matter_keys
+@use "../blocks/csv" cells records
 
 # --- the settings, and when the news of each section was last asked for ------------------
 

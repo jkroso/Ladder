@@ -44,8 +44,8 @@
 # which takes a few seconds, and keeps the program in a folder of the Mac's
 # caches. That needs Swift, which comes with Xcode and its command line tools.
 
-@use "./swift" target programs kept! settle! jobs RETRY Kept
-@use "./swift" => Swift
+@use "../swift" target programs kept! settle! jobs RETRY Kept
+@use "../swift" => Swift
 @use Base64: base64encode
 @use Printf: @sprintf
 

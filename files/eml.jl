@@ -18,7 +18,7 @@
 # work of code that the startup page loads.
 
 @use "./mime" message page addresses webpage headers oneline unworded
-@use "./markdown" front_matter
+@use "../markdown" front_matter
 
 "True for the name of a file that holds an email as a server sends one"
 isemail(name) = endswith(lowercase(name), ".eml")

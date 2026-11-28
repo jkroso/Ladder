@@ -26,7 +26,7 @@
 # This file reads and writes those lines, lists the files, and works out the
 # grid. It draws nothing.
 
-@use "./numbers" sortkey
+@use "../numbers" sortkey
 
 "The language of a code block that is a gallery"
 const GALLERY = "gallery"

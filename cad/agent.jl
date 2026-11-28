@@ -20,8 +20,8 @@
 # thread for SolidCraft's answer. Each gives back names, numbers and lists of
 # the design as it was then, and never a part of the editor.
 
-@use "../for_agents" => Offer
-@use "../for_agents" Tool on_main
+@use "../agent/for_agents" => Offer
+@use "../agent/for_agents" Tool on_main
 @use "./view" => Views
 @use "./view" DesignView
 @use "./design" => Designs

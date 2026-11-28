@@ -8,13 +8,13 @@
 @use "github.com/jkroso/MiniFB.jl"... onfiledrop onscroll
 @use "github.com/jkroso/UI.jl/Interface/Geometric"...
 @use "github.com/jkroso/UI.jl/Interface/Specific"...
-@use "./pictures" natural
+@use "./files/pictures" natural
 @use "./html" NOTE
 @use "./markdown" Kind Line Span Cell spans tablecells isdivider MATTER TOML_MATTER MATH only_id
 @use "./markdown" COMMENT
-@use "./sheet" sheetcells parts shown
-@use "./spreadsheet" spreadcells
-@use "./math" => Maths
+@use "./blocks/sheet" sheetcells parts shown
+@use "./blocks/spreadsheet" spreadcells
+@use "./blocks/math" => Maths
 @use "./look" exports...
 @use "./flow" exports...
 @use "./buffer" exports...

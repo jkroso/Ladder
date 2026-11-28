@@ -9,7 +9,7 @@
 # Ladder's developer.
 
 @use Test: @test, @testset
-@use "../update" => Update
+@use "../window/update" => Update
 @use "../main" => K
 @use "github.com/jkroso/UI.jl/Interface/draw" frame
 const px = K.px
@@ -300,7 +300,7 @@ end
   Update.finish!(u)
   # Another Julia stands in for the Ladder that quits: it finds the version that waits, and ends
   script = """
-    @use "$(joinpath(@__DIR__, "..", "update"))" => Update
+    @use "$(normpath(joinpath(@__DIR__, "..", "window", "update")))" => Update
     u = Update.Updater("$(u.app)", v"1.0.0"; feed="$(u.feed)", dir="$(u.dir)", rule="$(escape_string(RULE))", register="/usr/bin/true")
     u.next = Inf
     Update.tick!(u)

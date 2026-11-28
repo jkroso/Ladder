@@ -56,7 +56,7 @@
 # This file reads the number, finds the blocks of each group, and shares a
 # width between the columns. It draws nothing.
 
-@use "./markdown" Kind Line
+@use "../markdown" Kind Line
 
 "The language of a code block that puts the blocks after it in columns"
 const COLUMNS = "columns"

@@ -42,7 +42,7 @@
 
 @use "github.com/jkroso/UI.jl/Interface/objc" cls msg nsstring jstring with_pool
 @use LibGit2: LibGit2
-@use "./app/facts" => Facts
+@use "../app/facts" => Facts
 
 "The GitHub repo whose releases the app looks at. release.jl publishes to it."
 const REPO = Facts.REPO

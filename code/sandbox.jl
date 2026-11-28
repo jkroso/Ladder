@@ -11,13 +11,13 @@
 @use "github.com/jkroso/UI.jl/Interface/abstract" window_of
 @use "github.com/jkroso/UI.jl/Interface/draw" redraw_in!
 @use "github.com/jkroso/UI.jl/Interface/objc" libobjc cls sel msg nsstring with_pool
-@use "./markdown" Line words
-@use "./sheet" SHEET parts RUN_ROW
-@use "./remote" => Remote
+@use "../markdown" Line words
+@use "../blocks/sheet" SHEET parts RUN_ROW
+@use "../files/remote" => Remote
 @use "./guard" => Guard
-@use "./base" exports...
-@use "./remote_page" exports...
-@use "./agent/kinds" kind_command agent_kind
+@use "../base" exports...
+@use "../files/remote_page" exports...
+@use "../agent/kinds" kind_command agent_kind
 
 export ASKING_AGENT, PACKAGE_AGENT, PACKAGE_ASKER, PACKAGE_CHECKS, PACKAGE_DOWNLOADER,
        PACKAGE_READER, PackageCheck, SANDBOXES, SANDBOXES_LOCK, SANDBOX_ASKER, SANDBOX_ASKS,

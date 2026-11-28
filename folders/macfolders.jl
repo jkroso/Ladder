@@ -10,7 +10,7 @@
 
 @use "github.com/jkroso/UI.jl/Interface/objc" cls msg nsstring jstring with_pool
 @use Dates: Dates, Date
-@use "./dates" day   # the day of a time, in the Mac's own time zone
+@use "../dates" day   # the day of a time, in the Mac's own time zone
 
 # --- days ------------------------------------------------------------------------------
 

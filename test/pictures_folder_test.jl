@@ -17,8 +17,8 @@ include(joinpath(@__DIR__, "png_fake.jl"))   # `write_png` writes a small pictur
 @use "./map_fake" => Fake                    # a pretend program for Apple's maps: no MapKit and no network
 
 const px = K.px
-@use "../macfolders" => M
-@use "../picture_words" => W
+@use "../folders/macfolders" => M
+@use "../files/picture_words" => W
 @use "./drive" drive
 
 const dir = mktempdir()

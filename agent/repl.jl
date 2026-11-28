@@ -31,7 +31,7 @@
 # long. That's why a name is worth more than a look: `cells = bodies(shown)`
 # costs the agent one line.
 
-@use "./guard" => Guard
+@use "../code/guard" => Guard
 @use "./for_agents" => Offer
 @use "github.com/jkroso/JSON.jl" => JSON
 @use Sockets

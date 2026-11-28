@@ -23,7 +23,7 @@
 
 @use "github.com/jkroso/Units.jl" => Units
 @use "github.com/jkroso/Units.jl/Imperial" => Imperial
-@use "../highlight" tokens
+@use "../code/highlight" tokens
 
 const made = Ref{Any}(nothing)
 

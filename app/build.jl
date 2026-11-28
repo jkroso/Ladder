@@ -18,9 +18,9 @@ module Build
 
 using Kip
 @use "./facts" => Facts
-@use "../transcribe" => Transcribe
-@use "../map" => Maps
-@use "../hiddenpage" => Hidden
+@use "../files/transcribe" => Transcribe
+@use "../blocks/map" => Maps
+@use "../web/hiddenpage" => Hidden
 
 include("bundle.jl")
 

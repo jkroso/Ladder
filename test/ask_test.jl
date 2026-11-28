@@ -1,7 +1,7 @@
 # Tests for ask.jl. Run them with `julia -O0 --project=. test/ask_test.jl`.
 
 @use Test: @test, @testset
-@use "../ask" => A
+@use "../blocks/ask" => A
 
 const BLOCK = ["Which database should the app use?", "It holds the orders.", "",
                "( ) SQLite. It's one file.", "(x) Postgres", "- [ ] Keep a copy in the cloud", "[x] Keep a copy on this Mac",

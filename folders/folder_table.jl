@@ -27,9 +27,9 @@
 @use "github.com/jkroso/UI.jl/Interface/draw" ishovered cursor redraw_in! popup! close_popup!
 @use "github.com/jkroso/UI.jl/Interface/Semantic/Icon" Icon
 @use "github.com/jkroso/UI.jl/Interface/Semantic/TextInput" TextInput
-@use "./markdown" words
-@use "./sheet" parts known shown
-@use "./dates" => DatesRead
+@use "../markdown" words
+@use "../blocks/sheet" parts known shown
+@use "../dates" => DatesRead
 @use "./git" => Git
 @use "./zip" => Zips
 @use "./macfile" => MacFiles
@@ -37,11 +37,11 @@
 @use "github.com/jkroso/URI.jl/FS" => FS FSObject AbstractDirectory
 @use Colors: RGBA
 @use Dates: Dates, Date, Day
-@use "./base" exports...
-@use "./additions" exports...
-@use "./showed_before" ignored_shown
+@use "../base" exports...
+@use "../additions" exports...
+@use "../window/showed_before" ignored_shown
 
-@use "./flow" rows
+@use "../flow" rows
 export FolderItem, FolderTable, FolderHead, FolderMenu, FolderOrder, FolderKind, FOLDER_COLUMNS, FOLDER_HEADS,
        FOLDER_ICON_W, FOLDER_COL_W, FOLDER_ROWS_FIRST, FOLDER_MENU_W, FOLDER_KEY, folder_table!,
        folder_items!, folder_sorted, read_size, day_edge, read_when, FOLDER_FIELD_HINTS, folder_field!,

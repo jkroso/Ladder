@@ -13,8 +13,8 @@
 @use "github.com/jkroso/URI.jl/FS" => FS FSObject AbstractDirectory
 @use "./git" => Git
 @use "./notes" => Notes
-@use "./base" exports...
-@use "./shared" open!
+@use "../base" exports...
+@use "../shared" open!
 @use "./git_marks" exports...
 
 # --- a folder of notes -------------------------------------------------------------------------

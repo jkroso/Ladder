@@ -53,16 +53,16 @@
 @use "github.com/jkroso/UI.jl/Interface/draw" ui draw ishovered cursor hittest rect popup! close_popup! MouseScroll
 @use "github.com/jkroso/UI.jl/Interface/window" system_menu
 @use "github.com/jkroso/UI.jl/Interface/Semantic/Icon" Icon
-@use "./pictures" natural
-@use "./markdown" Kind words
+@use "../files/pictures" natural
+@use "../markdown" Kind words
 @use "./sheet" parts known shown
-@use "./merge" changes
+@use "../merge" changes
 @use "./chart" => Charts
 @use "./csv" => Csvs
 @use "./forms" => Forms
 @use Colors: RGBA
 @use Dates: Dates, Day
-@use "./base" exports...
+@use "../base" exports...
 @use "./sketch_view" exports...
 
 export FILE_ROWS, FILE_BYTES, HEAD_H, CELL_PAD, SHEET_LINE, SHEET_ROUND, SHEET_ABOVE, WIDEST_CELL,

@@ -1,7 +1,7 @@
 # Tests for changes.jl. Run them with `julia -O0 --project=. test/changes_test.jl`.
 
 @use Test: @test, @testset
-@use "../changes" => D
+@use "../blocks/changes" => D
 
 const BLOCK = ["diff --git a/src/app.js b/src/app.js",
                "index 83db48f..bf2a3c1 100644",

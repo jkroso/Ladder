@@ -3,7 +3,7 @@
 
 @use Test: @test, @testset
 @use Dates: Date, Day
-@use "../day" => D
+@use "../blocks/day" => D
 
 @testset "the day of a block" begin
   @test D.day(String[]) === nothing && D.day(["", "soon"]) === nothing

@@ -1,7 +1,7 @@
 # Tests for takeoff.jl. Run them with `julia -O0 --project=. test/takeoff_test.jl`.
 
 @use Test: @test, @testset
-@use "../takeoff" => T
+@use "../blocks/takeoff" => T
 
 const BLOCK = ["plan: ground-floor.pdf", "page: 2", "scale: 1:100", "scale 2: 1:50", "customer: J Smith", "colour: red", "",
                "count | Double power point | item 412",

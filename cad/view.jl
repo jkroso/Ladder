@@ -104,7 +104,7 @@
 @use "./preview" => Previews
 @use "./pieces" => Pieces
 @use "./expressions" => Expressions
-@use "../zip" => Zips
+@use "../folders/zip" => Zips
 @use "github.com/jkroso/UI.jl/Interface/Specific" text_width
 @use InteractiveUtils: clipboard
 

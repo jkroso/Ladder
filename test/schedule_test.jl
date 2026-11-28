@@ -2,7 +2,7 @@
 
 @use Test: @test, @testset
 @use Dates: Date, Day
-@use "../schedule" => S
+@use "../blocks/schedule" => S
 
 # 16 November 2026 is a Monday
 const MON = Date(2026, 11, 16)

@@ -4,9 +4,9 @@
 # never the Mac's own Downloads or Trash, and draw no window.
 
 @use Test: @test, @testset, @test_throws
-@use "../macfolders" => M
-@use "../macfile" => F
-@use "../trash" => T
+@use "../folders/macfolders" => M
+@use "../folders/macfile" => F
+@use "../folders/trash" => T
 @use Dates: Dates, DateTime
 
 const dir = mktempdir()

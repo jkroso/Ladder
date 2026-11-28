@@ -136,7 +136,7 @@ page is the one it means.
 """
 page() = begin
   p = PAGE[] isa AbstractString ? PAGE[] : PAGE[]()
-  isempty(p) ? joinpath(@__DIR__, "pages", "settings", "ignored-files.md") : String(p)
+  isempty(p) ? normpath(joinpath(@__DIR__, "..", "pages", "settings", "ignored-files.md")) : String(p)
 end
 
 "What Ladder writes on the page above the list, when there's no page yet"

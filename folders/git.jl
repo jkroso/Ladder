@@ -19,7 +19,7 @@
 # from here never stops a commit that another program makes at that moment.
 
 @use "github.com/jkroso/Prospects.jl" @def
-@use "./ago" ago
+@use "../ago" ago
 
 "How many seconds what git said stays good, before git is asked again"
 const FRESH = 2.0

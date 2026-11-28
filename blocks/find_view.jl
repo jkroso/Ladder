@@ -29,12 +29,12 @@
 @use "github.com/jkroso/UI.jl/Interface/Semantic/Icon" Icon
 @use "github.com/jkroso/UI.jl/Interface/Semantic/TextInput" TextInput
 @use "github.com/jkroso/UI.jl/Interface/Semantic/Mermaid" problem
-@use "./html" escape
-@use "./markdown" Line classify words
+@use "../html" escape
+@use "../markdown" Line classify words
 @use "./repeats" => Repeats
 @use "./find" => Searches
-@use "./folders" => Folders
-@use "./base" exports...
+@use "../folders/folders" => Folders
+@use "../base" exports...
 @use "./takeoff_view" exports...
 @use "./schedule_view" exports...
 

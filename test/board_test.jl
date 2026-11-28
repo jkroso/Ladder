@@ -1,7 +1,7 @@
 # Tests for board.jl. Run them with `julia -O0 --project=. test/board_test.jl`.
 
 @use Test: @test, @testset
-@use "../board" => B
+@use "../blocks/board" => B
 
 const PAGE = ["# A job", "",
               "- [x] Dig the trench",

@@ -41,8 +41,8 @@
 
 @use Base64: base64encode
 @use Dates: Dates, DateTime
-@use "./web/entities" entities latin LATIN_NAMES
-@use "./web/dom" Token RAW tokens
+@use "../web/entities" entities latin LATIN_NAMES
+@use "../web/dom" Token RAW tokens
 
 "One part of an email, or a whole email"
 struct Part

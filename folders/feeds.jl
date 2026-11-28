@@ -29,10 +29,10 @@
 
 @use "github.com/jkroso/Prospects.jl" @def
 @use Dates: Dates, Date, DateTime, Day, Hour, Minute
-@use "./xml" Element parse_xml
+@use "../xml" Element parse_xml
 @use "./news" => News
 @use "./podcasts" => Podcasts
-@use "./web/entities" entities
+@use "../web/entities" entities
 
 "The page of a folder of news that lists its feeds"
 const FILE = "Feeds.md"

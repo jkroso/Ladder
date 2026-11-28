@@ -8,7 +8,7 @@
 
 @use Test: @test, @testset
 @use "../main" => K
-@use "../remote" => Remote
+@use "../files/remote" => Remote
 @use "github.com/jkroso/MiniFB.jl" Window
 @use "github.com/jkroso/UI.jl/Interface/draw" frame
 @use "./drive" drive

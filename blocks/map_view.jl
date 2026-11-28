@@ -45,16 +45,16 @@
 @use "github.com/jkroso/UI.jl/Interface/image" image_source has_image
 @use "github.com/jkroso/UI.jl/Interface/Semantic/Icon" Icon
 @use "github.com/jkroso/UI.jl/Interface/Semantic/Mermaid" problem
-@use "./pictures" picture
-@use "./html" escape
-@use "./markdown" Kind words front_matter
+@use "../files/pictures" picture
+@use "../html" escape
+@use "../markdown" Kind words front_matter
 @use "./sheet" parts shown
 @use "./map" => Maps
 @use Colors: @colorant_str, RGBA
 @use "github.com/jkroso/UI.jl/Interface/image" register_image
-@use "./base" exports...
+@use "../base" exports...
 @use "./sketch_view" exports...
-@use "./fill_view" pinch_open
+@use "../window/fill_view" pinch_open
 
 export MAP, MAP_PAUSE, MAP_ROUND, MAP_SLACK, MapView, MapArea, map_place, map_wide, map_zoom, map_facts,
        map_pin, map_middle, map_spot, map_shows, map_changes, map_moves, map_find!, map_picture!, map_words,

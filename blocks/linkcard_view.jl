@@ -29,12 +29,12 @@
 @use "github.com/jkroso/UI.jl/Interface/draw" ishovered cursor open_url redraw_in!
 @use "github.com/jkroso/UI.jl/Interface/image" image_aspect
 @use "github.com/jkroso/UI.jl/Interface/Semantic/Icon" Icon
-@use "./pictures" picture
-@use "./markdown" words
+@use "../files/pictures" picture
+@use "../markdown" words
 @use "./linkcard" => Cards
-@use "./eml" => Eml
+@use "../files/eml" => Eml
 @use Colors: RGBA
-@use "./base" exports...
+@use "../base" exports...
 
 export BROWSER, cards_dir, LinkCard, CARD_TITLE, CARD_WORDS, CARD_SOURCE, CARD_LINE, CARD_PAD, card_tall,
        shortened, covered, online, card_picture, NOT_CARDS, card_address, card_item, opening, card_html

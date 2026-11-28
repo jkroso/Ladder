@@ -23,13 +23,13 @@
 @use "github.com/jkroso/UI.jl/Interface/abstract" SemanticUI WrapMode with_theme describe window_of focus handled
 @use "github.com/jkroso/UI.jl/Interface/draw" ui draw ishovered cursor MouseScroll with_round_clip
 @use "github.com/jkroso/UI.jl/Interface/Semantic/TextInput" TextInput
-@use "./pictures" picture
-@use "./html" escape
-@use "./markdown" words
+@use "../files/pictures" picture
+@use "../html" escape
+@use "../markdown" words
 @use "./sheet" parts
 @use "./signature" => Signatures
 @use Dates: Dates
-@use "./base" exports...
+@use "../base" exports...
 @use "./sketch_view" exports...
 @use "./schedule_view" exports...
 

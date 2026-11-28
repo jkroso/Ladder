@@ -38,12 +38,12 @@
 @use "github.com/jkroso/UI.jl/Interface/Semantic/Icon" Icon
 @use "./sheet" parts shown
 @use "github.com/jkroso/JSON.jl" JSONObject JSONNumber json_value write_json
-@use "./term/view" => Terms
+@use "../term/view" => Terms
 @use InteractiveUtils: clipboard
-@use "./base" exports...
+@use "../base" exports...
 @use "./sketch_view" exports...
 @use "./csv_view" exports...
-@use "./terminal_view" term_page
+@use "../term/terminal_view" term_page
 
 export JSONS, MOST_JSON, JSON_STEP, JSON_ARROW, JSON_PAD, MOST_STRING, JSON_READ, json_of, json_page,
        json_items, json_length, json_holder, json_count, json_copy, JSONRow, JSONTree, plant!, json_rows,

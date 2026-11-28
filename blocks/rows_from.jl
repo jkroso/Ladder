@@ -22,14 +22,14 @@
 @use "github.com/jkroso/UI.jl/Interface/draw" ishovered cursor popup! close_popup!
 @use "github.com/jkroso/UI.jl/Interface/Semantic/Icon" Icon
 @use "github.com/jkroso/UI.jl/Interface/Semantic/TextInput" TextInput
-@use "./markdown" Kind words
+@use "../markdown" Kind words
 @use "./chart" => Charts
 @use "./save" => Saves
 @use Colors: @colorant_str, RGBA
-@use "./base" exports...
+@use "../base" exports...
 @use "./json_view" exports...
 @use "./load_view" exports...
-@use "./media_view" istable chart_path
+@use "../files/media_view" istable chart_path
 @use "./find_view" choice_matches
 
 export SOURCE_MENU, SourceButton, close_picker!, from_picker, from_picker_section, headless_name,

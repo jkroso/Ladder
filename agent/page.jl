@@ -16,7 +16,7 @@
 @use "./waiters" => Agent
 @use "../base" exports...
 @use "./kinds" exports...
-@use "../git_page" AgentMarks
+@use "../folders/git_page" AgentMarks
 
 export waiters, agents, elsewhere, send!, hand_over!, agent_part, toggle_marks!, whose, sharer,
        PageAgents, page_agents, forget_waiters!, marking

@@ -1,7 +1,7 @@
 # Tests for chart.jl. Run them with `julia -O0 --project=. test/chart_test.jl`.
 
 @use Test: @test, @testset
-@use "../chart" => C
+@use "../blocks/chart" => C
 @use "github.com/jkroso/Units.jl/Money" USD
 @use "github.com/jkroso/Units.jl" Percent yr
 

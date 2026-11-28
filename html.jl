@@ -17,7 +17,7 @@
 # them, and a comment, like %%note%%, is left out.
 
 @use "./markdown" Kind Line Span classify spans tablecells isdivider front_matter isdone MATTER TOML_MATTER MATH COMMENT callout opens_callout wikitarget
-@use "./math" mathml
+@use "./blocks/math" mathml
 
 "`s` with the characters that mean something in HTML written as their names"
 escape(s::AbstractString) = replace(s, '&' => "&amp;", '<' => "&lt;", '>' => "&gt;", '"' => "&quot;")

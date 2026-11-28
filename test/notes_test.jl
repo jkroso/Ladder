@@ -2,7 +2,7 @@
 # them with `julia -O0 --project=. test/notes_test.jl`. They draw no window.
 
 @use Test: @test, @testset
-@use "../notes" => N
+@use "../folders/notes" => N
 
 const dir = mktempdir()
 const root = joinpath(dir, "Notes")

@@ -2,7 +2,7 @@
 # They use no network: a function of the test stands in for `curl`.
 
 @use Test: @test, @testset
-@use "../linkcard" => C
+@use "../blocks/linkcard" => C
 
 const SITE = "https://www.bunnings.com.au/paint/white-4l?colour=white#top"
 

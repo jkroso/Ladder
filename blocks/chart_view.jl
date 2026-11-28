@@ -13,18 +13,18 @@
 @use "github.com/jkroso/UI.jl/Interface/abstract" SemanticUI with_theme describe reuse! window_of handled
 @use "github.com/jkroso/UI.jl/Interface/draw" ui draw ishovered cursor show_tooltip! hide_tooltip! rect popup! close_popup! placed! with_clip
 @use "github.com/jkroso/UI.jl/Interface/Semantic/Icon" Icon
-@use "./pictures" picture
-@use "./html" escape
-@use "./markdown" Kind tablecells
+@use "../files/pictures" picture
+@use "../html" escape
+@use "../markdown" Kind tablecells
 @use "./sheet" folded
 @use "github.com/jkroso/Units.jl" => Units
 @use "./chart" => Charts
 @use Colors: @colorant_str, RGBA
-@use "./base" exports...
+@use "../base" exports...
 @use "./csv_view" exports...
 @use "./takeoff_view" exports...
 @use "./rows_from" exports...
-@use "./media_view" chart_file file_table istable table_rows
+@use "../files/media_view" chart_file file_table istable table_rows
 
 export CHART_KINDS, CHART_MENU, ChartMenu, ChartMenuButton, ChartMenuRow, PIE_H, PLOT_H, PlotArea,
        cell_amount, chart_buttons_shown, chart_colour, chart_columns, chart_data, chart_hit,

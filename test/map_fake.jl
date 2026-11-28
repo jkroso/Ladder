@@ -20,7 +20,7 @@
 # it take `SLOW` seconds, `offline[]` makes it fail, and `broken[]` makes it
 # write a file that isn't a picture. `slow[]` makes every place slow too.
 
-@use "../map" => Maps
+@use "../blocks/map" => Maps
 
 "Each picture that was asked for: its middle, the zoom, how wide and how tall it is in px, and whether it's dark"
 const calls = NamedTuple[]

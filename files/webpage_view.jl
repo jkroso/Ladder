@@ -38,15 +38,15 @@
 @use "github.com/jkroso/UI.jl/Interface/abstract" SemanticUI describe
 @use "github.com/jkroso/UI.jl/Interface/draw" redraw_in!
 @use "github.com/jkroso/UI.jl/Interface/window" dark_mode
-@use "./html" html
-@use "./sheet" shown
+@use "../html" html
+@use "../blocks/sheet" shown
 @use "github.com/jkroso/Units.jl" => Units
 @use "github.com/jkroso/Units.jl/Money" => Cash
 @use "./eml" => Eml
-@use "./web/browser" => Browsers
-@use "./web/files" => Webfiles
-@use "./base" exports...
-@use "./linkcard_view" exports...
+@use "../web/browser" => Browsers
+@use "../web/files" => Webfiles
+@use "../base" exports...
+@use "../blocks/linkcard_view" exports...
 
 export WEBVIEW, WEB_HIGH, WEB_LEAST, WEB_GETTER, web_online, web_files, web_source, web_lines,
        web_says, SI_UNITS, script_value, script_sums, send_sums!, HTMLPage, html_part, WEB_DARK,

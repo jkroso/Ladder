@@ -41,21 +41,21 @@
 @use "github.com/jkroso/UI.jl/Interface/Semantic/Icon" Icon
 @use "github.com/jkroso/UI.jl/Interface/Semantic/TextInput" TextInput
 @use "github.com/jkroso/UI.jl/Interface/Semantic/Mermaid" problem
-@use "./pictures" natural
-@use "./html" escape
-@use "./markdown" words
+@use "../files/pictures" natural
+@use "../html" escape
+@use "../markdown" words
 @use "./sheet" shown
 @use "./csv" => Csvs
 @use "./filter" => Filters
 @use "./save" => Saves
 @use "github.com/jkroso/JSON.jl" JSONObject JSONNumber json_value write_json
 @use Colors: @colorant_str, RGBA
-@use "./base" exports...
+@use "../base" exports...
 @use "./csv_view" exports...
 @use "./json_view" exports...
 @use "./load_view" exports...
 @use "./rows_from" exports...
-@use "./page_extras" save_panel
+@use "../page/page_extras" save_panel
 
 export ADD_W, CHIP_H, ChipCross, FILTER_COLUMNS, FILTER_KEY, FILTER_ROWS, FilterChip, FilterFound,
        FilterGrid, FilterHead, FilterMenu, FilterMore, FilterPick, chip_problem, chip_width,

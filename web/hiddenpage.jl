@@ -34,7 +34,7 @@
 # seconds and needs Swift on the Mac. The app and a run from the source each
 # have stores of their own, so you sign in once in each.
 
-@use "./swift" => Swift
+@use "../swift" => Swift
 @use "github.com/jkroso/JSON.jl" parse_json write_json
 
 const SOURCE = joinpath(@__DIR__, "hiddenpage.swift")

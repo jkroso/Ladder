@@ -47,12 +47,12 @@
 @use "github.com/jkroso/UI.jl/Interface/Semantic/Icon" Icon icon_cache
 @use "github.com/jkroso/UI.jl/Interface/Semantic/SVG" SVGPath
 @use "github.com/jkroso/UI.jl/Interface/Semantic/TextInput" TextInput
-@use "./pictures" picture
-@use "./markdown" words
+@use "../files/pictures" picture
+@use "../markdown" words
 @use "./sheet" parts
 @use "./sketch" => Sketches
 @use Colors: RGBA
-@use "./base" exports...
+@use "../base" exports...
 
 export SKETCH, SKETCH_TOOLS, SKETCH_SETTINGS, SKETCH_BAR, HANDLE, HANDLE_REACH, ROUND_CORNER, sketch_icon,
        SketchView, SketchArea, InkDot, sketch_colour, sketch_area, sketch_input, sketch_room, sketch_scale,

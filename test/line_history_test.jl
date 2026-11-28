@@ -7,7 +7,7 @@
 
 @use Test: @test, @testset
 @use "../main" => K
-@use "../git" => Git
+@use "../folders/git" => Git
 @use "github.com/jkroso/MiniFB.jl" Window KeyPress KeyRelease MouseMove Typed Keys onkey onmouse ontype
 @use "github.com/jkroso/UI.jl/Interface/draw" frame popups
 @use GeometryBasics: Vec2

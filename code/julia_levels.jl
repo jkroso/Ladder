@@ -41,12 +41,12 @@
 @use "github.com/jkroso/UI.jl/Interface/Specific"...
 @use "github.com/jkroso/UI.jl/Interface/abstract" SemanticUI WrapMode describe reuse! handled
 @use "github.com/jkroso/UI.jl/Interface/draw" ishovered cursor MouseScroll
-@use "./markdown" Kind Line words
+@use "../markdown" Kind Line words
 @use "./highlight" tokens
-@use "./sheet" parts
+@use "../blocks/sheet" parts
 @use InteractiveUtils: code_native, code_llvm
-@use "./base" exports...
-@use "./changes_view" exports...
+@use "../base" exports...
+@use "../blocks/changes_view" exports...
 
 export CODE_LEVELS, MOST_LOWERED, MOST_FORMS, julia_place, julia_part, code_depth, calls, is_definition,
        Defined, Thunk, Lowered, bare_code, source_of, thunk!, forms, call_words, tinted, inferred, LLVM_WORDS,

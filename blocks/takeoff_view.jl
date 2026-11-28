@@ -74,15 +74,15 @@
 @use "github.com/jkroso/UI.jl/Interface/image" image_source
 @use "github.com/jkroso/UI.jl/Interface/Semantic/Icon" Icon
 @use "github.com/jkroso/UI.jl/Interface/Semantic/TextInput" TextInput
-@use "./pictures" pdf_pages pdf_page pdf_size pdf_part pdf_lines
-@use "./html" escape
-@use "./markdown" words
+@use "../files/pictures" pdf_pages pdf_page pdf_size pdf_part pdf_lines
+@use "../html" escape
+@use "../markdown" words
 @use "./sheet" parts known shown
 @use "./spreadsheet" moved
 @use "./takeoff" => Plans
-@use "./centient" => Centient
+@use "../centient" => Centient
 @use Colors: @colorant_str, RGBA
-@use "./base" exports...
+@use "../base" exports...
 
 export TAKEOFF, PLAN_LEAST, REACH, SNAP, NEAR, SETTLED, QUICK, MOST_FOUND, SIDE_W, HUES, PLAN_TOOLS,
        PLAN_ICONS, hue, Sharp, TakeoffView, PlanArea, MeasureRow, AmountCell, UnitWord, UnitMenu, UnitRow,

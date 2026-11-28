@@ -3,7 +3,7 @@
 # letters, not pictures: gallery.jl goes by the names of the files.
 
 @use Test: @test, @testset
-@use "../gallery" => G
+@use "../blocks/gallery" => G
 
 const KINDS = (".png", ".jpg")
 const dir = mktempdir()

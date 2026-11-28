@@ -33,16 +33,16 @@
 @use "github.com/jkroso/UI.jl/Interface/abstract" SemanticUI with_theme describe window_of focus handled
 @use "github.com/jkroso/UI.jl/Interface/draw" ui draw ishovered cursor show_tooltip! hide_tooltip! redraw_in! rect with_round_clip clipboard!
 @use "github.com/jkroso/UI.jl/Interface/Semantic/Icon" Icon
-@use "./html" html
-@use "./markdown" words front_matter
-@use "./sheet" parts shown
+@use "../html" html
+@use "../markdown" words front_matter
+@use "../blocks/sheet" parts shown
 @use "./eml" => Eml
 @use "./webpage" => Webpages
-@use "./web" => Web
-@use "./web/select" => WebSelect
+@use "../web" => Web
+@use "../web/select" => WebSelect
 @use Colors: @colorant_str
-@use "./base" exports...
-@use "./map_view" exports...
+@use "../base" exports...
+@use "../blocks/map_view" exports...
 @use "./file_view" exports...
 
 export SENT_LINE, SENT_QUICK, SENT_FAILED, SENT_FRAME, SENT_PAGE, SentEmail, SentPage, sent_dir, sent_mark,

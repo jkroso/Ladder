@@ -20,16 +20,16 @@
 @use "github.com/jkroso/URI.jl/FSPath" FSPath
 @use "github.com/jkroso/URI.jl/FS" => FS FSObject AbstractDirectory
 @use Colors: @colorant_str, RGBA
-@use "./pictures" picture thumbnail finder_icon forget_picture photo_place
+@use "../files/pictures" picture thumbnail finder_icon forget_picture photo_place
 @use "./folders" => Folders
 @use "./zip" => Zips
-@use "./map" => Maps
+@use "../blocks/map" => Maps
 @use "./macfolders" => Mac
 @use "./macfile" => MacFiles
-@use "./picture_words" => PictureWords
+@use "../files/picture_words" => PictureWords
 @use "./trash" => Trash
-@use "./base" exports...
-@use "./shared" open! trash!
+@use "../base" exports...
+@use "../shared" open! trash!
 
 # --- the Mac's own folders: Downloads and the Trash ------------------------------------------
 #

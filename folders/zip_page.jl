@@ -11,7 +11,7 @@
 @use "github.com/jkroso/UI.jl/Interface/Semantic/Icon" Icon
 @use "github.com/jkroso/URI.jl/FS" => FS
 @use "./zip" => Zips
-@use "./base" exports...
+@use "../base" exports...
 
 # --- a zip file ---------------------------------------------------------------------------------
 #

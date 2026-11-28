@@ -5,7 +5,7 @@
 
 @use Test: @test, @testset
 @use "../main" => K
-@use "../sheet" number_at nudged
+@use "../blocks/sheet" number_at nudged
 @use "github.com/jkroso/MiniFB.jl" Window KeyPress KeyRelease MouseMove Keys onkey onmouse
 @use "github.com/jkroso/UI.jl/Interface/draw" frame cursor
 @use GeometryBasics: Vec2

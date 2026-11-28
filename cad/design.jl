@@ -29,7 +29,7 @@
 @use "github.com/jkroso/JSON.jl" => JSON
 @use "./scene" Shape read_glb Vec3
 @use "./scene" => Scenes
-@use "../zip" => Zips
+@use "../folders/zip" => Zips
 
 mutable struct Model
   path::String

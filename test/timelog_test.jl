@@ -2,7 +2,7 @@
 # Each one gives the time now itself, so none depends on the clock.
 
 @use Test: @test, @testset
-@use "../timelog" => T
+@use "../blocks/timelog" => T
 @use Dates: Date, Time, DateTime
 
 const LINES = ["2026-11-17 07:30-12:00 | Framing",

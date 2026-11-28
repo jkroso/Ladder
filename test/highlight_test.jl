@@ -2,7 +2,7 @@
 # them with `julia -O0 --project=. test/highlight_test.jl`.
 
 @use Test: @test, @testset
-@use "../highlight" tokens left_open
+@use "../code/highlight" tokens left_open
 
 "Each part of `line` in `lang` as text => kind, without the plain parts that are only spaces"
 parts(line, lang="julia", open='\0') = [t.text => t.kind for t in tokens(line, lang, open) if !(t.kind == :plain && all(isspace, t.text))]

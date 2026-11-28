@@ -22,17 +22,17 @@
 @use "github.com/jkroso/UI.jl/Interface/Semantic/Icon" Icon
 @use "github.com/jkroso/UI.jl/Interface/Semantic/TextInput" TextInput
 @use "github.com/jkroso/UI.jl/Interface/Semantic/Mermaid" problem
-@use "./html" escape
-@use "./markdown" Kind words
+@use "../html" escape
+@use "../markdown" Kind words
 @use "./csv" => Csvs
 @use "./save" => Saves
 @use "github.com/jkroso/JSON.jl" JSONObject JSONNumber json_value write_json
 @use Colors: @colorant_str, RGBA
-@use "./base" exports...
+@use "../base" exports...
 @use "./load_view" exports...
 @use "./rows_from" exports...
 @use "./filter_view" exports...
-@use "./media_view" table_file
+@use "../files/media_view" table_file
 
 export SAVE_SENDER, SEND_SCRIPT, asks_where, heard!, json_cell_of, same_file, save_chosen,
        save_data, save_folder, save_here!, save_html, save_name_field, save_picker,

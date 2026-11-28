@@ -3,7 +3,7 @@
 # temporary folder, with the Mac's own git, and draw no window.
 
 @use Test: @test, @testset
-@use "../git" => G
+@use "../folders/git" => G
 
 const dir = mktempdir()
 const repo = joinpath(dir, "work")

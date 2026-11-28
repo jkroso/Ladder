@@ -19,7 +19,7 @@
 # changes the names in a formula when a row or a column is added or removed.
 # Columns of text count characters from 0, as they do in markdown.jl.
 
-@use "./markdown" Cell tablecells
+@use "../markdown" Cell tablecells
 @use "./sheet" units shown brief problem code
 
 "The language of a code block that is a spreadsheet"

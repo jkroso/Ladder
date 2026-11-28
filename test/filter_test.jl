@@ -1,7 +1,7 @@
 # Tests for filter.jl. Run them with `julia -O0 --project=. test/filter_test.jl`.
 
 @use Test: @test, @testset
-@use "../filter" => F
+@use "../blocks/filter" => F
 
 const ROWS = [["Name", "City", "Total", "Joined", "Note"],
               ["Ann", "Sydney", "\$1,200", "2026-03-01", "pays late"],

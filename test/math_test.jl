@@ -3,7 +3,7 @@
 # They open no window.
 
 @use Test: @test, @testset
-@use "../math" => M
+@use "../blocks/math" => M
 @use "../markdown" Kind classify spans MATH
 @use "../html" html
 

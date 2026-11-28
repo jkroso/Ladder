@@ -17,9 +17,9 @@
 @use "./html" NOTE
 @use "./markdown" Kind Line Span spans words isdone MATTER TOML_MATTER opens_callout
 @use "./markdown" COMMENT
-@use "./highlight" tokens
-@use "./sheet" shown
-@use "./math" => Maths
+@use "./code/highlight" tokens
+@use "./blocks/sheet" shown
+@use "./blocks/math" => Maths
 @use Colors: RGBA
 @use "./folder_page" own! node!
 @use "./look" exports...

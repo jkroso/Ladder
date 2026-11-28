@@ -7,7 +7,7 @@
 
 @use Test: @test, @testset
 @use "../main" => K
-@use "../board" => Boards
+@use "../blocks/board" => Boards
 @use "github.com/jkroso/MiniFB.jl" Window KeyPress KeyRelease MouseMove Keys onkey onmouse
 @use "github.com/jkroso/UI.jl/Interface/draw" frame rect
 @use "github.com/jkroso/UI.jl/Interface/save" save_png

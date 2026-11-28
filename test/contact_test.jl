@@ -1,7 +1,7 @@
 # Tests for contact.jl. Run them with `julia -O0 --project=. test/contact_test.jl`.
 
 @use Test: @test, @testset
-@use "../contact" => C
+@use "../blocks/contact" => C
 
 const BLOCK = ["Ada Lovelace", "role: Engineer", "company: Analytical Engines", "email: ada@example.com", "mobile: 0400 123 456",
                "address: 12 Example St, Sydney NSW 2000", "web: example.com", "photo: ada.jpg", "note: Met at the 2026 conference.",

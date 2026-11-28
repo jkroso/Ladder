@@ -6,7 +6,7 @@
 @use Base64: base64encode
 @use Dates: Dates, DateTime
 @use Random: Random
-@use "../mime" => M
+@use "../files/mime" => M
 
 # A page shows a date in the Mac's time zone, so the tests choose one
 ENV["TZ"] = "Australia/Sydney"

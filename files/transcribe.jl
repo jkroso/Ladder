@@ -19,8 +19,8 @@
 # which takes a few seconds, and keeps the program in a folder of the Mac's
 # caches. That needs Swift, which comes with Xcode and its command line tools.
 
-@use "./swift" target programs
-@use "./swift" => Swift
+@use "../swift" target programs
+@use "../swift" => Swift
 
 const SOURCE = joinpath(@__DIR__, "transcribe.swift")
 

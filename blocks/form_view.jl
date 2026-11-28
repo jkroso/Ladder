@@ -44,8 +44,8 @@
 @use "github.com/jkroso/UI.jl/Interface/Semantic/Icon" Icon
 @use "github.com/jkroso/UI.jl/Interface/Semantic/TextInput" TextInput
 @use "github.com/jkroso/UI.jl/Interface/Semantic/RadioGroup" RadioGroup
-@use "./html" escape
-@use "./markdown" Kind words
+@use "../html" escape
+@use "../markdown" Kind words
 @use "./sheet" parts
 @use "./spreadsheet" moved
 @use "./forms" => Forms
@@ -53,7 +53,7 @@
 @use "./day" => Days
 @use Colors: @colorant_str, RGBA
 @use Dates: Dates, Date, Day
-@use "./base" exports...
+@use "../base" exports...
 @use "./rows_from" exports...
 
 export FORM, FORM_NARROW, FormChoice, FormMonth, FormState, FormTick, FormView, MONTH_CELL,

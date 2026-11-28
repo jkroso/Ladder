@@ -36,7 +36,7 @@ end
 
 "The top-level expression of commands.jl that makes the constant `name`, with its docstring"
 definition(name) = begin
-  for ex in Meta.parseall(read(joinpath(@__DIR__, "..", "commands.jl"), String)).args
+  for ex in Meta.parseall(read(normpath(joinpath(@__DIR__, "..", "window", "commands.jl")), String)).args
     Meta.isexpr(ex, :macrocall) || continue
     inner = last(ex.args)
     Meta.isexpr(inner, :const) && Meta.isexpr(inner.args[1], :(=)) && inner.args[1].args[1] == name && return ex

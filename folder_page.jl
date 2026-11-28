@@ -16,15 +16,15 @@
 @use "github.com/jkroso/UI.jl/Interface/Semantic/Icon" Icon
 @use "github.com/jkroso/UI.jl/Interface/image" image_aspect
 @use Colors: @colorant_str, RGBA
-@use "./eml" => Eml
-@use "./folders" => Folders
+@use "./files/eml" => Eml
+@use "./folders/folders" => Folders
 @use "./markdown" front_matter
 @use "./look" exports...
 @use "./shared" open!
 @use "./host" exports...
-@use "./pictures" picture
+@use "./files/pictures" picture
 @use "github.com/jkroso/URI.jl/FS" => FS FSObject
-@use "./remote" => Remote
+@use "./files/remote" => Remote
 
 export own!, node!, MARKDOWN, window_size, PICTURES, MODELS, TERMINALS, CHATS, SOUNDS, VIDEOS, ZIPS,
        TABLES, MAC_PICTURES, DOCUMENTS, FONTS, CODE, file_icon, SERIES_LIGHT, SERIES_DARK,

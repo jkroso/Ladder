@@ -38,19 +38,19 @@
 @use "github.com/jkroso/UI.jl/Interface/draw" hittest redraw_in! rect
 @use "github.com/jkroso/UI.jl/Interface/Semantic/Icon" load_icon
 @use "github.com/jkroso/UI.jl/Interface/Semantic/SVG" render_svg
-@use "./markdown" Kind Span classify words front_matter wikitarget
-@use "./math" => Maths
-@use "./columns" => Columns
+@use "../markdown" Kind Span classify words front_matter wikitarget
+@use "../blocks/math" => Maths
+@use "../blocks/columns" => Columns
 @use "github.com/jkroso/UI.jl/Interface/draw" set_tool! window_tool invalidate_layout!
 @use Colors: @colorant_str, RGBA
-@use "./base" exports...
-@use "./additions" exports...
-@use "./math_view" exports...
-@use "./file_view" exports...
-@use "./columns_view" exports...
-@use "./slides_view" exports...
+@use "../base" exports...
+@use "../additions" exports...
+@use "../blocks/math_view" exports...
+@use "../files/file_view" exports...
+@use "../blocks/columns_view" exports...
+@use "../page/slides_view" exports...
 @use "./run_code" exports...
-@use "./agent/page" exports...
+@use "../agent/page" exports...
 
 export SOURCE_FILES, drawn_by, BUILT_JULIA, JULIA_CODE, code_under, TextRun, pick_name, run_kind,
        span_kind, run_on, RUN_ROOM, text_run, code_label, code_picker, picks, code_tick!, asks_whom,
@@ -121,11 +121,21 @@ end
 
 """
 True when the file at `path`, as `code_place` gives it, is one that Ladder's
-window is made of: main.jl and the files beside it, and the files of agent
-mode and Ask Agent in the folder `agent`. A thing that such a file draws is
-Ladder's own. A page's code draws the rest.
+window is made of: the folder of main.jl, and a folder of code directly inside
+it. A thing that such a file draws is Ladder's own. A page's code draws the
+rest. The pages, the tests, the fonts, the docs, the syntax files, the plugin
+and the build are not.
 """
-ladder_file(path::AbstractString) = dirname(path) in (ladder_folder(), joinpath(ladder_folder(), "agent"))
+ladder_file(path::AbstractString) = begin
+  root = ladder_folder()
+  isempty(root) && return false
+  dir = dirname(path)
+  dir == root && return true
+  startswith(dir, root * "/") || return false
+  rel = relpath(dir, root)
+  occursin('/', rel) && return false
+  !(rel in ("test", "pages", "fonts", "docs", "syntax", "plugin", "build"))
+end
 
 """
 The folder of Julia's own code when Ladder was loaded. In the built app it's

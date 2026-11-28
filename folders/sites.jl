@@ -16,7 +16,7 @@
 # The page can have other lines too, like a heading or a note. Ladder reads
 # only the links of its lists, and leaves the other lines as they are.
 
-@use "./web/url" site_name
+@use "../web/url" site_name
 
 "The name of the page that keeps the favourite sites, at the top of the browser folder"
 const NAME = "Favourites.md"

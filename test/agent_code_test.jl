@@ -9,9 +9,9 @@
 
 @use Test: @test, @testset
 @use "../main" => K
-@use "../repl" => Repls
-@use "../for_agents" => Offer
-@use "../guard" => Guard
+@use "../agent/repl" => Repls
+@use "../agent/for_agents" => Offer
+@use "../code/guard" => Guard
 @use "../cad/engine" => Engines
 @use "../cad/design" => Models
 @use "github.com/jkroso/JSON.jl" => JSON

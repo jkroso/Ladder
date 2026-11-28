@@ -15,8 +15,8 @@
 include(joinpath(@__DIR__, "dsstore_fake.jl"))   # `store` makes the bytes of a .DS_Store file
 
 const px = K.px
-@use "../macfolders" => M
-@use "../trash" => T
+@use "../folders/macfolders" => M
+@use "../folders/trash" => T
 @use "./drive" drive middle
 
 const dir = mktempdir()

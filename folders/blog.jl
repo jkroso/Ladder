@@ -46,9 +46,9 @@
 # of such a blog is a section like any other.
 
 @use Dates: Dates, Date
-@use "./dates" => DatesRead
+@use "../dates" => DatesRead
 @use "./macfile" made
-@use "./markdown" matter_keys after_matter
+@use "../markdown" matter_keys after_matter
 
 "The folder in a blog's folder that Ladder writes the site into"
 const SITE = "docs"

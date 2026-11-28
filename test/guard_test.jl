@@ -5,7 +5,7 @@
 # folder that stands in for the site's own folder of the browser folder.
 
 @use Test: @test, @testset
-@use "../guard" => Guard
+@use "../code/guard" => Guard
 
 const dir = mktempdir()
 const site_dir = mkpath(joinpath(dir, "Browser", "example.com"))

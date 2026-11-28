@@ -32,10 +32,10 @@
 @use "github.com/jkroso/UI.jl/Interface/Specific"...
 @use "github.com/jkroso/UI.jl/Interface/abstract" SemanticUI describe
 @use "github.com/jkroso/UI.jl/Interface/draw" ui draw cursor
-@use "./markdown" Kind
+@use "../markdown" Kind
 @use "./sheet" parts folded
 @use "./columns" => Columns
-@use "./base" exports...
+@use "../base" exports...
 @use "./sheet_view" enter
 
 export COLUMN_BLOCK, COLUMN_GAP, COLUMN_MARK, PageColumn, ColumnGroup, PageColumns, column_gap,

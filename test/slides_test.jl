@@ -1,7 +1,7 @@
 # Tests for slides.jl. Run them with `julia -O0 --project=. test/slides_test.jl`.
 
 @use Test: @test, @testset
-@use "../slides" => S
+@use "../page/slides" => S
 
 "The lines that each slide of `page` shows, as text"
 shown(page) = (lines = String.(split(page, '\n')); [join(lines[s.first:s.last], "\n") for s in S.slides(lines)])

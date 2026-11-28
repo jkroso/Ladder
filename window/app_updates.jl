@@ -4,9 +4,9 @@
 @use "github.com/jkroso/UI.jl/Interface/abstract" window_of
 @use "github.com/jkroso/UI.jl/Interface/draw" redraw_in!
 @use "./update" => Update
-@use "./base" exports...
-@use "./live_view" reads!
-@use "./design_view" unsaved_designs
+@use "../base" exports...
+@use "../blocks/live_view" reads!
+@use "../cad/design_view" unsaved_designs
 
 export updates!, unsaved, extensions_tick!, extensions_news, extensions_act!, update_act!,
        UpdatesState, update_news, update_tick!

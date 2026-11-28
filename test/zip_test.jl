@@ -3,7 +3,7 @@
 # folder with the Mac's own `zip` and `ditto`, and draw no window.
 
 @use Test: @test, @testset, @test_throws
-@use "../zip" => Z
+@use "../folders/zip" => Z
 
 const dir = mktempdir()
 const src = joinpath(dir, "plans")

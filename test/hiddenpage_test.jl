@@ -4,7 +4,7 @@
 # the program, so they use neither WebKit nor the web, and they draw no window.
 
 @use Test: @test, @testset
-@use "../hiddenpage" => H
+@use "../web/hiddenpage" => H
 @use "github.com/jkroso/JSON.jl" parse_json
 
 const dir = mktempdir()

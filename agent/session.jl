@@ -17,9 +17,9 @@
 @use "github.com/jkroso/UI.jl/Interface/Specific"...
 @use "github.com/jkroso/UI.jl/Interface/abstract" window_of
 @use "github.com/jkroso/UI.jl/Interface/Semantic/Recorder" stop!
-@use "../for_agents" => Offer
-@use "../for_agents" on_main
-@use "../repl" => Repls
+@use "./for_agents" => Offer
+@use "./for_agents" on_main
+@use "./repl" => Repls
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
 @use "github.com/jkroso/JSON.jl" JSONObject json_value write_json
 @use Dates: Dates

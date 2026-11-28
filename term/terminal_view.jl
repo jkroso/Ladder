@@ -37,10 +37,10 @@
 @use "github.com/jkroso/UI.jl/Interface/Specific"...
 @use "github.com/jkroso/UI.jl/Interface/abstract" window_of focus
 @use "github.com/jkroso/UI.jl/Interface/draw" redraw_in!
-@use "./sheet" shown
-@use "./term/view" => Terms
+@use "../blocks/sheet" shown
+@use "./view" => Terms
 @use Colors: RGBA, Colorant
-@use "./base" exports...
+@use "../base" exports...
 
 export terminals, term_colour, term_mix, term_palette, TERM_BELLS, term_setting!,
        term_settings_text, read_term_setting!, term_part, term_tick!, close_terminals!, Terminals,

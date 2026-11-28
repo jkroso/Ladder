@@ -21,11 +21,11 @@
 @use "github.com/jkroso/UI.jl/Interface/Semantic/TextInput" TextInput
 @use "github.com/jkroso/UI.jl/Interface/Semantic/Slider" Slider
 @use "github.com/jkroso/UI.jl/Interface/Semantic/ColorPicker" ColorPicker
-@use "./html" escape
+@use "../html" escape
 @use "./sheet" parts
 @use "./ask" => Asks
 @use Colors: @colorant_str, RGB, HSV, Colorant
-@use "./base" exports...
+@use "../base" exports...
 
 export ASK, AskView, AskOption, ask_input, colour_of, colour_hex, ask_field, beside_mark, ASK_NAME_W,
        ask_field_row, ask_html

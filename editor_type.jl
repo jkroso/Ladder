@@ -10,7 +10,7 @@
 @use "github.com/jkroso/UI.jl/Interface/abstract" SemanticUI Theme light
 @use "github.com/jkroso/UI.jl/Interface/Semantic/TextInput" TextInput
 @use "./markdown" Cell Line words
-@use "./spreadsheet" Value
+@use "./blocks/spreadsheet" Value
 @use "github.com/jkroso/URI.jl/FS" => FS FSObject AbstractDirectory
 @use "./look" exports...
 @use "./flow" exports...
@@ -18,12 +18,12 @@
 @use "./folder_page" exports...
 @use "github.com/jkroso/UI.jl/Interface/draw" rect
 @use "github.com/jkroso/UI.jl/Interface/Semantic/Mermaid" problem
-@use "./sheet" Result parts shown folded
-@use "./chart" => Charts
-@use "./filter" => Filters
-@use "./save" => Saves
-@use "./gallery" => Galleries
-@use "./find" => Searches
+@use "./blocks/sheet" Result parts shown folded
+@use "./blocks/chart" => Charts
+@use "./blocks/filter" => Filters
+@use "./blocks/save" => Saves
+@use "./blocks/gallery" => Galleries
+@use "./blocks/find" => Searches
 
 export Item, Live, Grid, isspread, Glide, Editor, TopBar, Sidebar, Page, Document, Backdrop, FinderInput,
        ToolButton, TableButton, Mode, Levels, Stop, JuliaCode, Title, CheckCount, ReadOnly, SendButton,

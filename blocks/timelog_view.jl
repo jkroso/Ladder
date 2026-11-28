@@ -22,14 +22,14 @@
 @use "github.com/jkroso/UI.jl/Interface/draw" ui draw ishovered cursor redraw_in! rect popup! close_popup! placed!
 @use "github.com/jkroso/UI.jl/Interface/Semantic/Icon" Icon
 @use "github.com/jkroso/UI.jl/Interface/Semantic/TextInput" TextInput
-@use "./html" escape
-@use "./markdown" words
+@use "../html" escape
+@use "../markdown" words
 @use "./sheet" parts shown
 @use "./schedule" => Schedules
 @use "./timelog" => Timelogs
 @use Colors: @colorant_str, RGBA
 @use Dates: Dates
-@use "./base" exports...
+@use "../base" exports...
 @use "./sketch_view" exports...
 @use "./csv_view" exports...
 @use "./schedule_view" exports...

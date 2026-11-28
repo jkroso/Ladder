@@ -36,7 +36,7 @@
 # This file reads and writes those lines, and finds what matches in the lines
 # of a page. It draws nothing, and reads no file.
 
-@use "./markdown" Kind Line classify spans isdone isdivider MATTER TOML_MATTER
+@use "../markdown" Kind Line classify spans isdone isdivider MATTER TOML_MATTER
 
 "The language of a code block that is a list of what was found"
 const FIND = "find"

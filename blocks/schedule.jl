@@ -39,8 +39,8 @@
 # works out the days of each task. It draws nothing.
 
 @use Dates: Dates, Date, Day, dayofweek
-@use "./dates" => DatesRead
-@use "./markdown" Kind Line classify spans isdone
+@use "../dates" => DatesRead
+@use "../markdown" Kind Line classify spans isdone
 @use "./repeats" => Repeats
 
 "The language of a code block that is a schedule"

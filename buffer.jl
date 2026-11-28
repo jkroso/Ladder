@@ -11,20 +11,20 @@
 @use "github.com/jkroso/UI.jl/Interface/Specific"...
 @use "github.com/jkroso/UI.jl/Interface/abstract" version
 @use "./markdown" Kind Line classify front_matter
-@use "./highlight" left_open
-@use "./sheet" parts
-@use "./spreadsheet" moved
+@use "./code/highlight" left_open
+@use "./blocks/sheet" parts
+@use "./blocks/spreadsheet" moved
 @use "./merge" changes combine follow
-@use "./eml" => Eml
-@use "./remote" => Remote
+@use "./files/eml" => Eml
+@use "./files/remote" => Remote
 @use "./folder_page" MARKDOWN ZIPS
 @use "./look" exports...
 @use "./flow" exports...
-@use "./schedule" => Schedules
-@use "./filter" => Filters
-@use "./timelog" => Timelogs
-@use "./chart" => Charts
-@use "./save" => Saves
+@use "./blocks/schedule" => Schedules
+@use "./blocks/filter" => Filters
+@use "./blocks/timelog" => Timelogs
+@use "./blocks/chart" => Charts
+@use "./blocks/save" => Saves
 
 export look, table_text, in_browser, web_address, copied_from, julia_own, is_reply, web_site, site_runs,
        inspread, insheet, shared_lang, shown_only!, sandbox_only!, Pos, Buffer, readonly, protected, isremote,

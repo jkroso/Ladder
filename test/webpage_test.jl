@@ -5,9 +5,9 @@
 # program.
 
 @use Test: @test, @testset
-@use "../webpage" => W
+@use "../files/webpage" => W
 @use "../web/select" => S
-@use "../map" => Maps
+@use "../blocks/map" => Maps
 @use "./webpage_fake" => Fake
 
 W.HELPER[] = Fake.helper

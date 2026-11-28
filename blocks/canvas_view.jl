@@ -52,20 +52,20 @@
 @use "github.com/jkroso/UI.jl/Interface/objc" libobjc cls sel msg nsstring jstring with_pool
 @use "github.com/jkroso/UI.jl/Interface/image" image_aspect image_source
 @use "github.com/jkroso/UI.jl/Interface/Semantic/TextInput" TextInput
-@use "./pictures" picture
-@use "./markdown" words
+@use "../files/pictures" picture
+@use "../markdown" words
 @use "./sheet" parts
 @use "./spreadsheet" moved
-@use "./pasteboard" => Pasteboard
+@use "../pasteboard" => Pasteboard
 @use "./linkcard" => Cards
 @use "./sketch" => Sketches
 @use "./canvas" => Canvases
 @use Colors: RGBA
 @use InteractiveUtils: clipboard
-@use "./base" exports...
+@use "../base" exports...
 @use "./linkcard_view" exports...
 @use "./sketch_view" exports...
-@use "./file_view" exports...
+@use "../files/file_view" exports...
 @use "./schedule_view" exports...
 
 export CANVAS, CANVAS_TOOLS, NOTE_PAD, CARD_ROUND, NOTE_LEADING, TEXT_LEADING, PAGE_HEAD,

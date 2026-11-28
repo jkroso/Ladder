@@ -31,8 +31,8 @@
 @use "github.com/jkroso/UI.jl/Interface/draw" ui draw ishovered cursor show_tooltip! hide_tooltip! rect
 @use "github.com/jkroso/UI.jl/Interface/Semantic/Icon" Icon
 @use "github.com/jkroso/UI.jl/Interface/Semantic/TextInput" TextInput
-@use "./html" escape
-@use "./markdown" Kind words
+@use "../html" escape
+@use "../markdown" Kind words
 @use "./sheet" parts shown
 @use "./schedule" => Schedules
 @use "./calendar" => Calendars
@@ -40,7 +40,7 @@
 @use "./timelog" => Timelogs
 @use Colors: RGBA
 @use Dates: Dates, Date
-@use "./base" exports...
+@use "../base" exports...
 @use "./takeoff_view" exports...
 @use "./sheet_view" exports...
 @use "./schedule_view" exports...

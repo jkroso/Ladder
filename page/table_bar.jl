@@ -6,10 +6,10 @@
 @use "github.com/jkroso/UI.jl/Interface/abstract" describe focus
 @use "github.com/jkroso/UI.jl/Interface/draw" ishovered cursor
 @use "github.com/jkroso/UI.jl/Interface/Semantic/Icon" Icon
-@use "./markdown" tablecells
-@use "./spreadsheet" spreadtexts
-@use "./base" exports...
-@use "./sheet_view" exports...
+@use "../markdown" tablecells
+@use "../blocks/spreadsheet" spreadtexts
+@use "../base" exports...
+@use "../blocks/sheet_view" exports...
 
 export ALIGN_ICONS, BAR_H, DASHES, TABLE_ACTIONS, backrow!, emptyrow, tablebar, tableop!
 

@@ -6,7 +6,7 @@
 
 @use Test: @test, @testset
 @use "../main" => K
-@use "../sheet" tally known name_values needed
+@use "../blocks/sheet" tally known name_values needed
 @use "github.com/jkroso/MiniFB.jl" Window
 @use "github.com/jkroso/UI.jl/Interface/draw" frame
 @use "./drive" drive

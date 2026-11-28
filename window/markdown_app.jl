@@ -6,10 +6,10 @@
 @use "github.com/jkroso/UI.jl/Interface/abstract" window_of
 @use "github.com/jkroso/UI.jl/Interface/draw" open_url redraw_in!
 @use "github.com/jkroso/UI.jl/Interface/objc" cls msg nsstring with_pool
-@use "./app/facts" APP_ID
-@use "./base" exports...
-@use "./live_view" DefaultAsked
-@use "./webpage_view" html_page
+@use "../app/facts" APP_ID
+@use "../base" exports...
+@use "../blocks/live_view" DefaultAsked
+@use "../files/webpage_view" html_page
 
 export MARKDOWN_TYPE, app_path, await_default!, inbox, markdown_type, open_outside, open_outside!,
        outside_button, receive!

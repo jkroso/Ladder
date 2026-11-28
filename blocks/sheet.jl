@@ -18,7 +18,7 @@
 @use "github.com/jkroso/Units.jl" => Units
 @use "github.com/jkroso/Units.jl/Imperial" => Imperial
 @use "github.com/jkroso/Units.jl/Money" => Cash
-@use "./markdown" Cell
+@use "../markdown" Cell
 
 "The language of a code block that is a sheet"
 const SHEET = "sheet"

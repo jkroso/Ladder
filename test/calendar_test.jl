@@ -2,8 +2,8 @@
 
 @use Test: @test, @testset
 @use Dates: Date
-@use "../calendar" => C
-@use "../schedule" => S
+@use "../blocks/calendar" => C
+@use "../blocks/schedule" => S
 
 const TODAY = Date(2026, 11, 18)   # the day that counts as today
 const PAGE = ["# A job", "",

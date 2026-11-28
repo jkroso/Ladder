@@ -1,7 +1,7 @@
 # Tests for sketch.jl. Run them with `julia -O0 --project=. test/sketch_test.jl`.
 
 @use Test: @test, @testset
-@use "../sketch" => S
+@use "../blocks/sketch" => S
 
 const BLOCK = ["pen 12,30 14,32.5 18,40", "line 10,10 80,60", "arrow red 10,10 80,60", "box 100,50 200,120",
                "oval blue 300,50 400,150", "text green 120,80 The sink  goes here", "star 1,1 2,2", "box 1,1"]

@@ -3,7 +3,7 @@
 # account. mime_test.jl has the tests of how an email is taken apart.
 
 @use Test: @test, @testset
-@use "../eml" => E
+@use "../files/eml" => E
 
 # A page shows a date in the Mac's time zone, so the tests choose one
 ENV["TZ"] = "Australia/Sydney"

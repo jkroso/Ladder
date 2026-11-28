@@ -23,8 +23,8 @@
 # It changes only the cells that it's asked to: the rest of the row stays as the
 # file has it, quotes and all. It draws nothing.
 
-@use "./numbers" isnumber sortkey
-@use "./dates" when dayfirst
+@use "../numbers" isnumber sortkey
+@use "../dates" when dayfirst
 
 const MOST_COLUMNS = 40
 const MOST_ROWS = 5_000         # under the row of names

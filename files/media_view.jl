@@ -21,25 +21,25 @@
 @use "github.com/jkroso/UI.jl/Interface/media" recording
 @use "./pictures" natural
 @use "./transcribe" Transcription check! finished phrases words_between
-@use "./html" escape
-@use "./markdown" Kind words
-@use "./sheet" parts shown
-@use "./spreadsheet" moved
-@use "./chart" => Charts
-@use "./csv" => Csvs
+@use "../html" escape
+@use "../markdown" Kind words
+@use "../blocks/sheet" parts shown
+@use "../blocks/spreadsheet" moved
+@use "../blocks/chart" => Charts
+@use "../blocks/csv" => Csvs
 @use "./eml" => Eml
-@use "./web" => Web
-@use "./web/fetch" => Webfetch
+@use "../web" => Web
+@use "../web/fetch" => Webfetch
 @use "./remote" => Remote
-@use "./base" exports...
-@use "./linkcard_view" exports...
-@use "./sketch_view" exports...
-@use "./takeoff_view" exports...
-@use "./fill_view" exports...
+@use "../base" exports...
+@use "../blocks/linkcard_view" exports...
+@use "../blocks/sketch_view" exports...
+@use "../blocks/takeoff_view" exports...
+@use "../window/fill_view" exports...
 @use "./file_view" exports...
-@use "./live_view" exports...
+@use "../blocks/live_view" exports...
 @use "./email_view" exports...
-@use "./csv_view" celltext
+@use "../blocks/csv_view" celltext
 
 export Picture, pictures_dir, picture_item, HTML_BLOCK_TAGS, HTML_RAW_TAGS, HTML_OPENS,
        HTML_ATTRIBUTE, HTML_LONE, HTML_CLOSES, HTML_RUNS, html_end, html_runs, html_typed,
@@ -289,7 +289,7 @@ const LADDER_FACES = Dict{String,String}()
 
 "The @font-face rules of `family` when its files are in Ladder's fonts folder, or \"\" for a font of the Mac"
 font_faces(family::AbstractString) = get!(LADDER_FACES, family) do
-  dir = joinpath(@__DIR__, "fonts")
+  dir = normpath(joinpath(@__DIR__, "..", "fonts"))
   rules = String[]
   for name in (isdir(dir) ? readdir(dir) : String[])
     m = match(r"^(.+)-([A-Za-z]+)\.(?:ttf|otf)$", name)

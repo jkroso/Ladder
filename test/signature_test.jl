@@ -1,7 +1,7 @@
 # Tests for signature.jl. Run them with `julia -O0 --project=. test/signature_test.jl`.
 
 @use Test: @test, @testset
-@use "../signature" => S
+@use "../blocks/signature" => S
 @use Dates: DateTime
 
 const BLOCK = ["name: Sam Lee", "signed: 2026-11-18 09:14", "pen 52,80 60,71.5 74,90", "pen 90,62 96,88"]

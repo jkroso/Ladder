@@ -2,7 +2,7 @@
 # They write small CSV files into a temporary folder.
 
 @use Test: @test, @testset
-@use "../csv" => C
+@use "../blocks/csv" => C
 
 const dir = mktempdir()
 file(name, text) = (path = joinpath(dir, name); write(path, text); path)

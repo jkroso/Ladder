@@ -42,8 +42,8 @@ ENV["FAKE_ARGS"] = log
 
 @use "../web/fetch" => Webfetch
 @use "../web/files" => Webfiles
-@use "../remote" => Remote
-@use "../linkcard" => Cards
+@use "../files/remote" => Remote
+@use "../blocks/linkcard" => Cards
 
 "Wait until `done()` is true, for 10 seconds at most"
 until(done) = (t = time(); while !done() && time() - t < 10; sleep(0.01); end; done())

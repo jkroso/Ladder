@@ -27,7 +27,7 @@
 # as `Authorization: Bearer` and the key. The page holds only the name, so the
 # key stays out of the file. Ladder sends a key only over https, or to this Mac.
 
-@use "./web/url" isurl host
+@use "../web/url" isurl host
 
 const SAVE = "save"
 

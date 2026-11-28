@@ -1,7 +1,7 @@
 # Tests for canvas.jl. Run them with `julia -O0 --project=. test/canvas_test.jl`.
 
 @use Test: @test, @testset
-@use "../canvas" => C
+@use "../blocks/canvas" => C
 
 const BLOCK = ["text size 28 60,20 Kitchen",
                "note 60,80 Buy the tiles  before Friday",

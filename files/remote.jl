@@ -29,9 +29,9 @@
 #     against("https://example.com/a/b.md", "../c.md#top")   # "https://example.com/c.md#top"
 #     label("https://example.com/a/b.md")        # "example.com/a/b.md", for the top bar
 
-@use "./web/files" => Webfiles
-@use "./web/fetch" => Webfetch
-@use "./web/url" resolve
+@use "../web/files" => Webfiles
+@use "../web/fetch" => Webfetch
+@use "../web/url" resolve
 
 "What Ladder says it wants from a server: Markdown first, then plain text, then anything"
 const ACCEPT = "text/markdown, text/x-markdown;q=0.9, text/plain;q=0.8, text/html;q=0.7, */*;q=0.5"

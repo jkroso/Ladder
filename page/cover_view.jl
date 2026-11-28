@@ -11,10 +11,10 @@
 @use "github.com/jkroso/UI.jl/Interface/abstract" SemanticUI WrapMode describe focus handled
 @use "github.com/jkroso/UI.jl/Interface/draw" ui draw cursor with_round_clip
 @use "github.com/jkroso/UI.jl/Interface/image" image_source
-@use "./pictures" picture
-@use "./markdown" words
-@use "./mime" => Mime
-@use "./base" exports...
+@use "../files/pictures" picture
+@use "../markdown" words
+@use "../files/mime" => Mime
+@use "../base" exports...
 
 export MatterCard, MatterRow, matter_rows, COVER_MOST, COVER_GAP, CoverPicture, cover_key, cover_part,
        matter_card, email_head, edit_matter!

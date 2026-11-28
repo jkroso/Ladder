@@ -3,7 +3,7 @@
 # `julia -O0 --project=. test/sheet_test.jl`.
 
 @use Test: @test, @testset
-@use "../sheet" => S
+@use "../blocks/sheet" => S
 
 texts(rows) = [r.text for r in S.tally(rows)]
 

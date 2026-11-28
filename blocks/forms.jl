@@ -43,8 +43,8 @@
 # It draws nothing.
 
 @use Dates: Dates, Date
-@use "./numbers" number isnumber
-@use "./dates" => DatesRead
+@use "../numbers" number isnumber
+@use "../dates" => DatesRead
 
 "The language of a block that adds rows to a table"
 const FORM = "form"

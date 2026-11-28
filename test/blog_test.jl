@@ -4,7 +4,7 @@
 
 @use Test: @test, @testset
 @use Dates: Date
-@use "../blog" => B
+@use "../folders/blog" => B
 
 const dir = realpath(mktempdir())
 page!(name, text) = (path = joinpath(dir, name); write(path, text); path)

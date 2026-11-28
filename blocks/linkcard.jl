@@ -16,9 +16,9 @@
 # nothing from the page, and it keeps only those texts and two addresses: the
 # picture's and the icon's. It draws nothing.
 
-@use "./web/entities" entities latin LATIN_NAMES
-@use "./web/fetch" => Webfetch
-@use "./web/url" resolve site_name
+@use "../web/entities" entities latin LATIN_NAMES
+@use "../web/fetch" => Webfetch
+@use "../web/url" resolve site_name
 
 """
 What a web page says of itself. A text that the page doesn't give is empty.

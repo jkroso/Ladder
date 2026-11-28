@@ -3,7 +3,7 @@
 # map_fake.jl takes the program's place.
 
 @use Test: @test, @testset
-@use "../map" => M
+@use "../blocks/map" => M
 @use "./map_fake" => Fake
 
 M.HELPER[] = Fake.helper

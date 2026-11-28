@@ -2,7 +2,7 @@
 # rows that it saves as text. Run them with `julia -O0 --project=. test/save_test.jl`.
 
 @use Test: @test, @testset
-@use "../save" => S
+@use "../blocks/save" => S
 
 @testset "the lines of a save block" begin
   s = S.query(["to: big orders.csv", "From: Orders", "as: JSON", "method: put", "key: shop", "note: hi"])

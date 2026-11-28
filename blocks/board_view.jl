@@ -24,14 +24,14 @@
 @use "github.com/jkroso/UI.jl/Interface/abstract" SemanticUI WrapMode with_theme describe window_of handled
 @use "github.com/jkroso/UI.jl/Interface/draw" ui draw ishovered cursor rect
 @use "github.com/jkroso/UI.jl/Interface/Semantic/Icon" Icon
-@use "./html" escape
+@use "../html" escape
 @use "./sheet" parts shown
 @use "./schedule" => Schedules
 @use "./board" => Boards
 @use "./find" => Searches
 @use Colors: RGBA
 @use Dates: Dates
-@use "./base" exports...
+@use "../base" exports...
 @use "./sheet_view" exports...
 @use "./schedule_view" exports...
 

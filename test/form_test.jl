@@ -5,7 +5,7 @@
 
 @use Test: @test, @testset
 @use Dates: Date, Day
-@use "../forms" => F
+@use "../blocks/forms" => F
 @use "../main" => K
 @use "github.com/jkroso/MiniFB.jl" Window KeyPress Keys Typed onkey ontype
 @use "github.com/jkroso/UI.jl/Interface/draw" frame rect scene draw draw_tool window_tool focus popups

@@ -16,10 +16,10 @@
 @use "github.com/jkroso/UI.jl/Interface/abstract" SemanticUI describe
 @use "github.com/jkroso/UI.jl/Interface/draw" ui draw show_tooltip!
 @use "github.com/jkroso/UI.jl/Interface/Semantic/Mermaid" Mermaid problem
-@use "./markdown" Kind Span words
+@use "../markdown" Kind Span words
 @use "./sheet" shown
 @use "./math" => Maths
-@use "./base" exports...
+@use "../base" exports...
 
 export DIAGRAM, isdiagram, diagram, DiagramBlock, Equation, typeset, half_height, MATHS_LINE, maths_text,
        MATHS_SMALLEST, equation_item

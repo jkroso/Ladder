@@ -6,7 +6,7 @@
 
 @use Test: @test, @testset, @test_throws
 @use "../main" => K
-@use "../remote" => Remote
+@use "../files/remote" => Remote
 @use "github.com/jkroso/MiniFB.jl" Window KeyPress KeyRelease MouseMove Keys onkey onmouse Typed ontype
 @use "github.com/jkroso/UI.jl/Interface/draw" frame rect popups
 @use GeometryBasics: Vec2

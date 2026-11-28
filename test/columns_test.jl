@@ -3,7 +3,7 @@
 # `julia -O0 --project=. test/columns_test.jl`.
 
 @use Test: @test, @testset
-@use "../columns" => C
+@use "../blocks/columns" => C
 @use "../markdown" Kind classify
 
 page(text) = String.(split(text, '\n'))
