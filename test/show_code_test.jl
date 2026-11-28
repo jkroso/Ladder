@@ -15,6 +15,7 @@
 @use "github.com/jkroso/UI.jl/Interface/draw" frame rect _cursor_shape
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
 @use GeometryBasics: Vec2
+@use "./drive" drive
 const px = K.px
 
 # The folder is the test's own each time, so that two test processes that run at once don't write the same files
@@ -50,29 +51,11 @@ write(page, "# A tank\n\n```gauge\n3\n```\n\nThe end.\n")
 const e = K.build_editor(page)
 const w = Window(e, size=(900px, 600px))
 # Each frame is drawn with the newest code, as the app's own loop draws it
-frames(win=w, n=2) = foreach(_ -> Base.invokelatest(frame, win), 1:n)
+const (; frames, at, click, shot) = drive(w, latest=true)
 frames(w, 4)
-shot(name) = haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], name), w)
 
 node() = e.nodes[(:block, "gauge", page, 1)].value
-over() = begin
-  r = rect(node())
-  x, y = r.left + r.width / 2, r.top + r.height / 2
-  w.mouse = typeof(w.mouse)(x, y)
-  onmouse(w, MouseMove(Vec2{px}(x, y), w))
-  frames(w, 1)
-end
-click(held...) = begin
-  over()
-  foreach(h -> w.keys |= h, held)
-  frames(w, 1)
-  w.keys |= Keys.mouse_left
-  onkey(w, KeyPress{Keys.mouse_left}(0, w))
-  w.keys ⊻= Keys.mouse_left
-  onkey(w, KeyRelease{Keys.mouse_left}(0, w))
-  foreach(h -> w.keys ⊻= h, held)
-  frames()
-end
+over() = at(node())
 "The window's tool, which draws the line round a thing and the buttons on it"
 picker() = K.code_picker(e)
 "What the buttons on the line round the thing that a click with ⌘ and ⌥ down chose do, as the last frame drew them"
@@ -80,18 +63,7 @@ buttons() = [a for (a, _) in picker().buttons if a != :label]
 "Where the last frame drew the button `action`, or the label for `:label`"
 button(action) = last(only(b for b in picker().buttons if b[1] == action))
 "Click the button `action` on the line round the thing that a click with ⌘ and ⌥ down chose"
-press_button(action) = begin
-  left, top, wide, tall = button(action)
-  x, y = px(left + wide / 2), px(top + tall / 2)
-  w.mouse = typeof(w.mouse)(x, y)
-  onmouse(w, MouseMove(Vec2{px}(x, y), w))
-  frames(w, 1)
-  w.keys |= Keys.mouse_left
-  onkey(w, KeyPress{Keys.mouse_left}(0, w))
-  w.keys ⊻= Keys.mouse_left
-  onkey(w, KeyRelease{Keys.mouse_left}(0, w))
-  frames()
-end
+press_button(action) = click(button(action))
 "The cursor that the window shows with the mouse at the middle of the place `(left, top, wide, tall)`"
 cursor_at((left, top, wide, tall)) = begin
   x, y = px(left + wide / 2), px(top + tall / 2)
@@ -131,10 +103,10 @@ end
 
 @testset "a click with ⌘ and ⌥ down shows the code" begin
   # A click with no key down is the block's own
-  click()
+  click(node())
   @test node().clicks == 1 && isempty(code_windows())
   # With only one of the two keys down, too
-  click(Keys.cmd)
+  click(node(), Keys.cmd)
   @test isempty(code_windows())
   # And with ⇧ or ⌃ down as well, as with a key that holds all four
   t = K.code_picker(e)
@@ -144,7 +116,7 @@ end
     foreach(h -> w.keys ⊻= h, (Keys.cmd, Keys.opt, others...))
   end
   n = node().clicks
-  click(Keys.cmd, Keys.opt, Keys.shft, Keys.ctrl)
+  click(node(), Keys.cmd, Keys.opt, Keys.shft, Keys.ctrl)
   @test node().clicks == n + 1 && isempty(code_windows())
   n = node().clicks
   over()
@@ -152,7 +124,7 @@ end
   frames()
   shot("show-code-line.png")
   w.keys ⊻= Keys.cmd; w.keys ⊻= Keys.opt
-  click(Keys.cmd, Keys.opt)
+  click(node(), Keys.cmd, Keys.opt)
   # The block didn't get the click. Its line stays after the keys went up, with a button for each thing to do with it.
   @test node().clicks == n && isempty(code_windows())
   @test picker().chosen[1] === node() && buttons() == [:show_code, :ask_agent]
@@ -175,13 +147,13 @@ end
   @test picker().chosen === nothing && isempty(picker().buttons) && isempty(code_windows()) && e.popup == :none
   @test cursor_at(gone) != :hand
   # So does a click anywhere else, and the click goes on to what it's on
-  click(Keys.cmd, Keys.opt)
+  click(node(), Keys.cmd, Keys.opt)
   @test picker().chosen !== nothing
-  click()
+  click(node())
   @test picker().chosen === nothing && node().clicks == n + 1
   n = node().clicks
   # Show Code shows a window with the file, with the caret on the method, and the line goes
-  click(Keys.cmd, Keys.opt)
+  click(node(), Keys.cmd, Keys.opt)
   press_button(:show_code)
   @test picker().chosen === nothing && node().clicks == n
   shown = code_windows()
@@ -192,7 +164,7 @@ end
 
 @testset "the agent's logo on the line opens the palette with the thing as A" for command in (:ask_agent,)
   n = node().clicks
-  click(Keys.cmd, Keys.opt)
+  click(node(), Keys.cmd, Keys.opt)
   press_button(command)
   p = K.palette(e)
   @test e.popup == :commands && p.command.name == command && node().clicks == n && picker().chosen === nothing
@@ -214,30 +186,30 @@ end
   K.focus(e)
   e.buf.caret = e.buf.anchor = (3, 0)
   frames()
-  press(k, held...) = (foreach(h -> w.keys |= h, held); onkey(w, KeyPress{k}(0, w)); foreach(h -> w.keys ⊻= h, held); haskey(e.nodes, :palette) && (e.nodes[:palette].moved = 0.0); frames())
-  press(Keys.p, Keys.cmd, Keys.shft)
+  (; key) = drive(w, latest=true, slide=false)
+  key(Keys.p, Keys.cmd, Keys.shft)
   foreach(c -> ontype(w, Typed(c, w)), "show code"); frames()
-  press(Keys.enter)
+  key(Keys.enter)
   p = K.palette(e)
   @test p.command.name == :show_code && K.chip_value(p, K.palette_chips(p), 1).node === node() && e.popup == :commands
-  press(Keys.enter)
+  key(Keys.enter)
   @test e.popup == :none && shown.buf.caret[1] == first_line
   # A click chooses the thing and shows its code at once. The thing doesn't get the click.
   shown.buf.caret = shown.buf.anchor = (1, 0)
   e.buf.caret = e.buf.anchor = (7, 0)
   frames()
-  press(Keys.p, Keys.cmd, Keys.shft)
+  key(Keys.p, Keys.cmd, Keys.shft)
   foreach(c -> ontype(w, Typed(c, w)), "show code"); frames()
-  press(Keys.enter)
+  key(Keys.enter)
   # The caret is in a paragraph: the node starts with nothing, so no line goes round the whole page
   @test K.chip_value(p, K.palette_chips(p), 1) === K.UNSAID && p.at == 1 && isempty(K.chip_letters(p, K.palette_chips(p)))
   n = node().clicks
-  click()
+  click(node())
   @test e.popup == :none && node().clicks == n && shown.buf.caret[1] == first_line
   # The click after that is the block's own again, once the bar has slid down
   e.nodes[:palette].moved = 0.0
   frames()
-  click()
+  click(node())
   @test node().clicks == n + 1
 end
 

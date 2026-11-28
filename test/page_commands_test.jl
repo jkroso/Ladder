@@ -8,6 +8,7 @@
 @use "../main" => K
 @use "github.com/jkroso/MiniFB.jl" Window KeyPress Keys onkey Typed ontype
 @use "github.com/jkroso/UI.jl/Interface/draw" frame popups
+@use "./drive" drive
 const px = K.px
 
 const dir = mktempdir()
@@ -27,11 +28,9 @@ helper(x) = x
 
 const e = K.build_editor(page)
 const w = Window(e, size=(900px, 700px))
-frames(n=2) = (haskey(e.nodes, :palette) && (e.nodes[:palette].moved = 0.0); foreach(_ -> Base.invokelatest(frame, w), 1:n))
+const (; frames, typed, key) = drive(w, latest=true, slide=false)
 frames()
 K.focus(e)
-press(k, held...) = (foreach(h -> w.keys |= h, held); onkey(w, KeyPress{k}(0, w)); foreach(h -> w.keys ⊻= h, held); frames())
-typed(s) = (foreach(c -> ontype(w, Typed(c, w)), s); frames())
 names() = [String(c.name) for c in K.palette_commands(e)]
 
 @testset "a page's functions are commands once its code has run" begin
@@ -45,22 +44,22 @@ names() = [String(c.name) for c in K.palette_commands(e)]
 end
 
 @testset "its arguments are chips, and what it gives back shows under the top bar" begin
-  press(Keys.p, Keys.cmd, Keys.shft)
+  key(Keys.p, Keys.cmd, Keys.shft)
   typed("invoice")
-  press(Keys.enter)
+  key(Keys.enter)
   p = K.palette(e)
   @test p.command.name == :invoice && [K.chip_name(c) for c in K.palette_chips(p)] == ["Client", "Hours"]
-  typed("Ada"); press(Keys.enter)
-  typed("3"); press(Keys.enter)
+  typed("Ada"); key(Keys.enter)
+  typed("3"); key(Keys.enter)
   # It isn't one of the commands that run at once, so Run runs it
   @test p.at == 3 && e.popup == :commands
-  press(Keys.enter)
+  key(Keys.enter)
   @test e.popup == :none && first(K.said_result(e)) == "Invoice: Ada owes 270"
   @test any(x -> x.key == :result, popups(w))
   # A value that isn't words shows as Julia shows it
-  press(Keys.p, Keys.cmd, Keys.shft)
-  typed("week"); press(Keys.enter)
-  typed("5"); press(Keys.enter); press(Keys.enter)
+  key(Keys.p, Keys.cmd, Keys.shft)
+  typed("week"); key(Keys.enter)
+  typed("5"); key(Keys.enter); key(Keys.enter)
   @test first(K.said_result(e)) == "Week: 40"
 end
 

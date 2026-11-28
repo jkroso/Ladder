@@ -9,6 +9,7 @@
 K.RUN_WAIT[] = Inf   # the code runs in a thread of its own, and each result is there when the key's handler ends
 @use "github.com/jkroso/MiniFB.jl" Window KeyPress Keys onkey Typed ontype
 @use "github.com/jkroso/UI.jl/Interface/draw" frame
+@use "./drive" drive
 const px = K.px
 
 const dir = mktempdir()
@@ -33,11 +34,9 @@ write(page, "# Notes\n\n```julia\n1 + 1\n```\n")
 
 const e = K.build_editor(source)
 const w = Window(e, size=(900px, 400px))
-frames(n=2) = (haskey(e.nodes, :palette) && (e.nodes[:palette].moved = 0.0); foreach(_ -> Base.invokelatest(frame, w), 1:n))
+const (; frames, typed, key) = drive(w, latest=true, slide=false)
 frames(3)
 K.focus(e)
-press(k, held...) = (foreach(h -> w.keys |= h, held); onkey(w, KeyPress{k}(0, w)); foreach(h -> w.keys ⊻= h, held); frames())
-typed(s) = (foreach(c -> ontype(w, Typed(c, w)), s); frames())
 names() = [String(c.name) for c in K.palette_commands(e)]
 const b = e.buf
 "The line that `text` starts on"
@@ -79,10 +78,10 @@ end
   write(source, replace(read(source, String), "missing_name + 1" => "RATE + 1"))
   K.open!(e, source)
   frames()
-  press(Keys.p, Keys.cmd, Keys.shft)
+  key(Keys.p, Keys.cmd, Keys.shft)
   typed("run all")
   @test first(K.palette_rows(e, K.palette(e))).value.name == :run_all
-  press(Keys.enter)
+  key(Keys.enter)
   @test e.popup == :none
   @test length(K.outcomes(e)) == 46 && !any(o -> o.failed, K.outcomes(e))
   @test outcome(line("RATE + 1")).brief == "3"

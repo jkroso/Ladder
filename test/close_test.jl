@@ -9,6 +9,7 @@
 @use "github.com/jkroso/MiniFB.jl" KeyPress Keys onkey Typed ontype
 @use "github.com/jkroso/UI.jl/Interface/draw" frame
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
+@use "./drive" drive
 
 const px = K.px
 const cmd, opt = Keys.cmd, Keys.opt
@@ -26,25 +27,17 @@ window(names...) = begin
   frames(w)
   e, w, folder
 end
-frames(w, n=2) = foreach(_ -> frame(w), 1:n)
-"Press the key `k` in window `w` with the keys `held` down"
-press(w, k, held...) = begin
-  foreach(h -> w.keys |= h, held)
-  onkey(w, KeyPress{k}(0, w))
-  foreach(h -> w.keys ⊻= h, held)
-  frames(w)
-end
+const (; frames, key, shot) = drive()
 "Every piece of text that a node shows"
 texts(node, out=String[]) = begin
   node isa K.Text ? push!(out, node.content) : node isa K.SemanticUI ? texts(K.describe(node), out) :
   node isa K.GeometricUI && foreach(n -> texts(n, out), node.children)
   out
 end
-shot(w, name) = haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], name), w)
 
 @testset "⌘W closes the file and shows its folder" begin
   e, w, folder = window("a.md", "b.md")
-  press(w, Keys.w, cmd)
+  key(w, Keys.w, cmd)
   @test e in K.editors
   # The page shows the folder, and the sidebar lists it, as a click on the folder in the sidebar's trail does
   @test e.buf.path == folder && !K.nofile(e)
@@ -56,9 +49,9 @@ end
 
 @testset "⌘W on a folder's page closes it, and the window stays open" begin
   e, w, folder = window("a.md", "b.md")
-  press(w, Keys.w, cmd)
+  key(w, Keys.w, cmd)
   @test e.buf.path == folder
-  press(w, Keys.w, cmd)
+  key(w, Keys.w, cmd)
   @test e in K.editors
   @test K.nofile(e) && isempty(e.buf.path)
   shot(w, "close-nofile.png")
@@ -77,10 +70,10 @@ end
 
 @testset "⌘W in a window with no file closes the window" begin
   e, w, _ = window("a.md")
-  press(w, Keys.w, cmd)
-  press(w, Keys.w, cmd)
+  key(w, Keys.w, cmd)
+  key(w, Keys.w, cmd)
   @test e in K.editors && K.nofile(e)
-  press(w, Keys.w, cmd)
+  key(w, Keys.w, cmd)
   @test !(e in K.editors)
 end
 
@@ -93,7 +86,7 @@ end
   K.open!(e, joinpath(app, "read me.md")); frames(w)
   K.close_tab!(e, joinpath(folder, "a.md"))   # with another tab open, ⌘W would show it
   @test K.closes_to(e) === nothing
-  press(w, Keys.w, cmd)
+  key(w, Keys.w, cmd)
   @test K.nofile(e) && e in K.editors
   close(w)
 end
@@ -103,20 +96,20 @@ end
   K.type!(e, "words"); frames(w)
   @test K.dirty(e.buf)
   lines = copy(e.buf.lines)
-  press(w, Keys.w, cmd)
+  key(w, Keys.w, cmd)
   @test e.buf.path == dirname(e.back[end]) && basename.(e.back) == ["a.md"]
-  press(w, Keys.left, cmd, opt)
+  key(w, Keys.left, cmd, opt)
   @test basename(e.buf.path) == "a.md" && e.buf.lines == lines && K.dirty(e.buf)
   close(w)
 end
 
 @testset "the settings window closes at once" begin
   e, w, _ = window("a.md")
-  press(w, Keys.comma, cmd)
+  key(w, Keys.comma, cmd)
   s = K.settings_editor()
   sw = K.window_of(s)
   frames(sw)
-  press(sw, Keys.w, cmd)
+  key(sw, Keys.w, cmd)
   @test K.settings_editor() === nothing && !(s in K.editors)
   # The other window still shows its file
   @test basename(e.buf.path) == "a.md"

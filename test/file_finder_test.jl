@@ -12,6 +12,7 @@
 @use "github.com/jkroso/UI.jl/Interface/draw" frame rect
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
 @use "github.com/jkroso/UI.jl/Interface/testing" pixels
+@use "./drive" drive
 const px = K.px
 
 const dir = mktempdir()
@@ -29,22 +30,9 @@ window(wide=1000, high=700) = begin
   K.focus(e)
   e, w
 end
-frames(w) = (frame(w); frame(w))
-press(w, k, held...) = begin
-  foreach(h -> w.keys |= h, held)
-  onkey(w, KeyPress{k}(0, w))
-  foreach(h -> w.keys ⊻= h, held)
-  frames(w)
-end
-typed(w, s) = (foreach(c -> ontype(w, Typed(c, w)), s); frames(w))
+const (; frames, at, typed, key) = drive(moved=2)
 "Move the mouse to the middle of `node`"
-over(w, node) = begin
-  r = rect(node)
-  x, y = r.left + r.width / 2, r.top + r.height / 2
-  w.mouse = typeof(w.mouse)(x, y)
-  onmouse(w, MouseMove(Vec2{px}(x, y), w))
-  frames(w)
-end
+over(w, node) = at(w, node)
 "The rows of the finder's list, in order"
 rows(e) = [e.nodes[(:pick, n, p)] for (n, p) in enumerate(K.finder_shown(e))]
 names(e) = [splitext(basename(r.path))[1] for r in rows(e)]
@@ -60,7 +48,7 @@ end
 @testset "the finder has the palette's look, and its list is as wide as its field" begin
   e, w = window()
   page = colour_at(w, 900, 600, 1000)
-  press(w, Keys.o, Keys.cmd)
+  key(w, Keys.o, Keys.cmd)
   @test e.popup == :finder
   @test names(e) == NAMES
   # The page isn't dimmed behind it, as it isn't behind the palette
@@ -76,7 +64,7 @@ end
   @test K.num(first_row.top) >= K.num(field.top + field.height)
   @test K.num(first_row.left - field.left) == 7
   @test K.num((field.left + field.width) - (first_row.left + first_row.width)) == 7
-  press(w, Keys.escape)
+  key(w, Keys.escape)
   @test e.popup == :none
 end
 
@@ -85,32 +73,32 @@ end
   @test K.letter_runs("Welcome.md", "WE") == [("We", true), ("lcome.md", false)]
   @test K.letter_runs("julia.md", "") == [("julia.md", false)]
   e, w = window()
-  press(w, Keys.o, Keys.cmd)
+  key(w, Keys.o, Keys.cmd)
   typed(w, "me")
   @test names(e) == ["components", "welcome"]
   typed(w, "zzz")
   @test isempty(rows(e)) && isempty(K.finder_shown(e))
-  press(w, Keys.escape)
+  key(w, Keys.escape)
 end
 
 @testset "the mouse over a row chooses it, and Return opens that page" begin
   e, w = window()
-  press(w, Keys.o, Keys.cmd)
+  key(w, Keys.o, Keys.cmd)
   over(w, rows(e)[3])
   @test e.picked == 3
-  press(w, Keys.enter)
+  key(w, Keys.enter)
   @test e.popup == :none && basename(e.buf.path) == "julia.md"
 end
 
 @testset "a short window lists only the rows that fit, and ↓ stops at the last of them" begin
   e, w = window(700, 330)
-  press(w, Keys.o, Keys.cmd)
+  key(w, Keys.o, Keys.cmd)
   shown = length(rows(e))
   @test 1 <= shown < length(NAMES)
   @test K.num(rect(last(rows(e))).top + rect(last(rows(e))).height) <= 330
-  foreach(_ -> press(w, Keys.down), 1:length(NAMES))
+  foreach(_ -> key(w, Keys.down), 1:length(NAMES))
   @test e.picked == shown
-  press(w, Keys.enter)
+  key(w, Keys.enter)
   @test basename(e.buf.path) == "$(NAMES[shown]).md"
 end
 
@@ -144,7 +132,7 @@ end
   K.Folders.forget_projects!()
   try
     e, w = window()
-    press(w, Keys.p, Keys.cmd)
+    key(w, Keys.p, Keys.cmd)
     @test e.popup == :projects && K.input(e).placeholder == "Find a project"
     t = K.Folders.searching()
     t === nothing || wait(t)
@@ -155,15 +143,15 @@ end
     @test names(e) == ["New"]
     typed(w, "zzz")
     @test isempty(rows(e)) && K.picker_none(e) == "No project has that name"
-    foreach(_ -> press(w, Keys.backspace), 1:3)
+    foreach(_ -> key(w, Keys.backspace), 1:3)
     @test K.input(e).text == "new" && names(e) == ["New"]
     # Return opens the project in the window. The sidebar lists its folder, and stays hidden.
-    press(w, Keys.enter)
+    key(w, Keys.enter)
     @test e.popup == :none && e.folder == new
     # ⌘O still finds a page of the folder
-    press(w, Keys.o, Keys.cmd)
+    key(w, Keys.o, Keys.cmd)
     @test e.popup == :finder && K.input(e).placeholder == "Find a file, or type a web address"
-    press(w, Keys.escape)
+    key(w, Keys.escape)
   finally
     K.HOME[] = ""
     K.Folders.FILE[] = ""

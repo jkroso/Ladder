@@ -2,7 +2,7 @@
 # under its player. See "sound in the text" in media_view.jl. Run them with
 # `julia -O0 --project=. test/sound_test.jl`. They move the mouse in a window that isn't
 # on the screen, and they don't transcribe anything. Set the environment
-# variable SOUND_SHOTS to a folder to keep a picture of each step.
+# variable LADDER_SHOTS to a folder to keep a picture of each step.
 
 @use Test: @test, @testset
 @use "github.com/jkroso/MiniFB.jl" Window MouseMove onmouse
@@ -12,6 +12,7 @@
 @use GeometryBasics: Vec2
 
 @use "../main" => K
+@use "./drive" drive
 const px, num = K.px, K.num
 
 const dir = mktempdir()
@@ -33,9 +34,7 @@ These words are right under the second player.
 
 const e = K.build_editor(page)
 const w = Window(e, size=(900px, 700px))
-frames(n=2) = foreach(_ -> frame(w), 1:n)
-at((x, y)) = (w.mouse = typeof(w.mouse)(px(x), px(y)); onmouse(w, MouseMove(Vec2{px}(px(x), px(y)), w)); frames())
-shot(name) = haskey(ENV, "SOUND_SHOTS") && save_png(joinpath(ENV["SOUND_SHOTS"], name), w)
+const (; frames, at, shot) = drive(w, moved=2)
 line(words) = findfirst(startswith(words), e.buf.lines)
 # The caret is on no line, so each line shows as it reads
 e.buf.reading = true

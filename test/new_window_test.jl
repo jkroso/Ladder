@@ -7,6 +7,7 @@
 @use Test: @test, @testset
 @use "github.com/jkroso/MiniFB.jl" KeyPress Keys onkey
 @use "github.com/jkroso/UI.jl/Interface/draw" frame
+@use "./drive" drive
 
 const px = K.px
 const cmd = Keys.cmd
@@ -29,18 +30,11 @@ window(path) = begin
   frames(w)
   e, w
 end
-frames(w, n=2) = foreach(_ -> frame(w), 1:n)
-"Press the key `k` in window `w` with the keys `held` down"
-press(w, k, held...) = begin
-  foreach(h -> w.keys |= h, held)
-  onkey(w, KeyPress{k}(0, w))
-  foreach(h -> w.keys ⊻= h, held)
-  frames(w)
-end
+const (; frames, key) = drive()
 "Press ⌘N in `w`, and give the editor of the window that it opened"
 new_window(w) = begin
   before = copy(K.editors)
-  press(w, Keys.n, cmd)
+  key(w, Keys.n, cmd)
   made = Base.filter(o -> !any(b -> b === o, before), K.editors)
   @test length(made) == 1
   frames(K.window_of(only(made)))
@@ -98,8 +92,8 @@ end
 
 @testset "⌘N in a window with no file opens a new window on the sidebar's folder" begin
   e, w = window(joinpath(sub, "plan.md"))
-  press(w, Keys.w, cmd)   # the window shows the file's folder
-  press(w, Keys.w, cmd)   # and then no file
+  key(w, Keys.w, cmd)   # the window shows the file's folder
+  key(w, Keys.w, cmd)   # and then no file
   @test isempty(e.buf.path)
   n = new_window(w)
   @test n.buf.path == e.folder

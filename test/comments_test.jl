@@ -10,6 +10,7 @@
 @use "github.com/jkroso/UI.jl/Interface/draw" frame rect
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
 @use GeometryBasics: Vec2
+@use "./drive" drive middle
 const px = K.px
 
 @testset "the markup of a comment" begin
@@ -52,14 +53,7 @@ opened(path, wide) = begin
   foreach(_ -> frame(w), 1:3)
   e, w
 end
-frames(w) = foreach(_ -> frame(w), 1:3)
-middle(r) = (K.num(r.left + r.width / 2), K.num(r.top + r.height / 2))
-at(w, (x, y)) = (w.mouse = typeof(w.mouse)(px(x), px(y)); onmouse(w, MouseMove(Vec2{px}(px(x), px(y)), w)); frames(w))
-click(w, place) = begin
-  at(w, place)
-  w.keys |= Keys.mouse_left; onkey(w, KeyPress{Keys.mouse_left}(0, w)); frame(w)
-  w.keys ⊻= Keys.mouse_left; onkey(w, KeyRelease{Keys.mouse_left}(0, w)); frames(w)
-end
+const (; frames, at, click) = drive(frames=3, moved=3, pressed=1)
 
 @testset "comments in the margin" begin
   e, w = opened(page, 1500)

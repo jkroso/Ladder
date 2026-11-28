@@ -12,6 +12,7 @@
 @use GeometryBasics: Vec2
 @use "github.com/jkroso/UI.jl/Interface/draw" frame rect popups
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
+@use "./drive" drive
 const px = K.px
 
 const dir = mktempdir()
@@ -32,41 +33,15 @@ window(text=PAGE; name="page.md", size=(900px, 700px)) = begin
   e, w
 end
 
-"Draw the window with the bar where it comes to rest, not part of the way there"
-frames(w) = begin
-  e = w.ui
-  haskey(e.nodes, :palette) && (e.nodes[:palette].moved = 0.0)
-  frame(w); frame(w)
-end
-"Press the key `k` in window `w` with the keys `held` down"
-press(w, k, held...) = begin
-  foreach(h -> w.keys |= h, held)
-  onkey(w, KeyPress{k}(0, w))
-  foreach(h -> w.keys ⊻= h, held)
-  frames(w)
-end
-typed(w, s) = (foreach(c -> ontype(w, Typed(c, w)), s); frames(w))
+# Each frame draws the bar where it comes to rest, not part of the way there
+const (; frames, click, typed, key, shot) = drive(moved=2, slide=false)
 "Move the mouse to the middle of the part of the window that `node` is drawn in"
-over(w, node) = begin
-  r = rect(node)
-  x, y = r.left + r.width / 2, r.top + r.height / 2
-  w.mouse = typeof(w.mouse)(x, y)
-  onmouse(w, MouseMove(Vec2{px}(x, y), w))
-  frames(w)
-end
-click(w, node) = begin
-  over(w, node)
-  w.keys |= Keys.mouse_left
-  onkey(w, KeyPress{Keys.mouse_left}(0, w))
-  w.keys ⊻= Keys.mouse_left
-  frames(w)
-end
-shot(w, name) = haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], name), w)
+over(w, node) = drive(w, moved=2, slide=false).at(node)
 const cmd, shift = Keys.cmd, Keys.shft
 
-open_palette(w) = press(w, Keys.p, cmd, shift)
+open_palette(w) = key(w, Keys.p, cmd, shift)
 "Open the palette and take the command whose name is `name`"
-take(w, name) = (open_palette(w); typed(w, name); press(w, Keys.enter))
+take(w, name) = (open_palette(w); typed(w, name); key(w, Keys.enter))
 names(e) = [row.name for row in K.palette_rows(e, K.palette(e))]
 field(e) = K.input(e).text
 "The chips that show, and the kind of each"
@@ -225,9 +200,9 @@ end
   # Esc in an empty bar closes it. With text, it empties the bar first.
   open_palette(w)
   typed(w, "sav")
-  press(w, Keys.escape)
+  key(w, Keys.escape)
   @test e.popup == :commands && field(e) == ""
-  press(w, Keys.escape)
+  key(w, Keys.escape)
   @test e.popup == :none && w.focus === e
   # The page under it is as it was
   @test e.buf.lines == lines
@@ -235,7 +210,7 @@ end
   K.toggle_panel!(e); e.slid = 0.0
   open_palette(w)
   @test p.plan.band.x == K.num(K.panel_w(e)) && p.plan.bar.x == K.num(K.panel_w(e)) + 14
-  press(w, Keys.escape)
+  key(w, Keys.escape)
   close(w)
 end
 
@@ -247,23 +222,23 @@ end
   # The rest of the first name shows after the text, and Tab types it
   @test K.palette_ghost(e, K.palette(e)) == "ar"
   shot(w, "omni-typed.png")
-  press(w, Keys.tab)
+  key(w, Keys.tab)
   @test field(e) == "Sidebar" && e.popup == :commands
   shown = e.panel
-  press(w, Keys.enter)
+  key(w, Keys.enter)
   @test e.popup == :none && e.panel != shown && w.focus === e
 
   # Words of what a command does find it too
   open_palette(w)
   typed(w, "hidden files")
   @test names(e)[1] == "Hidden Files"
-  press(w, Keys.escape); press(w, Keys.escape)
+  key(w, Keys.escape); key(w, Keys.escape)
   open_palette(w)
   typed(w, "zzzz")
   @test isempty(names(e)) && K.palette(e).plan.list.words == "No command has that name"
-  press(w, Keys.enter)          # with nothing in the list, Return does nothing
+  key(w, Keys.enter)          # with nothing in the list, Return does nothing
   @test e.popup == :commands
-  press(w, Keys.escape); press(w, Keys.escape)
+  key(w, Keys.escape); key(w, Keys.escape)
   close(w)
 end
 
@@ -272,16 +247,16 @@ end
   open_palette(w)
   p = K.palette(e)
   @test p.pick == 1
-  press(w, Keys.down); press(w, Keys.down)
+  key(w, Keys.down); key(w, Keys.down)
   @test p.pick == 3
-  press(w, Keys.up)
+  key(w, Keys.up)
   @test p.pick == 2
-  press(w, Keys.up); press(w, Keys.up)
+  key(w, Keys.up); key(w, Keys.up)
   @test p.pick == 1                                  # it stops at the first row
   over(w, e.nodes[(:palette_row, 3)])
   @test p.pick == 3
   # Many presses of ↓ bring a row that was out of sight into it
-  foreach(_ -> press(w, Keys.down), 1:12)
+  foreach(_ -> key(w, Keys.down), 1:12)
   @test p.pick == 15 && p.scroll.offset > 0px
   # What's typed puts the first row back
   typed(w, "s")
@@ -340,17 +315,17 @@ end
   # It takes no text: the arrows choose, and say the row at once. The window shows each colours as the arrow reaches it.
   typed(w, "ni")
   @test names(e) == ["Sepia", "Paper", "Night"] && field(e) == ""
-  press(w, Keys.down)
+  key(w, Keys.down)
   @test e.theme == :paper && p.before == :sepia
-  press(w, Keys.down)
+  key(w, Keys.down)
   @test said(e, 1) == K.Colours(:night) && p.at == 1 && e.theme == :night
   # Return takes the row, and Theme runs at once: it changes nothing that you'd want to look at first
   @test K.runs_at_once(Val(:theme)) && !K.runs_at_once(Val(:rename)) && !K.runs_at_once(Val(:ask_agent))
-  press(w, Keys.enter)
+  key(w, Keys.enter)
   @test e.theme == :night && e.popup == :none && w.focus === e && p.before === nothing
   take(w, "go to")
   shot(w, "omni-night.png")
-  press(w, Keys.escape); press(w, Keys.escape)
+  key(w, Keys.escape); key(w, Keys.escape)
   K.theme!(e, :sepia)
   # The mouse does the same: a click on a row
   take(w, "theme")
@@ -361,10 +336,10 @@ end
   # A command that waits for Run: Return takes the row and goes on to the Run button. Theme waits here, for a moment.
   @eval K runs_at_once(::Val{:theme}) = false
   take(w, "theme")
-  press(w, Keys.down); press(w, Keys.enter)
+  key(w, Keys.down); key(w, Keys.enter)
   @test p.at == 2 && p.plan.list === nothing && e.theme == :paper
   shot(w, "omni-run.png")
-  press(w, Keys.enter)
+  key(w, Keys.enter)
   @test e.theme == :paper && e.popup == :none
   K.theme!(e, :sepia)
   # The mouse does the same: a row, then the Run button
@@ -374,22 +349,22 @@ end
   # A click on the chip puts the keyboard back in it, at the row that it has
   click(w, e.nodes[(:palette_chip, 1)])
   @test p.at == 1 && p.pick == 2
-  press(w, Keys.up)
+  key(w, Keys.up)
   @test said(e, 1) == K.Colours(:sepia)
   # A click on the Run button under an open list runs the command with the row that the arrow said
   click(w, e.nodes[:palette_run])
   @test e.theme == :sepia && e.popup == :none
   # Tab takes the row that's chosen, as Return does
   take(w, "theme")
-  press(w, Keys.down); press(w, Keys.tab)
+  key(w, Keys.down); key(w, Keys.tab)
   @test p.at == 2 && said(e, 1) == K.Colours(:paper) && e.theme == :paper
   # Esc puts back the colours that the page had before the arrows showed another
-  press(w, Keys.escape); press(w, Keys.escape)
+  key(w, Keys.escape); key(w, Keys.escape)
   @test e.theme == :sepia && e.popup == :none
   @eval K runs_at_once(::Val{:theme}) = true
   # So does a click outside the palette
   take(w, "theme")
-  press(w, Keys.down)
+  key(w, Keys.down)
   @test e.theme == :paper
   K.close_palette!(e)
   @test e.theme == :sepia
@@ -409,42 +384,42 @@ end
   typed(w, "cos")
   @test names(e) == ["Costs"] && K.palette_ghost(e, p) == "ts" && said(e, 1) === K.UNSAID
   # Return takes the row, and Go To runs at once
-  press(w, Keys.enter)
+  key(w, Keys.enter)
   @test e.popup == :none && e.buf.caret[1] == 5
 
   # Letters that write a number make a row of it, after the headings that have them
   take(w, "go to")
   typed(w, "9")
   @test names(e) == ["9"]
-  press(w, Keys.enter)
+  key(w, Keys.enter)
   @test e.popup == :none && e.buf.caret[1] == 9
 
   # An arrow says its row at once. The field has the row's words then, and the rows stay.
   take(w, "go to")
-  press(w, Keys.down)
+  key(w, Keys.down)
   @test said(e, 1) == K.HeadingLine(5, "Costs") && field(e) == "Costs" && names(e) == ["Plans", "Costs", "Dates"]
   # Typing takes its place, and takes away what the chip had
   typed(w, "d")
   @test field(e) == "d" && said(e, 1) === K.UNSAID && names(e) == ["Dates"]
   # Tab takes the row, as Return does. ⇧Tab comes back, with the chip's row chosen and nothing in the field.
-  press(w, Keys.tab)
+  key(w, Keys.tab)
   @test p.at == 2 && said(e, 1) == K.HeadingLine(9, "Dates")
-  press(w, Keys.tab, shift)
+  key(w, Keys.tab, shift)
   @test p.at == 1 && field(e) == "" && p.pick == 3
   # ⌫ in the empty field takes away what the chip has
-  press(w, Keys.backspace)
+  key(w, Keys.backspace)
   @test said(e, 1) === K.UNSAID
   # Letters that no row has
   typed(w, "zzz")
   @test isempty(names(e)) && p.plan.list.words == "No matches found"
-  press(w, Keys.escape); press(w, Keys.escape)
+  key(w, Keys.escape); key(w, Keys.escape)
 
   # What the function throws shows over the bar, and the palette stays
   take(w, "go to")
-  typed(w, "999"); press(w, Keys.enter)
+  typed(w, "999"); key(w, Keys.enter)
   @test e.popup == :commands && p.fault == "Command failed: The page has $(length(e.buf.lines)) lines." && e.buf.caret[1] == 9
   shot(w, "omni-fault.png")
-  press(w, Keys.escape); press(w, Keys.escape)
+  key(w, Keys.escape); key(w, Keys.escape)
   @test e.popup == :none
   close(w)
 end
@@ -465,65 +440,65 @@ end
   @test kinds(e) == [:segment] && said(e, 1) === K.UNSAID && w.focus === p
   shot(w, "omni-segment.png")
   # → chooses the next, and the chips of its method show at once
-  press(w, Keys.right)
+  key(w, Keys.right)
   @test said(e, 1) === Page && kinds(e) == [:segment, :text]
-  press(w, Keys.right)
+  key(w, Keys.right)
   @test said(e, 1) === Folder && kinds(e) == [:segment, :text, :number, :switch]
   # Return chooses the next too, and stays in the chip. ← chooses the one before.
-  press(w, Keys.enter)
+  key(w, Keys.enter)
   @test said(e, 1) === Page && p.at == 1
-  press(w, Keys.left)
+  key(w, Keys.left)
   @test said(e, 1) === Folder
-  press(w, Keys.space)
+  key(w, Keys.space)
   @test said(e, 1) === Page
-  press(w, Keys.left)
+  key(w, Keys.left)
   # Words are the chip's as they're typed
-  press(w, Keys.tab)
+  key(w, Keys.tab)
   @test p.at == 2 && w.focus === K.input(e)
   typed(w, "plans")
   @test said(e, 2) == "plans"
-  press(w, Keys.enter)
+  key(w, Keys.enter)
   # A number too. Text that writes no number leaves the chip as it was, and Return puts the field back.
   @test p.at == 3
   typed(w, "x")
   @test said(e, 3) === K.UNSAID
-  press(w, Keys.enter)
+  key(w, Keys.enter)
   @test p.at == 3 && field(e) == ""
   typed(w, "3")
   @test said(e, 3) === 3
   # ↑ and ↓ add one and take one away
-  press(w, Keys.up)
+  key(w, Keys.up)
   @test said(e, 3) === 4 && field(e) == "4"
-  press(w, Keys.down)
+  key(w, Keys.down)
   @test said(e, 3) === 3
-  press(w, Keys.enter)
+  key(w, Keys.enter)
   # A switch: Space turns it, and Return turns it and goes on
   @test p.at == 4 && w.focus === p
-  press(w, Keys.space)
+  key(w, Keys.space)
   @test said(e, 4) === true
-  press(w, Keys.space)
+  key(w, Keys.space)
   @test said(e, 4) === false
-  press(w, Keys.enter)
+  key(w, Keys.enter)
   @test said(e, 4) === true && p.at == 5
   shot(w, "omni-chips.png")
   # ⇧Tab goes back a chip, and Tab on to the Run button and round to the first chip
-  press(w, Keys.tab, shift)
+  key(w, Keys.tab, shift)
   @test p.at == 4
-  press(w, Keys.tab); press(w, Keys.tab)
+  key(w, Keys.tab); key(w, Keys.tab)
   @test p.at == 1
   # The other kind has the chips of its own method, and keeps the name, which that method takes too
-  press(w, Keys.left)
+  key(w, Keys.left)
   @test said(e, 1) === Page && length(chips(e)) == 2 && said(e, 2) == "plans"
-  press(w, Keys.tab)
+  key(w, Keys.tab)
   @test p.at == 2 && field(e) == "plans"
-  press(w, Keys.tab)
+  key(w, Keys.tab)
   @test p.at == 3
-  press(w, Keys.enter)
+  key(w, Keys.enter)
   @test calls[end] == (:page, "plans") && e.popup == :none
 
   # Tab in a choice of two that has nothing gives it its first thing
   take(w, "make")
-  press(w, Keys.tab)
+  key(w, Keys.tab)
   @test said(e, 1) === Page && p.at == 2
   # A click on the chip chooses the other
   click(w, e.nodes[(:palette_chip, 1)])
@@ -532,25 +507,25 @@ end
   click(w, e.nodes[(:palette_chip, 4)])
   @test said(e, 4) === true && p.at == 4
   # Esc empties the bar, and the list of commands is back
-  press(w, Keys.escape)
+  key(w, Keys.escape)
   @test e.popup == :commands && p.command === nothing && field(e) == "" && length(names(e)) > 10
-  press(w, Keys.escape)
+  key(w, Keys.escape)
 
   # A chip that can be left out. Return goes on from a chip whatever it has.
   take(w, "count to")
   @test kinds(e) == [:number, :number]
-  press(w, Keys.enter); press(w, Keys.enter)
+  key(w, Keys.enter); key(w, Keys.enter)
   @test p.at == 3
   # The Run button with a chip that's needed still empty sends the keyboard to that chip
   n = length(calls)
-  press(w, Keys.enter)
+  key(w, Keys.enter)
   @test p.at == 1 && length(calls) == n && e.popup == :commands && p.fault == "N has nothing yet"
   typed(w, "5")
   @test p.fault == ""
-  press(w, Keys.tab); press(w, Keys.tab); press(w, Keys.enter)
+  key(w, Keys.tab); key(w, Keys.tab); key(w, Keys.enter)
   @test calls[end] == (:count, 5, 1)
   take(w, "count to")
-  typed(w, "5"); press(w, Keys.enter); typed(w, "2"); press(w, Keys.enter); press(w, Keys.enter)
+  typed(w, "5"); key(w, Keys.enter); typed(w, "2"); key(w, Keys.enter); key(w, Keys.enter)
   @test calls[end] == (:count, 5, 2)
 
   # A day is typed
@@ -558,7 +533,7 @@ end
   @test kinds(e) == [:text]
   typed(w, "2026-11-25")
   @test said(e, 1) == K.Date(2026, 11, 25)
-  press(w, Keys.enter); press(w, Keys.enter)
+  key(w, Keys.enter); key(w, Keys.enter)
   @test calls[end] == (:due, K.Date(2026, 11, 25))
 
   # A function that takes only the editor and the window runs when it's taken
@@ -568,10 +543,10 @@ end
   # One that the palette can't ask the arguments of isn't in the list. Its keys say that it has nothing to work on.
   open_palette(w); typed(w, "opaque")
   @test !("Opaque" in names(e))
-  press(w, Keys.escape); press(w, Keys.escape)
+  key(w, Keys.escape); key(w, Keys.escape)
   K.open_palette!(e, K.COMMANDS[:opaque]); frames(w)
   @test e.popup == :commands && p.command === nothing && occursin("nothing to work on", p.fault)
-  press(w, Keys.escape); press(w, Keys.escape)
+  key(w, Keys.escape); key(w, Keys.escape)
   close(w)
 end
 
@@ -581,24 +556,24 @@ end
   take(w, "shout")
   @test kinds(e) == [:text]
   typed(w, "hey")
-  press(w, Keys.opt)
+  key(w, Keys.opt)
   @test kinds(e) == [:text, :switch, :number] && p.advanced
-  press(w, Keys.opt)
+  key(w, Keys.opt)
   @test kinds(e) == [:text] && !p.advanced
   # Without them, the function has what it gives them itself
-  press(w, Keys.tab); press(w, Keys.enter)
+  key(w, Keys.tab); key(w, Keys.enter)
   @test calls[end] == (:shout, "hey", false, 1)
   take(w, "shout")
-  typed(w, "hey"); press(w, Keys.opt); press(w, Keys.tab)
+  typed(w, "hey"); key(w, Keys.opt); key(w, Keys.tab)
   @test p.at == 2
-  press(w, Keys.space); press(w, Keys.tab)
+  key(w, Keys.space); key(w, Keys.tab)
   typed(w, "3")
   @test said(e, 2) === true && said(e, 3) === 3
   shot(w, "omni-advanced.png")
   # Hiding them from the last one puts the keyboard on the Run button
-  press(w, Keys.opt)
+  key(w, Keys.opt)
   @test p.at == 2 && length(chips(e)) == 1
-  press(w, Keys.enter)
+  key(w, Keys.enter)
   @test calls[end] == (:shout, "hey", true, 3)
   close(w)
 end
@@ -607,25 +582,25 @@ end
   e, w = window(size=(420px, 600px))
   p = K.palette(e)
   take(w, "make")
-  press(w, Keys.right); press(w, Keys.right)       # a folder, which has four chips
-  press(w, Keys.tab)
+  key(w, Keys.right); key(w, Keys.right)       # a folder, which has four chips
+  key(w, Keys.tab)
   typed(w, "a long name for a folder of plans")
   @test p.plan.more && !p.wrap
   @test !any(pl -> pl.what == :run, p.plan.places) && p.plan.bar.h == 54
   shot(w, "omni-more.png")
   # Tab to a chip that doesn't show puts them all on as many lines as they need
-  press(w, Keys.tab)
+  key(w, Keys.tab)
   @test p.at == 3 && p.wrap && !p.plan.more
   @test any(pl -> pl.what == :run, p.plan.places) && length(unique(pl.y for pl in p.plan.places)) > 1 && p.plan.bar.h > 54
   shot(w, "omni-wrap.png")
-  press(w, Keys.escape); press(w, Keys.escape)
+  key(w, Keys.escape); key(w, Keys.escape)
   # A click on the … does the same
   take(w, "make")
-  press(w, Keys.right); press(w, Keys.right); press(w, Keys.tab)
+  key(w, Keys.right); key(w, Keys.right); key(w, Keys.tab)
   typed(w, "a long name for a folder of plans")
   click(w, e.nodes[:palette_more])
   @test p.wrap && p.at == 2
-  press(w, Keys.escape); press(w, Keys.escape)
+  key(w, Keys.escape); key(w, Keys.escape)
   close(w)
 end
 
@@ -633,19 +608,19 @@ end
   e, w = window()
   p = K.palette(e)
   K.rebind!(e, :theme, only(K.read_shortcuts("ctrl+opt+t")))
-  press(w, Keys.t, Keys.ctrl, Keys.opt)
+  key(w, Keys.t, Keys.ctrl, Keys.opt)
   @test e.popup == :commands && p.command.name == :theme && names(e) == ["Sepia", "Paper", "Night"]
   # The palette's own row shows the keys of a command, one key in each box
-  press(w, Keys.escape)
+  key(w, Keys.escape)
   typed(w, "theme")
   @test K.key_signs(K.palette_rows(e, p)[1].keys) == ["⌃", "⌥", "T"]
-  press(w, Keys.escape); press(w, Keys.escape)
+  key(w, Keys.escape); key(w, Keys.escape)
   K.put_back!(e, :theme)
   # With the keys of Emacs, ⌥X opens the palette too, as M-x does there
   K.bundle!(e, "Emacs")
-  press(w, Keys.x, Keys.opt)
+  key(w, Keys.x, Keys.opt)
   @test e.popup == :commands && p.command === nothing
-  press(w, Keys.escape)
+  key(w, Keys.escape)
   K.bundle!(e, "Ladder")
   close(w)
 end
@@ -656,32 +631,32 @@ end
   take(w, "text size")
   @test kinds(e) == [:number]
   # These run as soon as their chip has something: Return after the number runs it
-  typed(w, "20"); press(w, Keys.enter)
+  typed(w, "20"); key(w, Keys.enter)
   @test K.text_size(e) == 20 && e.popup == :none
-  take(w, "text size"); typed(w, "17"); press(w, Keys.enter)
+  take(w, "text size"); typed(w, "17"); key(w, Keys.enter)
   # ↑ counts from the size that the text is now, and the page shows each size at once. Esc puts back the size that it had.
-  take(w, "text size"); press(w, Keys.up); press(w, Keys.up)
+  take(w, "text size"); key(w, Keys.up); key(w, Keys.up)
   @test K.text_size(e) == 19 && e.popup == :commands
-  press(w, Keys.escape); press(w, Keys.escape)
+  key(w, Keys.escape); key(w, Keys.escape)
   @test K.text_size(e) == 17 && e.popup == :none
   # A switch that isn't touched is off, and doesn't run the command by itself: Tab goes on to the Run button
   take(w, "spelling")
   @test kinds(e) == [:switch] && e.popup == :commands
-  press(w, Keys.tab); press(w, Keys.enter)
+  key(w, Keys.tab); key(w, Keys.enter)
   @test !e.spelling
-  take(w, "spelling"); press(w, Keys.enter)
+  take(w, "spelling"); key(w, Keys.enter)
   @test e.spelling && e.popup == :none
   take(w, "key bindings")
   @test kinds(e) == [:pick] && names(e) == ["Ladder", "VS Code", "Sublime Text", "Emacs"]
-  foreach(_ -> press(w, Keys.down), 1:3); press(w, Keys.enter)
+  foreach(_ -> key(w, Keys.down), 1:3); key(w, Keys.enter)
   @test e.bundle == "Emacs"
-  take(w, "key bindings"); press(w, Keys.enter)
+  take(w, "key bindings"); key(w, Keys.enter)
   @test e.bundle == "Ladder"
   # A new block goes where the caret is
   e.buf.caret = e.buf.anchor = (3, 0); K.touch!(e); frame(w)
   take(w, "insert")
   @test kinds(e) == [:search]
-  typed(w, "divider"); press(w, Keys.enter)
+  typed(w, "divider"); key(w, Keys.enter)
   @test "---" in e.buf.lines && e.popup == :none
   close(w)
 end
@@ -698,7 +673,7 @@ end
   @test e.popup == :commands
   @test "Sidebar" in names(e) && "Theme" in names(e)
   @test !("Insert" in names(e)) && !("Undo" in names(e)) && !("Bold" in names(e))
-  press(w, Keys.escape)
+  key(w, Keys.escape)
   close(w)
 end
 
@@ -738,11 +713,11 @@ end
   on(name) = only(row.on for row in K.palette_rows(e, p) if row.name == name)
   @test on("Rename") == "page.md" && on("Move To Trash") == "page.md" && on("New Page") == basename(dir) && on("Theme") == "" && on("Save") == ""
   shot(w, "omni-focus.png")
-  press(w, Keys.escape)
+  key(w, Keys.escape)
   # The function gets the thing in focus, and the palette asks for the rest
   take(w, "stamp")
   @test p.command.name == :stamp && kinds(e) == [:text]
-  typed(w, "paid"); press(w, Keys.enter); press(w, Keys.enter)
+  typed(w, "paid"); key(w, Keys.enter); key(w, Keys.enter)
   @test calls[end] == (:stamp, file, "paid")
   take(w, "count text")
   @test calls[end][1] == :count_text && calls[end][2] isa K.Document && e.popup == :none
@@ -765,7 +740,7 @@ end
   e, w = window(name="repo/todo.md")
   open_palette(w)
   @test "Fetch New" in names(e)
-  press(w, Keys.escape)
+  key(w, Keys.escape)
   take(w, "fetch new")
   @test calls[end][1] == :fetch_new && calls[end][2] isa K.GitDirectory
   close(w)
@@ -773,13 +748,13 @@ end
   e, w = window(name="repo/notes/idea.md")
   open_palette(w)
   @test "Fetch New" in names(e) && "Rename" in names(e)
-  press(w, Keys.escape)
+  key(w, Keys.escape)
   close(w)
   # A file in a plain folder has none of them
   e, w = window(name="plain.md")
   open_palette(w)
   @test !("Fetch New" in names(e)) && "Rename" in names(e)
-  press(w, Keys.escape)
+  key(w, Keys.escape)
   close(w)
 end
 
@@ -789,19 +764,19 @@ end
   @test all(in(names(e)), ["Bold", "Italic", "Insert", "Export", "Print", "Slides", "Save"]) && !("Comment" in names(e))
   # Nothing showed before this page, so there's nothing to go back to. Nothing is found, so there's no next place.
   @test !("Back" in names(e)) && !("Forward" in names(e)) && !("Find Next" in names(e)) && "Find" in names(e)
-  press(w, Keys.escape)
+  key(w, Keys.escape)
   # With the caret in a line of code, a comment can be made
   e.buf.caret = e.buf.anchor = (6, 0); K.touch!(e); frame(w)
   open_palette(w)
   @test "Comment" in names(e)
-  press(w, Keys.escape)
+  key(w, Keys.escape)
   close(w)
   # A file of code is no page of Markdown
   e, w = window("x = 1\ny = 2\n", name="sums.jl")
   open_palette(w)
   @test all(in(names(e)), ["Comment", "Save", "Rename", "Go To"])
   @test !any(in(names(e)), ["Bold", "Italic", "Insert", "Export", "Print", "Slides"])
-  press(w, Keys.escape)
+  key(w, Keys.escape)
   close(w)
 end
 
@@ -823,7 +798,7 @@ end
   K.focus(e)
   open_palette(w)
   @test w.focus === K.input(e) && p.had === e
-  press(w, Keys.escape)
+  key(w, Keys.escape)
   @test w.focus === e && p.had === nothing
   close(w)
 end

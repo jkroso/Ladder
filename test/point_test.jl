@@ -12,6 +12,7 @@
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
 @use "github.com/jkroso/UI.jl/Interface/testing" pixels
 @use GeometryBasics: Vec2
+@use "./drive" drive middle
 const px = K.px
 
 const dir = mktempdir()
@@ -64,12 +65,10 @@ Wall = 3m
 
 const e = K.build_editor(page)
 const w = Window(e, size=(1000px, 2300px))
-frames(n=2) = foreach(_ -> frame(w), 1:n)
+const (; frames, at) = drive(w, moved=2)
 frames()
 shot(name) = (path = joinpath(dir, name); save_png(path, w); haskey(ENV, "LADDER_SHOTS") && cp(path, joinpath(ENV["LADDER_SHOTS"], name), force=true); pixels(path))
 
-at((x, y)) = (w.mouse = typeof(w.mouse)(px(x), px(y)); onmouse(w, MouseMove(Vec2{px}(px(x), px(y)), w)); frames())
-middle(r) = (K.num(r.left + r.width / 2), K.num(r.top + r.height / 2))
 block(lang) = e.nodes[(:block, lang, page, 1)]
 const board, calendar, hours, chart, schedule = block(K.BOARD), block(K.CALENDAR), block(K.TIMELOG), block(K.CHART), block(K.SCHEDULE)
 "The middle of the page's line `i`, in the window"

@@ -7,6 +7,7 @@
 @use "../main" => K
 @use "github.com/jkroso/MiniFB.jl" Window KeyPress Keys onkey Typed ontype
 @use "github.com/jkroso/UI.jl/Interface/draw" frame popups
+@use "./drive" drive
 const px = K.px
 
 const dir = mktempdir()
@@ -21,9 +22,8 @@ window(text; name="page.md") = begin
   K.focus(e)
   e, w
 end
-frames(w) = (e = w.ui; haskey(e.nodes, :palette) && (e.nodes[:palette].moved = 0.0); frame(w); frame(w))
-press(w, k, held...) = (foreach(h -> w.keys |= h, held); onkey(w, KeyPress{k}(0, w)); foreach(h -> w.keys ⊻= h, held); frames(w))
-typed(w, s) = (foreach(c -> ontype(w, Typed(c, w)), s); frames(w))
+# The palette is drawn where it comes to rest, not part of the way there
+const (; frames, typed, key) = drive(slide=false)
 names(e) = [row.name for row in K.palette_rows(e, K.palette(e))]
 
 @testset "the top bar has no count" begin
@@ -43,10 +43,10 @@ end
 
 @testset "Word Count runs from the palette, and its answer shows under the top bar" begin
   e, w = window("# Plans\n\nSome words here.\n")
-  press(w, Keys.p, Keys.cmd, Keys.shft)
+  key(w, Keys.p, Keys.cmd, Keys.shft)
   typed(w, "word count")
   @test "Word Count" in names(e)
-  press(w, Keys.enter)
+  key(w, Keys.enter)
   @test first(K.said_result(e)) == "4 words  ·  23 characters  ·  1 min read"
   frames(w)
   @test any(pop -> pop.key == :result, popups(w))

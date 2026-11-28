@@ -10,6 +10,7 @@
 @use GeometryBasics: Vec2
 
 @use "../main" => K
+@use "./drive" drive
 const px = K.px
 const cmd, ctrl, opt, shift = Keys.cmd, Keys.ctrl, Keys.opt, Keys.shft
 
@@ -31,26 +32,7 @@ window(names...) = begin
   K.focus(e)
   e, w, folder
 end
-frames(w, n=2) = foreach(_ -> frame(w), 1:n)
-"Press the key `k` in window `w` with the keys `held` down"
-press(w, k, held...) = begin
-  foreach(h -> w.keys |= h, held)
-  onkey(w, KeyPress{k}(0, w))
-  foreach(h -> w.keys ⊻= h, held)
-  frames(w)
-end
-"Click the middle of the part of the window that `node` is drawn in"
-click(w, node) = begin
-  r = rect(node)
-  x, y = r.left + r.width / 2, r.top + r.height / 2
-  w.mouse = typeof(w.mouse)(x, y)
-  onmouse(w, MouseMove(Vec2{px}(x, y), w))
-  frames(w)
-  w.keys |= Keys.mouse_left
-  onkey(w, KeyPress{Keys.mouse_left}(0, w))
-  w.keys ⊻= Keys.mouse_left
-  frames(w)
-end
+const (; frames, click, key) = drive(moved=2)
 "Show the sidebar, or hide it, and draw the window until the sidebar has finished its slide"
 sidebar!(e, w) = begin
   K.toggle_panel!(e)
@@ -68,13 +50,13 @@ showing(e) = basename(e.buf.path)
   K.follow!(e, "b.md"); frames(w)
   K.follow!(e, "c.md"); frames(w)
   @test showing(e) == "c.md"
-  press(w, Keys.left, cmd, opt)
+  key(w, Keys.left, cmd, opt)
   @test showing(e) == "b.md"
-  press(w, Keys.left, cmd, opt)
+  key(w, Keys.left, cmd, opt)
   @test showing(e) == "a.md"
-  press(w, Keys.right, cmd, opt)
+  key(w, Keys.right, cmd, opt)
   @test showing(e) == "b.md"
-  press(w, Keys.right, cmd, opt)
+  key(w, Keys.right, cmd, opt)
   @test showing(e) == "c.md"
   # The text has the keyboard again, as it has after any file opens
   @test w.focus === e
@@ -84,13 +66,13 @@ end
   e, w, _ = window("a.md", "b.md")
   @test K.go_back!(e) == false
   @test K.go_forward!(e) == false
-  press(w, Keys.left, cmd, opt)
+  key(w, Keys.left, cmd, opt)
   @test showing(e) == "a.md"
   K.follow!(e, "b.md"); frames(w)
-  press(w, Keys.right, cmd, opt)      # nothing is ahead of the last file
+  key(w, Keys.right, cmd, opt)      # nothing is ahead of the last file
   @test showing(e) == "b.md"
-  press(w, Keys.left, cmd, opt)
-  press(w, Keys.left, cmd, opt)       # and nothing is before the first
+  key(w, Keys.left, cmd, opt)
+  key(w, Keys.left, cmd, opt)       # and nothing is before the first
   @test showing(e) == "a.md"
 end
 
@@ -100,7 +82,7 @@ end
   frames(w)
   K.follow!(e, "b.md"); frames(w)
   @test e.scroll.offset == 0px
-  press(w, Keys.left, cmd, opt)
+  key(w, Keys.left, cmd, opt)
   @test showing(e) == "a.md" && e.scroll.offset == 640px
 end
 
@@ -113,7 +95,7 @@ end
   K.follow!(e, "#d-md"); frames(w)                         # a heading of the file that shows adds nothing
   @test basename.(e.back) == ["a.md", "b.md", "c.md"]
   for name in ("c.md", "b.md", "a.md")
-    press(w, Keys.left, cmd, opt)
+    key(w, Keys.left, cmd, opt)
     @test showing(e) == name
   end
 end
@@ -121,13 +103,13 @@ end
 @testset "a new file after going back ends the way forward" begin
   e, w, _ = window("a.md", "b.md", "c.md")
   K.follow!(e, "b.md"); frames(w)
-  press(w, Keys.left, cmd, opt)
+  key(w, Keys.left, cmd, opt)
   @test showing(e) == "a.md" && basename.(e.ahead) == ["b.md"]
   K.follow!(e, "c.md"); frames(w)
   @test isempty(e.ahead)
-  press(w, Keys.right, cmd, opt)
+  key(w, Keys.right, cmd, opt)
   @test showing(e) == "c.md"
-  press(w, Keys.left, cmd, opt)
+  key(w, Keys.left, cmd, opt)
   @test showing(e) == "a.md"
 end
 
@@ -137,10 +119,10 @@ end
   K.follow!(e, "c.md"); frames(w)
   K.follow!(e, "d.md"); frames(w)
   K.move!(e, joinpath(folder, "c.md"), joinpath(folder, "sea.md")); frames(w)
-  press(w, Keys.left, cmd, opt)
+  key(w, Keys.left, cmd, opt)
   @test showing(e) == "sea.md"
   K.trash!(e, joinpath(folder, "b.md")); frames(w)
-  press(w, Keys.left, cmd, opt)
+  key(w, Keys.left, cmd, opt)
   @test showing(e) == "a.md"
   # The file that shows goes to the Trash, and another takes its place. Going back doesn't show the one that went.
   K.follow!(e, "d.md"); frames(w)
@@ -157,7 +139,7 @@ end
   K.open!(e, new); frames(w)
   K.type!(e, "words"); frames(w)
   K.follow!(e, "b.md"); frames(w)
-  press(w, Keys.left, cmd, opt)
+  key(w, Keys.left, cmd, opt)
   @test e.buf.path == new && !isfile(new)
   @test e.buf.lines == ["words"]
 end
@@ -166,9 +148,9 @@ end
   a, wa, _ = window("a.md", "b.md")
   b, wb, _ = window("c.md", "d.md")
   K.follow!(a, "b.md"); frames(wa)
-  press(wb, Keys.left, cmd, opt)
+  key(wb, Keys.left, cmd, opt)
   @test showing(b) == "c.md" && showing(a) == "b.md"
-  press(wa, Keys.left, cmd, opt)
+  key(wa, Keys.left, cmd, opt)
   @test showing(a) == "a.md"
 end
 
@@ -177,10 +159,10 @@ end
     e, w, _ = window("a.md", "b.md")
     K.bundle!(e, bundle)
     K.follow!(e, "b.md"); frames(w)
-    press(w, Keys.minus, ctrl)
+    key(w, Keys.minus, ctrl)
     @test showing(e) == "a.md"
     @test e.buf.lines[1] == "# a.md"          # the key typed nothing
-    press(w, Keys.minus, ctrl, shift)
+    key(w, Keys.minus, ctrl, shift)
     @test showing(e) == "b.md"
   end
 end
@@ -188,7 +170,7 @@ end
 @testset "⌘[ and ⌘] aren't the keys that go back and forward" begin
   e, w, _ = window("a.md", "b.md")
   K.follow!(e, "b.md"); frames(w)
-  press(w, Keys.left_bracket, cmd)
+  key(w, Keys.left_bracket, cmd)
   @test showing(e) == "b.md"
 end
 
@@ -225,7 +207,7 @@ end
   # The sidebar closes, and the arrows go with it. The keys still go back.
   sidebar!(e, w)
   @test isempty(K.history_buttons(e))
-  press(w, Keys.left, cmd, opt)
+  key(w, Keys.left, cmd, opt)
   @test showing(e) == "a.md"
 end
 
@@ -278,7 +260,7 @@ end
   K.open_finder!(e); frames(w)
   side(Keys.mouse_back)
   @test showing(e) == "b.md" && e.popup == :finder
-  press(w, Keys.escape)
+  key(w, Keys.escape)
   # No command can have one as its shortcut
   @test !haskey(K.KEY_NAMES, "mouse_back") && !haskey(K.KEY_NAMES, "mouse_forward")
   @test K.ismouse(Keys.mouse_back) && K.ismouse(Keys.mouse_forward)

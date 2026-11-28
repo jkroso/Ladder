@@ -9,6 +9,7 @@
 @use "github.com/jkroso/UI.jl/Interface/draw" frame rect
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
 @use GeometryBasics: Vec2
+@use "./drive" drive middle
 
 const px = K.px
 const cmd, opt = Keys.cmd, Keys.opt
@@ -20,8 +21,7 @@ K.PLACE_FILE[] = joinpath(dir, "place")
 # A file that goes to the Trash here is only deleted
 K.trasher[] = p -> (rm(p, recursive=true); true)
 
-frames(w, n=2) = foreach(_ -> frame(w), 1:n)
-shot(w, name) = haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], name), w)
+const (; frames, at, click, key, shot) = drive(moved=2)
 
 "A folder of its own with the pages `names` in it"
 folder(names...) = begin
@@ -50,24 +50,8 @@ end
 show!(e, w, f, names...) = foreach(n -> (K.open!(e, joinpath(f, n)); frames(w)), names)
 "The names of the files of the tabs"
 names(e) = basename.(K.tabs(e))
-"Press the key `k` in window `w` with the keys `held` down"
-press(w, k, held...) = begin
-  foreach(h -> w.keys |= h, held)
-  onkey(w, KeyPress{k}(0, w))
-  foreach(h -> w.keys ⊻= h, held)
-  frames(w)
-end
-"Move the mouse to `x`, `y`"
-hover(w, x, y) = (w.mouse = typeof(w.mouse)(x, y); onmouse(w, MouseMove(Vec2{px}(x, y), w)); frames(w))
-"Click the window at `x`, `y` with the mouse's button `button`"
-click(w, x, y, button=Keys.mouse_left) = begin
-  hover(w, x, y)
-  w.keys |= button
-  onkey(w, KeyPress{button}(0, w))
-  w.keys ⊻= button
-  frames(w)
-end
-middle(r) = (r.left + r.width / 2, r.top + r.height / 2)
+"Click the window at `place` with the mouse's middle button"
+middle_click(w, place) = (at(w, place); w.keys |= Keys.mouse_middle; onkey(w, KeyPress{Keys.mouse_middle}(0, w)); w.keys ⊻= Keys.mouse_middle; frames(w))
 "The key of the number `n` at the top of the keyboard"
 digit(n) = getproperty(Keys, Symbol(n))
 "The item of the tab of the file `name`"
@@ -105,14 +89,14 @@ end
   e, w, f = window("a.md", "b.md")
   show!(e, w, f, "b.md")
   K.type!(e, "words"); frames(w)
-  click(w, middle(rect(tab(e, "a.md")))...)
+  click(w, middle(rect(tab(e, "a.md"))))
   @test basename(e.buf.path) == "a.md"
   # The text has the keyboard again
   @test K.window_of(e).focus === e
   # A file's changes stay while another file shows, and its tab has a dot
   @test K.dirty(e.buffers[joinpath(f, "b.md")])
   @test K.tab_tree(e).focused === tab(e, "a.md")
-  click(w, middle(rect(tab(e, "b.md")))...)
+  click(w, middle(rect(tab(e, "b.md"))))
   @test basename(e.buf.path) == "b.md" && K.dirty(e.buf)
   close(w)
 end
@@ -120,18 +104,18 @@ end
 @testset "⌘W closes the tab and shows the one under it" begin
   e, w, f = window("a.md", "b.md", "c.md")
   show!(e, w, f, "b.md", "c.md", "b.md")
-  press(w, Keys.w, cmd)
+  key(w, Keys.w, cmd)
   @test names(e) == ["a.md", "c.md"] && basename(e.buf.path) == "c.md"
   # The last tab shows the one above it
-  press(w, Keys.w, cmd)
+  key(w, Keys.w, cmd)
   @test names(e) == ["a.md"] && basename(e.buf.path) == "a.md"
   # The last tab of all shows its folder, as ⌘W did before there were tabs
-  press(w, Keys.w, cmd)
+  key(w, Keys.w, cmd)
   @test isempty(K.tabs(e)) && e.buf.path == f && !K.nofile(e)
   # Then the folder closes, and then the window
-  press(w, Keys.w, cmd)
+  key(w, Keys.w, cmd)
   @test K.nofile(e) && e in K.editors
-  press(w, Keys.w, cmd)
+  key(w, Keys.w, cmd)
   @test !(e in K.editors)
 end
 
@@ -140,7 +124,7 @@ end
   show!(e, w, f, "b.md", "a.md")
   K.open_folder!(e, f); frames(w)
   @test e.buf.path == f
-  press(w, Keys.w, cmd)
+  key(w, Keys.w, cmd)
   @test basename(e.buf.path) == "a.md" && names(e) == ["a.md", "b.md"]
   close(w)
 end
@@ -148,9 +132,9 @@ end
 @testset "⌘⌥← after ⌘W opens the file again, in a new tab" begin
   e, w, f = window("a.md", "b.md")
   show!(e, w, f, "b.md")
-  press(w, Keys.w, cmd)
+  key(w, Keys.w, cmd)
   @test names(e) == ["a.md"]
-  press(w, Keys.left, cmd, opt)
+  key(w, Keys.left, cmd, opt)
   @test basename(e.buf.path) == "b.md" && names(e) == ["a.md", "b.md"]
   close(w)
 end
@@ -160,16 +144,16 @@ end
   show!(e, w, f, "b.md", "c.md")
   # The × shows only while the mouse is over the tab
   @test tab(e, "b.md").firstchild.close === nothing || rect(tab(e, "b.md").firstchild.close) === nothing
-  hover(w, middle(rect(tab(e, "b.md")))...)
+  at(w, middle(rect(tab(e, "b.md"))))
   x = tab(e, "b.md").firstchild.close
   @test x isa K.TabClose && rect(x) !== nothing
   shot(w, "tab-close.png")
-  click(w, middle(rect(x))...)
+  click(w, middle(rect(x)))
   # The file that shows stays
   @test names(e) == ["a.md", "c.md"] && basename(e.buf.path) == "c.md"
   # The × of the tab of the file that shows closes it as ⌘W does
-  hover(w, middle(rect(tab(e, "c.md")))...)
-  click(w, middle(rect(tab(e, "c.md").firstchild.close))...)
+  at(w, middle(rect(tab(e, "c.md"))))
+  click(w, middle(rect(tab(e, "c.md").firstchild.close)))
   @test names(e) == ["a.md"] && basename(e.buf.path) == "a.md"
   close(w)
 end
@@ -190,13 +174,13 @@ dots(e, name) = drawn_at(rect(tab(e, name)), "Dot")
   K.page_agents(e).waiters = (time() + 1e6, [K.Agent.Waiter("", K.truepath(joinpath(f, n)), "Claude") for n in ("a.md", "b.md")])
   frames(w)
   dot = only(dots(e, "a.md"))
-  hover(w, middle(rect(tab(e, "a.md")))...)
+  at(w, middle(rect(tab(e, "a.md"))))
   x = rect(tab(e, "a.md").firstchild.close)
   shot(w, "tab-close-dot.png")
   # The dot hides, and the × has its middle where the dot had its middle
   @test isempty(dots(e, "a.md"))
-  @test K.num(middle(x)[1]) ≈ K.num(middle(dot)[1]) atol=0.5
-  @test K.num(middle(x)[2]) ≈ K.num(middle(dot)[2]) atol=0.5
+  @test middle(x)[1] ≈ middle(dot)[1] atol=0.5
+  @test middle(x)[2] ≈ middle(dot)[2] atol=0.5
   # The × is all inside the tab's row
   row = rect(tab(e, "a.md"))
   @test K.num(x.left + x.width) <= K.num(row.left + row.width)
@@ -204,15 +188,15 @@ dots(e, name) = drawn_at(rect(tab(e, name)), "Dot")
   @test length(dots(e, "b.md")) == 1
   # A tab with no dot has its × in the same place
   K.page_agents(e).waiters = (time() + 1e6, K.Agent.Waiter[])
-  hover(w, middle(rect(tab(e, "b.md")))...)
-  @test K.num(middle(rect(tab(e, "b.md").firstchild.close))[1]) ≈ K.num(middle(x)[1]) atol=0.5
+  at(w, middle(rect(tab(e, "b.md"))))
+  @test middle(rect(tab(e, "b.md").firstchild.close))[1] ≈ middle(x)[1] atol=0.5
   close(w)
 end
 
 @testset "a click with the middle button closes a tab" begin
   e, w, f = window("a.md", "b.md")
   show!(e, w, f, "b.md")
-  click(w, middle(rect(tab(e, "a.md")))..., Keys.mouse_middle)
+  middle_click(w, middle(rect(tab(e, "a.md"))))
   @test names(e) == ["b.md"] && basename(e.buf.path) == "b.md"
   close(w)
 end
@@ -298,7 +282,7 @@ end
 
 @testset "the pages of the settings have no tabs" begin
   e, w, f = window("a.md")
-  press(w, Keys.comma, cmd)
+  key(w, Keys.comma, cmd)
   s = K.settings_editor()
   @test isempty(K.tabs(s))
   close(K.window_of(s))
@@ -308,7 +292,7 @@ end
 @testset "⌘T opens a new tab with the file finder" begin
   e, w, f = window("a.md", "b.md", "c.md")
   show!(e, w, f, "b.md")
-  press(w, Keys.t, cmd)
+  key(w, Keys.t, cmd)
   # The window shows no file, the finder is open, and New Tab is at the bottom of the tabs, shaded
   @test K.nofile(e) && K.new_tab(e) && e.popup == :finder
   @test K.tab_rows(e) == [joinpath(f, "a.md"), joinpath(f, "b.md"), ""]
@@ -325,11 +309,11 @@ end
 @testset "⌘W on a new tab shows the tab that showed last" begin
   e, w, f = window("a.md", "b.md")
   show!(e, w, f, "b.md", "a.md")
-  press(w, Keys.t, cmd)
+  key(w, Keys.t, cmd)
   e.popup = :none; frames(w)
   # The empty page says that ⌘W closes the tab, not the window
   @test texts(e.nodes[:page])[end] == "⌘W closes the tab"
-  press(w, Keys.w, cmd)
+  key(w, Keys.w, cmd)
   @test basename(e.buf.path) == "a.md" && names(e) == ["a.md", "b.md"] && !K.new_tab(e)
   @test e in K.editors
   close(w)
@@ -337,37 +321,37 @@ end
 
 @testset "⌘T in a window with no tabs, and ⌘W twice closes it" begin
   e, w, f = window("a.md")
-  press(w, Keys.w, cmd)   # the last tab closes, and the folder shows
+  key(w, Keys.w, cmd)   # the last tab closes, and the folder shows
   @test isempty(K.tabs(e)) && e.buf.path == f
-  press(w, Keys.t, cmd)
+  key(w, Keys.t, cmd)
   @test K.new_tab(e) && K.tab_rows(e) == [""]
   e.popup = :none
-  press(w, Keys.w, cmd)   # the new tab closes, and the window shows no file
+  key(w, Keys.w, cmd)   # the new tab closes, and the window shows no file
   @test K.nofile(e) && !K.new_tab(e) && e in K.editors
   @test texts(e.nodes[:page])[end] == "⌘W closes the window"
-  press(w, Keys.w, cmd)
+  key(w, Keys.w, cmd)
   @test !(e in K.editors)
 end
 
 @testset "⌘1 to ⌘9 show the tabs" begin
   e, w, f = window("a.md", "b.md", "c.md")
   show!(e, w, f, "b.md", "c.md")
-  press(w, digit(1), cmd)
+  key(w, digit(1), cmd)
   @test basename(e.buf.path) == "a.md"
-  press(w, digit(3), cmd)
+  key(w, digit(3), cmd)
   @test basename(e.buf.path) == "c.md"
-  press(w, digit(2), cmd)
+  key(w, digit(2), cmd)
   @test basename(e.buf.path) == "b.md"
   # A tab that isn't there does nothing
-  press(w, digit(9), cmd)
+  key(w, digit(9), cmd)
   @test basename(e.buf.path) == "b.md" && names(e) == ["a.md", "b.md", "c.md"]
   # A plain number is typed, and shows no tab
-  press(w, digit(1))
+  key(w, digit(1))
   @test basename(e.buf.path) == "b.md"
   # They show from a new tab too
-  press(w, Keys.t, cmd)
+  key(w, Keys.t, cmd)
   e.popup = :none
-  press(w, digit(1), cmd)
+  key(w, digit(1), cmd)
   @test basename(e.buf.path) == "a.md" && !K.new_tab(e)
   # The palette lists a tab's command only while the window has that tab
   @test K.works_here(e, Val(:tab_3)) && !K.works_here(e, Val(:tab_4))
