@@ -41,16 +41,7 @@ export clocked, page_minutes, stop_clock!
 
 push!(BLOCK_ICONS, "play-fill", "stop-fill")
 
-"The view of the page's first time log, read again from the lines of its block, or nothing when the page has none or can't be changed"
-page_log(e) = begin
-  b = e.buf
-  (readonly(b) || b.fixed) && return nothing
-  span = get!(() -> block_lines(b, TIMELOG, 1), e.flows, (:log_block, b.path, b.version))
-  span === nothing && return nothing
-  v = block_view(e, TIMELOG, 1)
-  v.first, v.last = span
-  reread!(v, b.lines[span[1]+1:span[2]-1])
-end
+
 
 """
 The minutes that the page's time logs have for each task, by the task's name

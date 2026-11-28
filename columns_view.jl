@@ -50,7 +50,7 @@
 export COLUMN_BLOCK, COLUMN_GAP, COLUMN_MARK, PageColumn, ColumnGroup, PageColumns, column_gap,
        column_groups, page_columns!, flat, column_cache, in_column, shifted, column_turn!,
        whole_groups, page_parts, land, ColumnsView, COLUMN_WORDS, html_columns, columns_html,
-       LaidColumns, laid_columns, item_under
+       LaidColumns, laid_columns, item_under, line_step
 
 const COLUMN_BLOCK = Columns.COLUMNS   # the language of the block. `COLUMNS` is the columns of a takeoff's table.
 const COLUMN_GAP = 1.6     # the room between two columns, as a part of the size of the page's text
@@ -472,3 +472,54 @@ block_icon(::Type{ColumnsView}) = "columns-gap"
 block_insert(::Type{ColumnsView}) = ("Columns", ["```$COLUMN_BLOCK", "2", "```", "", ""], (5, 0))
 block_outline_inside(::Type{ColumnsView}) = true
 block_html(e, v::ColumnsView) = columns_html(e, v)
+
+"The place one line up or down the screen from the caret, in the order of the page's lines. `vertical` keeps it in a column of the page."
+line_step(e, by::Int) = begin
+  b = e.buf
+  i, col = b.caret
+  run = picked(b)
+  if run !== nothing
+    # From a part that the caret is on as a whole, ↑ goes to the line before the part and ↓ to the line after it
+    j = by > 0 ? run[2] + 1 : run[1] - 1
+    j < 1 && return b.caret
+    if j > length(b.lines)
+      # ↓ on a part at the end of the document starts a line below it, as it does under a table
+      edit!(b, line_end(b, length(b.lines)), line_end(b, length(b.lines)), "\n")
+      return (length(b.lines), 0)
+    end
+    x = e.goal = something(e.goal, 0px)
+    free(b, j, 0) || return by > 0 ? (j, 0) : line_end(b, j)
+    into = item(e, j)
+    into.content isa Sheet && return enter(e, into, into.content, by, x)
+    f = flow(e, j, false)
+    return (j, colat(f, by < 0 ? length(f.lines) : 1, x))
+  end
+  it = item(e, i)
+  at = it.content isa Grid ? gridcell(it.content, b.caret) : nothing
+  at === nothing || return vertical(e, it, at, by)
+  it.content isa Sheet && return vertical(e, it, it.content, by)
+  f = flow(e, i)
+  k, x = spot(f, col)
+  x = e.goal = something(e.goal, x)
+  1 <= k + by <= length(f.lines) && return (i, colat(f, k + by, x))
+  j = i + by
+  if rich(b)
+    # As rich text, the caret steps over a line that doesn't show, like the ``` of a code block
+    j = step_over(b, j, by, i)
+    if j > length(b.lines) && i < length(b.lines)
+      # ↓ over such a line at the end of the document starts a line below it, as it does under a table
+      edit!(b, line_end(b, length(b.lines)), line_end(b, length(b.lines)), "\n")
+      return (length(b.lines), 0)
+    end
+    # It goes onto a part that shows as one thing, like a diagram, as a whole
+    1 <= j <= length(b.lines) && !free(b, j, i) && return (j, 0)
+  end
+  j < 1 && return (1, 0)
+  j > length(b.lines) && return line_end(b, i)
+  # Into a sheet, the caret goes to the cell that's under it or over it
+  into = item(e, j)
+  into.content isa Sheet && return enter(e, into, into.content, by, x)
+  # The line is laid out as it will show with the caret on it. A line of text shows little of its markup as plain text, so it's laid out as it reads.
+  f = flow(e, j, b.plain && !by_runs(b, j))
+  (j, colat(f, by < 0 ? length(f.lines) : 1, x))
+end

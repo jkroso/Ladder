@@ -56,8 +56,7 @@ check_now(e, c::FileCheck) = begin
   found[k]
 end
 
-"True when the check that went as `r` stopped only because the code of the file that the window of `e` shows hasn't run"
-needs_run(e, r::Checked) = r.went == :stop && occursin("UndefVarError", r.said) && loaded_module(page_key(e.buf.path)) === nothing
+
 
 "The block of code that the check on line `i` checks: the one that has the first line of code under it"
 checked_block(e, i::Int) = begin
@@ -170,14 +169,9 @@ end
 
 const STEP_INK = colorant"rgb(48,128,236)"
 
-"The function that the top part `ex` of a file of Julia code defines: its definition without its documentation, or nothing when it defines none"
-definition_of(ex) = begin
-  Meta.isexpr(ex, :macrocall) && length(ex.args) == 4 && ex.args[1] == GlobalRef(Core, Symbol("@doc")) && return definition_of(ex.args[4])
-  Meta.isexpr(ex, (:function, :(=))) && Meta.isexpr(def_call(ex), :call) ? ex : nothing
-end
 
-"The call that the definition `def` of a function starts with, like `share(s)`, without what's written after it, like `where T`"
-def_call(def) = (x = def.args[1]; while Meta.isexpr(x, (:where, :(::))) x = x.args[1] end; x)
+
+
 
 "The name of each value that the function of the definition `def` takes, from its first line, like `share(s; places=2)`"
 arg_names(def) = begin

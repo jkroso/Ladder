@@ -78,19 +78,21 @@
 @use "./file_view" exports...
 @use "./schedule_view" exports...
 
-export CANVAS, CANVAS_TOOLS, NOTE_PAD, CARD_ROUND, NOTE_LEADING, TEXT_LEADING, PAGE_HEAD, PREVIEW_SIZE,
-       CANVAS_MOST, CANVAS_LEAST, CANVAS_ROOM, CANVAS_ZOOMS, CARD_KNOB, CARD_KNOB_REACH, TEXT_SIZES,
-       MOST_GLANCE, CanvasView, CanvasArea, CanvasDot, same_in, canvas_area, canvas_input, canvas_back,
-       card_back, canvas_face, card_wraps, card_wrap, word_room, word_size, word_lead, word_inset, card_lines,
-       card_file, card_size, page_glances, plain_words, page_glance, page_card_tall, link_glance, link_title,
-       link_card_tall, board_place, window_place, mouse_place, board_middle, board_extent, fit_board!,
-       page_tall, zoom_board!, card_under, width_knob, join_knob, knob_under, sized_text, colour_target,
-       text_sizes_bar, canvas_to_fill, resize_text!, card_shadow, card_paper, line_foot, draw_words, cut_to,
-       draw_join, draw_card, draw_page_card, draw_link_card, card_lines_of, draw_inner_board, draw_board_ink,
-       draw_knob, draw_canvas_marks, draw_caret, caret_line, index_near, typed_place, sync_typing!,
-       start_typing!, finish_typing!, type_newline!, caret_up_down!, add_joined!, add_after!, delete_picked!,
-       undo_canvas!, add_card!, text_card, page_name_for, put_on_board!, drop_place, paste_canvas!,
-       choose_pictures!, open_card!, canvas_at, canvas_drop!, canvas_html
+export CANVAS, CANVAS_TOOLS, NOTE_PAD, CARD_ROUND, NOTE_LEADING, TEXT_LEADING, PAGE_HEAD,
+       PREVIEW_SIZE, CANVAS_MOST, CANVAS_LEAST, CANVAS_ROOM, CANVAS_ZOOMS, CARD_KNOB,
+       CARD_KNOB_REACH, TEXT_SIZES, MOST_GLANCE, CanvasView, CanvasArea, CanvasDot, same_in,
+       canvas_area, canvas_input, canvas_back, card_back, canvas_face, card_wraps, card_wrap,
+       word_room, word_size, word_lead, word_inset, card_lines, card_file, card_size, page_glances,
+       plain_words, page_glance, page_card_tall, link_glance, link_title, link_card_tall,
+       board_place, window_place, mouse_place, board_middle, board_extent, fit_board!, page_tall,
+       zoom_board!, card_under, width_knob, join_knob, knob_under, sized_text, colour_target,
+       text_sizes_bar, canvas_to_fill, resize_text!, card_shadow, card_paper, line_foot, draw_words,
+       cut_to, draw_join, draw_card, draw_page_card, draw_link_card, card_lines_of,
+       draw_inner_board, draw_board_ink, draw_knob, draw_canvas_marks, draw_caret, caret_line,
+       index_near, typed_place, sync_typing!, start_typing!, finish_typing!, type_newline!,
+       caret_up_down!, add_joined!, add_after!, delete_picked!, undo_canvas!, add_card!, text_card,
+       page_name_for, put_on_board!, drop_place, paste_canvas!, choose_pictures!, open_card!,
+       canvas_at, canvas_drop!, canvas_html, keep_copy, keep_pasted, passing
 
 const CANVAS = Canvases.CANVAS
 "The tools of a canvas: the icon of each one's button, and what the button's tooltip says"
@@ -1362,3 +1364,34 @@ block_name(::Type{CanvasView}) = "Canvas"
 block_icon(::Type{CanvasView}) = "sticky"
 block_insert(::Type{CanvasView}) = ("Canvas", ["```$CANVAS", "```", "", ""], (4, 0))
 block_html(e, v::CanvasView) = canvas_html(e, v)
+
+"""
+Copy the file at `path` to the media folder of the document's folder, under
+its own name, and return the copy's path. Nothing if the document has no
+folder yet.
+"""
+keep_copy(e, path) = begin
+  dir = docdir(e)
+  isdir(dir) || return nothing
+  copy = unused(page_media(dir), splitext(basename(path))...)
+  cp(path, copy)
+  list_files!(e)
+  copy
+end
+
+"""
+Write `bytes` that were pasted to a new file in the media folder of the
+document's folder, and return its path. `ext` is the end of the file's name,
+like "png". Nothing if the document has no folder yet.
+"""
+keep_pasted(e, ext, bytes) = begin
+  dir = docdir(e)
+  isdir(dir) || return nothing
+  path = unused(page_media(dir), "pasted-" * Libc.strftime("%Y%m%d-%H%M%S", time()), ".$ext")
+  write(path, bytes)
+  list_files!(e)   # a sidebar that shows hidden files lists the media folder, or the new file in it
+  path
+end
+
+"True when the file at `path` is a temporary one, which macOS removes later. A file in the document's own folder is never one."
+passing(e, path) = isfile(path) && dirname(path) != docdir(e) && any(p -> startswith(path, p), PASSING)

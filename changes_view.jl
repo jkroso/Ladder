@@ -51,9 +51,10 @@
 @use "./folder_page" exports...
 @use "./ask_view" exports...
 
-export CHANGES, DIFF_ROW, DIFF_SIZE, BESIDE_LEAST, NOTE_ROW, NOTE_FIELD, ChangesView, HunkArea, note_input,
-       noting!, stop_noting!, DiffText, DiffBand, DiffLayout, diff_face, hang, note_face, note_box,
-       tally_words, short_path, change_words, decide!, change_file!, hatch, diff_side, changes_html
+export CHANGES, DIFF_ROW, DIFF_SIZE, BESIDE_LEAST, NOTE_ROW, NOTE_FIELD, ChangesView, HunkArea,
+       note_input, noting!, stop_noting!, DiffText, DiffBand, DiffLayout, diff_face, hang,
+       note_face, note_box, tally_words, short_path, change_words, decide!, change_file!, hatch,
+       diff_side, changes_html, reload_changed!
 
 const CHANGES = Diffs.CHANGES
 const DIFF_ROW = 19.0        # px: how tall a line of a change is
@@ -582,3 +583,30 @@ BLOCKS[CHANGES] = ChangesView
 block_name(::Type{ChangesView}) = "Changes"
 block_icon(::Type{ChangesView}) = "file-diff"
 block_html(e, v::ChangesView) = changes_html(e, v)
+
+"""
+Run each part of the code of the file at `file` that's new since the file had
+the lines `before`, in the module `mod` that the file made. So a function
+that was changed in the file is changed in the app that runs, and every
+window draws again. It gives how many parts ran, and what went wrong with the
+first that failed, or "".
+"""
+reload_changed!(mod::Module, file::AbstractString, before::Vector{String}) = begin
+  was = Set(t for (_, t) in part_texts(before))
+  ran, failed = 0, ""
+  for (first, code) in part_texts(text(file))
+    (code in was || isempty(strip(code))) && continue
+    try
+      # Blank lines before the code give each of its lines the number that it has in the file
+      Base.include_string(mod, "\n"^(first - 1) * code, String(file))
+      ran += 1
+    catch err
+      isempty(failed) && (failed = trouble(err))
+    end
+  end
+  ran > 0 && (CODE_RUNS[] += 1; redraw_windows!())   # the checks of a page or a file run again
+  (ran, failed)
+end
+
+# Code that Ladder never ran has no module to run in. The file changes, and that's all.
+reload_changed!(::Nothing, file::AbstractString, before::Vector{String}) = (0, "")

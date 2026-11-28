@@ -38,6 +38,7 @@
 @use "./dropped_files" exports...
 @use "./copied_blocks" exports...
 
+@use "./canvas_view" keep_copy keep_pasted passing
 export CLOSING, ENDING, OPENERS, OPENING, PAIRS, PAIR_REACH, SLIDE_TIME, backstep, bracket_pair,
        bracket_runs, caret_pair, carry, copy_selection!, erase!, glow_bracket_pair, in_empty_pair,
        in_long_string, indent!, indent_lines!, neighbour, newline!, next_cell!, opened, pair!,
@@ -136,56 +137,7 @@ word_step(b::Buffer, p::Pos, by::Int) = begin
   (i, col)
 end
 
-"The place one line up or down the screen from the caret, in the order of the page's lines. `vertical` keeps it in a column of the page."
-line_step(e, by::Int) = begin
-  b = e.buf
-  i, col = b.caret
-  run = picked(b)
-  if run !== nothing
-    # From a part that the caret is on as a whole, ↑ goes to the line before the part and ↓ to the line after it
-    j = by > 0 ? run[2] + 1 : run[1] - 1
-    j < 1 && return b.caret
-    if j > length(b.lines)
-      # ↓ on a part at the end of the document starts a line below it, as it does under a table
-      edit!(b, line_end(b, length(b.lines)), line_end(b, length(b.lines)), "\n")
-      return (length(b.lines), 0)
-    end
-    x = e.goal = something(e.goal, 0px)
-    free(b, j, 0) || return by > 0 ? (j, 0) : line_end(b, j)
-    into = item(e, j)
-    into.content isa Sheet && return enter(e, into, into.content, by, x)
-    f = flow(e, j, false)
-    return (j, colat(f, by < 0 ? length(f.lines) : 1, x))
-  end
-  it = item(e, i)
-  at = it.content isa Grid ? gridcell(it.content, b.caret) : nothing
-  at === nothing || return vertical(e, it, at, by)
-  it.content isa Sheet && return vertical(e, it, it.content, by)
-  f = flow(e, i)
-  k, x = spot(f, col)
-  x = e.goal = something(e.goal, x)
-  1 <= k + by <= length(f.lines) && return (i, colat(f, k + by, x))
-  j = i + by
-  if rich(b)
-    # As rich text, the caret steps over a line that doesn't show, like the ``` of a code block
-    j = step_over(b, j, by, i)
-    if j > length(b.lines) && i < length(b.lines)
-      # ↓ over such a line at the end of the document starts a line below it, as it does under a table
-      edit!(b, line_end(b, length(b.lines)), line_end(b, length(b.lines)), "\n")
-      return (length(b.lines), 0)
-    end
-    # It goes onto a part that shows as one thing, like a diagram, as a whole
-    1 <= j <= length(b.lines) && !free(b, j, i) && return (j, 0)
-  end
-  j < 1 && return (1, 0)
-  j > length(b.lines) && return line_end(b, i)
-  # Into a sheet, the caret goes to the cell that's under it or over it
-  into = item(e, j)
-  into.content isa Sheet && return enter(e, into, into.content, by, x)
-  # The line is laid out as it will show with the caret on it. A line of text shows little of its markup as plain text, so it's laid out as it reads.
-  f = flow(e, j, b.plain && !by_runs(b, j))
-  (j, colat(f, by < 0 ? length(f.lines) : 1, x))
-end
+
 
 "The place one line up or down from the caret, which is in row `r`, column `c` of a table"
 vertical(e, it::Item, (r, c), by::Int) = begin
@@ -797,19 +749,7 @@ page_media(dir) = begin
   media
 end
 
-"""
-Write `bytes` that were pasted to a new file in the media folder of the
-document's folder, and return its path. `ext` is the end of the file's name,
-like "png". Nothing if the document has no folder yet.
-"""
-keep_pasted(e, ext, bytes) = begin
-  dir = docdir(e)
-  isdir(dir) || return nothing
-  path = unused(page_media(dir), "pasted-" * Libc.strftime("%Y%m%d-%H%M%S", time()), ".$ext")
-  write(path, bytes)
-  list_files!(e)   # a sidebar that shows hidden files lists the media folder, or the new file in it
-  path
-end
+
 
 "A path in `dir` that no file has yet: `stem` and `ext`, with a number after the stem if that name is taken"
 unused(dir, stem, ext) = begin
@@ -821,22 +761,9 @@ unused(dir, stem, ext) = begin
   path
 end
 
-"True when the file at `path` is a temporary one, which macOS removes later. A file in the document's own folder is never one."
-passing(e, path) = isfile(path) && dirname(path) != docdir(e) && any(p -> startswith(path, p), PASSING)
 
-"""
-Copy the file at `path` to the media folder of the document's folder, under
-its own name, and return the copy's path. Nothing if the document has no
-folder yet.
-"""
-keep_copy(e, path) = begin
-  dir = docdir(e)
-  isdir(dir) || return nothing
-  copy = unused(page_media(dir), splitext(basename(path))...)
-  cp(path, copy)
-  list_files!(e)
-  copy
-end
+
+
 
 zoom!(e, z) = (e.zoom = clamp(z, 0.6, 2.5); save_settings!(e); rerun!(e, :zoom); restyle!(e))
 

@@ -62,11 +62,12 @@
 
 export CHECK, CHECK_GOOD, Checked, COMPARES, value_brief, check_line, CheckView, ischeck, checks,
        check_places, checked!, check_words, check_colour, CheckDot, CHECK_DOT, check_tip, CheckTop,
-       open_checks!, check_fixed, CHECK_INSET, check_face, CheckLine, check_line!, check_input, julia_look,
-       open_check!, settle_check!, describe_dots, CHECK_LEVELS, in_lines, check_in_charge, check_html,
-       FILE_CHECK, file_checks, file_checks_tick!, LIVE_WAIT, part_expr, defines_function, live_checks_tick!,
-       check_note, mark_checks, hover_check!, file_results, check_part, next_check!, expression_at,
-       check_value, add_check!, CheckButtons, check_buttons, ChecksState
+       open_checks!, check_fixed, CHECK_INSET, check_face, CheckLine, check_line!, check_input,
+       julia_look, open_check!, settle_check!, describe_dots, CHECK_LEVELS, in_lines,
+       check_in_charge, check_html, FILE_CHECK, file_checks, file_checks_tick!, LIVE_WAIT,
+       part_expr, defines_function, live_checks_tick!, check_note, mark_checks, hover_check!,
+       file_results, check_part, next_check!, expression_at, check_value, add_check!, CheckButtons,
+       check_buttons, ChecksState, def_call, definition_of, needs_run
 
 const CHECK = "check"
 push!(BLOCK_ICONS, "check2-square", "check-circle-fill", "x-circle-fill", "exclamation-triangle-fill", "arrow-clockwise")
@@ -775,3 +776,15 @@ end
 add_command!(add_check!, title="Write a check of the call at the caret over its function, with the value that the call has now", kind=:edit)
 
 works_here(e, ::Val{:add_check}) = julia_file(e)
+
+"The call that the definition `def` of a function starts with, like `share(s)`, without what's written after it, like `where T`"
+def_call(def) = (x = def.args[1]; while Meta.isexpr(x, (:where, :(::))) x = x.args[1] end; x)
+
+"The function that the top part `ex` of a file of Julia code defines: its definition without its documentation, or nothing when it defines none"
+definition_of(ex) = begin
+  Meta.isexpr(ex, :macrocall) && length(ex.args) == 4 && ex.args[1] == GlobalRef(Core, Symbol("@doc")) && return definition_of(ex.args[4])
+  Meta.isexpr(ex, (:function, :(=))) && Meta.isexpr(def_call(ex), :call) ? ex : nothing
+end
+
+"True when the check that went as `r` stopped only because the code of the file that the window of `e` shows hasn't run"
+needs_run(e, r::Checked) = r.went == :stop && occursin("UndefVarError", r.said) && loaded_module(page_key(e.buf.path)) === nothing

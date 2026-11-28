@@ -54,13 +54,14 @@
 @use "./live_view" exports...
 @use "./columns_view" item_under
 
-export TASK_H, TASK_BAR, DATES_H, DAY_MOST, DAY_LEAST, DAY_USUAL, TASK_BAR_EDGE, KNOB, KNOB_GAP, NAMES_W,
-       NAMES_FULL, DETAILS_H, DAY_ZERO, SCHEDULE_ICONS, ScheduleView, ChartArea, TaskName, TaskDetails,
-       DayButton, schedule_input, chart, page_todos, schedule_view, replan!, tasks!, task_place, chart_h,
-       save_page!, daynum, numday, day_x, x_day, bar_box, task_bar, task_runs, time_bar, row_bars, knob_place,
-       knob, time_at, time_words, link_points, away, under, hot_row, task_days, task_words, zoom_days!, arrow,
-       draw_days, task_hue, run_done, draw_bar, hot_time, draw_bars, draw_links, zoom_x, names_w,
-       page_schedule, todo_line, task_over, task_of
+export TASK_H, TASK_BAR, DATES_H, DAY_MOST, DAY_LEAST, DAY_USUAL, TASK_BAR_EDGE, KNOB, KNOB_GAP,
+       NAMES_W, NAMES_FULL, DETAILS_H, DAY_ZERO, SCHEDULE_ICONS, ScheduleView, ChartArea, TaskName,
+       TaskDetails, DayButton, schedule_input, chart, page_todos, schedule_view, replan!, tasks!,
+       task_place, chart_h, save_page!, daynum, numday, day_x, x_day, bar_box, task_bar, task_runs,
+       time_bar, row_bars, knob_place, knob, time_at, time_words, link_points, away, under, hot_row,
+       task_days, task_words, zoom_days!, arrow, draw_days, task_hue, run_done, draw_bar, hot_time,
+       draw_bars, draw_links, zoom_x, names_w, page_schedule, todo_line, task_over, task_of,
+       page_log
 
 const TASK_H = 30.0        # px: how tall the row of a task is
 const TASK_BAR = 20.0         # and how tall its bar is
@@ -1125,4 +1126,15 @@ onkey(b::DayButton, ev::KeyPress{Keys.mouse_left}) = begin
   Schedules.days!(d.of.data, t, t.days + b.by)
   commit!(d.of)
   handled
+end
+
+"The view of the page's first time log, read again from the lines of its block, or nothing when the page has none or can't be changed"
+page_log(e) = begin
+  b = e.buf
+  (readonly(b) || b.fixed) && return nothing
+  span = get!(() -> block_lines(b, TIMELOG, 1), e.flows, (:log_block, b.path, b.version))
+  span === nothing && return nothing
+  v = block_view(e, TIMELOG, 1)
+  v.first, v.last = span
+  reread!(v, b.lines[span[1]+1:span[2]-1])
 end

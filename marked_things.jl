@@ -59,8 +59,7 @@ end
 "The name of the thing that the mouse is on in `part`, or nothing. A kind of block that shows things by name has a method."
 pointed(part) = nothing
 
-"What tells a thing of a calendar from the others for the rest of the page: the name of its task or its to-do item, or the words of an event"
-thing_name(t::Calendars.Thing) = t.kind == :event ? t.words : t.key
+
 
 pointed(v::BoardView) = begin
   v.grab === nothing || return nothing

@@ -56,11 +56,11 @@
 @use "./schedule_view" exports...
 @use "./board_view" exports...
 
-export CALENDAR, DAY_ROWS, DAY_HEAD, THING_H, THING_GAP, DAY_TIGHT, calendar_day, CalendarView, CalendarDay,
-       CalendarThing, CalendarTick, CalendarMore, CalendarDrag, month_shown, calendar_tasks, things!,
-       calendar_folder, calendar_items, item_place, stamp_page!, log_things, day_things, thing_line,
-       calendar_input, tight, words_room, drop_day, day_lines, week_rows, add_event!, thing_html,
-       calendar_html
+export CALENDAR, DAY_ROWS, DAY_HEAD, THING_H, THING_GAP, DAY_TIGHT, calendar_day, CalendarView,
+       CalendarDay, CalendarThing, CalendarTick, CalendarMore, CalendarDrag, month_shown,
+       calendar_tasks, things!, calendar_folder, calendar_items, item_place, stamp_page!,
+       log_things, day_things, thing_line, calendar_input, tight, words_room, drop_day, day_lines,
+       week_rows, add_event!, thing_html, calendar_html, thing_name
 
 const CALENDAR = Calendars.CALENDAR
 push!(BLOCK_ICONS, "calendar3", "chevron-left", "chevron-right")
@@ -583,3 +583,6 @@ block_name(::Type{CalendarView}) = "Calendar"
 block_icon(::Type{CalendarView}) = "calendar3"
 block_insert(::Type{CalendarView}) = ("Calendar", ["```$CALENDAR", "```", "", ""], (4, 0))
 block_html(e, v::CalendarView) = calendar_html(e, v)
+
+"What tells a thing of a calendar from the others for the rest of the page: the name of its task or its to-do item, or the words of an event"
+thing_name(t::Calendars.Thing) = t.kind == :event ? t.words : t.key
