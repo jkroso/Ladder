@@ -299,7 +299,7 @@ news_tick!(e) = begin
   nothing
 end
 
-EACH_FRAME[:news] = news_tick!
+each_frame!(news_tick!)
 
 "Ask for the news of each section of the folder of `v` that hasn't had its news today, when Settings say to"
 news_auto!(e, v) = begin

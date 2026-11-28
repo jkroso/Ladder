@@ -26,6 +26,7 @@
 @use "./strokes" exports...
 @use "./shared" exports...
 @use "./host" exports...
+@use "./additions" exports...
 @use "./folder_page" exports...
 @use "./views" exports...
 @use "./julia_levels" exports...
@@ -603,48 +604,51 @@ describe_window(e::Editor) = begin
   colours_over[], pane_dark[] = nothing, false   # the page's colours, whatever the last frame left
   use!(look == :site ? SITE : look == :news ? NEWS : getproperty(THEMES, e.theme))
   use_code_font!(e)
-  side_tick!(e)   # the side menu of this frame, and how wide it is
+  # What each part of Ladder does in this frame, before the page is laid out. Each one that's named here has an
+  # order, and its line says what it must come before or after. Work with no order has no line here: its own file
+  # adds it with `each_frame!`, and `frame_ticks!` does it. See additions.jl.
+  side_tick!(e)   # first: the side menu of this frame, and how wide it is. All that asks how wide the page is comes after it.
   win = window_of(e)
   if win !== nothing && e.applied != look_key(e)
     set_dark!(win, look_key(e) == :night)
     e.applied = look_key(e)
   end
-  receive!(e)
+  receive!(e)   # a file that macOS asked for shows: before all that works on the page that shows
   await_default!(e)
-  remote_tick!(e)
+  remote_tick!(e)   # a page from the web that came shows: before `refresh!`, and before all that works on the page that shows
   moved = refresh!(e.buf)
   moved === nothing || (stay!(e, moved); fresh!(e, moved))
   # The bars beside the lines that just changed fade, so the window is drawn again while they show
   isempty(fresh(e)) || redraw_in!(e, 1/30)
-  find_tick!(e)
-  sound_tick!(e)
-  blocks_tick!(e)
-  point_tick!(e)
-  scrub_tick!(e)
-  inline_tick!(e)
-  confine!(e)   # while the lines of a block fill the window, the caret stays in them
-  job_tick!(e)
-  update_tick!(e)
-  folder_pages_tick!(e)
-  ignored_tick!(e)
-  startup_tick!(e)
+  find_tick!(e)     # it moves the caret and scrolls to what's found: before blocks_tick! and zoom_tick!, which keep the page where it was, and before confine!
+  sound_tick!(e)    # it puts the words of a recording in the text: before inline_tick! and each other tick that looks for a change to the text
+  blocks_tick!(e)   # each block writes its lines, and one that fills the window keeps the page where it was: after find_tick!, before inline_tick!
+  point_tick!(e)    # it reads where the last frame put each line: before layout!
+  scrub_tick!(e)    # a click on a number puts the caret there: before confine!, slide_tick! and line_tick!
+  inline_tick!(e)   # after all that changes the text here, and before file_checks_tick!, which runs the checks again when a sum has a new value
+  confine!(e)   # while the lines of a block fill the window, the caret stays in them: after all that moves the caret
+  job_tick!(e)      # its words hang from a button of the top bar: before bar_tick!, which keeps the bar out while something hangs from it
+  update_tick!(e)   # the blocks of the settings page that show an update run again: before layout!
+  folder_pages_tick!(e)   # it can show a folder in the page: before all from zoom_tick! down that asks which file shows
+  startup_tick!(e)  # the words under the top bar: after remote_tick!, whose words it shows in this frame, and before bar_tick!, since it reads where the bar was
+  frame_ticks!(e)   # the work with no order, which each file added with `each_frame!`: before bar_tick!, as words of it can hang from the bar
   foreach(f -> f(e), values(EACH_FRAME))   # what code from the startup page does in each frame, like a look for new email
-  zoom_tick!(e)
-  slide_tick!(e)
-  screen_tick!(e)
-  bar_tick!(e)
-  code_tick!(e)
-  run_tick!(e)
-  term_tick!(e)
+  zoom_tick!(e)     # after all that scrolls or shows another file: the page under what fills the window stays where it was
+  slide_tick!(e)    # after all that moves the caret or changes the text: the caret's slide shows, and the slides have no caret and no sidebar
+  screen_tick!(e)   # before bar_tick!: a bar that hides in full screen goes in the frame that the window fills its screen
+  bar_tick!(e)      # after all whose words hang from the bar, and after screen_tick!
+  run_tick!(e)      # it takes what the page's code came to: before file_checks_tick!, which runs the checks again after code ran
+  term_tick!(e)     # the terminals that the window doesn't show: after all that can show another file
+  # These three give the agents' tasks their turn, and what one finds depends on the ones before it. ask_tick! runs the code
+  # that an agent changed and can put its answer in the page: before the checks, line_tick! and app_tick!. chat_tick! sees to
+  # the sessions that the window doesn't show: after all that can show another file.
   ask_tick!(e)
   session_tick!(e)
   chat_tick!(e)
-  live_checks_tick!(e)
-  file_checks_tick!(e)
-  rename_tick!(e)
-  line_tick!(e)
-  app_tick!(e)
-  publish_tick!(e)
+  live_checks_tick!(e)   # before file_checks_tick!: the checks of a function that it ran again run in the same frame. It reads the checks that the last frame found.
+  file_checks_tick!(e)   # after all that changes the text or runs code
+  line_tick!(e)     # after all that moves the caret, scrolls or changes the text: git's words about a line go when one of those happens
+  app_tick!(e)      # after all that changes the text: it writes the page, and keeps the caret and the sidebar away
   layout!(e)
   inline_diff!(e)   # room for the lines that went from the file, while the window shows what changed in it
   # A page whose long lines don't wrap scrolls sideways as far as its longest line goes, and no further when the window grows

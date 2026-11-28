@@ -312,7 +312,7 @@ git_run_tick!(e) = for (root, r) in collect(GIT_RUNS)
   r.e === e || redraw_in!(e, 0)
 end
 
-EACH_FRAME[:git_runs] = git_run_tick!
+each_frame!(git_run_tick!)
 
 """
 The Pull and Push buttons of git's panel for the repository at `root`, where
@@ -1411,7 +1411,7 @@ commit_tick!(e) = begin
   nothing
 end
 
-EACH_FRAME[:commit_message] = commit_tick!
+each_frame!(commit_tick!)
 
 "Commit what git has for the next commit of the repository at `root`, the files that are ticked in git's panel, with the message `message`"
 commit_staged!(e, root, message) = begin

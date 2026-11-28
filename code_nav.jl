@@ -362,6 +362,7 @@ rename_tick!(e) = begin
   end
   nothing
 end
+each_frame!(rename_tick!)
 
 works_here(e, ::Val{:rename_in_code}) = !isempty(code_blocks(e))
 
