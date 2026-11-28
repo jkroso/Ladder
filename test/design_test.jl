@@ -135,6 +135,11 @@ else
     trail = only(p for p in popups(w) if p.key == :title_trail).content
     @test within(rect(trail), rect(ribbon)) && abs(middle_y(rect(trail)) - middle_y(rect(title))) <= 1
     @test last(trail.steps)[2] == file
+    # The file's name in the path is where it was in the toolbar, under the mouse. The folders before it shrink to fit
+    # the room to its left: this design is in a temporary folder deep under /var.
+    name = only(c for c in values(trail.crumbs) if c.last)
+    @test abs(K.num(rect(name).left + K.TT_PAD - rect(title).left)) <= 1
+    @test any(n -> length(n) == 1 && n != "/", first.(trail.steps))
     # The path stays in the name's room, on the toolbar's colour
     @test within(rect(trail), rect(grip)) && K.trail_ground(e) == V.panel_colour(V.theme(v))
     shot("design-path-hover.png")

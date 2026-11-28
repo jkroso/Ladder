@@ -9268,6 +9268,14 @@ show_title_trail!(e, t, w, path) = begin
   parts = focus_parts(e)
   more = trail_parts_wide(e, parts) + edited_wide(e)   # what follows the file's name
   shown = title_steps(all, room - more)
+  # In the page the name is in the middle of its room, and the path stays in that room. The file's name stays where it
+  # was, under the mouse, so the folders before it have only the room from the left end to the name, and their names
+  # shrink to fit it, as in the sidebar.
+  lo = r.left + r.width / 2 - room / 2
+  if inpage
+    left = r.left + get(e.nodes, :title_lead, 0px) - lo   # the room for the folders, before the name
+    shown = title_steps(all, min(room - more, left + title_widths(all[end:end])[1] - TT_PAD + TT_EDGE + 1px))
+  end
   v = get!(() -> own!(t, TitleTrail()), e.nodes, :title_trail)
   v.path == path || (empty!(v.crumbs); empty!(v.arrows))
   # A pinned path is in the middle of the bar. After a click unpins it, it stays there until it closes, so the name doesn't move from under the mouse.
@@ -9279,8 +9287,8 @@ show_title_trail!(e, t, w, path) = begin
   before = sum(widths[1:end-1], init=0px) + TT_ARROW * (length(shown) - 1) + TT_EDGE + 1px + TT_PAD
   # The name is in the middle of its room in the bar, with the headings after it and as much room before it, so the middle of the name's node is the bar's
   x = v.centred ? r.left + r.width / 2 - total / 2 : r.left + get(e.nodes, :title_lead, 0px) - before
-  # In the page, the name is in the middle of its room, and the path stays in that room, so it lies over nothing else of the page
-  inpage && (lo = r.left + r.width / 2 - room / 2; x = clamp(x, lo, max(lo, lo + room - total)))
+  # In the page the path stays in the name's room, so it lies over nothing else of the page
+  inpage && (x = clamp(x, lo, max(lo, lo + room - total)))
   x = clamp(x, start, max(start, wide - 8px - total))
   top = inpage ? r.top + (r.height - TT_H) / 2 : bar_top(e) + (TOPBAR_H - TT_H) / 2
   popup!(w, v, anchor=(x, top), placement=:below, gap=0px, width=total, key=:title_trail, modal=false, theme=menu_theme())
