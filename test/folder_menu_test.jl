@@ -31,6 +31,7 @@ const e = K.build_editor(page)
 const w = Window(e, size=(1000px, 800px))
 const (; frames, at, typed, key) = drive(w, moved=2)
 e.panel || K.toggle_panel!(e)
+e.slid = 0.0   # the sidebar is open at once: the rows of a sidebar that still slides aren't where they come to rest
 frames(3)
 
 right_click(place) = (at(place); onkey(w, KeyPress{Keys.mouse_right}(0, w)); frames())
@@ -56,7 +57,7 @@ folder_menu(name, item) = (right_click(middle(rect(row(name)))); choose(item))
   right_click(middle(rect(row("Projects"))))
   @test menu() !== nothing
   # The Finder can show a folder, so Show in Finder isn't grey
-  @test menu().items == ["New Page", "New Folder", "New Terminal", "Open in New Window", "Add to Favourites", "Rename", "Duplicate", "Copy Path", "Show in Finder", "Ignore", "Move to Trash"]
+  @test menu().items == ["New Page", "New Folder", "New Terminal", "New Agent Session", "Open in New Window", "Add to Favourites", "Rename", "Duplicate", "Copy Path", "Show in Finder", "Ignore", "Move to Trash"]
   key(Keys.escape)
   @test menu() === nothing
 end
@@ -169,7 +170,7 @@ under_files() = right_click((100, 600))
   @test e.folder == v2 && isempty(listed())
   under_files()
   @test menu() !== nothing
-  @test menu().items == ["New Page", "New Folder", "New Terminal", "Copy Path", "Show in Finder", "Add to Favourites"]
+  @test menu().items == ["New Page", "New Folder", "New Terminal", "New Agent Session", "Copy Path", "Show in Finder", "Add to Favourites"]
   key(Keys.escape)
   # The top bar over the sidebar has no such menu
   right_click((100, 20))
