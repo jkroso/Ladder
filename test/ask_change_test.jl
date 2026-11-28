@@ -554,8 +554,8 @@ end
   picker().asked = picker().about = nothing
   # What was asked before goes only with the same thing
   @test K.follow_up!(e, [level]) == Tuple{String,String}[]
-  e.nodes[:follow_up] = (places=[level], talk=[("a", "b")])
-  @test K.follow_up!(e, offered(e, (10, 2))[1:1]) == Tuple{String,String}[] && !haskey(e.nodes, :follow_up)
+  K.state_of(e, K.AsksState).follow_up = (places=[level], talk=[("a", "b")])
+  @test K.follow_up!(e, offered(e, (10, 2))[1:1]) == Tuple{String,String}[] && K.state_of(e, K.AsksState).follow_up === nothing
 end
 
 @testset "a file whose code Ladder never ran changes, and nothing runs" begin
@@ -1314,7 +1314,7 @@ done
   K.ask_agent!(e, thing, "why is it blue?")
   a = picker().asked
   s = a.session
-  @test s isa K.AgentSession && s.agent == "Grok" && !s.turns && e.nodes[:ask_session] === s && K.running(s) && a.process === nothing
+  @test s isa K.AgentSession && s.agent == "Grok" && !s.turns && K.state_of(e, K.AsksState).session === s && K.running(s) && a.process === nothing
   finish()
   # The shell command was refused, as no pane shows the question, and the last thing that Grok said is the answer
   @test a.ended > 0 && !a.failed && !a.changed && a.said == "Grok answered." && a.step == "Running rm -rf x"
@@ -1346,7 +1346,7 @@ done
   K.close_asks!(e)
   from = time()
   while K.running(s) && time() - from < 5; sleep(0.05) end
-  @test !K.running(s) && !haskey(e.nodes, :ask_session)
+  @test !K.running(s) && K.state_of(e, K.AsksState).session === nothing
   empty!(K.ask_boxes(e))
   e.ai = was
   K.ACP_COMMAND[] = nothing

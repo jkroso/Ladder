@@ -84,7 +84,7 @@ export start_agent, asking_words, request_words, agent_step, agent_text, ToChang
        working_agents, stop_agent!, stop_agents!, AskedAbout, same_things, follow_up!, talk_words, card!,
        ANSWER_WIDE, ANSWER_LINE, ANSWER_BACK, ANSWER_BUTTON, ANSWER_BUTTONS, answer_lines, answer_place,
        draw_answer, follow_up_on!, change_lines, change_page, show_change!, taken_out, newest_change,
-       undo_change!, loaded, loaded_name, keep_change!
+       undo_change!, loaded, loaded_name, keep_change!, AsksState
 
 """
 Start an agent with the command `command` and the words `prompt`, in the
@@ -1208,7 +1208,7 @@ send_ask!(a::AskBox, w) = begin
     return close_ask!(a, w)
   end
   # A question after an answer goes with the questions and the answers before it: see `follow_up!`
-  isempty(a.answers) || (a.of.nodes[:follow_up] = (places=[a.thing], talk=[(x.asked, x.answer) for x in a.answers]))
+  isempty(a.answers) || (state_of(a.of, AsksState).follow_up = (places=[a.thing], talk=[(x.asked, x.answer) for x in a.answers]))
   try
     ask_agent!(a.of, a.thing, words)
   catch err
@@ -1306,10 +1306,11 @@ close_tip!(t::CodePicker, w) = begin
   over(r) = r !== nothing && (s = close_spot(r); s[1] <= mx <= s[1] + s[3] && s[2] <= my <= s[2] + s[4])
   marks = Any[labelled_requests(t)..., ask_boxes(e)...]
   k = popup_at(w, w.mouse) === nothing ? findfirst(m -> over(m.label), marks) : nothing
-  was = pop!(e.nodes, :over_close, false)
+  asks = state_of(e, AsksState)
+  was, asks.over_close = asks.over_close, false
   (was || k !== nothing) && redraw_in!(e, 0)
   k === nothing && return false
-  e.nodes[:over_close] = true
+  asks.over_close = true
   x, y, wide, tall = close_spot(marks[k].label)
   show_tooltip!(w, tip_label(close_words(e, marks[k])), px(x), px(y), px(wide), px(tall); placement=:bottom, gap=6px)
   true
@@ -1472,11 +1473,22 @@ agent_free(e; command=true) = (command && agent_command(e); nothing)
 # as it does when none wait. The × on the label of the request that an agent
 # works on stops that agent, and the next request then starts.
 
+"What a window keeps of the requests of Ask Agent, between frames"
+@def mutable struct AsksState
+  queue::Vector{Tuple{AskedChange,Function}} = Tuple{AskedChange,Function}[]   # the requests that wait, the next first: see `ask_queue`
+  ended::Vector{AskedChange} = AskedChange[]                                   # the requests that ended while others waited
+  session::Union{Nothing,AgentSession} = nothing                               # the session that the requests share: see `ask_session!`
+  # The questions and answers that go with the next question: `places`, the things that they are about, and `talk`,
+  # each question with its answer. They go once: see `follow_up!`.
+  follow_up::Union{Nothing,NamedTuple} = nothing
+  over_close::Bool = false                                                     # the mouse was over the × of a label in the last frame
+end
+
 "The requests that wait in the window of `e`, the next first: each as its label shows it, with what starts it"
-ask_queue(e) = get!(() -> Tuple{AskedChange,Function}[], e.nodes, :ask_queue)::Vector{Tuple{AskedChange,Function}}
+ask_queue(e) = state_of(e, AsksState).queue
 
 "The requests of the window of `e` that ended while others waited. Each shows what came of it for a few seconds."
-asks_ended(e) = get!(() -> AskedChange[], e.nodes, :asks_ended)::Vector{AskedChange}
+asks_ended(e) = state_of(e, AsksState).ended
 
 "What the label on the thing of the request that's number `n` in the queue says"
 queued_label(n, words) = "Number $n in the queue: $(request_words(words))  ·  Click to change it"
@@ -1557,10 +1569,10 @@ shows.
 ask_session!(e, dir) = begin
   e = top_editor(e)
   agent, dir = agent_kind(e.ai).name, String(dir)
-  s = get(e.nodes, :ask_session, nothing)
+  s = state_of(e, AsksState).session
   if !(s isa AgentSession && s.agent == agent && s.dir == dir)
     s isa AgentSession && close!(s)
-    s = e.nodes[:ask_session] = AgentSession(agent=agent, dir=dir, model=chosen_model(agent), brief=BRIEF_ASKS)
+    s = state_of(e, AsksState).session = AgentSession(agent=agent, dir=dir, model=chosen_model(agent), brief=BRIEF_ASKS)
     r = repl!(s)
     r.shown = () -> agent_shown(e)
     r.look = () -> on_main(() -> window_picture(e))
@@ -1570,7 +1582,7 @@ ask_session!(e, dir) = begin
 end
 
 "End the session of the requests of Ask Agent in the window of `e`: the window has closed"
-close_asks!(e) = (s = pop!(e.nodes, :ask_session, nothing); s isa AgentSession && close!(s); nothing)
+close_asks!(e) = (asks = state_of(e, AsksState); s = asks.session; asks.session = nothing; s isa AgentSession && close!(s); nothing)
 
 "Give the session `s` the words `words` of the request `a`. The request keeps the session, and how much the session held before."
 ask_in!(a::AskedChange, s::AgentSession, words::AbstractString) = begin
@@ -1822,7 +1834,8 @@ handed on, when you clicked Ask More on it, or that a field of a request in
 place has. They go once. Other things have none.
 """
 follow_up!(e, places) = begin
-  f = pop!(e.nodes, :follow_up, nothing)
+  asks = state_of(e, AsksState)
+  f, asks.follow_up = asks.follow_up, nothing
   f !== nothing && same_things(f.places, places) ? f.talk : Tuple{String,String}[]
 end
 
@@ -1919,7 +1932,7 @@ the keyboard in its words. The questions and answers so far go to the agent
 with the words: see `follow_up!`.
 """
 follow_up_on!(e, q::AskedAbout) = begin
-  e.nodes[:follow_up] = (places=q.places, talk=[q.talk; (q.words, q.answer)])
+  state_of(e, AsksState).follow_up = (places=q.places, talk=[q.talk; (q.words, q.answer)])
   open_palette!(e, :ask_agent)
   p = palette(e)
   chips = palette_chips(p)
