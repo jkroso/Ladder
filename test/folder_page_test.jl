@@ -171,6 +171,7 @@ end
 @testset "the page of a folder shows as a page" begin
   file = page!(notes, notes_page("box"))
   @test K.ismarkdown(file) && !K.ismarkdown(joinpath(notes, ".other"))
+  empty!(K.problems)   # what a live block of a test before this one said, when the tests share a process
   K.open!(e, file); frames()
   @test e.buf.path == file && e.buf.view != :file && e.buf.lines[1] == "These are my notes."
   @test isempty(K.problems)
