@@ -515,7 +515,7 @@ done
   until(f, most=10) = (t = time(); while !f() && time() - t < most; sleep(0.02); frames(1) end; f())
   folder = realpath(news)
   # Opening the front page starts one: a session of Grok whose file is in the folder of today's articles
-  opens() = (K.open_folder!(e, news); e.nodes[:news_shown] = 0.0; frames())
+  opens() = (K.open_folder!(e, news); K.state_of(e, K.NewsShown).at = 0.0; frames())
   opens()
   @test haskey(K.NEWS_COMPANIONS, folder)
   p = K.NEWS_COMPANIONS[folder][2]

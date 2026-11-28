@@ -26,7 +26,7 @@
 
 export __init__, full_takeoff, go_back!, go_forward!, go_place!, hidden!, ignore!,
        ignored_changed!, ignored_tick!, jump_list, last_shown, place_back, place_now, showable,
-       step_back!, step_words, takeoff_over, Unpreviewed, unpreviewed!
+       step_back!, step_words, takeoff_over, Unpreviewed, unpreviewed!, Jumps, IgnoredSeen
 
 # --- the files that showed before --------------------------------------------------------
 #
@@ -68,6 +68,14 @@ end
 # jump left, with the caret and the scroll as they were, before it goes back
 # to another file. ⌘⌥→ goes to the jump's line again.
 
+@use "github.com/jkroso/Prospects.jl" @def
+
+"The places that a window jumped from: see `jump_list`"
+@def mutable struct Jumps
+  back::Vector{Any} = Any[]    # the places that ⌘⌥← goes back to, the last one last
+  ahead::Vector{Any} = Any[]   # the places that ⌘⌥→ goes forward to again
+end
+
 """
 The places of the files that showed that the window of `e` jumped from: `back`
 for ⌘⌥←, and `ahead` for ⌘⌥→. Each has the file's path, where the caret and
@@ -75,7 +83,7 @@ the scroll were, and how many files the list of files to go back to (or
 forward to) had then: a place comes before the files that the list got
 after it.
 """
-jump_list(e) = get!(() -> (back=Any[], ahead=Any[]), e.nodes, :jumps)
+jump_list(e) = state_of(e, Jumps)
 
 "How far the page was scrolled before the command palette showed a row of its list in the window, which the window keeps while the palette's command runs: see `place_now`"
 @def mutable struct Unpreviewed
@@ -173,11 +181,16 @@ ignore!(e, path, on::Bool=true) = begin
   ignored_changed!(e)
 end
 
+"The list of what you ignore, as a window last saw it"
+@def mutable struct IgnoredSeen
+  at::Union{Nothing,Float64} = nothing   # when the list had last changed, when the window last listed its folder, or nothing before its first frame
+end
+
 "List the folder of every window again, after the list of what you ignore changed"
 ignored_changed!(e) = begin
   for o in unique([editors; e])
     list_files!(o)
-    o.nodes[:ignored_at] = Folders.changed()
+    state_of(o, IgnoredSeen).at = Folders.changed()
     w = window_of(o)
     w === nothing || stale!(w)
   end
@@ -191,7 +204,9 @@ lists its folder again.
 """
 ignored_tick!(e) = begin
   at = Folders.changed()
-  get!(e.nodes, :ignored_at, at) < at && ignored_changed!(e)
+  seen = state_of(e, IgnoredSeen)
+  seen.at === nothing && (seen.at = at)
+  seen.at < at && ignored_changed!(e)
   nothing
 end
 each_frame!(ignored_tick!)

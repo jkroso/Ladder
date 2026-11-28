@@ -36,7 +36,7 @@
 @use "./commands" exports...
 
 export FOLDER_MENU, copy_path, duplicate!, finish_rename!, new_folder!, new_terminal!, repath,
-       stop_rename!, wiki_link, NewlyMade
+       stop_rename!, wiki_link, NewlyMade, Renaming
 
 # --- the menu of a file ---------------------------------------------------------------------
 #
@@ -190,6 +190,12 @@ end
   kind::Union{Nothing,Symbol} = nothing   # :page, :folder or :file, or nothing for a file that was there already
 end
 
+"The file or the folder that's being renamed in a window"
+@def mutable struct Renaming
+  path::Union{Nothing,String} = nothing   # its path, or nothing when none is being renamed
+  at::Symbol = :sidebar                   # where its name is a text field: :sidebar, :title or :desktop
+end
+
 """
 Start to rename the file or the folder at `path`. Its name becomes a text
 field, in the sidebar or in the top bar, as `at` says. Both show the whole
@@ -203,25 +209,27 @@ rename!(e, path; at=:sidebar, new=nothing) = begin
   i.color = colours.ink
   i.text = basename(path)
   i.anchor, i.cursor = 0, length(isdir(path) ? i.text : title(path))
-  e.nodes[:renaming] = path
-  e.nodes[:renaming_at] = at
+  r = state_of(e, Renaming)
+  r.path = path
+  r.at = at
   got = focus(i)
   new === nothing || (state_of(e, NewlyMade).kind = new)
   got
 end
 
 "The path of the file that's being renamed in `at`, the `:sidebar` or the `:title`. It's \"\" when none is."
-renaming(e, at) = get(e.nodes, :renaming_at, :sidebar) == at ? get(e.nodes, :renaming, "") : ""
+renaming(e, at) = (r = state_of(e, Renaming); r.at == at ? something(r.path, "") : "")
 
 """
 Take the text field away. The keyboard goes back to the sidebar, or to the
 text when the field was in the top bar or was the name of a new page.
 """
 stop_rename!(e) = begin
-  delete!(e.nodes, :renaming)
+  r = state_of(e, Renaming)
+  r.path = nothing
   made = state_of(e, NewlyMade)
   new, made.kind = made.kind, nothing
-  at = pop!(e.nodes, :renaming_at, :sidebar)
+  at, r.at = r.at, :sidebar
   at == :desktop ? focus_desktop!(e) : at == :title || new == :page ? focus(e) : focus(file_tree(e))
 end
 
@@ -239,10 +247,11 @@ end
 "A click somewhere else while a file is renamed gives the file the name that's typed"
 ended_rename!(e) = begin
   w = window_of(e)
-  (w === nothing || !haskey(e.nodes, :renaming) || w.focus === renamer(e)) && return
+  r = state_of(e, Renaming)
+  (w === nothing || r.path === nothing || w.focus === renamer(e)) && return
   finish_rename!(e)
-  delete!(e.nodes, :renaming)
-  delete!(e.nodes, :renaming_at)
+  r.path = nothing
+  r.at = :sidebar
   state_of(e, NewlyMade).kind = nothing
   nothing
 end
@@ -255,7 +264,7 @@ name is only part of the name. It's false when another file or folder has
 that name already, and then nothing changes.
 """
 finish_rename!(e) = begin
-  old = get(e.nodes, :renaming, "")
+  old = something(state_of(e, Renaming).path, "")
   name = String(strip(renamer(e).text))
   (isempty(old) || isempty(name) || occursin('/', name)) && return true
   ending = isdir(old) ? "" : splitext(old)[2]

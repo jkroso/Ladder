@@ -42,7 +42,7 @@
 @use "./folder_kinds" exports...
 @use "./git_page" keep_saying! said_result unsay_result!
 
-export COPY_ADDRESSES, COPY_MARK, GOT_MARK, PAGE_WAIT, PageAsked, RELOAD_ASKER, SHOWN_BLOCKS,
+export COPY_ADDRESSES, COPY_MARK, GOT_MARK, PAGE_WAIT, PageAsked, PageAsking, RELOAD_ASKER, SHOWN_BLOCKS,
        ask_reload!, fingerprint, forget_view_copies!, got_mark, land_page!, mark_copy!, mark_file!,
        navigate!, navigate_place, open_in_browser!, place_label, reads_here, reload_page!,
        reload_panel, remote_tick!, saved_page, show_page!, take_page!, typed_path, unsay_getting!,
@@ -352,6 +352,11 @@ mutable struct PageAsked
   since::Float64       # when it was asked for
 end
 
+"What a window keeps of the page that it has asked a web server for"
+Base.@kwdef mutable struct PageAsking
+  asked::Union{Nothing,PageAsked} = nothing   # the page that's on its way, or nothing
+end
+
 """
 Ask the server for the page at `address`, and show it in the window of `e`.
 A page that the browser folder has already shows at once, and what the
@@ -372,7 +377,7 @@ get_page!(e, address; record=true, else_browser=false, again=false, reload=false
     isempty(heading) || go_heading!(e, saved, heading)
     record, again = false, true
   end
-  e.nodes[:page_asked] = PageAsked(address, nothing, record, else_browser, again, reload, time())
+  state_of(e, PageAsking).asked = PageAsked(address, nothing, record, else_browser, again, reload, time())
   redraw_in!(e, 0)
   e
 end
@@ -383,8 +388,8 @@ const PAGE_WAIT = 0.4
 "Look whether the page that the window of `e` asked a web server for has come, and show it when it has. Each frame calls this."
 remote_tick!(e) = begin
   isempty(WEB_FOLDER_PAGES) || web_folders_tick!(e)
-  a = get(e.nodes, :page_asked, nothing)
-  a isa PageAsked || return nothing
+  a = state_of(e, PageAsking).asked
+  a === nothing && return nothing
   if a.coming === nothing
     page_online(e) || return nothing   # a window that isn't on the screen yet asks once it is
     a.coming = Remote.ask(a.address, getter=(args...) -> PAGE_GETTER[](args...))
@@ -400,7 +405,7 @@ remote_tick!(e) = begin
     redraw_in!(e, 0.05)
     return nothing
   end
-  delete!(e.nodes, :page_asked)
+  state_of(e, PageAsking).asked = nothing
   Remote.ismarkdown(got) && ask_web_folders!(got.address)   # a page that moved is in other folders
   land_page!(e, a, got)
   redraw_in!(e, 0)

@@ -49,7 +49,7 @@
 @use "./folder_page" exports...
 
 export terminals, term_colour, term_mix, term_palette, TERM_BELLS, term_setting!, term_settings_text,
-       read_term_setting!, term_part, term_tick!, close_terminals!
+       read_term_setting!, term_part, term_tick!, close_terminals!, Terminals
 
 "True when the page shows a terminal's file at one of its levels: as the terminal, its text, its bytes in hexadecimal or its bits"
 term_page(b::Buffer) = b.view in FILE_VIEWS && lowercase(splitext(b.path)[2]) in TERMINALS && isfile(b.path)
@@ -57,8 +57,15 @@ term_page(b::Buffer) = b.view in FILE_VIEWS && lowercase(splitext(b.path)[2]) in
 "True when the page shows a terminal's file as the terminal"
 term_shown(e) = e.buf.view == :file && hosted(e) === nothing && term_page(e.buf)
 
+@use "github.com/jkroso/Prospects.jl" @def
+
+"The terminals of a window"
+@def mutable struct Terminals
+  list::Vector{Terms.TerminalView} = Terms.TerminalView[]   # one for each terminal's file that the window has shown and that's still there
+end
+
 "The terminals of the window of `e`: one for each terminal's file that it has shown and that's still there"
-terminals(e) = get!(() -> Any[], e.nodes, :terminals)
+terminals(e) = state_of(e, Terminals).list
 
 "A colour as the terminal's view takes it: its red, green and blue, a byte each"
 term_colour(c::Colorant) = (c = convert(RGBA{Float64}, c); UInt32(round(Int, 255c.r)) << 16 | UInt32(round(Int, 255c.g)) << 8 | UInt32(round(Int, 255c.b)))
@@ -165,7 +172,7 @@ terminal that isn't shown gives the keyboard back, as when ⌘E shows its
 file's text. One whose file has gone ends.
 """
 term_tick!(e) = begin
-  haskey(e.nodes, :terminals) || return
+  isempty(terminals(e)) && return
   shown = term_shown(e) ? get(e.nodes, (:term, e.buf.path), nothing) : nothing
   w = window_of(e)
   for v in copy(terminals(e))
@@ -186,7 +193,7 @@ end
 
 "End the shell of every terminal of the window of `e`, and write its file: the window has closed"
 close_terminals!(e) = begin
-  haskey(e.nodes, :terminals) || return
+  isempty(terminals(e)) && return
   foreach(Terms.close!, terminals(e))
   empty!(terminals(e))
   nothing

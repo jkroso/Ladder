@@ -75,7 +75,7 @@
 @use "./sidebar" exports...
 
 export WELCOME, closes_to, current_folder, describe_window, leave_page!, window_body, window_over,
-       window_view
+       window_view, OpenedOn, TextObjectKept
 
 # --- the app -------------------------------------------------------------------------
 
@@ -152,9 +152,16 @@ open_on_folder!(e, path) = begin
   e.folder = path
   list_files!(e)
   isempty(e.files) ? show_beside!(e, path) : open!(e, e.files[1])
-  e.nodes[:opened_on] = (path, e.buf.path)
+  state_of(e, OpenedOn).place = (path, e.buf.path)
   show_opened!(e)
   e
+end
+
+@use "github.com/jkroso/Prospects.jl" @def
+
+"The folder that a window was opened on, until the window shows it in the page or shows another file"
+@def mutable struct OpenedOn
+  place::Union{Nothing,Tuple{String,String}} = nothing   # the folder and the file that showed when the window opened on it, or nothing
 end
 
 """
@@ -164,13 +171,14 @@ plain until that page has run, so the window asks again then. A window that
 shows another file by then keeps that file.
 """
 show_opened!(e) = begin
-  on = get(e.nodes, :opened_on, nothing)
+  opened = state_of(e, OpenedOn)
+  on = opened.place
   on === nothing && return
   path, was = on
-  (e.folder == path && e.buf.path == was) || return (delete!(e.nodes, :opened_on); nothing)
+  (e.folder == path && e.buf.path == was) || return (opened.place = nothing; nothing)
   d = directory(e)
   (d isa AbstractDirectory && !(d isa FS.Directory) && page_first(e, d) && page_view(e, d) !== nothing) || return
-  delete!(e.nodes, :opened_on)
+  opened.place = nothing
   open!(e, d)
   nothing
 end
@@ -371,6 +379,11 @@ folder's files as the list that the folder has on the Mac.
 """
 table_view(e, d, o, from, to) = nothing
 
+"The object of the page of text that a window shows, as it was last found"
+@def mutable struct TextObjectKept
+  found::Union{Nothing,Tuple{String,Float64,Any}} = nothing   # the page's path, when its object was looked for, and the object or nothing
+end
+
 """
 The object of the page of text that shows, or nothing. One that the sidebar
 doesn't list is found again after a second, and not in each frame. A page
@@ -380,10 +393,11 @@ text_object(e) = begin
   path = e.buf.path
   (at = web_address(path); isempty(at)) || return web_page(at)
   haskey(e.entries, path) && return e.entries[path]
-  kept = get(e.nodes, :text_object, nothing)
+  s = state_of(e, TextObjectKept)
+  kept = s.found
   kept !== nothing && kept[1] == path && time() - kept[2] < 1 && return kept[3]
   o = try object(e, path) catch; nothing end
-  e.nodes[:text_object] = (path, time(), o)
+  s.found = (path, time(), o)
   o
 end
 

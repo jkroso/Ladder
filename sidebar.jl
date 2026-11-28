@@ -41,7 +41,7 @@
 
 export COMPONENTS, LAYOUTS, PanelEdge, SIDEBAR_GUIDES, SIDEBAR_ICONS, TRAIL_ARROW, TRAIL_GAP,
        TRAIL_PAD, TRAIL_SIZE, TrailName, chose!, edited, edited_entries, go_entry!, goes, outline!,
-       page_elsewhere, panel_edge, show_folder!, show_open_file!, trail_names
+       page_elsewhere, panel_edge, show_folder!, show_open_file!, trail_names, SidebarTree
 
 # --- the sidebar --------------------------------------------------------------------------
 
@@ -360,6 +360,12 @@ here(e, tree) = begin
   at === nothing ? group : items(group)[at]
 end
 
+"What a window keeps of the tree in its sidebar, between frames"
+@def mutable struct SidebarTree
+  open::Union{Nothing,Tree.TreeItem} = nothing   # the item of the file that shows, whose group the sidebar last opened, or nothing
+  at::Union{Nothing,Tree.TreeItem} = nothing     # the item that the tree marked in the last frame, or nothing
+end
+
 """
 Open the group of the file that shows, so the sidebar lists its headings, and
 close the group of the file that showed before. It's done once each time
@@ -371,11 +377,12 @@ show_open_file!(e, tree) = begin
   listed = collect(tree.children)
   i = findfirst(item -> item.firstchild.path == e.buf.path, listed)
   shown = i === nothing ? nothing : listed[i]
-  before = get(e.nodes, :open_file, nothing)
+  kept = state_of(e, SidebarTree)
+  before = kept.open
   shown === before && return
   before isa Tree.ItemGroup && (before.collapsed = true)
   shown isa Tree.ItemGroup && (shown.collapsed = false)
-  e.nodes[:open_file] = shown
+  kept.open = shown
 end
 
 "Make the sidebar's tree show the folder's files and the headings of each file that's open in it"
@@ -404,13 +411,13 @@ fill_tree!(e, tree) = begin
     tree.focused = here(e, tree)
   elseif !any(item -> item === tree.focused, shown)
     tree.focused = something(here(e, tree), get(shown, 1, nothing), Some(nothing))
-  elseif tree.focused !== get(e.nodes, :tree_at, nothing)
+  elseif tree.focused !== state_of(e, SidebarTree).at
     # An arrow key moved to another item. Keep it in sight.
     high = Tree.ROW_HEIGHT   # the height of a row while the theme's text has its usual size, as the sidebar's has
     row = findfirst(item -> item === tree.focused, shown)
     scroll_into_view!(e.files_scroll, high * (row - 1), high * row)
   end
-  e.nodes[:tree_at] = tree.focused
+  state_of(e, SidebarTree).at = tree.focused
   tree
 end
 

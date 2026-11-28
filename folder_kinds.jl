@@ -43,7 +43,8 @@ export ask_web_folders!, FOLDER_PAGE_KINDS, folder_page_lines, FOLDER_PAGE_STOPP
        OWN_KINDS, page_kind, pages_callable, PLACE_KINDS, SITE_KINDS, run_folder_pages!, run_web_folder_pages!,
        show_folder_as!, site_answers, SITE_ANSWERS, SITE_ASKER, site_runs!, sites_file,
        stop_trusting_site!, trust_bar, trust_panel, trust_site!, typed_as, WEB_FOLDER_PAGES,
-       web_folders_tick!, web_page, WEB_PAGES_DUE, WebFolderPage, FoundObject, find_object_again!
+       web_folders_tick!, web_page, WEB_PAGES_DUE, WebFolderPage, FoundObject, find_object_again!,
+       FolderPagesSeen
 
 # --- a folder's own page ----------------------------------------------------------------
 #
@@ -192,10 +193,16 @@ end
 "Find the object of what the page of `e` shows again, the next time that something asks for it"
 find_object_again!(e) = (state_of(e, FoundObject).found = nothing; e)
 
+"What a window keeps of the folders that have pages of their own"
+@def mutable struct FolderPagesSeen
+  ran::Int = 0   # how many times the folders' pages had run when the window last listed its folder: see FOLDER_PAGES_RAN
+end
+
 "List the sidebar's folder again when the kind of a folder with a page can have changed since the window last listed it"
 folder_pages_tick!(e) = begin
-  (get(e.nodes, :folder_pages, 0) == FOLDER_PAGES_RAN[] || !pages_callable()) && return
-  e.nodes[:folder_pages] = FOLDER_PAGES_RAN[]
+  s = state_of(e, FolderPagesSeen)
+  (s.ran == FOLDER_PAGES_RAN[] || !pages_callable()) && return
+  s.ran = FOLDER_PAGES_RAN[]
   list_files!(e)
   find_object_again!(e)   # the folder that the page shows is found again too
   show_opened!(e)   # a window that was opened on a folder shows it in the page, if its page said that its kind does

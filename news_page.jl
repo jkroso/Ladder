@@ -96,7 +96,7 @@ export COMPANION_IN_TEST, COMPANION_START, FEEDS_ASKED, FEEDS_COMING, FEEDS_SAID
        news_options, news_prune!, news_read!, news_rule, news_runs, news_sheet, news_spread,
        news_start!, news_status, news_story, news_story!, news_story_act!, news_text, news_tick!,
        news_width, news_words, open_feeds!, open_interests!, open_news!, show_feeds!,
-       show_interests!, stop_companion!, stop_news!
+       show_interests!, stop_companion!, stop_news!, NewsShown
 
 "A folder of news: a page that says the kinds of news that you want, and a folder for each day's articles. See \"a folder of news\"."
 @def struct NewsDirectory <: AbstractDirectory end
@@ -876,12 +876,18 @@ news_empty(e, v::NewsPage, z) = begin
     Box(width(max=560px * z, grow=grow), news_text(says[2], 16px * z, color=colours.dim, align=TextAlign.Center)))
 end
 
+"When a window last drew the front page of the news"
+@def mutable struct NewsShown
+  at::Float64 = 0.0   # the time of the last frame that drew it, or 0 before the first
+end
+
 describe(v::NewsPage) = begin
   e = editor(v)
   news_read!(e, v)
   news_auto!(e, v)
   # The front page draws at least every two seconds, so a longer gap means that it has just opened
-  shown, e.nodes[:news_shown] = get(e.nodes, :news_shown, 0.0), time()
+  seen = state_of(e, NewsShown)
+  shown, seen.at = seen.at, time()
   !v.day && time() - shown > 10 && news_companion!(e, v.path)
   redraw_in!(e, 2)   # the folder is read again, so a new article gets its story
   z = e.zoom
