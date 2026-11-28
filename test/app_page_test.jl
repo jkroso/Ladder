@@ -9,6 +9,7 @@
 @use "../main" => K
 @use "github.com/jkroso/MiniFB.jl" Window Typed Keys ontype KeyPress
 @use "github.com/jkroso/UI.jl/Interface/draw" frame rect
+@use "./drive" drive
 const px = K.px
 
 const dir = mktempdir()
@@ -18,7 +19,7 @@ write(page, "# Jobs\n\n- [ ] Dig the trench\n- [ ] Lay the pipe\n\n```board\n```
 
 const e = K.build_editor(page)
 const w = Window(e, size=(900px, 600px))
-frames(win=w, n=3) = foreach(_ -> Base.invokelatest(frame, win), 1:n)
+const (; frames) = drive(w, frames=3, latest=true)
 frames()
 
 @testset "the window has only the page" begin

@@ -7,6 +7,7 @@
 @use "../main" => K
 @use "github.com/jkroso/MiniFB.jl" Window KeyPress Keys onkey Typed ontype
 @use "github.com/jkroso/UI.jl/Interface/draw" frame rect
+@use "./drive" drive
 const px = K.px
 
 const dir = mktempdir()
@@ -25,24 +26,8 @@ window(text; name="page.md", size=(900px, 700px)) = begin
   e, w
 end
 
-"Press the key `k` in window `w` with the keys `held` down"
-press(w, k, held...) = begin
-  foreach(h -> w.keys |= h, held)
-  onkey(w, KeyPress{k}(0, w))
-  foreach(h -> w.keys ⊻= h, held)
-  frame(w)
-end
+const (; click, key) = drive()
 caret!(e, w, line, col=0) = (e.buf.caret = e.buf.anchor = (line, col); K.touch!(e); frame(w))
-click(w, x, y) = begin
-  w.mouse = typeof(w.mouse)(px(x), px(y))
-  frame(w)
-  w.keys |= Keys.mouse_left
-  onkey(w, KeyPress{Keys.mouse_left}(0, w))
-  w.keys ⊻= Keys.mouse_left
-  frame(w); frame(w)
-end
-"Click the middle of the part of the window that `node` is drawn in, or a point `dx` from its right edge"
-click(w, node; dx=nothing) = (r = rect(node); click(w, K.num(dx === nothing ? r.left + r.width / 2 : r.left + r.width - dx), K.num(r.top + r.height / 2)))
 const cmd, ctrl, opt, shift = Keys.cmd, Keys.ctrl, Keys.opt, Keys.shft
 
 @testset "a shortcut reads back from the text that the settings file has for it" begin
@@ -87,51 +72,51 @@ end
   e, w = window("one two three\nfour five six\nseven")
   b = e.buf
   caret!(e, w, 1, 0)
-  press(w, Keys.right); press(w, Keys.right)
+  key(w, Keys.right); key(w, Keys.right)
   @test b.caret == (1, 2) && b.anchor == (1, 2)
-  press(w, Keys.right, opt)
+  key(w, Keys.right, opt)
   @test b.caret == (1, 3)
-  press(w, Keys.right, cmd)
+  key(w, Keys.right, cmd)
   @test b.caret == (1, 13)
-  press(w, Keys.left, cmd, shift)                 # ⇧ grows the selection
+  key(w, Keys.left, cmd, shift)                 # ⇧ grows the selection
   @test b.caret == (1, 0) && b.anchor == (1, 13)
-  press(w, Keys.right)                            # with no ⇧, → goes to that end of the selection
+  key(w, Keys.right)                            # with no ⇧, → goes to that end of the selection
   @test b.caret == (1, 13) && b.anchor == (1, 13)
-  press(w, Keys.down); press(w, Keys.home)
+  key(w, Keys.down); key(w, Keys.home)
   @test b.caret == (2, 0)
-  press(w, Keys.right, opt, shift)
+  key(w, Keys.right, opt, shift)
   @test K.excerpt(b, K.selection(b)...) == "four"
-  press(w, Keys.b, cmd)
+  key(w, Keys.b, cmd)
   @test b.lines[2] == "**four** five six"
-  press(w, Keys.z, cmd)
+  key(w, Keys.z, cmd)
   @test b.lines[2] == "four five six"
-  press(w, Keys.z, cmd, shift)
+  key(w, Keys.z, cmd, shift)
   @test b.lines[2] == "**four** five six"
-  press(w, Keys.down, cmd)
+  key(w, Keys.down, cmd)
   @test b.caret == (3, 5)
-  press(w, Keys.backspace, opt)
+  key(w, Keys.backspace, opt)
   @test b.lines[3] == ""
-  press(w, Keys.a, cmd)
+  key(w, Keys.a, cmd)
   @test K.selection(b) == ((1, 0), (3, 0))
-  press(w, Keys.up, cmd)
+  key(w, Keys.up, cmd)
   @test b.caret == (1, 0)
   # ⇧ with ⌫ is still ⌫, and a key with ⇧ that has no command of its own does nothing
   caret!(e, w, 1, 3)
-  press(w, Keys.backspace, shift)
+  key(w, Keys.backspace, shift)
   @test b.lines[1] == "on two three"
   before = copy(b.lines)
-  press(w, Keys.s, cmd, shift, opt)
+  key(w, Keys.s, cmd, shift, opt)
   @test b.lines == before && K.dirty(b)
-  press(w, Keys.s, cmd)
+  key(w, Keys.s, cmd)
   @test !K.dirty(b)
   # Return, Tab and ⌘\ still work
   caret!(e, w, 1, 2)
-  press(w, Keys.enter)
+  key(w, Keys.enter)
   @test b.lines[1:2] == ["on", " two three"]
   @test !e.panel
-  press(w, Keys.backslash, cmd)
+  key(w, Keys.backslash, cmd)
   @test e.panel
-  press(w, Keys.backslash, cmd)
+  key(w, Keys.backslash, cmd)
   @test !e.panel
 end
 
@@ -141,29 +126,29 @@ end
   tab = K.indentation(e, K.CodeBlock)
   # In code, from the middle of a word, as in the startup page's `  Books.start(Ladder)`
   caret!(e, w, 3, 4)
-  press(w, Keys.left_bracket, cmd)
+  key(w, Keys.left_bracket, cmd)
   @test b.lines[3] == "bar()" && b.caret == (3, 2)
-  press(w, Keys.left_bracket, cmd)                 # a line with no indent stays
+  key(w, Keys.left_bracket, cmd)                 # a line with no indent stays
   @test b.lines[3] == "bar()" && b.caret == (3, 2)
-  press(w, Keys.right_bracket, cmd)
+  key(w, Keys.right_bracket, cmd)
   @test b.lines[3] == tab * "bar()" && b.caret == (3, 2 + length(tab))
   # Each line of a selection moves, and the fence doesn't
   b.anchor, b.caret = (1, 2), (3, 1); K.touch!(e); frame(w)
-  press(w, Keys.right_bracket, cmd)
+  key(w, Keys.right_bracket, cmd)
   @test b.lines[1:3] == ["```python", tab * "foo()", tab * tab * "bar()"]
-  press(w, Keys.left_bracket, cmd)
-  press(w, Keys.left_bracket, cmd)
+  key(w, Keys.left_bracket, cmd)
+  key(w, Keys.left_bracket, cmd)
   @test b.lines[1:3] == ["```python", "foo()", "bar()"]
   # In a list, the item moves a level
   caret!(e, w, 7, 4)
-  press(w, Keys.left_bracket, cmd)
+  key(w, Keys.left_bracket, cmd)
   @test b.lines[7] == "- b" && b.caret == (7, 2)
-  press(w, Keys.right_bracket, cmd)
+  key(w, Keys.right_bracket, cmd)
   @test b.lines[7] == "  - b" && b.caret == (7, 4)
   # A paragraph has no steps, and the keys type nothing in it
   caret!(e, w, 9, 4)
-  press(w, Keys.right_bracket, cmd)
-  press(w, Keys.left_bracket, cmd)
+  key(w, Keys.right_bracket, cmd)
+  key(w, Keys.left_bracket, cmd)
   @test b.lines[9] == "Some words"
 end
 
@@ -176,9 +161,9 @@ end
   @test K.keys_now(e).also[first(K.read_shortcuts("cmd+right_bracket"))] == [:test_next]
   # On a page that you can change, Ladder's ⌘] has a use, and it moves the line in
   caret!(e, w, 2, 4)
-  press(w, Keys.right_bracket, cmd)
+  key(w, Keys.right_bracket, cmd)
   @test b.lines[2] != "  - b" && went[] == 0
-  press(w, Keys.left_bracket, cmd)
+  key(w, Keys.left_bracket, cmd)
   @test b.lines[2] == "  - b"
   # On a page that you can't change, like an email or a file that the Mac marks as read-only, Ladder's ⌘] has
   # none, so the other command runs
@@ -190,7 +175,7 @@ end
   frame(ow); frame(ow)
   K.focus(o)
   @test o.buf.fixed
-  press(ow, Keys.right_bracket, cmd)
+  key(ow, Keys.right_bracket, cmd)
   @test went[] == 1 && o.buf.lines[2] == "  - b"
   # A key that only one command has goes to it, as it always did, though it has no use here
   ks = K.keys_now(o)
@@ -206,42 +191,42 @@ end
   e, w = window("a\nb\nc\nd")
   b = e.buf
   caret!(e, w, 2, 1)
-  press(w, Keys.right_bracket, cmd, opt)          # the line goes down, and the caret goes with it
+  key(w, Keys.right_bracket, cmd, opt)          # the line goes down, and the caret goes with it
   @test b.lines == ["a", "c", "b", "d"] && b.caret == (3, 1)
-  press(w, Keys.left_bracket, cmd, opt)
-  press(w, Keys.left_bracket, cmd, opt)
+  key(w, Keys.left_bracket, cmd, opt)
+  key(w, Keys.left_bracket, cmd, opt)
   @test b.lines == ["b", "a", "c", "d"] && b.caret == (1, 1)
-  press(w, Keys.left_bracket, cmd, opt)           # the first line has nowhere to go
+  key(w, Keys.left_bracket, cmd, opt)           # the first line has nowhere to go
   @test b.lines == ["b", "a", "c", "d"]
-  press(w, Keys.d, cmd, shift)
+  key(w, Keys.d, cmd, shift)
   @test b.lines == ["b", "b", "a", "c", "d"] && b.caret == (2, 1)
-  press(w, Keys.k, cmd, shift)
+  key(w, Keys.k, cmd, shift)
   @test b.lines == ["b", "a", "c", "d"] && b.caret == (2, 1)
   # ⌘⇧L selects the line, and again takes the next line too. The lines that are selected move together.
   caret!(e, w, 2, 0)
-  press(w, Keys.l, cmd, shift)
+  key(w, Keys.l, cmd, shift)
   @test (b.anchor, b.caret) == ((2, 0), (3, 0))
   @test K.touched(b) == (2, 2)
-  press(w, Keys.l, cmd, shift)
+  key(w, Keys.l, cmd, shift)
   @test (b.anchor, b.caret) == ((2, 0), (4, 0))
-  press(w, Keys.left_bracket, cmd, opt)
+  key(w, Keys.left_bracket, cmd, opt)
   @test b.lines == ["a", "c", "b", "d"]
   @test K.touched(b) == (1, 2)
-  press(w, Keys.k, cmd, shift)
+  key(w, Keys.k, cmd, shift)
   @test b.lines == ["b", "d"]
   # The last line of the page goes too, and one ⌘Z brings a deleted line back
   caret!(e, w, 2, 1)
-  press(w, Keys.k, cmd, shift)
+  key(w, Keys.k, cmd, shift)
   @test b.lines == ["b"] && b.caret == (1, 1)
-  press(w, Keys.z, cmd)
+  key(w, Keys.z, cmd)
   @test b.lines == ["b", "d"]
   # ⌃K takes away the rest of the line, and at the end of a line it joins the next line to it
   e, w = window("alpha beta\ngamma")
   b = e.buf
   caret!(e, w, 1, 5)
-  press(w, Keys.k, ctrl)
+  key(w, Keys.k, ctrl)
   @test b.lines == ["alpha", "gamma"]
-  press(w, Keys.k, ctrl)
+  key(w, Keys.k, ctrl)
   @test b.lines == ["alphagamma"]
 end
 
@@ -250,38 +235,38 @@ end
   b = e.buf
   picked() = K.excerpt(b, K.selection(b)...)
   caret!(e, w, 1, 6)                              # in the middle of a word
-  press(w, Keys.d, cmd)
+  key(w, Keys.d, cmd)
   @test (b.anchor, b.caret) == ((1, 4), (1, 9)) && picked() == "two_3"
   for col in (0, 3)                               # at the start of a word, and at its end
     caret!(e, w, 1, col)
-    press(w, Keys.d, cmd)
+    key(w, Keys.d, cmd)
     @test picked() == "one"
   end
   caret!(e, w, 2, 4)
-  press(w, Keys.d, cmd)
+  key(w, Keys.d, cmd)
   @test picked() == "don't"
   # With part of a word selected, each end goes out to the edge of its word
   b.anchor, b.caret = (1, 5), (2, 3)
-  press(w, Keys.d, cmd)
+  key(w, Keys.d, cmd)
   @test (b.anchor, b.caret) == ((1, 4), (2, 7))
   # With no word at the caret, nothing changes. The text of the last line starts after its "+ ", which doesn't show.
   for at in ((3, 0), (4, 2))
     caret!(e, w, at...)
-    press(w, Keys.d, cmd)
+    key(w, Keys.d, cmd)
     @test b.anchor == b.caret == at
   end
   # Every bundle has it on ⌘D. Emacs has it on ⌥⇧2 as well.
   for (bundle, _) in K.BUNDLES
     e.bundle = bundle
     caret!(e, w, 1, 12)
-    press(w, Keys.d, cmd)
+    key(w, Keys.d, cmd)
     @test picked() == "three" && b.lines[1] == "one two_3 three"
   end
   # ⌘⇧D copies the line now, in the bundles of Ladder and Sublime Text
   @test K.caps.(K.bundle_keys("Ladder")[:duplicate_line]) == K.caps.(K.bundle_keys("Sublime Text")[:duplicate_line]) == ["⌘⇧D"]
   e.bundle = "Emacs"
   caret!(e, w, 1, 1)
-  press(w, K.read_shortcuts("opt+shift+2")[1][1].key, opt, shift)
+  key(w, K.read_shortcuts("opt+shift+2")[1][1].key, opt, shift)
   @test picked() == "one"
 end
 
@@ -290,37 +275,37 @@ end
   b = e.buf
   spans() = sort([K.selection(b); [minmax(s...) for s in K.others(b)]])
   caret!(e, w, 1, 1)
-  press(w, Keys.d, cmd)
+  key(w, Keys.d, cmd)
   @test spans() == [((1, 0), (1, 3))]
-  press(w, Keys.d, cmd)                           # the next one is selected too, and the caret goes to it
+  key(w, Keys.d, cmd)                           # the next one is selected too, and the caret goes to it
   @test spans() == [((1, 0), (1, 3)), ((1, 8), (1, 11))] && b.caret == (1, 11)
-  press(w, Keys.d, cmd)                           # "catalog" has the letters, and isn't the word
+  key(w, Keys.d, cmd)                           # "catalog" has the letters, and isn't the word
   @test b.caret == (2, 11)
-  press(w, Keys.d, cmd)                           # nor is "Cat"
+  key(w, Keys.d, cmd)                           # nor is "Cat"
   @test b.caret == (4, 7)
   all4 = [((1, 0), (1, 3)), ((1, 8), (1, 11)), ((2, 8), (2, 11)), ((4, 4), (4, 7))]
   @test spans() == all4
-  press(w, Keys.d, cmd)                           # every place is selected, so nothing changes
+  key(w, Keys.d, cmd)                           # every place is selected, so nothing changes
   @test spans() == all4
   # What's typed goes in at each of them
   ontype(w, Typed('o', w)); ontype(w, Typed('x', w)); frame(w)
   @test b.lines == ["ox dog ox", "catalog ox", "", "Cat ox."]
   @test spans() == [((1, 2), (1, 2)), ((1, 9), (1, 9)), ((2, 10), (2, 10)), ((4, 6), (4, 6))]
   # ⌫ and the keys that go along the line work at each of them too
-  press(w, Keys.backspace)
+  key(w, Keys.backspace)
   @test b.lines == ["o dog o", "catalog o", "", "Cat o."]
-  press(w, Keys.left)
+  key(w, Keys.left)
   ontype(w, Typed('b', w)); frame(w)
   @test b.lines == ["bo dog bo", "catalog bo", "", "Cat bo."]
-  press(w, Keys.right, shift)
+  key(w, Keys.right, shift)
   @test spans() == [((1, 1), (1, 2)), ((1, 8), (1, 9)), ((2, 9), (2, 10)), ((4, 5), (4, 6))]
   # One ⌘Z takes back what was done at all of them, and they're all still selected
-  press(w, Keys.backspace)
+  key(w, Keys.backspace)
   @test b.lines == ["b dog b", "catalog b", "", "Cat b."]
-  press(w, Keys.z, cmd)
+  key(w, Keys.z, cmd)
   @test b.lines == ["bo dog bo", "catalog bo", "", "Cat bo."] && length(K.others(b)) == 3
   # Escape leaves the selection that was there first, and the caret still shows
-  press(w, Keys.escape)
+  key(w, Keys.escape)
   @test isempty(K.others(b)) && !b.reading
   @test (b.anchor, b.caret) == ((1, 1), (1, 2))
   ontype(w, Typed('!', w)); frame(w)
@@ -329,35 +314,35 @@ end
   e, w = window("cat dog cat\ncat")
   b = e.buf
   caret!(e, w, 1, 9)
-  press(w, Keys.d, cmd); press(w, Keys.d, cmd); press(w, Keys.d, cmd)
+  key(w, Keys.d, cmd); key(w, Keys.d, cmd); key(w, Keys.d, cmd)
   @test b.caret == (1, 3) && length(K.others(b)) == 2
-  press(w, Keys.escape)
+  key(w, Keys.escape)
   @test isempty(K.others(b)) && (b.anchor, b.caret) == ((1, 8), (1, 11))
   # A key that isn't done at each of them leaves the one caret
   e, w = window("a b a\nb")
   b = e.buf
   caret!(e, w, 1, 0)
-  press(w, Keys.d, cmd); press(w, Keys.d, cmd)
+  key(w, Keys.d, cmd); key(w, Keys.d, cmd)
   @test length(K.others(b)) == 1
-  press(w, Keys.down)
+  key(w, Keys.down)
   @test isempty(K.others(b))
   # Return starts a new line at each of them, and the ones after it move down
   caret!(e, w, 1, 0)
-  press(w, Keys.d, cmd); press(w, Keys.d, cmd)
-  press(w, Keys.right)
-  press(w, Keys.enter)
+  key(w, Keys.d, cmd); key(w, Keys.d, cmd)
+  key(w, Keys.right)
+  key(w, Keys.enter)
   @test b.lines == ["a", " b a", "", "b"]
   @test spans() == [((2, 0), (2, 0)), ((3, 0), (3, 0))]
   # Text that isn't one word is found wherever it is, and the search goes round to the top of the page
   e, w = window("x a+b\na+b a+b.")
   b = e.buf
   b.anchor, b.caret = (2, 4), (2, 7)
-  press(w, Keys.d, cmd)
+  key(w, Keys.d, cmd)
   @test spans() == [((1, 2), (1, 5)), ((2, 4), (2, 7))] && b.caret == (1, 5)
-  press(w, Keys.d, cmd)
+  key(w, Keys.d, cmd)
   @test spans() == [((1, 2), (1, 5)), ((2, 0), (2, 3)), ((2, 4), (2, 7))]
   # ⌘B makes each of them bold
-  press(w, Keys.b, cmd)
+  key(w, Keys.b, cmd)
   @test b.lines == ["x **a+b**", "**a+b** **a+b**."]
 end
 
@@ -366,33 +351,33 @@ end
   b = e.buf
   @test b.view == :code
   caret!(e, w, 2, 4)
-  press(w, Keys.slash, cmd)
+  key(w, Keys.slash, cmd)
   @test b.lines[2] == "  # a = 1" && b.caret == (2, 6)
-  press(w, Keys.slash, cmd)
+  key(w, Keys.slash, cmd)
   @test b.lines[2] == "  a = 1" && b.caret == (2, 4)
   # Each line that's selected gets its mark at the indent of the one that's furthest out. An empty line stays empty.
   b.anchor, b.caret = (2, 0), (4, 3)
-  press(w, Keys.slash, cmd)
+  key(w, Keys.slash, cmd)
   @test b.lines[2:4] == ["  # a = 1", "", "  #   b = 2"]
-  press(w, Keys.z, cmd)                           # one ⌘Z puts every line back
+  key(w, Keys.z, cmd)                           # one ⌘Z puts every line back
   @test b.lines[2:4] == ["  a = 1", "", "    b = 2"]
   # A mark with no space after it comes off too
   b.lines[2] = "  #a = 1"
   b.version += 1
   caret!(e, w, 2, 0)
-  press(w, Keys.slash, cmd)
+  key(w, Keys.slash, cmd)
   @test b.lines[2] == "  a = 1"
   # On a page, code has comments and text has none
   e, w = window("Some text\n\n```julia\nx = 1\n```\n\n```js\nlet y = 2\n```\n")
   b = e.buf
   caret!(e, w, 4, 0)
-  press(w, Keys.slash, cmd)
+  key(w, Keys.slash, cmd)
   @test b.lines[4] == "# x = 1"
   caret!(e, w, 8, 0)
-  press(w, Keys.slash, cmd)
+  key(w, Keys.slash, cmd)
   @test b.lines[8] == "// let y = 2"
   caret!(e, w, 1, 0)
-  press(w, Keys.slash, cmd)
+  key(w, Keys.slash, cmd)
   @test b.lines[1] == "Some text"
 end
 
@@ -402,21 +387,21 @@ end
   K.bundle!(e, "VS Code")
   @test e.bundle == "VS Code"
   caret!(e, w, 1, 0)
-  press(w, Keys.down, opt)
+  key(w, Keys.down, opt)
   @test b.lines == ["b", "a", "c"] && b.caret == (2, 0)
-  press(w, Keys.up, opt)
+  key(w, Keys.up, opt)
   @test b.lines == ["a", "b", "c"]
-  press(w, Keys.down, opt, shift)                 # this has a command of its own, so it selects nothing
+  key(w, Keys.down, opt, shift)                 # this has a command of its own, so it selects nothing
   @test b.lines == ["a", "a", "b", "c"] && b.caret == b.anchor
-  press(w, Keys.p, cmd)                           # ⌘P finds a project, as in every bundle
+  key(w, Keys.p, cmd)                           # ⌘P finds a project, as in every bundle
   @test e.popup == :projects
-  press(w, Keys.escape)
+  key(w, Keys.escape)
   @test e.popup == :none
   @test_throws ErrorException K.bundle!(e, "Notepad")
   # The keys of the bundle called Ladder for a line don't move one here
   K.bundle!(e, "VS Code")
   caret!(e, w, 1, 0)
-  press(w, Keys.right_bracket, cmd, opt)
+  key(w, Keys.right_bracket, cmd, opt)
   @test b.lines == ["a", "a", "b", "c"]
 end
 
@@ -426,26 +411,26 @@ end
   K.bundle!(e, "Sublime Text")
   caret!(e, w, 1, 4)
   @test !e.panel
-  press(w, Keys.k, cmd)                           # the first key only waits
+  key(w, Keys.k, cmd)                           # the first key only waits
   @test !e.panel && b.lines == ["word"]
-  press(w, Keys.b, cmd)
+  key(w, Keys.b, cmd)
   @test e.panel && b.lines == ["word"]            # ⌘B after ⌘K isn't bold
   K.focus(e)
   b.anchor, b.caret = (1, 0), (1, 4)
-  press(w, Keys.b, cmd)                           # by itself it still is
+  key(w, Keys.b, cmd)                           # by itself it still is
   @test b.lines == ["**word**"]
   # A second key that ends no shortcut does nothing, and types nothing
-  press(w, Keys.z, cmd)
+  key(w, Keys.z, cmd)
   @test b.lines == ["word"]
   caret!(e, w, 1, 4)
-  press(w, Keys.k, cmd)
-  press(w, Keys.x)
+  key(w, Keys.k, cmd)
+  key(w, Keys.x)
   @test b.lines == ["word"]
-  press(w, Keys.x)                                # the key after that types as usual
+  key(w, Keys.x)                                # the key after that types as usual
   @test b.lines == ["wordx"]
-  press(w, Keys.k, cmd); press(w, Keys.k, cmd)    # ⌘K ⌘K deletes to the end of the line
+  key(w, Keys.k, cmd); key(w, Keys.k, cmd)    # ⌘K ⌘K deletes to the end of the line
   caret!(e, w, 1, 2)
-  press(w, Keys.k, cmd); press(w, Keys.k, cmd)
+  key(w, Keys.k, cmd); key(w, Keys.k, cmd)
   @test b.lines == ["wo"]
 end
 
@@ -454,59 +439,59 @@ end
   b = e.buf
   K.bundle!(e, "Emacs")
   caret!(e, w, 1, 0)
-  press(w, Keys.f, ctrl)
+  key(w, Keys.f, ctrl)
   @test b.caret == (1, 1)
-  press(w, Keys.f, opt)                           # ⌥F goes to the end of the word, and types no letter
+  key(w, Keys.f, opt)                           # ⌥F goes to the end of the word, and types no letter
   @test b.caret == (1, 3) && b.lines[1] == "one two"
-  press(w, Keys.e, ctrl)
+  key(w, Keys.e, ctrl)
   @test b.caret == (1, 7)
-  press(w, Keys.a, ctrl, shift)                   # ⇧ grows the selection with these keys too
+  key(w, Keys.a, ctrl, shift)                   # ⇧ grows the selection with these keys too
   @test (b.anchor, b.caret) == ((1, 7), (1, 0))
-  press(w, Keys.n, ctrl)
+  key(w, Keys.n, ctrl)
   @test b.caret[1] == 2
-  press(w, Keys.p, ctrl)
+  key(w, Keys.p, ctrl)
   @test b.caret[1] == 1
   caret!(e, w, 1, 0)
-  press(w, Keys.d, ctrl)
+  key(w, Keys.d, ctrl)
   @test b.lines[1] == "ne two"
-  press(w, Keys.x, ctrl); press(w, Keys.u)        # ⌃X then U undoes, and the U isn't typed
+  key(w, Keys.x, ctrl); key(w, Keys.u)        # ⌃X then U undoes, and the U isn't typed
   @test b.lines[1] == "one two"
-  press(w, Keys.z, cmd, shift)                    # the Mac's keys still work
+  key(w, Keys.z, cmd, shift)                    # the Mac's keys still work
   @test b.lines[1] == "ne two"
   @test K.dirty(b)
-  press(w, Keys.x, ctrl); press(w, Keys.s, ctrl)
+  key(w, Keys.x, ctrl); key(w, Keys.s, ctrl)
   @test !K.dirty(b)
-  press(w, Keys.s, ctrl)                          # ⌃S by itself finds: on a page, with the search in the top bar
+  key(w, Keys.s, ctrl)                          # ⌃S by itself finds: on a page, with the search in the top bar
   frame(w); frame(w)
   searching() = any(p -> p.key == K.TS_KEY, K.popups(w))
   @test searching()
-  press(w, Keys.escape)
+  key(w, Keys.escape)
   @test !searching()
   # A letter with no key held still types
   K.focus(e)
   caret!(e, w, 1, 0)
-  press(w, Keys.f)
+  key(w, Keys.f)
   @test b.lines[1] == "fne two"
 end
 
 @testset "while the page is read, the keys that move the caret scroll the page" begin
   e, w = window(join(["line $i" for i in 1:200], "\n\n"))
   b = e.buf
-  press(w, Keys.escape)
+  key(w, Keys.escape)
   @test b.reading
-  press(w, Keys.down)
+  key(w, Keys.down)
   @test e.scroll.offset == 50px
-  press(w, Keys.down, cmd)
+  key(w, Keys.down, cmd)
   @test e.scroll.offset > 1000px
-  press(w, Keys.home)
+  key(w, Keys.home)
   @test e.scroll.offset == 0px
-  press(w, Keys.backspace); press(w, Keys.tab); press(w, Keys.enter)
+  key(w, Keys.backspace); key(w, Keys.tab); key(w, Keys.enter)
   @test b.reading && !K.dirty(b)
   # With the Emacs bundle, its keys scroll the page too
   K.bundle!(e, "Emacs")
-  press(w, Keys.n, ctrl)
+  key(w, Keys.n, ctrl)
   @test e.scroll.offset == 50px
-  press(w, Keys.period, opt, shift)
+  key(w, Keys.period, opt, shift)
   @test e.scroll.offset > 1000px
 end
 
@@ -524,25 +509,25 @@ end
   # A click on a command's row waits for its new keys, and the next key with the keys held with it is the command's shortcut
   click(w, row(:save))
   @test K.key_asking(e) == :save && w.focus === row(:save)
-  press(w, Keys.s, ctrl)
+  key(w, Keys.s, ctrl)
   @test keys(:save) == ["⌃S"]
   @test K.key_asking(e) === nothing && w.focus === e
   @test e.rebound == Dict(:save => "ctrl+s")
   # A letter by itself types, so it can't be a shortcut. The row goes on waiting, and esc leaves the keys as they were.
   click(w, row(:save))
-  press(w, Keys.a)
+  key(w, Keys.a)
   @test K.key_asking(e) == :save && keys(:save) == ["⌃S"]
   @test occursin("types a character", e.nodes[:key_refused])
-  press(w, Keys.escape)
+  key(w, Keys.escape)
   @test K.key_asking(e) === nothing && keys(:save) == ["⌃S"]
   # The keys of another command go to this one, and a line under the row says so
   click(w, row(:save))
-  press(w, Keys.o, cmd)
+  key(w, Keys.o, cmd)
   @test keys(:save) == ["⌘O"] && isempty(keys(:open))
   @test e.nodes[:key_note][1] == :save && occursin("Find a file by name", e.nodes[:key_note][2])
   # A key with ⌥ would type a character. The page's own text never gets it.
   click(w, row(:print))
-  press(w, Keys.p, opt)
+  key(w, Keys.p, opt)
   @test keys(:print) == ["⌥P"]
   @test e.buf.lines == text
   # "Put back" gives a command the bundle's keys again, and takes them from the command that has them now
@@ -599,7 +584,7 @@ end
   e = K.build_editor(joinpath(dir, "page.md"))
   w = K.window!(e, size=(1100px, 800px))
   frame(w)
-  press(w, Keys.comma, cmd)
+  key(w, Keys.comma, cmd)
   s = K.settings_editor()
   sw = K.window_of(s)
   frame(sw); frame(sw)
@@ -624,7 +609,7 @@ end
   @test !any(line -> occursin("code_wrap", line), s.buf.lines)
   @test K.link_at(s, px.(link("code-editor.md"))) == "code-editor.md"
   sw.keys |= cmd
-  click(sw, link("code-editor.md")...)
+  click(sw, link("code-editor.md"))
   sw.keys ⊻= cmd
   @test s.buf.path == K.settings_page("code-editor.md")
   @test any(line -> occursin("code_wrap", line), s.buf.lines)
@@ -641,7 +626,7 @@ end
   @test e.bundle == "Emacs"
   K.bundle!(s, "Ladder")
   # ⌘, closes the settings window from any of its pages
-  press(sw, Keys.comma, cmd)
+  key(sw, Keys.comma, cmd)
   @test K.settings_editor() === nothing
   @test K.editors == [e]
   close(w)

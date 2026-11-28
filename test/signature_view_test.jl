@@ -10,6 +10,7 @@
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
 @use GeometryBasics: Vec2
 @use Dates: DateTime
+@use "./drive" drive middle
 const px = K.px
 const S = K.Signatures
 
@@ -36,21 +37,13 @@ And the builder signs here.
 
 const e = K.build_editor(page)
 const w = Window(e, size=(1000px, 900px))
-frames(n=2, w=w) = foreach(_ -> frame(w), 1:n)
+const (; frames, at, press, release, click, typed, key, shot) = drive(w)
 frames()
 const v = e.nodes[(:block, K.SIGNATURE, page, 1)]
 const u = e.nodes[(:block, K.SIGNATURE, page, 2)]
-shot(name, w=w) = haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], name), w)
 
-at((x, y), w=w) = (w.mouse = typeof(w.mouse)(px(x), px(y)); onmouse(w, MouseMove(Vec2{px}(px(x), px(y)), w)); frames(1, w))
-press(place, w=w) = (at(place, w); w.keys |= Keys.mouse_left; onkey(w, KeyPress{Keys.mouse_left}(0, w)))
-release(w=w) = (w.keys ⊻= Keys.mouse_left; onkey(w, KeyRelease{Keys.mouse_left}(0, w)); frames(2, w))
-click(place, w=w) = (press(place, w); release(w))
 "Press the mouse at the first place, move it through the others, and let go"
-drag(places...; w=w) = (press(places[1], w); foreach(p -> at(p, w), places[2:end]); release(w))
-key(k, held...) = (foreach(h -> w.keys |= h, held); onkey(w, KeyPress{k}(0, w)); foreach(h -> w.keys ⊻= h, held); frames())
-typed(s) = (foreach(c -> ontype(w, Typed(c, w)), s); frames())
-middle(r) = (K.num(r.left + r.width / 2), K.num(r.top + r.height / 2))
+drag(places...; w=w) = ((; at, press, release) = drive(w); press(places[1]); foreach(at, places[2:end]); release())
 "The lines of the `n`th signature of the page that `e` shows"
 block(n, e=e) = (s = K.block_lines(e.buf, K.SIGNATURE, n); e.buf.lines[s[1]+1:s[2]-1])
 "Where a place of the box of `v` is in the window"
@@ -219,14 +212,14 @@ end
   K.save!(e.buf)
   e2 = K.build_editor(page)
   w2 = Window(e2, size=(340px, 700px))
-  frames(3, w2)
+  frames(w2, 3)
   v2 = e2.nodes[(:block, K.SIGNATURE, page, 1)]
   # The box is as wide as the page's text, and as tall as its shape needs
   @test v2.box[3] ≈ K.num(e2.width) && v2.box[3] < 400 && v2.box[4] / v2.box[3] ≈ 130 / 420
   @test v2.box[1] + v2.box[3] <= 340
   drag(spot(v2, 300, 40), spot(v2, 320, 80), spot(v2, 350, 50); w=w2)
   @test block(1, e2)[end] == "pen 300,40 320,80 350,50"
-  shot("signature-narrow.png", w2)
+  drive(w2).shot("signature-narrow.png")
   close(w2)
 end
 
@@ -251,10 +244,10 @@ end
   """)
   e3 = K.build_editor(wrong)
   w3 = Window(e3, size=(800px, 700px))
-  frames(3, w3)
+  frames(w3, 3)
   v3 = e3.nodes[(:block, K.SIGNATURE, wrong, 1)]
   @test v3.box[3] ≈ 420 && !S.issigned(v3.data) && length(v3.data.other) == 5 && shows(v3, :input)
-  shot("signature-wrong.png", w3)
+  drive(w3).shot("signature-wrong.png")
   @test occursin("<svg ", K.page_html(e3))
   # The block takes a stroke, and keeps the lines that it couldn't read
   drag(spot(v3, 60, 70), spot(v3, 90, 40), spot(v3, 120, 90); w=w3)
@@ -268,16 +261,16 @@ end
   chmod(fixed, 0o444)
   e4 = K.build_editor(fixed)
   w4 = Window(e4, size=(800px, 700px))
-  frames(3, w4)
+  frames(w4, 3)
   v4, u4 = e4.nodes[(:block, K.SIGNATURE, fixed, 1)], e4.nodes[(:block, K.SIGNATURE, fixed, 2)]
   @test e4.buf.fixed && K.locked(v4) && K.cursor(v4.parts[:area]) == :arrow
   drag(spot(v4, 200, 70), spot(v4, 230, 40), spot(v4, 260, 90); w=w4)
   drag(spot(u4, 200, 70), spot(u4, 230, 40), spot(u4, 260, 90); w=w4)
   @test v4.draft === nothing && length(v4.data.strokes) == 1 && isempty(block(2, e4)) && !K.dirty(e4.buf)
   # It has no Clear button and no field for the name
-  at(spot(v4, 200, 60), w4); frames(2, w4)
+  drive(w4).at(spot(v4, 200, 60)); frames(w4, 2)
   @test !shows(v4, (:button, :clear)) && !shows(u4, :input)
-  shot("signature-fixed.png", w4)
+  drive(w4).shot("signature-fixed.png")
   close(w4)
   chmod(fixed, 0o644)
 end

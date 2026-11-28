@@ -7,6 +7,7 @@
 @use "../main" => K
 @use "github.com/jkroso/MiniFB.jl" Window KeyPress Keys onkey Typed ontype
 @use "github.com/jkroso/UI.jl/Interface/draw" frame
+@use "./drive" drive
 const px = K.px
 
 const dir = mktempdir()
@@ -38,7 +39,7 @@ window() = begin
   K.focus(e)
   (e, w)
 end
-frames(w) = foreach(_ -> Base.invokelatest(frame, w), 1:3)
+const (; frames) = drive(frames=3, latest=true)
 ran(e, code) = (out = K.run_code(e, code); @test !out[3]; out[1])
 
 @testset "the module loses what the code made" begin

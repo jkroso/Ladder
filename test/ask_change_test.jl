@@ -12,6 +12,7 @@
 @use "github.com/jkroso/MiniFB.jl" Window KeyPress KeyRelease MouseMove Keys onkey onmouse Typed ontype
 @use "github.com/jkroso/UI.jl/Interface/draw" frame rect window_tool popups
 @use GeometryBasics: Vec2
+@use "./drive" drive middle
 const px = K.px
 
 # The folder is the test's own each time, so that two test processes that run at once don't write the same files
@@ -60,7 +61,7 @@ write(stopped, "#!/bin/sh\necho 'No network.'\nexit 3\n")
 
 const e = K.build_editor(page)
 const w = Window(e, size=(900px, 600px))
-frames(win=w, n=2) = foreach(_ -> Base.invokelatest(frame, win), 1:n)
+const (; frames, click, typed, key) = drive(latest=true, slide=false)
 frames(w, 4)
 node() = e.nodes[(:block, "level", page, 1)].value
 picker(win=w) = window_tool(win)::K.CodePicker
@@ -92,31 +93,10 @@ end
 ask_question(script, c, words) = (K.AGENT_COMMAND[] = `sh $script`; K.ask_agent!(e, c, words); finish(); picker().about)
 asked() = read(joinpath(dir, "asked.txt"), String)
 
-"Press the key `k` in window `win` with the keys `held` down"
-press(win, k, held...) = begin
-  foreach(h -> win.keys |= h, held)
-  onkey(win, KeyPress{k}(0, win))
-  foreach(h -> win.keys ⊻= h, held)
-  haskey(win.ui.nodes, :palette) && (win.ui.nodes[:palette].moved = 0.0)
-  frames(win)
-end
-typed(win, s) = (foreach(c -> ontype(win, Typed(c, win)), s); frames(win))
-"Click the window `win` at `(x, y)`"
-click(win, x, y) = begin
-  win.mouse = typeof(win.mouse)(x, y)
-  onmouse(win, MouseMove(Vec2{px}(x, y), win))
-  frames(win, 1)
-  win.keys |= Keys.mouse_left
-  onkey(win, KeyPress{Keys.mouse_left}(0, win))
-  win.keys ⊻= Keys.mouse_left
-  onkey(win, KeyRelease{Keys.mouse_left}(0, win))
-  frames(win)
-end
 "The middle of line `i` of the page of `o`, a little in from its left"
 on_line(o, i) = (it = K.item(o, i); (o.origin[1] + 30px, o.origin[2] + it.top + it.tall / 2))
 "A point on line `i` of `o` to the right of the palette's list of choices, which takes a click on it"
 beside_list(o, i) = (o.origin[1] + 320px, on_line(o, i)[2])
-middle(r) = (r.left + r.width / 2, r.top + r.height / 2)
 
 @testset "what the agent said, and the parts of a file's code" begin
   @test K.agent_said("I read the file.\n\nThe bar is\n12 pixels tall.\n\n") == "The bar is 12 pixels tall."
@@ -168,9 +148,9 @@ end
   K.focus(e)
   e.buf.caret = e.buf.anchor = (3, 0)
   frames(w)
-  press(w, Keys.p, Keys.cmd, Keys.shft)
+  key(w, Keys.p, Keys.cmd, Keys.shft)
   typed(w, "ask agent")
-  press(w, Keys.enter)
+  key(w, Keys.enter)
   p = K.palette(e)
   said() = K.chip_value(p, K.palette_chips(p), 1)
   # What the caret was on is the node, so the keyboard is in the words
@@ -181,60 +161,60 @@ end
   @test K.chip_wide(e, p, K.palette_chips(p), 1) < 40
   # While the keyboard is in the words, the mouse picks out nothing on the page, and a click there chooses nothing
   @test K.click_chip(e, p) === nothing
-  click(w, on_line(e, 10)...)
+  click(w, on_line(e, 10))
   @test said().node === node() && p.at == 2 && e.popup == :commands
   # With the keyboard in the node's chip, a click on the page's `julia` block chooses it, and the keyboard goes on to the words
-  press(w, Keys.tab, Keys.shft)
+  key(w, Keys.tab, Keys.shft)
   @test p.at == 1 && K.click_chip(e, p) == 1
-  click(w, beside_list(e, 10)...)
+  click(w, beside_list(e, 10))
   @test said().words == "x = 1" && p.at == 2 && e.popup == :commands && e.buf.caret == (3, 0)
   # A click on the bar chooses the thing that the block shows
-  press(w, Keys.tab, Keys.shft)
-  click(w, middle(rect(node()))...)
+  key(w, Keys.tab, Keys.shft)
+  click(w, middle(rect(node())))
   @test said().node === node() && p.at == 2
   # ⇧ and a click add a second thing, B in orange, and the chip shows both letters. Again takes it out.
-  press(w, Keys.tab, Keys.shft)
+  key(w, Keys.tab, Keys.shft)
   w.keys |= Keys.shft
-  click(w, beside_list(e, 10)...)
+  click(w, beside_list(e, 10))
   w.keys ⊻= Keys.shft
   @test said() isa K.Things && [x.words for x in said().all] == ["Level", "x = 1"] && p.at == 1
   @test letters() == [(1, "A", K.CHIP_MARKS[1]), (1, "B", K.CHIP_MARKS[2])]
   # Tab goes on to the words, and the chip keeps both things
-  press(w, Keys.tab)
+  key(w, Keys.tab)
   @test p.at == 2 && said() isa K.Things && length(said().all) == 2 && 60 < K.chip_wide(e, p, K.palette_chips(p), 1) < 80
   # ⇧Tab and Return keep them too
-  press(w, Keys.tab, Keys.shft)
-  press(w, Keys.enter)
+  key(w, Keys.tab, Keys.shft)
+  key(w, Keys.enter)
   @test p.at == 2 && said() isa K.Things && length(said().all) == 2
-  press(w, Keys.tab, Keys.shft)
+  key(w, Keys.tab, Keys.shft)
   prompt = K.change_prompt(said().all, "make A look like B")
   @test occursin("A: a part of its window, a Level.", prompt) && occursin("B: a block of Julia code on a page of Markdown, in the file", prompt)
   @test occursin("The user's words: make A look like B", prompt)
   w.keys |= Keys.shft
-  click(w, beside_list(e, 10)...)
+  click(w, beside_list(e, 10))
   w.keys ⊻= Keys.shft
   @test said().node === node()
   # ⌥↑ works from the words too
-  press(w, Keys.tab)
+  key(w, Keys.tab)
   @test p.at == 2
   # ⌥↑ takes the part that holds it, which is bigger on the screen, and ⌥↓ goes back, with the keyboard where it was
   place(x) = (r = rect(x); (r.left, r.top, r.width, r.height))
-  press(w, Keys.up, Keys.opt)
+  key(w, Keys.up, Keys.opt)
   @test said().node !== node() && place(said().node) != place(node()) && p.at == 2
   ups = 1
   while !(said().node isa K.Document) && ups < 6
-    press(w, Keys.up, Keys.opt)
+    key(w, Keys.up, Keys.opt)
     ups += 1
   end
   @test said().node isa K.Document
-  foreach(_ -> press(w, Keys.down, Keys.opt), 1:ups)
+  foreach(_ -> key(w, Keys.down, Keys.opt), 1:ups)
   @test said().node === node()
-  press(w, Keys.down, Keys.opt)
+  key(w, Keys.down, Keys.opt)
   @test said().node === node()
   # A click on the palette's own bar isn't a choice
   @test K.on_palette(p, K.num(w.size[1]) / 2, K.num(w.size[2]) - 30)
-  press(w, Keys.escape)
-  press(w, Keys.escape)
+  key(w, Keys.escape)
+  key(w, Keys.escape)
   @test e.popup == :none && K.click_chip(e, p) === nothing
 end
 
@@ -242,9 +222,9 @@ end
   code.buf.caret = code.buf.anchor = (14, 3)
   K.AGENT_COMMAND[] = `sh $wider`
   K.focus(code)
-  press(cw, Keys.p, Keys.cmd, Keys.shft)
+  key(cw, Keys.p, Keys.cmd, Keys.shft)
   typed(cw, "ask agent")
-  press(cw, Keys.enter)
+  key(cw, Keys.enter)
   p = K.palette(code)
   chips = K.palette_chips(p)
   @test p.command.name == :ask_agent && [K.chip_name(c) for c in chips] == ["Node", "Request"] && K.chip_kind(code, chips[1]) == :search
@@ -252,25 +232,25 @@ end
   @test K.chip_value(p, chips, 1).words == "wide(l::Level)" && p.at == 2
   # With the keyboard in the node's chip, a click on another block of the file chooses it, and a click on the first chooses it again
   @test K.num(on_line(code, 17)[2]) < K.palette(code).plan.band.y
-  press(cw, Keys.tab, Keys.shft)
-  click(cw, beside_list(code, 17)...)
+  key(cw, Keys.tab, Keys.shft)
+  click(cw, beside_list(code, 17))
   @test K.chip_value(p, chips, 1).words == "describe(l::Level)" && p.at == 2
-  press(cw, Keys.tab, Keys.shft)
-  click(cw, beside_list(code, 14)...)
+  key(cw, Keys.tab, Keys.shft)
+  click(cw, beside_list(code, 14))
   @test K.chip_value(p, chips, 1).words == "wide(l::Level)" && code.buf.caret == (14, 3)
   # ⌥↑ takes the whole file, which nothing holds, and ⌥↓ goes back to the block
-  press(cw, Keys.up, Keys.opt)
+  key(cw, Keys.up, Keys.opt)
   whole = K.chip_value(p, chips, 1)
   @test (whole.words, whole.note, whole.first, whole.last) == ("level.jl", "the whole file", 1, length(code.buf.lines))
   @test occursin("the whole of a file", K.change_prompt(whole, "tidy it"))
-  press(cw, Keys.up, Keys.opt)
+  key(cw, Keys.up, Keys.opt)
   @test K.chip_value(p, chips, 1) == whole
-  press(cw, Keys.down, Keys.opt)
+  key(cw, Keys.down, Keys.opt)
   @test K.chip_value(p, chips, 1).words == "wide(l::Level)"
   typed(cw, "make the bar wider")
-  press(cw, Keys.enter)
+  key(cw, Keys.enter)
   @test p.at == 3
-  press(cw, Keys.enter)
+  key(cw, Keys.enter)
   @test code.popup == :none
   a = picker(cw).asked
   @test a !== nothing && a.words == "make the bar wider" && a.places[1].first == 13
@@ -288,7 +268,7 @@ end
   # The label says what the agent said, and a click on it shows the change
   @test a.changed && last(K.AGENT_CHANGES) === a
   left, top, wide, tall = a.label
-  click(cw, px(left + wide / 2), px(top + tall / 2))
+  click(cw, (px(left + wide / 2), px(top + tall / 2)))
   shown = only(filter(o -> endswith(o.buf.path, "what the agents changed.md"), K.editors))
   close(K.window_of(shown))
   # The label goes after a few seconds
@@ -370,7 +350,7 @@ end
 end
 
 "Press Esc, which goes on to the page and hides the caret, and show the caret again for the tests after"
-esc!() = (press(w, Keys.escape); e.buf.reading = false; frames(w, 2))
+esc!() = (key(w, Keys.escape); e.buf.reading = false; frames(w, 2))
 
 @testset "The × on the label, or Stop Agent, stops the agent, and what it changed doesn't run. Esc doesn't." begin
   level = first(offered(e, (3, 0)))
@@ -390,7 +370,7 @@ esc!() = (press(w, Keys.escape); e.buf.reading = false; frames(w, 2))
   @test endswith(K.asked_label(picker().asked), "Click to open")
   # A click on the label opens a field under the thing, with what was asked and what the agent does. The agent works on.
   left, top, wide, tall = picker().asked.label
-  click(w, left + wide / 2, top + tall / 2)
+  click(w, (left + wide / 2, top + tall / 2))
   frames(w, 2)
   f = only(K.ask_boxes(e))
   @test K.same_things([f.thing], [level]) && any(p -> p.key == K.box_key(f), popups(w)) && w.focus === f.parts[:text]
@@ -398,12 +378,12 @@ esc!() = (press(w, Keys.escape); e.buf.reading = false; frames(w, 2))
   @test picker().asked.ended == 0 && !picker().asked.stopped && !endswith(K.asked_label(picker().asked, open=false), "Click to open")
   # Its Close button closes only the field, which has nothing in it, and the label stays
   x = rect(f.parts[:close])
-  click(w, x.left + x.width / 2, x.top + x.height / 2)
+  click(w, (x.left + x.width / 2, x.top + x.height / 2))
   @test isempty(K.ask_boxes(e)) && picker().asked.ended == 0 && !picker().asked.stopped && w.focus === e
   # The × at the end of the label stops it
   frames(w, 2)
   left, top, wide, tall = K.close_spot(picker().asked.label)
-  click(w, left + wide / 2, top + tall / 2)
+  click(w, (left + wide / 2, top + tall / 2))
   finish()
   a = picker().asked
   @test a.stopped && a.changed && a.said == "You stopped the agent. Ladder didn't run what it changed. Undo Change puts it back."
@@ -416,7 +396,7 @@ esc!() = (press(w, Keys.escape); e.buf.reading = false; frames(w, 2))
   K.ask_agent!(e, level, "make it red")
   frames(w, 2)
   left, top, wide, tall = K.close_spot(picker().asked.label)
-  click(w, left + wide / 2, top + tall / 2)
+  click(w, (left + wide / 2, top + tall / 2))
   finish()
   @test picker().asked.stopped && picker().asked.said == "You stopped the agent. Nothing changed."
   # So does the command, which says so when no agent works
@@ -468,7 +448,7 @@ end
   e.buf.caret = e.buf.anchor = (7, 3)
   frames(w)
   was = e.buf.caret
-  click(w, px(left + wide / 2), px(top + tall / 2))
+  click(w, (px(left + wide / 2), px(top + tall / 2)))
   @test picker().about === nothing
   @test e.buf.caret == was
   # Esc leaves it, so that an answer stays until you've read it
@@ -483,9 +463,9 @@ end
   K.focus(e)
   e.buf.caret = e.buf.anchor = (3, 0)
   frames(w)
-  press(w, Keys.p, Keys.cmd, Keys.shft)
+  key(w, Keys.p, Keys.cmd, Keys.shft)
   typed(w, "ask agent")
-  press(w, Keys.enter)
+  key(w, Keys.enter)
   p = K.palette(e)
   @test p.command.name == :ask_agent && [K.chip_name(c) for c in K.palette_chips(p)] == ["Node", "Request"] && p.at == 2
   @test K.chip_value(p, K.palette_chips(p), 1).node === node()
@@ -504,7 +484,7 @@ end
   @test K.input(e).scroll > 0
   # Words for a command that isn't for them, like Rename In Code's new name, are as wide as they are
   @test !K.wide_words(Val(:rename_in_code)) && K.wide_words(Val(:ask_agent))
-  press(w, Keys.escape); press(w, Keys.escape)
+  key(w, Keys.escape); key(w, Keys.escape)
   # Each agent prints its steps as lines of JSON
   K.AGENT_COMMAND[] = nothing
   @test occursin("--output-format stream-json --verbose", join(K.agent_command(e).exec, " "))
@@ -550,14 +530,14 @@ end
   picker().asked = picker().about = nothing
   q = ask_question(answers, level, "why is it blue?")
   "Click the button Ask More of the card `q`"
-  ask_more(q) = ((left, top, wide, tall) = q.button; click(w, px(left + wide / 2), px(top + tall / 2)))
+  ask_more(q) = ((left, top, wide, tall) = q.button; click(w, (px(left + wide / 2), px(top + tall / 2))))
   # Ask More: the palette asks Ask Agent about the same thing, with the keyboard in the words
   ask_more(q)
   p = K.palette(e)
   @test picker().about === nothing && e.popup == :commands && p.command.name == :ask_agent && p.at == 2
   @test K.chip_value(p, K.palette_chips(p), 1).node === node()
   typed(w, "and why is it short?")
-  press(w, Keys.enter); press(w, Keys.enter)
+  key(w, Keys.enter); key(w, Keys.enter)
   finish()
   # The agent is told the question before and its answer, and the new card keeps them
   @test occursin("The user's words: and why is it short?", asked())
@@ -568,7 +548,7 @@ end
   @test e.popup == :commands && p.command.name == :ask_agent && p.at == 2 && K.chip_value(p, K.palette_chips(p), 1).node === node()
   K.AGENT_COMMAND[] = `sh $quiet`
   typed(w, "make it red")
-  press(w, Keys.enter); press(w, Keys.enter)
+  key(w, Keys.enter); key(w, Keys.enter)
   finish()
   @test occursin("The user's words: make it red", asked()) && occursin("Question: why is it blue?", asked()) && occursin("Question: and why is it short?", asked())
   picker().asked = picker().about = nothing
@@ -648,9 +628,9 @@ end
   waits()
   @test a.sent && occursin("The user's words: make it green", got())
   "Click the label of the change that the agent was asked for"
-  click_label() = (frames(w, 2); (left, top, wide, tall) = picker().asked.label; click(w, left + wide / 2, top + tall / 2); frames(w, 2))
+  click_label() = (frames(w, 2); (left, top, wide, tall) = picker().asked.label; click(w, (left + wide / 2, top + tall / 2)); frames(w, 2))
   "Click the × at the end of that label"
-  click_close() = (frames(w, 2); (left, top, wide, tall) = K.close_spot(picker().asked.label); click(w, left + wide / 2, top + tall / 2); frames(w, 2))
+  click_close() = (frames(w, 2); (left, top, wide, tall) = K.close_spot(picker().asked.label); click(w, (left + wide / 2, top + tall / 2)); frames(w, 2))
   # Esc leaves the label of a change that Claude has. A click on the label opens a field with the request and how it goes.
   frames(w, 2)
   esc!()
@@ -660,7 +640,7 @@ end
   @test K.unanswered(e, f) == [("make it green", "Claude is working on it.")] && picker().asked === a
   # Its Close button closes only the field, and the label stays. The × at the label's end takes it away.
   x = rect(f.parts[:close])
-  click(w, x.left + x.width / 2, x.top + x.height / 2)
+  click(w, (x.left + x.width / 2, x.top + x.height / 2))
   @test isempty(K.ask_boxes(e)) && picker().asked === a
   @test K.close_words(e, a) == "Hide this. Claude still has the request."
   click_close()
@@ -788,9 +768,9 @@ end
 end
 
 @testset "the palette's Switch Agent chooses the agent, as Settings does" begin
-  press(w, Keys.p, Keys.cmd, Keys.shft)
+  key(w, Keys.p, Keys.cmd, Keys.shft)
   typed(w, "switch agent")
-  press(w, Keys.enter)
+  key(w, Keys.enter)
   p = K.palette(e)
   @test e.popup == :commands && p.command.name == :switch_agent
   # The agents are a list over the chip. One whose command isn't on this Mac says so.
@@ -798,8 +778,8 @@ end
   @test [r.name for r in rows] == ["Claude", "Antigravity", "Codex", "Grok"]
   @test [r.note for r in rows] == [(try K.agent_path(k); "" catch; "not installed" end) for k in K.AGENT_KINDS]
   # Return takes the row, and the command runs at once: it changes no file
-  foreach(_ -> press(w, Keys.down), 1:3)
-  press(w, Keys.enter)
+  foreach(_ -> key(w, Keys.down), 1:3)
+  key(w, Keys.enter)
   @test e.popup == :none && e.ai == "Grok" && K.asks_whom(e) == "Grok"
   K.preferred_agent!(e, "Claude")
 end
@@ -837,38 +817,38 @@ end
   @test K.lowest(sub, sub.layout) > tall && b.lines[7] == "The end."
   # ↑ goes up a line of the wrapped text, as it does in a page
   at = sub.buf.caret[2]
-  press(w, Keys.up)
+  key(w, Keys.up)
   @test sub.buf.caret[1] == 1 && 0 < sub.buf.caret[2] < at
   # ⇧Return starts a new line, and sends nothing
-  press(w, Keys._end); press(w, Keys.enter, Keys.shft)
+  key(w, Keys._end); key(w, Keys.enter, Keys.shft)
   @test length(sub.buf.lines) == 2 && asking() && picker().asked === nothing
   # ⌘Z takes it back
-  press(w, Keys.z, Keys.cmd)
+  key(w, Keys.z, Keys.cmd)
   @test length(sub.buf.lines) == 1
-  press(w, Keys.a, Keys.cmd); press(w, Keys.backspace)
+  key(w, Keys.a, Keys.cmd); key(w, Keys.backspace)
   @test sub.buf.lines == [""]
   # Esc does nothing, as it's easy to press by mistake: the field keeps what's typed
   typed(w, "half a request")
-  press(w, Keys.escape)
+  key(w, Keys.escape)
   @test asking() && w.focus === sub && sub.buf.lines == ["half a request"]
-  press(w, Keys.a, Keys.cmd); press(w, Keys.backspace)
+  key(w, Keys.a, Keys.cmd); key(w, Keys.backspace)
   # Return with nothing typed does nothing
-  press(w, Keys.enter)
+  key(w, Keys.enter)
   @test asking() && w.focus === sub && picker().asked === nothing
   # Nor does a click on the page: the field keeps what's typed, and a click in it gives it the keyboard again
   typed(w, "half a request")
-  click(w, on_line(e, 1)...)
+  click(w, on_line(e, 1))
   @test asking() && w.focus === e && sub.buf.lines == ["half a request"]
   r = rect(K.node!(K.Document, sub, :document))
-  click(w, r.left + 4px, r.top + r.height / 2)
+  click(w, (r.left + 4px, r.top + r.height / 2))
   @test w.focus === sub
-  press(w, Keys.a, Keys.cmd); press(w, Keys.backspace)
+  key(w, Keys.a, Keys.cmd); key(w, Keys.backspace)
   # The field is put under its words in each frame, so it follows them as the page scrolls
   r = K.asked_rect(e, c)
   @test only(filter(p -> p.key == K.box_key(a), popups(w))).anchor == (r.left, r.top, r.width, r.height)
   # The field has no words and no answer, so there's nothing to open again: the Close button takes the field and the box away
   x = rect(a.parts[:close])
-  click(w, x.left + x.width / 2, x.top + x.height / 2)
+  click(w, (x.left + x.width / 2, x.top + x.height / 2))
   @test !asking() && !any(p -> p.key == K.box_key(a), popups(w)) && w.focus === e
   b.anchor, b.caret = (7, 0), (7, 8)
   # What's typed goes to the agent with the words, and its answer shows under them, in place
@@ -876,7 +856,7 @@ end
   frames(w, 2)
   K.AGENT_COMMAND[] = `sh $quiet`
   typed(w, "is this right?")
-  press(w, Keys.enter)
+  key(w, Keys.enter)
   @test !asking() && picker().asked.words == "is this right?" && picker().asked.places == [c]
   finish()
   @test occursin("A: words that the user selected in a file, in the file $(c.file), lines 7 to 7. It starts:\n\n    The end.", asked())
@@ -888,9 +868,9 @@ end
   # The keys of the page are the page's while the answer shows: Return starts a new line there
   before = copy(b.lines)
   b.anchor = b.caret = (8, 0)
-  press(w, Keys.enter)
+  key(w, Keys.enter)
   @test length(b.lines) == length(before) + 1 && only(K.ask_boxes(e)) === a
-  press(w, Keys.z, Keys.cmd)
+  key(w, Keys.z, Keys.cmd)
   @test b.lines == before
   # A question after the answer goes with the question and the answer before it. The field hides while the agent
   # works, and shows again with the new answer under the first, and the field empty.
@@ -898,7 +878,7 @@ end
   K.AGENT_COMMAND[] = `sh $(agent("slow.sh", "sleep 1", "Because it is."))`
   K.focus(a.parts[:text])
   typed(w, "and why?")
-  press(w, Keys.enter)
+  key(w, Keys.enter)
   @test only(K.ask_boxes(e)) === a && a.parts[:text].buf.lines == [""] && length(a.answers) == 1 && w.focus === e
   @test !shows(a) && picker().asked.words == "and why?" && picker().asked.ended == 0
   finish()
@@ -910,14 +890,14 @@ end
   # A third question goes with both questions and answers before it
   K.focus(a.parts[:text])
   typed(w, "and then?")
-  press(w, Keys.enter)
+  key(w, Keys.enter)
   finish()
   @test occursin("Question: is this right?", asked()) && occursin("Question: and why?", asked()) && length(a.answers) == 3
   # A question whose agent you stop has no answer: the field shows again as it was
   K.AGENT_COMMAND[] = `sh -c "exec sleep 30"`
   K.focus(a.parts[:text])
   typed(w, "and how?")
-  press(w, Keys.enter)
+  key(w, Keys.enter)
   @test !shows(a)
   K.stop_agent!(e)
   finish()
@@ -933,21 +913,21 @@ end
   K.page_act!(e, 1)
   frames(w, 2)
   typed(w, "and this?")
-  press(w, Keys.enter)
+  key(w, Keys.enter)
   @test box().error == "Ladder can't find the command `no-such-agent-command` of Nobody. Install it, or choose another agent with the command Switch Agent."
   K.preferred_agent!(e, "Claude")
   pop!(K.AGENT_KINDS)
   # Esc in the field leaves a working agent working, and the field as it is
   K.AGENT_COMMAND[] = `sh -c "exec sleep 30"`
   K.ask_agent!(e, c, "something else")
-  press(w, Keys.escape)
+  key(w, Keys.escape)
   @test asking() && picker().asked.ended == 0
   K.close_ask!(box(), w)
   # A request while the agent works waits in the queue, and its label says its place
   K.page_act!(e, 1)
   frames(w, 2)
   typed(w, "and this?")
-  press(w, Keys.enter)
+  key(w, Keys.enter)
   q = K.ask_queue(e)
   @test !asking() && length(q) == 1 && q[1][1].words == "and this?" && picker().asked.words == "something else"
   @test K.queued_label(1, "and this?") == "Number 1 in the queue: and this?  ·  Click to change it"
@@ -956,28 +936,28 @@ end
   @test [a.words for (a, _) in q] == ["and this?", "and that?"] && all(((a, _),) -> a.label !== nothing, q)
   # A click on a label opens a field with the request's words. Return gives the request the field's words, and it keeps its place.
   "Click the label of the request `a`"
-  click_on(a) = (frames(w, 2); (left, top, wide, tall) = a.label; click(w, px(left + wide / 2), px(top + tall / 2)); frames(w, 2))
+  click_on(a) = (frames(w, 2); (left, top, wide, tall) = a.label; click(w, (px(left + wide / 2), px(top + tall / 2))); frames(w, 2))
   click_on(q[1][1])
   f = only(K.ask_boxes(e))
   @test f.editing === q[1][1] && f.parts[:text].buf.lines == ["and this?"] && w.focus === f.parts[:text]
   @test K.waits_note(e, q[1][1]) == "Return changes the request. It stays number 1 in the queue."
   @test any(p -> p.key == K.box_key(f), popups(w))
   typed(w, " and these?")
-  press(w, Keys.enter)
+  key(w, Keys.enter)
   @test isempty(K.ask_boxes(e)) && [a.words for (a, _) in q] == ["and this? and these?", "and that?"]
   # Close leaves the request as it was
   click_on(q[2][1])
   f = only(K.ask_boxes(e))
   typed(w, " no")
   x = rect(f.parts[:close])
-  click(w, x.left + x.width / 2, x.top + x.height / 2)
+  click(w, (x.left + x.width / 2, x.top + x.height / 2))
   @test isempty(K.ask_boxes(e)) && [a.words for (a, _) in q] == ["and this? and these?", "and that?"]
   # Take Back takes it out, and the others move up
   click_on(q[2][1])
   f = only(K.ask_boxes(e))
   @test f.parts[:text].buf.lines == ["and that?"]
   x = rect(f.parts[:take_back])
-  click(w, x.left + x.width / 2, x.top + x.height / 2)
+  click(w, (x.left + x.width / 2, x.top + x.height / 2))
   @test isempty(K.ask_boxes(e)) && [a.words for (a, _) in q] == ["and this? and these?"] && picker().asked.ended == 0
   # When the agent ends, the next request starts with its new words, and the label of the one before stays a while.
   # A field that was open on it says so, and Return then asks with its words as a new request.
@@ -1010,7 +990,7 @@ end
   K.page_menu!(e, w)
   frames(w, 1)
   @test b.caret == b.anchor == (3, 0) && K.picked(b) == (3, 5)
-  press(w, Keys.down); press(w, Keys.enter)
+  key(w, Keys.down); key(w, Keys.enter)
   frames(w, 2)
   t = box().thing
   @test (t.first, t.last) == (3, 5) && t.node.text == "```level\n3\n```" && K.asked_rect(e, t) !== nothing
@@ -1034,7 +1014,7 @@ end
   are(xs...) = (bs = K.ask_boxes(e); length(bs) == length(xs) && all(map(===, bs, collect(xs))))
   asking = field((7, 0), (7, 8))
   typed(w, "is this right?")
-  press(w, Keys.enter)
+  key(w, Keys.enter)
   # The field of a question with no answer goes when it's sent. The answer opens a new one.
   @test isempty(K.ask_boxes(e)) && !shows(asking)
   finish()
@@ -1047,7 +1027,7 @@ end
   typing = field((7, 0), (7, 3))
   @test are(answer, empty, typing) && shows(empty) && shows(answer) && shows(typing)
   x = rect(empty.parts[:close])
-  click(w, x.left + x.width / 2, x.top + x.height / 2)
+  click(w, (x.left + x.width / 2, x.top + x.height / 2))
   @test are(answer, typing) && !shows(empty) && shows(answer)
   K.focus(typing.parts[:text])
   typed(w, "half a question")
@@ -1074,7 +1054,7 @@ end
   # top of the others.
   for a in reverse(copy(K.ask_boxes(e)))
     x = rect(a.parts[:close])
-    click(w, x.left + x.width / 2, x.top + x.height / 2)
+    click(w, (x.left + x.width / 2, x.top + x.height / 2))
     frames(w)
     @test any(o -> o === a, K.ask_boxes(e)) && a.closed && !shows(a) && endswith(K.box_label(a), "  ·  Click to open")
   end
@@ -1085,7 +1065,7 @@ end
   for a in copy(K.ask_boxes(e))
     frames(w, 2)
     left, top, wide, tall = K.close_spot(a.label)
-    click(w, left + wide / 2, top + tall / 2)
+    click(w, (left + wide / 2, top + tall / 2))
     frames(w)
     @test !any(o -> o === a, K.ask_boxes(e)) && !shows(a)
   end
@@ -1099,9 +1079,9 @@ end
   K.focus(e)
   shows(a) = any(p -> p.key == K.box_key(a), popups(w))
   "Click the middle of `r`, a label's place"
-  click_at(r) = (frames(w, 2); click(w, px(r[1] + r[3] / 2), px(r[2] + r[4] / 2)); frames(w, 2))
+  click_at(r) = (frames(w, 2); click(w, (px(r[1] + r[3] / 2), px(r[2] + r[4] / 2))); frames(w, 2))
   "Click the Close button of the field `a`"
-  close!(a) = (x = rect(a.parts[:close]); click(w, x.left + x.width / 2, x.top + x.height / 2); frames(w, 2))
+  close!(a) = (x = rect(a.parts[:close]); click(w, (x.left + x.width / 2, x.top + x.height / 2)); frames(w, 2))
   "Open a field under the words \"The end.\" and ask `words` in it"
   ask!(words) = begin
     K.focus(e)
@@ -1109,7 +1089,7 @@ end
     K.page_act!(e, 1)
     frames(w, 2)
     typed(w, words)
-    press(w, Keys.enter)
+    key(w, Keys.enter)
     frames(w, 2)
     picker().asked
   end
@@ -1184,12 +1164,12 @@ end
   # A click there goes to the field: the agent works on, and the field stays with the keyboard
   typed(w, "half a request")
   K.focus(e)
-  click(w, x, y)
+  click(w, (x, y))
   @test picker().asked === working && working.ended == 0 && !working.stopped
   @test only(K.ask_boxes(e)) === a && a.parts[:text].buf.lines == ["half a request"]
   # A field with nothing in it stays when the window shows another file and then its page again
   K.focus(a.parts[:text])
-  press(w, Keys.a, Keys.cmd); press(w, Keys.backspace)
+  key(w, Keys.a, Keys.cmd); key(w, Keys.backspace)
   @test a.parts[:text].buf.lines == [""]
   K.open!(e, source); frames(w, 2)
   K.open!(e, page); frames(w, 3)
@@ -1210,7 +1190,7 @@ end
   q = ask("why is it blue?")
   @test q.answer == "I looked, and it's as you say." && q.card !== nothing
   # A click on the page leaves the card
-  click(w, on_line(e, 1)...)
+  click(w, on_line(e, 1))
   frames(w)
   @test picker().about === q && q.card !== nothing
   # A new question puts the answer of the card in a field under its thing

@@ -7,6 +7,7 @@
 @use Test: @test, @testset
 @use "github.com/jkroso/MiniFB.jl" KeyPress Keys onkey
 @use "github.com/jkroso/UI.jl/Interface/draw" frame
+@use "./drive" drive
 
 const px = K.px
 const dir = mktempdir()
@@ -21,7 +22,7 @@ const long = joinpath(top, "long.md")
 write(long, "# Long\n\n" * join(["Line $i of a page that's longer than the window." for i in 1:200], "\n\n") * "\n")
 write(joinpath(sub, "plan.md"), "# Plan\n\nThe plan.\n")
 
-frames(w, n=3) = foreach(_ -> frame(w), 1:n)
+const (; frames) = drive(frames=3)
 "A window that isn't on the screen, for the editor `e`"
 window(e) = (w = K.window!(e, size=(900px, 700px)); frames(w); w)
 "What the place file says, by name"

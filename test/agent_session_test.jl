@@ -8,6 +8,7 @@
 @use "../main" => K
 @use "github.com/jkroso/MiniFB.jl" Window KeyPress KeyRelease MouseMove Keys onkey onmouse Typed ontype onfiledrop
 @use "github.com/jkroso/UI.jl/Interface/draw" frame
+@use "./drive" drive
 const px = K.px
 
 const dir = realpath(mktempdir())
@@ -75,7 +76,7 @@ chmod(turner, 0o755)
 
 const e = K.build_editor(notes)
 const w = Window(e, size=(1100px, 760px))
-frames(win=w, n=2) = foreach(_ -> Base.invokelatest(frame, win), 1:n)
+const (; frames, typed, key) = drive(w, latest=true)
 frames(w, 4)
 K.focus(e)
 
@@ -90,14 +91,6 @@ until(f, win=w) = begin
   false
 end
 
-"Press the key `k` in the window with the keys `held` down"
-press(k, held...) = begin
-  foreach(h -> w.keys |= h, held)
-  onkey(w, KeyPress{k}(0, w))
-  foreach(h -> w.keys ⊻= h, held)
-  frames()
-end
-typed(s) = (foreach(c -> ontype(w, Typed(c, w)), s); frames())
 "Every rectangle in `r`, as it was last drawn"
 flat(r, out=Any[]) = (push!(out, r); try foreach(c -> flat(c, out), r.children) catch end; out)
 "The rectangle with the name `name` in the window of `ed`, or nothing"
@@ -187,7 +180,7 @@ try
     p = pane()
     typed("Make a table")
     @test p.field.buf.lines == ["Make a table"]
-    press(Keys.enter)
+    key(Keys.enter)
     s = p.session
     @test s.busy && p.field.buf.lines == [""] && w.focus === p.field
     # The field slides down from the middle of the page to its foot, and stays there
@@ -236,7 +229,7 @@ try
   @testset "⌘E shows the file's text, and the session comes back as it was" begin
     p = pane()
     s = p.session
-    press(Keys.e, Keys.cmd)
+    key(Keys.e, Keys.cmd)
     frames(w, 3)
     @test !K.chat_shown(e) && e.buf.view == :text && named("Talk") === nothing
     @test startswith(e.buf.lines[1], "<!-- ladder:session ") && "Make a table" in e.buf.lines
@@ -375,14 +368,14 @@ try
     K.open!(e, notes)
     frames(w, 3)
     K.focus(e)
-    press(Keys.a, Keys.cmd, Keys.shft)
+    key(Keys.a, Keys.cmd, Keys.shft)
     frames(w, 4)
     first_one = e.buf.path
     @test first_one != notes && dirname(first_one) == dir && occursin(r"^Claude( \d+)?\.chat$", basename(first_one)) && K.chat_shown(e) && e.popup == :none
     p = e.nodes[(:chat, first_one)]
     @test w.focus === p.field && isempty(p.session.items) && p.session.agent == "Claude"
     # From the words of a session, the key is the window's
-    press(Keys.a, Keys.cmd, Keys.shft)
+    key(Keys.a, Keys.cmd, Keys.shft)
     frames(w, 4)
     @test e.buf.path != first_one && endswith(e.buf.path, ".chat") && K.chat_shown(e) && isfile(first_one)
   end
@@ -442,7 +435,7 @@ try
     seg, vl = first((seg, vl) for vl in line.content.lines for seg in vl.segs if seg.atomic && seg.node === nothing)
     start = (sub.origin[1] + seg.x + seg.w / 2, sub.origin[2] + line.top + line.content.above + vl.top + vl.high / 2)
     @test K.scrub_at(sub, start) == (1, 21, 23)
-    at(pos) = (w.mouse = typeof(w.mouse)(pos...); onmouse(w, MouseMove(w.mouse, w)); frames(w, 1))
+    (; at) = drive(w, latest=true)
     at(start)
     w.keys |= Keys.mouse_left; onkey(w, KeyPress{Keys.mouse_left}(0, w)); frames(w, 1)
     at(start .+ (10px, 0px))
@@ -456,7 +449,7 @@ try
     # While the reply shows no caret, a key changes nothing, even with the keyboard. A click puts a caret there: see the next test.
     K.focus(sub)
     @test w.focus === sub
-    ontype(w, Typed('x', w)); press(Keys.backspace)
+    ontype(w, Typed('x', w)); key(Keys.backspace)
     @test occursin("!`l = 18m`", sub.buf.lines[1]) && sub.buf.lines == split(rstrip(it.text), '\n')
   end
 
@@ -507,7 +500,7 @@ try
     @test K.send_tip(p) == "Send with your changes  ⏎"
     K.focus(p.field)
     before = length(heard_lines())
-    press(Keys.enter)
+    key(Keys.enter)
     ok = until(() -> !p.session.busy)
     @test ok && length(heard_lines()) == before + 1
     told = heard_lines()[end]
@@ -544,7 +537,7 @@ try
     mouse_to((r.left + r.width / 2, r.top + r.height / 2))
     click_here()
     @test kind.open
-    press(Keys.escape)
+    key(Keys.escape)
     @test !kind.open
   end
 
@@ -604,7 +597,7 @@ try
     # The list is over the field, which is in the middle of the page before anything is said
     list, slot = only(q for q in K.popups(w) if q.key == K.SLASH_MENU).scene, K.rect(K.pane_slot(p))
     @test [x.title for (_, x) in menu.rows] == ["Paint the fence"] && list.top + list.height <= slot.top && list.top > 0px
-    press(Keys.enter)
+    key(Keys.enter)
     s = p.session
     @test s.id == "aaaa-1111" && [typeof(i) for i in s.items] == [K.YouSaid, K.AgentReply] && K.running(s) && p.field.buf.lines == [""]
     ok = until(() -> p.kept == s.version)
@@ -613,12 +606,12 @@ try
     @test ok && saved.id == "aaaa-1111" && saved.items[1].words == "Paint the fence" && saved.items[2].text == "It is **painted**."
     @test "aaaa-1111" in K.session_options(s)
     typed("And the gate")
-    press(Keys.enter)
+    key(Keys.enter)
     ok = until(() -> !s.busy && last(s.items) isa K.AgentReply)
     @test ok && s.id == "aaaa-1111" && length(s.items) == 4 && occursin("And the gate", last(heard_lines()))
     # /new makes a new file for a new session beside this one, which stays
     typed("/new")
-    press(Keys.enter)
+    key(Keys.enter)
     frames(w, 4)
     @test e.buf.path != file && K.chat_shown(e) && isfile(file) && isempty(K.read_talk(read(e.buf.path, String)).items)
     @test K.read_talk(read(file, String)).id == "aaaa-1111"

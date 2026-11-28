@@ -8,6 +8,7 @@
 @use "../main" => K
 @use "github.com/jkroso/MiniFB.jl" Window KeyPress Keys onkey
 @use "github.com/jkroso/UI.jl/Interface/draw" frame
+@use "./drive" drive
 const px = K.px
 
 const dir = mktempdir()
@@ -26,7 +27,7 @@ window(text) = begin
   e, w
 end
 
-press(w, k) = (onkey(w, KeyPress{k}(0, w)); frame(w))
+const (; key) = drive()
 caret!(e, w, line, col) = (e.buf.caret = e.buf.anchor = (line, col); K.touch!(e); frame(w))
 select!(e, w, lo, hi) = (e.buf.anchor = lo; e.buf.caret = hi; K.touch!(e); frame(w))
 segs(f) = [seg for vl in f.lines for seg in vl.segs]
@@ -92,7 +93,7 @@ A note[^1] here.
   # → goes one character at a time, into each run and out of it
   caret!(e, w, 3, 0)
   for c in 1:length(text)
-    press(w, Keys.right)
+    key(w, Keys.right)
     @test e.buf.caret == (3, c)
   end
 
@@ -146,7 +147,7 @@ end
   above = K.item(e, 3).content
   _, x = K.spot(above, at(text, "words"))
   caret!(e, w, 4, K.colat(K.item(e, 4).content, 1, x))
-  press(w, Keys.up)
+  key(w, Keys.up)
   @test e.buf.caret[1] == 3 && abs(e.buf.caret[2] - at(text, "words")) <= 1
 end
 

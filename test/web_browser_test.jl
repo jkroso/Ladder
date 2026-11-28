@@ -18,8 +18,9 @@
 @use "../web/browser" Browser go! back! forward! reload! can_back can_forward loading scroll!
 @use "../web/browser" => Browsers
 @use "../web/select" => Select
+@use "./drive" drive
 
-shot(name, w) = haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], name), w)
+const (; shot) = drive()
 
 "The first element of `doc` whose `id` is `id`"
 byid(doc, id) = only(Forms.under(e -> attr(e, "id") == id, doc.root))
@@ -291,7 +292,7 @@ const HOME = """<!DOCTYPE html><title>Home &amp; garden</title><link rel=stylesh
   l = b.view.live
   @test Live.evaluate(l, "counted") == 1 && Live.evaluate(l, "getComputedStyle(document.getElementById('next')).color") == "rgb(200, 0, 0)"
   @test rect(b).width == 500px && rect(b).height == 300px && b.view.page.tall > 1500
-  shot("web-browser.png", w)
+  shot(w, "web-browser.png")
 
   # The wheel and the keys scroll the page
   move!(w, (250px, 150px))
@@ -347,7 +348,7 @@ const HOME = """<!DOCTYPE html><title>Home &amp; garden</title><link rel=stylesh
   press!(w, Keys.a, Keys.cmd)
   type!(w, "snow day")
   @test attr(q, "value") == "snow day"
-  shot("web-browser-typing.png", w)
+  shot(w, "web-browser-typing.png")
   # The caret is where the page drew the letters: after the last one, inside the field
   stops = Browsers.caret_stops(b, q)
   @test length(stops) == 9 && issorted(first.(stops)) && 0 < stops[1][1] < stops[end][1] < 210 && 120 <= stops[1][2] < 140
@@ -445,7 +446,7 @@ end
   @test !loading(b) && "https://www.youtube.com/oembed?format=json&url=https%3A%2F%2Fwww.youtube.com%2Fwatch%3Fv%3Dabc" in asked
   click!(w, (100px, 100px))
   @test opened == ["https://www.youtube.com/watch?v=abc"] && b.shown == "https://example.com/" && !loading(b)
-  shot("browser_video.png", w)
+  shot(w, "browser_video.png")
   close(w)
 end
 
@@ -486,7 +487,7 @@ end
   @test Browsers.selected_words(b) == "One two three" && b.drag == :none && b.down === nothing
   press!(w, Keys.c, Keys.cmd)
   @test clipboard(w) == "One two three"
-  shot("web-browser-selected.png", w)
+  shot(w, "web-browser-selected.png")
   # A drag that starts on a link selects its words, and doesn't follow it
   drag!(spot(around("a link")[1]), spot(around("a link")[2]))
   @test Browsers.selected_words(b) == "a link" && isempty(opened)

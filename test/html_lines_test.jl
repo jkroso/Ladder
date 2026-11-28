@@ -9,6 +9,7 @@
 @use "github.com/jkroso/MiniFB.jl" Window
 @use "github.com/jkroso/UI.jl/Interface/draw" frame
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
+@use "./drive" drive
 const px = K.px
 
 const dir = mktempdir()
@@ -23,8 +24,7 @@ window(text; name="page.md") = begin
   frames(w)
   e, w
 end
-frames(w, n=2) = foreach(_ -> Base.invokelatest(frame, w), 1:n)
-shot(name, w) = haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], name), w)
+const (; frames, shot) = drive(latest=true)
 
 "The HTML that a page shows from line `i`, or nothing"
 shown_html(e, i) = (it = K.item(e, i); it.content isa K.Live && it.content.node isa K.HTMLBlock ? it.content.node : nothing)
@@ -121,7 +121,7 @@ end
   @test isapprox(word.tall / p.page.words[1].tall, K.HEADINGS[2], rtol=0.05)
   # The lines round it show as text
   @test K.item(e, 1).content isa K.Flow && K.item(e, 5).content isa K.Flow
-  shot("html_heading.png", w)
+  shot(w, "html_heading.png")
 end
 
 @testset "a picture that HTML names from the page's folder shows" begin
@@ -137,7 +137,7 @@ end
   @test v !== nothing
   @test v.page.tall >= 40
   @test any(p -> p.second !== nothing, v.store.found)
-  shot("html_picture.png", w)
+  shot(w, "html_picture.png")
 end
 
 @testset "a click on a link of the HTML follows it as a link of the text does" begin

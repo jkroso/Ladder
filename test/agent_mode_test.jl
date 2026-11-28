@@ -11,6 +11,7 @@
 @use "github.com/jkroso/UI.jl/Interface/draw" frame
 @use "github.com/jkroso/UI.jl/Interface/save" save_scene
 @use "github.com/jkroso/UI.jl/Interface/objc" libobjc cls sel msg nsstring
+@use "./drive" drive
 const px = K.px
 
 const dir = realpath(mktempdir())
@@ -284,7 +285,7 @@ acp_lines() = isfile(acp_heard) ? readlines(acp_heard) : String[]
 
 const e = K.build_editor(page)
 const w = Window(e, size=(900px, 700px))
-frames(win=w, n=2) = foreach(_ -> Base.invokelatest(frame, win), 1:n)
+const (; frames, click, typed, key) = drive(w, latest=true)
 frames(w, 4)
 K.focus(e)
 
@@ -299,15 +300,6 @@ until(f) = begin
   false
 end
 
-"Press the key `k` in the window with the keys `held` down"
-press(k, held...) = begin
-  foreach(h -> w.keys |= h, held)
-  onkey(w, KeyPress{k}(0, w))
-  foreach(h -> w.keys ⊻= h, held)
-  frames()
-end
-typed(s) = (foreach(c -> ontype(w, Typed(c, w)), s); frames())
-click(x, y) = (w.mouse = typeof(w.mouse)(x, y); onkey(w, KeyPress{Keys.mouse_left}(0, w)); frames())
 "Every rectangle in `r`, as it was last drawn"
 flat(r, out=Any[]) = (push!(out, r); try foreach(c -> flat(c, out), r.children) catch end; out)
 "The rectangle with the name `name` in the window, or nothing"
@@ -320,7 +312,7 @@ mouse_to(x, y) = (w.mouse = typeof(w.mouse)(x, y); onmouse(w, MouseMove(w.mouse,
 "Move the mouse onto the box that you type in, at its left end, where no button is, so the model's button shows"
 on_slot() = (r = K.rect(K.pane_slot(pane)); mouse_to(r.left + 12px, r.top + r.height / 2))
 "Click the model's button, which shows only while the mouse is over the box that you type in"
-model_click() = (on_slot(); b = named("Model"); click(b.left + 10px, b.top + 10px); frames())
+model_click() = (on_slot(); b = named("Model"); click((b.left + 10px, b.top + 10px)); frames())
 
 try
   @testset "Agent Mode widens the window, with the agent at the left, the page on a card and the outline at the right" begin
@@ -367,13 +359,13 @@ try
     # The page is at its top, so the first section is the one that shows
     brushes = rows[3]
     at = K.rect(brushes)
-    click(at.left + at.width - 20px, at.top + at.height / 2)
+    click((at.left + at.width - 20px, at.top + at.height / 2))
     @test e.buf.caret[1] == findfirst(==("## Brushes"), e.buf.lines)
     frames(w, 3)
     @test brushes.now && e.scroll.offset > 0px
     # A click on a heading's arrow hides the headings under it
     paint = K.rect(rows[1])
-    click(paint.left + 14px, paint.top + paint.height / 2)
+    click((paint.left + 14px, paint.top + paint.height / 2))
     rows = [r.from.from for r in flat(K.rect(e)) if hasproperty(r.from, :from) && r.from.from isa K.OutlineRow]
     @test [r.title for r in rows] == ["Paint", "Brushes", "Done"] && rows[1].folded
   end
@@ -539,7 +531,7 @@ try
     w.mouse = typeof(w.mouse)(send.left - 200px, send.top - 300px)
     onmouse(w, MouseMove(w.mouse, w)); frames(w, 3); sleep(2K.SEND_GROWS); frames()
     @test named("About") === nothing && named("Send pill").width == 28px
-    press(Keys.enter)
+    key(Keys.enter)
     @test pane.session !== nothing && pane.field.buf.lines == [""]
     @test w.focus === pane.field
     ok = until(() -> !pane.session.busy)
@@ -642,7 +634,7 @@ try
     frames()
     @test !e.plain && drawn() == "Plain words."
     # ⌘E in the reply takes the window down a level, and the reply and your words go down with it
-    press(Keys.e, Keys.cmd)
+    key(Keys.e, Keys.cmd)
     @test e.plain && K.low(e) && w.focus === sub
     @test sub.plain && pane.field.plain && drawn() == "Plain **words**."
     # With the caret in plain words, no run shows its markup
@@ -653,7 +645,7 @@ try
     # ⌘E again goes back up, in the page and in the reply
     sub.buf.caret = sub.buf.anchor = (1, 9)
     K.touch!(sub)
-    press(Keys.e, Keys.cmd)
+    key(Keys.e, Keys.cmd)
     @test !e.plain && !sub.plain && !pane.field.plain && drawn() == "Plain words."
     K.focus(pane.field)
     frames()
@@ -671,7 +663,7 @@ try
     frames(w, 3)   # the pane scrolls to what's new
     @test named("Agent asks") !== nothing && named("Allow") !== nothing && named("Refuse") !== nothing
     allow = named("Allow")
-    click(allow.left + allow.width / 2, allow.top + allow.height / 2)
+    click((allow.left + allow.width / 2, allow.top + allow.height / 2))
     @test wants.answer == :allowed
     ok = until(() -> !pane.session.busy)
     @test ok && step.state == :done && last(items()).text == "It ran."
@@ -685,7 +677,7 @@ try
     ok = until(() -> last(items()) isa K.AgentWants)
     frames(w, 3)
     refuse = named("Refuse")
-    click(refuse.left + refuse.width / 2, refuse.top + refuse.height / 2)
+    click((refuse.left + refuse.width / 2, refuse.top + refuse.height / 2))
     ok = until(() -> !pane.session.busy)
     @test ok && occursin("\"behavior\":\"deny\"", last(heard_lines())) && last(items()).text == "I left it."
   end
@@ -698,7 +690,7 @@ try
     frames(w, 2)
     fold = named("Steps")
     @test fold !== nothing && count(r -> hasproperty(r.from, :name) && r.from.name == "Step", flat(K.rect(e))) == 1   # the one step of the command before
-    click(fold.left + 30px, fold.top + fold.height / 2)
+    click((fold.left + 30px, fold.top + fold.height / 2))
     @test count(r -> hasproperty(r.from, :name) && r.from.name == "Step", flat(K.rect(e))) == 6
     # A step that's under way keeps the agent busy, and the button at the foot stops it
     pane.field.buf.lines = ["Now go slow"]
@@ -708,7 +700,7 @@ try
     frames(w, 3)
     stop = named("Stop")
     @test stop !== nothing && named("Send") === nothing
-    click(stop.left + stop.width / 2, stop.top + stop.height / 2)
+    click((stop.left + stop.width / 2, stop.top + stop.height / 2))
     ok = until(() -> !pane.session.busy)
     @test ok && occursin("\"interrupt\"", last(heard_lines()))
     @test last(items()) isa K.SessionNote && !last(items()).bad && items()[end-1].state == :done
@@ -717,7 +709,7 @@ try
   @testset "A key for the window works from the agent's pane, and Esc leaves your words" begin
     K.focus(pane.field)
     typed("half a thought")
-    press(Keys.escape)
+    key(Keys.escape)
     @test pane.field.buf.lines == ["half a thought"] && w.focus === pane.field && K.agent_mode(e)
     # The agent is what agent mode is for, so nothing hides its pane. The sidebar's button and ⌘\ show the sidebar, with
     # its tabs and the folder's files, at the pane's left. The pane and the card give it the room, and both stay.
@@ -728,7 +720,7 @@ try
     card_end = named("Page card").left + named("Page card").width
     window_was = (w.size[1], w.position[1])
     outline_was = named("Outline").width
-    press(Keys.backslash, Keys.cmd)
+    key(Keys.backslash, Keys.cmd)
     e.slid = 0.0
     frames(w, 3)
     files, agent, card = named("Files"), named("Agent"), named("Page card")
@@ -748,20 +740,20 @@ try
     arrows = [r for r in flat(K.rect(e)) if hasproperty(r.from, :from) && r.from.from isa K.ToolButton && r.from.from.action in (:back, :forward)]
     @test length(arrows) == 2 && all(r -> files.width < r.left && r.left + r.width <= card.left, arrows)
     # The button's click hides the sidebar again, and the pane and the card are as they were
-    press(Keys.backslash, Keys.cmd)
+    key(Keys.backslash, Keys.cmd)
     e.slid = 0.0
     frames(w, 3)
     @test !e.panel && named("Files") === nothing && (w.size[1], w.position[1]) == window_was
     @test (named("Agent").width, named("Page card").left, named("Agent head").left) == was
     # A window that can't grow, like one that fills a screen, keeps its size: the pane and the card give the sidebar its room
     e.full_screen = true
-    press(Keys.backslash, Keys.cmd)
+    key(Keys.backslash, Keys.cmd)
     e.slid = 0.0
     frames(w, 3)
     files, agent, card = named("Files"), named("Agent"), named("Page card")
     @test e.panel && w.size[1] == window_was[1] && agent.left == files.width && card.left + card.width == card_end
     @test K.AGENT_MIN <= agent.width < was[1] && agent.left + agent.width + K.PAGE_CARD_GAP == card.left
-    press(Keys.backslash, Keys.cmd)
+    key(Keys.backslash, Keys.cmd)
     e.slid = 0.0
     e.full_screen = false
     frames(w, 3)
@@ -801,40 +793,40 @@ try
       K.pane_field!(pane); K.focus(pane.field); frames()
       lines() = pane.field.buf.lines
       typed("half")
-      press(Keys.up)
+      key(Keys.up)
       @test lines() == ["Fix the typo"] && pane.field.buf.caret == (1, 12)
       # While the field shows words that came back, ↑ goes on, though the caret is on the last of their lines
-      press(Keys.up)
+      key(Keys.up)
       @test lines() == ["Make the title bigger", "and bold"] && pane.field.buf.caret == (2, 8)
-      press(Keys.up)
+      key(Keys.up)
       @test lines() == ["Older words"]
       # Nothing is older, so the caret moves as usual
-      press(Keys.up)
+      key(Keys.up)
       @test lines() == ["Older words"] && pane.field.buf.caret == (1, 0)
-      press(Keys.down); press(Keys.down)
+      key(Keys.down); key(Keys.down)
       @test lines() == ["Fix the typo"]
       # ↓ after the newest words puts back what you were typing, and then it moves the caret
-      press(Keys.down)
+      key(Keys.down)
       @test lines() == ["half"]
-      press(Keys.down)
+      key(Keys.down)
       @test lines() == ["half"] && pane.field.buf.caret == (1, 4)
       # Words that came back and that you change are yours: ↑ moves the caret up their lines, and on the top line it goes on
-      press(Keys.up); press(Keys.up)
+      key(Keys.up); key(Keys.up)
       typed(" now")
       @test lines() == ["Make the title bigger", "and bold now"]
-      press(Keys.up)
+      key(Keys.up)
       @test lines() == ["Make the title bigger", "and bold now"] && pane.field.buf.caret[1] == 1
-      press(Keys.up)
+      key(Keys.up)
       @test lines() == ["Older words"]
       # ⌘Z puts back what the field showed before
-      press(Keys.z, Keys.cmd)
+      key(Keys.z, Keys.cmd)
       @test lines() == ["Make the title bigger", "and bold now"]
       # Words that start with a slash come back too, and the next ↑ goes on from them, not into the list of commands
       K.keep_said!(file, folder, "/new")
       K.pane_field!(pane); K.focus(pane.field); frames()
-      press(Keys.up)
+      key(Keys.up)
       @test lines() == ["/new"] && !isempty(K.slash_rows(pane, "/new"))
-      press(Keys.up)
+      key(Keys.up)
       @test lines() == ["Fix the typo"]
     finally
       K.SETTINGS_FILE[] = kept
@@ -924,7 +916,7 @@ try
   @testset "A click on the agent's name lists the agents, and Codex works by turns" begin
     name = named("Agent name")
     @test name !== nothing && name.top + name.height <= K.TOPBAR_H
-    click(name.left + 10px, name.top + 10px)
+    click((name.left + 10px, name.top + 10px))
     frames()
     menus = [p for p in K.popups(w) if p.key == K.AGENT_MENU]
     @test length(menus) == 1
@@ -936,7 +928,7 @@ try
     @test all(r -> r.top >= K.TOPBAR_H - 12px, rows())
     # A click on a row makes that agent the pane's, and shuts the menu
     grok = rows()[4]
-    click(grok.left + 20px, grok.top + 10px)
+    click((grok.left + 20px, grok.top + 10px))
     @test e.ai == "Grok" && K.pane_agent(pane, e) == "Grok" && !any(p -> p.key == K.AGENT_MENU, K.popups(w))
     K.pane_agent!(pane, "Claude")
     # Settings says which agents are listed. One that's taken out goes from the menu, and the one that's chosen stays whatever its box says.
@@ -946,7 +938,7 @@ try
     @test K.listed_agents(e) == ["Claude", "Antigravity", "Grok"]
     @test [c.name for c in K.choices_for(K.AgentChoice, e)] == ["Claude", "Antigravity", "Grok"]
     @test occursin("\nagentshidden=Claude,Codex\n", read(K.settings_file(), String))
-    click(name.left + 10px, name.top + 10px)
+    click((name.left + 10px, name.top + 10px))
     frames()
     @test [r.from.from.name for r in rows()] == ["Claude", "Antigravity", "Grok"]
     K.close_popup!(w, K.AGENT_MENU)
@@ -1043,7 +1035,7 @@ try
     frames(w, 3)
     @test named("Agent asks") !== nothing
     allow = named("Allow")
-    click(allow.left + allow.width / 2, allow.top + allow.height / 2)
+    click((allow.left + allow.width / 2, allow.top + allow.height / 2))
     @test wants.answer == :allowed
     ok = until(() -> !s.busy)
     @test ok && step.state == :done && last(items()).text == "It ran."
@@ -1054,7 +1046,7 @@ try
     ok = until(() -> last(items()) isa K.AgentWants)
     frames(w, 3)
     refuse = named("Refuse")
-    click(refuse.left + refuse.width / 2, refuse.top + refuse.height / 2)
+    click((refuse.left + refuse.width / 2, refuse.top + refuse.height / 2))
     ok = until(() -> !s.busy)
     @test ok && any(l -> occursin("\"optionId\":\"deny\"", l), acp_lines()) && last(items()).text == "I left it." && items()[findlast(it -> it isa K.AgentStep, items())].state == :failed
     # What you say while the agent works waits for it. Stop cancels the turn, and what waited never goes.
@@ -1217,7 +1209,7 @@ try
     @test all(r -> r.top + r.height <= button.top, rows()) && last(rows()).left + last(rows()).width <= button.left + button.width
     # Before a session, a click chooses the model that the session starts with, and the settings keep it
     sonnet = rows()[2]
-    click(sonnet.left + 20px, sonnet.top + 10px)
+    click((sonnet.left + 20px, sonnet.top + 10px))
     @test !any(p -> p.key == K.MODEL_MENU, K.popups(w))
     @test K.chosen_model("Claude") == "sonnet" && K.model_words(pane, e) == "Sonnet 5.5"
     pane.field.buf.lines = ["Hello"]
@@ -1231,7 +1223,7 @@ try
     n = length(items())
     model_click()
     haiku = rows()[3]
-    click(haiku.left + 20px, haiku.top + 10px)
+    click((haiku.left + 20px, haiku.top + 10px))
     ok = until(() -> s.running == "claude-haiku-5-5")
     @test ok && K.running(s) && s.model == "haiku" && K.chosen_model("Claude") == "haiku" && K.model_words(pane, e) == "Haiku 5.5"
     @test occursin(r"\"subtype\":\"set_model\"", last(heard_lines())) && occursin("\"model\":\"haiku\"", last(heard_lines()))
@@ -1284,7 +1276,7 @@ try
     @test all(r -> all(x -> x.left + x.width <= r.left + r.width, [x for x in flat(r) if hasproperty(x.from, :from) && x.from.from isa K.EffortButton]), rows())
     # A click on an effort chooses that model with that effort
     high = only(x for x in flat(rows()[1]) if hasproperty(x.from, :from) && x.from.from isa K.EffortButton && x.from.from.effort == "High")
-    click(high.left + 5px, high.top + 5px)
+    click((high.left + 5px, high.top + 5px))
     @test !any(p -> p.key == K.MODEL_MENU, K.popups(w))
     # Its program changes the model while it runs, and the session says when it has
     ok = until(() -> g.running == "gemini-4-neon-high")
@@ -1293,7 +1285,7 @@ try
     # A click on a model's name keeps the effort, and Medium is for a model that hasn't that effort
     model_click()
     carbon = rows()[2]
-    click(carbon.left + 20px, carbon.top + 10px)
+    click((carbon.left + 20px, carbon.top + 10px))
     @test g.model == "gemini-4-carbon-high"
     @test K.row_choice("Antigravity", K.model_rows(K.agent_models("Antigravity").listed)[4].second, "gemini-4-neon-xhigh").id == "gemini-3.8-flash-low"
     @test K.row_choice("Antigravity", K.model_rows(K.agent_models("Antigravity").listed)[1].second, "gemini-4-carbon-high").id == "gemini-4-neon-high"
@@ -1352,7 +1344,7 @@ try
       @test any(t -> startswith(shot, t), K.PASSING)
       K.focus(pane.field); frames()
       put("public.file-url", "file://" * replace(shot, " " => "%20"))
-      press(Keys.v, Keys.cmd)
+      key(Keys.v, Keys.cmd)
       @test K.attached(pane) == [joinpath(kept, "Screenshot 1.png")] && read(K.attached(pane)[1]) == read(shot) && pane.field.buf.lines == [""]
       # It shows over the words, in the slot, at its own shape, with its button in its corner. The slot's ends stay as round.
       foot, picture, x, send = named("Agent foot"), named("Picture"), named("Take away"), named("Send")
@@ -1365,27 +1357,27 @@ try
       @test abs(K.num(slot.top + slot.height - (send.top + send.height / 2)) - r) < 0.5 && abs(K.num(slot.left + slot.width - (send.left + send.width / 2)) - r) < 0.5
       # A picture that's copied as itself, like a screenshot that went to the clipboard, is written to a file
       put("public.png", read(shot))
-      press(Keys.v, Keys.cmd)
+      key(Keys.v, Keys.cmd)
       @test length(K.attached(pane)) == 2 && startswith(basename(K.attached(pane)[2]), "pasted-") && dirname(K.attached(pane)[2]) == kept
       # Its button takes it away, and the file that Ladder wrote for it
       second = K.attached(pane)[2]
       xs = [r for r in flat(K.rect(e)) if hasproperty(r.from, :name) && r.from.name == "Take away"]
       @test length(xs) == 2
-      click(xs[2].left + 10px, xs[2].top + 10px)
+      click((xs[2].left + 10px, xs[2].top + 10px))
       @test K.attached(pane) == [joinpath(kept, "Screenshot 1.png")] && !isfile(second)
       # A file that isn't a picture goes in as its path, and text as text
       notes = joinpath(dir, "notes.txt"); write(notes, "x")
       put("public.file-url", "file://" * notes)
-      press(Keys.v, Keys.cmd)
+      key(Keys.v, Keys.cmd)
       put("public.utf8-plain-text", " in it?")
-      press(Keys.v, Keys.cmd)
+      key(Keys.v, Keys.cmd)
       @test pane.field.buf.lines == [notes * " in it?"] && length(K.attached(pane)) == 1
       # An app that takes dictation puts its words on the clipboard, presses ⌘V, and soon puts back what the clipboard
       # held before, like a screenshot. The words go in, though the paste reads the clipboard after the picture is back.
       paste = K.COMMANDS[:paste]
       K.COMMANDS[:paste] = K.Command(:paste, "Paste", :edit, "cmd+v", (e, w, s) -> (put("public.png", read(shot)); paste.run(e, w, s)))
       put("public.utf8-plain-text", " Yes.")
-      try press(Keys.v, Keys.cmd) finally K.COMMANDS[:paste] = paste end
+      try key(Keys.v, Keys.cmd) finally K.COMMANDS[:paste] = paste end
       @test pane.field.buf.lines == [notes * " in it? Yes."] && length(K.attached(pane)) == 1
       # A picture that's dropped anywhere on the agent's pane goes with the words too, and the words take the keyboard
       dropped = joinpath(dir, "dropped.png"); cp(shot, dropped)
@@ -1399,7 +1391,7 @@ try
       # Claude gets the picture before your words, and the words say which file it's in
       pane.field.buf.lines = ["What's in this?"]
       n = length(heard_lines())
-      press(Keys.enter)
+      key(Keys.enter)
       ok = until(() -> pane.session !== nothing && !pane.session.busy)
       said = heard_lines()[n+1:end]
       kept_shot = joinpath(kept, "Screenshot 1.png")
@@ -1412,8 +1404,8 @@ try
       @test named("Your pictures") !== nothing && named("Picture") === nothing
       # Only pictures, with no words, can go too
       put("public.png", read(shot))
-      press(Keys.v, Keys.cmd)
-      press(Keys.enter)
+      key(Keys.v, Keys.cmd)
+      key(Keys.enter)
       ok = until(() -> !pane.session.busy)
       @test ok && items()[findlast(it -> it isa K.YouSaid, items())].words == "" && occursin("\"type\":\"image\"", last(heard_lines()))
       # A picture of a kind that Claude doesn't take goes as a PNG file, and one with too many bytes goes smaller
@@ -1463,12 +1455,12 @@ try
     # The page is scrolled down, away from its line 5
     e.scroll.offset = 400px
     frames(w, 3)
-    click(paint...)
+    click(paint)
     frames(w, 3)
     @test e.buf.path == page && e.buf.caret[1] == 5 && e.buf.lines[5] == "## Paint"
     @test w.focus === e && e.scroll.offset < 400px
     # A link to lines of another file shows that file, with the line near the top of the window
-    click(link_place("file://$(replace(notes, ' ' => "%20"))#L41")...)
+    click(link_place("file://$(replace(notes, ' ' => "%20"))#L41"))
     frames(w, 3)
     @test e.buf.path == notes && e.buf.caret[1] == 41 && e.buf.lines[41] == "Note 20." && e.scroll.offset > 0px
     @test K.agent_mode(e)
@@ -1500,18 +1492,18 @@ try
     # What you type after the slash leaves the commands that have it, those that start with it first
     typed("co")
     @test names() == ["compact", "context"] && menu.over == 1
-    press(Keys.down)
+    key(Keys.down)
     @test menu.over == 2 && pane.field.buf.lines == ["/co"]
-    press(Keys.down)
+    key(Keys.down)
     @test menu.over == 1
-    press(Keys.up)
+    key(Keys.up)
     @test menu.over == 2
     # Tab writes the command in the field, with a space to add to. The list then shows that command alone.
-    press(Keys.tab)
+    key(Keys.tab)
     @test pane.field.buf.lines == ["/context "] && w.focus === pane.field && pane.field.buf.caret == (1, 9)
     @test menu.rows == Any[(:hint, menu.rows[1][2])] && menu.rows[1][2].name == "context"
     # Return gives the agent the command as you typed it, with nothing of Ladder's before it
-    press(Keys.enter)
+    key(Keys.enter)
     ok = until(() -> !pane.session.busy && !isempty(heard_lines()) && occursin("/context", last(heard_lines())))
     @test ok && occursin("\"content\":\"/context\"", last(heard_lines())) && !occursin("<ladder>", last(heard_lines()))
     @test items()[1] isa K.YouSaid && items()[1].words == "/context" && isempty(items()[1].about)
@@ -1519,7 +1511,7 @@ try
     # Return on a row of the list runs that command
     typed("/comp")
     @test names() == ["compact"] && shows()
-    press(Keys.enter)
+    key(Keys.enter)
     ok = until(() -> !pane.session.busy && occursin("/compact", last(heard_lines())))
     @test ok && occursin("\"content\":\"/compact\"", last(heard_lines())) && pane.field.buf.lines == [""]
     # Words that start with a slash and are no command go as other words do, with what the window shows
@@ -1533,13 +1525,13 @@ try
     typed("/cont")
     row = only(r for r in flat(only(q for q in K.popups(w) if q.key == K.SLASH_MENU).scene) if hasproperty(r.from, :name) && r.from.name == "Command row")
     n = length(heard_lines())
-    click(row.left + 30px, row.top + 10px)
+    click((row.left + 30px, row.top + 10px))
     ok = until(() -> !pane.session.busy && length(heard_lines()) > n)
     @test ok && occursin("\"content\":\"/context\"", last(heard_lines())) && w.focus === pane.field
     # /model and a space lists the models, and Return chooses one
     typed("/model so")
     @test [(kind, x.id) for (kind, x) in menu.rows] == [(:model, "sonnet")]
-    press(Keys.enter)
+    key(Keys.enter)
     ok = until(() -> pane.session.running == "claude-sonnet-5-5")
     @test ok && pane.session.model == "sonnet" && pane.field.buf.lines == [""]
     K.pane_model!(pane, "opus")
@@ -1547,7 +1539,7 @@ try
     # /new ends the session, as the + button does
     s = pane.session
     typed("/new")
-    press(Keys.enter)
+    key(Keys.enter)
     ok = until(() -> !K.running(s))
     @test ok && pane.session === nothing && pane.field.buf.lines == [""]
     # An agent that works by turns has no earlier sessions to go on with
@@ -1647,7 +1639,7 @@ try
     K.focus(pane.field)
     # Return on /resume writes it out with a space, which lists the sessions, the newest first
     typed("/res")
-    press(Keys.enter)
+    key(Keys.enter)
     frames()
     @test pane.field.buf.lines == ["/resume "]
     @test [(kind, x.id, x.title) for (kind, x) in menu.rows] == [(:session, "aaaa-1111", "Fence \"painting\""), (:session, "bbbb-2222", "Count the brushes")]
@@ -1656,12 +1648,12 @@ try
     @test [x.id for (_, x) in menu.rows] == ["bbbb-2222"]
     typed("x")
     @test menu.rows == Any[(:note, "No earlier session has those words in its title.")]
-    press(Keys.enter)   # nothing to go on with, so the words stay
+    key(Keys.enter)   # nothing to go on with, so the words stay
     @test pane.field.buf.lines == ["/resume BRUSHx"] && isempty(pane.session.items)
     K.field!(pane, "/resume fence")
     frames()
     was = pane.session.process
-    press(Keys.enter)
+    key(Keys.enter)
     s = pane.session
     # What was said in that session shows, without what an agent of Claude's was told, and without Ladder's own lines
     @test s.id == "aaaa-1111" && pane.field.buf.lines == [""]
@@ -1708,8 +1700,8 @@ try
     # Only the sessions of this folder, the newest first
     @test ok && [(x.id, x.title) for (_, x) in menu.rows] == [("old-2", "Brush sizes"), ("old-1", "Paint prices"), ("bad", "A lost one")]
     @test any(l -> occursin("\"method\":\"session/list\"", l) && occursin("\"cwd\":\"$(s.dir)\"", l), acp_lines())
-    press(Keys.down)
-    press(Keys.enter)
+    key(Keys.down)
+    key(Keys.enter)
     @test s.loading && pane.field.buf.lines == [""]
     ok = until(() -> !s.loading && s.talk.ready)
     # The same program loaded the session, and what was said in it shows: your words without Ladder's block, the step, the reply
@@ -1731,7 +1723,7 @@ try
     typed("/resume lost")
     ok = until(() -> !s.looking && first(first(menu.rows)) == :session)   # Ladder asks for the list again, as a session may have come since
     @test ok && [x.id for (_, x) in menu.rows] == ["bad"]
-    press(Keys.enter)
+    key(Keys.enter)
     ok = until(() -> !s.loading && s.talk.ready)
     @test ok && s.id == "old-1" && length(s.items) == n + 1 && last(s.items) isa K.SessionNote && last(s.items).bad
     @test last(s.items).words == "Antigravity couldn't open that session: Resource not found: bad"
@@ -1742,7 +1734,7 @@ try
     ok = until(() -> pane.session !== nothing && pane.session.earlier !== nothing && !pane.session.looking && first(first(menu.rows)) == :session)
     s = pane.session
     @test ok && s.agent == "Grok"
-    press(Keys.enter)
+    key(Keys.enter)
     ok = until(() -> !s.loading && s.talk.ready)
     @test ok && s.id == "old-2" && s.unbriefed
     pane.field.buf.lines = ["/context"]

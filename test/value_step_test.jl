@@ -6,6 +6,7 @@
 @use "../main" => K
 @use "github.com/jkroso/MiniFB.jl" Window KeyPress Keys onkey
 @use "github.com/jkroso/UI.jl/Interface/draw" frame
+@use "./drive" drive
 const px = K.px
 
 const dir = mktempdir()
@@ -22,15 +23,9 @@ window(text; name="page.md") = begin
   e, w
 end
 
-"Press the key `k` in window `w` with the keys `held` down"
-press(w, k, held...) = begin
-  foreach(h -> w.keys |= h, held)
-  onkey(w, KeyPress{k}(0, w))
-  foreach(h -> w.keys ⊻= h, held)
-  frame(w)
-end
-up(w) = press(w, Keys.up, Keys.ctrl)
-down(w) = press(w, Keys.down, Keys.ctrl)
+const (; key) = drive()
+up(w) = key(w, Keys.up, Keys.ctrl)
+down(w) = key(w, Keys.down, Keys.ctrl)
 caret!(e, w, line, col) = (e.buf.caret = e.buf.anchor = (line, col); K.touch!(e); frame(w))
 
 "The text of `line` with the number that the caret is at in brackets, or nothing"
@@ -123,7 +118,7 @@ end
   down(w); down(w)
   @test b.lines[3] == "width 15m and 2.40 high"
   # Presses one after another are taken back by one ⌘Z
-  press(w, Keys.z, Keys.cmd)
+  key(w, Keys.z, Keys.cmd)
   @test b.lines[3] == "width 16m and 2.40 high"
   # The caret at the end of 9 is at the end of 10
   caret!(e, w, 3, 18)                                # at the end of 2.40
@@ -132,15 +127,15 @@ end
   @test b.caret == (3, 18)
   # A key that's typed after them is taken back by itself
   K.edit!(b, (3, 23), (3, 23), "!", typing=true)
-  press(w, Keys.z, Keys.cmd)
+  key(w, Keys.z, Keys.cmd)
   @test b.lines[3] == "width 16m and 3.00 high"
-  press(w, Keys.z, Keys.cmd)
+  key(w, Keys.z, Keys.cmd)
   @test b.lines[3] == "width 16m and 2.40 high"
   # With a word at the caret and no number, the word gets a capital
   caret!(e, w, 3, 2)
   up(w)
   @test b.lines[3] == "Width 16m and 2.40 high"
-  press(w, Keys.z, Keys.cmd)
+  key(w, Keys.z, Keys.cmd)
   # The number grows a digit, and the caret stays as far from its end
   K.edit!(b, (3, 0), K.line_end(b, 3), "count 99 apples")
   caret!(e, w, 3, 6)                                 # at the start of 99
@@ -162,7 +157,7 @@ end
   @test b.lines[1] == "HELLO world"
   down(w)
   @test b.lines[1] == "Hello world"
-  press(w, Keys.z, Keys.cmd)
+  key(w, Keys.z, Keys.cmd)
   @test b.lines[1] == "hello world"
   # With no word at the caret, nothing changes
   K.edit!(b, (1, 0), K.line_end(b, 1), "a  b")
@@ -181,7 +176,7 @@ end
   frame(w)
   up(w)
   @test b.lines[1:3] == ["a 2", "b 6", "c 10"]
-  press(w, Keys.z, Keys.cmd)
+  key(w, Keys.z, Keys.cmd)
   @test b.lines[1:3] == ["a 1", "b 5", "c 9"]
 end
 

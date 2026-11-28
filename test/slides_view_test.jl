@@ -71,10 +71,9 @@ write(joinpath(dir, "other.md"), "# Another page\n\nWith words.\n")
 
 const e = K.build_editor(page)
 const w = K.window!(e, size=(1000px, 800px))
-const (; frames, at, click, key) = drive(w)
+const (; frames, at, click, key, shot) = drive(w)
 e.panel = true   # the sidebar shows
 frames(3)
-shot(name, win=w) = haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], name), win)
 
 caret!(line, col=0) = (e.buf.caret = e.buf.anchor = (line, col); K.touch!(e); frames())
 line_of(text) = findfirst(==(text), e.buf.lines)
@@ -336,9 +335,9 @@ end
   K.slides!(narrow); frame(w3); frame(w3)
   s = K.slideshow(narrow)
   @test s.at == 3 && 1.0 <= s.scale < wide && s.tall <= K.slide_room(narrow) && narrow.width <= 520px - 2K.PAGE_X
-  shot("slide-list-narrow.png", w3)
+  drive(w3).shot("slide-list-narrow.png")
   K.go_slide!(narrow, 4); frame(w3); frame(w3)
-  shot("slide-diagram-narrow.png", w3)
+  drive(w3).shot("slide-diagram-narrow.png")
   K.end_slides!(narrow)
   close(w)
   @test isempty(K.editors)

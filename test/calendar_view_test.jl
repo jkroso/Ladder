@@ -50,10 +50,9 @@ The end.
 
 const e = K.build_editor(page)
 const w = Window(e, size=(1000px, 1400px))
-const (; frames, at, press, release, click, typed, key) = drive(w)
+const (; frames, at, press, release, click, typed, key, shot) = drive(w)
 frames()
 const v = e.nodes[(:block, K.CALENDAR, page, 1)]
-shot(name, win=w) = haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], name), win)
 
 "Press the mouse at one place, move it to another by way of the place between, and let go"
 drag(from, to) = (press(from); at(((from[1] + to[1]) / 2, (from[2] + to[2]) / 2)); at(to); release())
@@ -285,9 +284,9 @@ end
   @test length(things) == 2 && all(t -> t.cut && rect(t).left >= day.left && rect(t).left + rect(t).width <= day.left + day.width, things)
   @test K.tight(b) && rect(things[1].box) === nothing
   @test occursin("<caption>November 2026</caption>", K.page_html(e2))
-  shot("calendar-narrow.png", w2)
+  drive(w2).shot("calendar-narrow.png")
   e2.theme = :night; K.restyle!(e2); foreach(_ -> frame(w2), 1:2)
-  shot("calendar-narrow-dark.png", w2)
+  drive(w2).shot("calendar-narrow-dark.png")
   # The Insert menu adds an empty calendar
   insert = only(x for x in K.INSERTS if x isa Tuple && x[1] == "Calendar")
   e2.buf.caret = e2.buf.anchor = K.line_end(e2.buf, length(e2.buf.lines))

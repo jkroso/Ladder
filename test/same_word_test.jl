@@ -1,7 +1,7 @@
 # Tests for the lines round the other places that have the word that's
 # selected. See `same_word` in page_extras.jl. Run them with
 # `julia -O0 --project=. test/same_word_test.jl`. They select text in a window
-# that isn't on the screen. With a folder as the first argument, they save
+# that isn't on the screen. With `LADDER_SHOTS` set to a folder, they save
 # pictures of the window there.
 
 @use Test: @test, @testset
@@ -9,9 +9,9 @@
 @use "github.com/jkroso/MiniFB.jl" Window
 @use "github.com/jkroso/UI.jl/Interface/draw" frame
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
+@use "./drive" drive
 const px = K.px
 
-const shots = isempty(ARGS) ? "" : ARGS[1]
 const dir = mktempdir()
 const file = joinpath(dir, "progress.jl")
 write(file, """
@@ -49,7 +49,7 @@ end
 select!(e, w, lo, hi) = (e.buf.anchor = lo; e.buf.caret = hi; foreach(_ -> frame(w), 1:2))
 "The line and the columns of each place that has a line round it"
 outlined(e) = [(i, from, to) for (i, from, to) in K.same_word(e)]
-shot(w, name) = isempty(shots) || save_png(joinpath(shots, name * ".png"), w)
+const (; shot) = drive()
 
 @testset "a word that's selected in a file of code" begin
   e, w = open!(file)

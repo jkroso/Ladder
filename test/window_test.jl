@@ -9,6 +9,7 @@
 @use "github.com/jkroso/UI.jl/Interface/draw" frame
 
 @use "../main" => K
+@use "./drive" drive
 const px, window_of, focus = K.px, K.window_of, K.focus
 
 const dir = mktempdir()
@@ -17,13 +18,7 @@ write(page, "# Notes\n\n" * join(("Line $i of the notes." for i in 1:200), "\n\n
 write(joinpath(dir, "other.md"), "# Other\n\nAnother page.\n")
 const settings_page = K.settings_page()
 
-"Press `key` in window `w` with `mods` held down, then draw the window"
-press(w, key, mods...) = begin
-  foreach(m -> (w.keys |= m), mods)
-  onkey(w, KeyPress{key}(0, w)); onkey(w, KeyRelease{key}(0, w))
-  foreach(m -> (w.keys ⊻= m), mods)
-  frame(w)
-end
+const (; key) = drive()
 
 "A window that shows `path`, made the way Ladder makes its first window"
 window(path) = begin
@@ -38,7 +33,7 @@ close_all() = foreach(e -> close(window_of(e)), copy(K.editors))
 
 @testset "⌘, opens the settings in a window of their own" begin
   e, w = window(page)
-  press(w, Keys.comma, Keys.cmd)
+  key(w, Keys.comma, Keys.cmd)
   @test e.buf.path == page                      # the page stays in its window
   @test length(K.editors) == 2
   s = K.settings_editor()
@@ -50,10 +45,10 @@ close_all() = foreach(e -> close(window_of(e)), copy(K.editors))
   @test sw.title == "Settings"
   frame(sw)
   # A second ⌘, in the first window doesn't open another settings window
-  press(w, Keys.comma, Keys.cmd)
+  key(w, Keys.comma, Keys.cmd)
   @test length(K.editors) == 2
   # In the settings window, ⌘, closes it
-  press(sw, Keys.comma, Keys.cmd)
+  key(sw, Keys.comma, Keys.cmd)
   @test K.settings_editor() === nothing
   @test K.editors == [e]
   close_all()
@@ -63,7 +58,7 @@ end
 @testset "the settings window has the settings of the window that opened it" begin
   e, w = window(page)
   e.theme, e.font, e.zoom = :night, "Menlo", 1.5
-  press(w, Keys.comma, Keys.cmd)
+  key(w, Keys.comma, Keys.cmd)
   s = K.settings_editor()
   @test (s.theme, s.font, s.zoom) == (:night, "Menlo", 1.5)
   close_all()
@@ -71,7 +66,7 @@ end
 
 @testset "a setting that changes in one window changes in the other" begin
   e, w = window(page)
-  press(w, Keys.comma, Keys.cmd)
+  key(w, Keys.comma, Keys.cmd)
   s = K.settings_editor()
   sw = window_of(s)
   frame(sw)
@@ -88,7 +83,7 @@ end
   frame(w); frame(sw)
   # And the other way: ⌘+ in the page's window makes the text of the settings window bigger too
   before = s.zoom
-  press(w, Keys.equal, Keys.cmd)
+  key(w, Keys.equal, Keys.cmd)
   @test e.zoom > before
   @test s.zoom == e.zoom
   frame(sw)
@@ -102,7 +97,7 @@ end
   y = e.scroll.offset
   top = findfirst(it -> it.top + it.tall > y, e.layout)
   line, gap = e.layout[top].first, e.layout[top].top - y
-  press(w, Keys.comma, Keys.cmd)
+  key(w, Keys.comma, Keys.cmd)
   s = K.settings_editor()
   K.text_size!(s, 30)
   frame(w)
@@ -113,58 +108,58 @@ end
 
 @testset "⌘W closes a window" begin
   e, w = window(page)
-  press(w, Keys.comma, Keys.cmd)
+  key(w, Keys.comma, Keys.cmd)
   s = K.settings_editor()
   sw = window_of(s)
   frame(sw)
-  press(sw, Keys.w, Keys.cmd)
+  key(sw, Keys.w, Keys.cmd)
   @test K.editors == [e]                        # the settings window closed, and the page's window didn't
   # A setting no longer goes to the window that closed
   K.theme!(e, :paper)
   @test s.theme != :paper
   # ⌘, opens the settings window again
-  press(w, Keys.comma, Keys.cmd)
+  key(w, Keys.comma, Keys.cmd)
   @test K.settings_editor() !== nothing
   @test K.settings_editor() !== s
   close_all()
   # A plain W doesn't close the window. test/close_test.jl has what ⌘W does in a window with a file.
   e, w = window(page)
-  press(w, Keys.w)
+  key(w, Keys.w)
   @test K.editors == [e]
   close_all()
 end
 
 @testset "⌘W and ⌘, work while something else has the keyboard" begin
   e, w = window(page)
-  press(w, Keys.comma, Keys.cmd)
+  key(w, Keys.comma, Keys.cmd)
   s = K.settings_editor()
   sw = window_of(s)
   frame(sw)
   # The file finder's text field, as a stand-in for a slider that took the keyboard
   focus(K.input(s))
   @test sw.focus !== s
-  press(sw, Keys.comma, Keys.cmd)
+  key(sw, Keys.comma, Keys.cmd)
   @test K.settings_editor() === nothing
   # The bar that finds text has the keyboard in the page's window. ⌘F opens that bar for a file of code. On a
   # page of Markdown ⌘F opens the search in the top bar instead, so the test opens the bar itself.
   K.open_find!(e); frame(w)
   @test w.focus === K.find_input(e)
-  press(w, Keys.w, Keys.cmd)
+  key(w, Keys.w, Keys.cmd)
   @test e.buf.path == dirname(page)
-  press(w, Keys.w, Keys.cmd)
+  key(w, Keys.w, Keys.cmd)
   @test K.nofile(e)
-  press(w, Keys.w, Keys.cmd)
+  key(w, Keys.w, Keys.cmd)
   @test isempty(K.editors)
 end
 
 @testset "a settings window that goes to another page is a window like any other" begin
   e, w = window(page)
-  press(w, Keys.comma, Keys.cmd)
+  key(w, Keys.comma, Keys.cmd)
   s = K.settings_editor()
   K.open!(s, joinpath(dir, "other.md"))
   @test K.settings_editor() === nothing
   # So ⌘, there opens the settings window, and doesn't close this one
-  press(window_of(s), Keys.comma, Keys.cmd)
+  key(window_of(s), Keys.comma, Keys.cmd)
   @test length(K.editors) == 3
   @test K.settings_editor() !== nothing
   close_all()
@@ -172,7 +167,7 @@ end
 
 @testset "a file from the Finder opens in the page's window, not the settings window" begin
   e, w = window(page)
-  press(w, Keys.comma, Keys.cmd)
+  key(w, Keys.comma, Keys.cmd)
   s = K.settings_editor()
   sw = window_of(s)
   other = joinpath(dir, "other.md")
@@ -188,7 +183,7 @@ end
 
 @testset "with only the settings window open, a file from the Finder opens in a new window" begin
   e, w = window(page)
-  press(w, Keys.comma, Keys.cmd)
+  key(w, Keys.comma, Keys.cmd)
   s = K.settings_editor()
   sw = window_of(s)
   K.theme!(s, :night)

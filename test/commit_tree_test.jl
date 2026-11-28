@@ -12,6 +12,7 @@
 @use "github.com/jkroso/UI.jl/Interface/draw" frame rect onscroll
 @use GeometryBasics: Vec2
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
+@use "./drive" drive
 
 const px = K.px
 const G = K.Git
@@ -49,10 +50,9 @@ const start, side, work, merged = hash("v1"), hash("side"), hash("main~1"), hash
 const e = K.build_editor(joinpath(repo, "Readme.md"))
 e.panel = true   # the sidebar is open, with no slide
 const w = Window(e, size=(1100px, 700px))
-frames(n=3) = foreach(_ -> Base.invokelatest(frame, w), 1:n)
+const (; frames, shot) = drive(w, frames=3, latest=true)
 "Draw until git has answered, and then what it said is on the screen"
 settle() = (frames(2); G.wait!(); frames(2); G.wait!(); frames(2))
-shot(name) = haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], "tree-$name.png"), w)
 "The words of every Text in the geometry `g`"
 texts(g) = g isa K.Text ? [String(g.content)] : reduce(vcat, map(texts, try collect(g.children) catch; Any[] end), init=String[])
 "The line of git's panel for the commit `hash`"
@@ -87,7 +87,7 @@ end
   @test "side" in texts(K.describe(line(side)))
   @test "v1" in texts(K.describe(line(start)))
   @test length(collect(K.describe(line(merged)).children)) == 3
-  shot("panel")
+  shot("tree-panel")
 end
 
 @testset "a repository whose commits are one after another has a tree of one lane" begin
@@ -106,7 +106,7 @@ end
   # A commit with no branch or tag at it has only its first line and the line under it
   one = only(l for l in ls if l.commit.subject == "One")
   @test isempty(one.commit.refs) && length(collect(K.describe(one).children)) == 2
-  shot("one-lane")
+  shot("tree-one-lane")
 end
 
 @testset "the last commits have a scroll of their own, so the panel needs none" begin
@@ -136,7 +136,7 @@ end
   # It goes down to the foot of the window, less the panel's padding
   @test K.num(log_of(rect(p)).top) + K.num(log_of(rect(p)).height) ≈ 700 atol=8
   @test K.num(rect(newest).top) < 400 && K.num(rect(oldest).top) > 700
-  shot("long")
+  shot("tree-long")
   # The wheel over the commits scrolls them, and the parts over them stay
   top = K.num(rect(newest).top)
   x, y = K.num(rect(newest).left) + 40, K.num(rect(newest).top) + 10

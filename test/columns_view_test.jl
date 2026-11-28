@@ -10,6 +10,7 @@
 @use "github.com/jkroso/UI.jl/Interface/draw" frame rect
 @use "github.com/jkroso/UI.jl/Interface/save" save_png
 @use GeometryBasics: Vec2
+@use "./drive" drive
 const px = K.px
 
 const dir = mktempdir()
@@ -28,13 +29,7 @@ window(name, text; size=(1100px, 900px)) = begin
   K.focus(e)
   e, w
 end
-frames(w, n=2) = foreach(_ -> frame(w), 1:n)
-shot(w, name) = haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], name), w)
-at(w, (x, y)) = (w.mouse = typeof(w.mouse)(px(x), px(y)); onmouse(w, MouseMove(Vec2{px}(px(x), px(y)), w)); frames(w, 1))
-press(w, place, keys=Keys(0)) = (at(w, place); w.keys |= keys | Keys.mouse_left; onkey(w, KeyPress{Keys.mouse_left}(0, w)))
-release(w, keys=Keys(0)) = (w.keys ⊻= keys | Keys.mouse_left; onkey(w, KeyRelease{Keys.mouse_left}(0, w)); frames(w))
-click(w, place, keys=Keys(0)) = (press(w, place, keys); release(w, keys))
-key(w, k, held=Keys(0)) = (w.keys = held; onkey(w, KeyPress{k}(0, w)); w.keys = Keys(0); frames(w))
+const (; frames, at, press, release, click, key, shot) = drive()
 type(e, w, text) = (foreach(c -> ontype(e, Typed(c, w)), text); frames(w))
 caret!(e, w, p) = (e.buf.caret = e.buf.anchor = p; K.touch!(e); frames(w))
 line(e, text) = findfirst(==(text), e.buf.lines)

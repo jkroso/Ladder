@@ -12,6 +12,7 @@
 @use "github.com/jkroso/UI.jl/Interface/objc" libobjc sel nsstring
 @use "github.com/jkroso/UI.jl/Interface/save" save_png save_scene
 @use GeometryBasics: Vec2
+@use "./drive" drive middle
 const px = K.px
 const C = K.Contacts
 
@@ -74,22 +75,14 @@ The end.
 
 const e = K.build_editor(page)
 const w = Window(e, size=(1000px, 1100px))
-frames(n=2, w=w) = foreach(_ -> frame(w), 1:n)
+const (; frames, at, press, release, click, typed, key, shot) = drive(w)
 frames()
 view(n=1, e=e) = e.nodes[(:block, K.CONTACT, e.buf.path, n)]
-shot(name, w=w) = haskey(ENV, "LADDER_SHOTS") && save_png(joinpath(ENV["LADDER_SHOTS"], name), w)
 
-at((x, y), w=w) = (w.mouse = typeof(w.mouse)(px(x), px(y)); onmouse(w, MouseMove(Vec2{px}(px(x), px(y)), w)); frames(1, w))
-press(place, w=w) = (at(place, w); w.keys |= Keys.mouse_left; onkey(w, KeyPress{Keys.mouse_left}(0, w)))
-release(w=w) = (w.keys ⊻= Keys.mouse_left; onkey(w, KeyRelease{Keys.mouse_left}(0, w)); frames(2, w))
-click(place, w=w) = (press(place, w); release(w))
 "Two clicks in one place, one soon after the other"
-twice(place, w=w) = (click(place, w); click(place, w))
+twice(place, w=w) = (drive(w).click(place); drive(w).click(place))
 "Wait until a click on a row is known to have no second click, and draw"
-wait(w=w) = (sleep(K.CONTACT_WAIT + 0.1); frames(2, w))
-key(k, held...; w=w) = (foreach(h -> w.keys |= h, held); onkey(w, KeyPress{k}(0, w)); foreach(h -> w.keys ⊻= h, held); frames(2, w))
-typed(s, w=w) = (foreach(c -> ontype(w, Typed(c, w)), s); frames(2, w))
-middle(r) = (K.num(r.left + r.width / 2), K.num(r.top + r.height / 2))
+wait() = (sleep(K.CONTACT_WAIT + 0.1); frames())
 "The lines of the `n`th block of contacts of the page that `e` shows"
 block(n=1, e=e) = (s = K.block_lines(e.buf, K.CONTACT, n); e.buf.lines[s[1]+1:s[2]-1])
 "A part of a block, and where it was last drawn"
@@ -500,7 +493,7 @@ close(w)
 @testset "a narrow window" begin
   e2 = K.build_editor(page)
   w2 = Window(e2, size=(300px, 1300px))
-  frames(3, w2)
+  frames(w2, 3)
   v = view(1, e2)
   card = rect(part(v, :card, 1))
   # The card is as wide as the page's text, and nothing leaves it
@@ -512,7 +505,7 @@ close(w)
   end
   # The address is on more lines than one, and a long email address ends in …
   @test rect(part(v, :row, 1, 6)).height > rect(part(v, :row, 1, 5)).height
-  shot("contact-narrow.png", w2)
+  drive(w2).shot("contact-narrow.png")
   close(w2)
 end
 
@@ -540,7 +533,7 @@ end
   """)
   e3 = K.build_editor(wrong)
   w3 = Window(e3, size=(800px, 1000px))
-  frames(3, w3)
+  frames(w3, 3)
   v = view(1, e3)
   card = rect(part(v, :card, 1))
   @test card.width ≈ 420px && length(v.data) == 1 && C.title(v.data[1]) == ": :"
@@ -550,9 +543,9 @@ end
     @test card.left <= r.left && r.left + r.width <= card.left + card.width + 0.5px
   end
   # A photo that isn't there, and one that the web doesn't have, leave the head or the building
-  arrived[] = true; frames(3, w3)
+  arrived[] = true; frames(w3, 3)
   @test isempty(part(v, :face, 1).key) && isempty(part(view(2, e3), :face, 1).key)
-  shot("contact-wrong.png", w3)
+  drive(w3).shot("contact-wrong.png")
   @test K.page_html(e3) isa String
   close(w3)
 end
@@ -566,18 +559,18 @@ end
   write(online, "# Online\n\n```contact\nAda Lovelace\nphoto: $photo\n```\n")
   e6 = K.build_editor(online)
   w6 = Window(e6, size=(800px, 500px))
-  frames(3, w6)
+  frames(w6, 3)
   v = view(1, e6)
   # Until the picture has come, the card shows the initials, and the window isn't held up
   @test asked == [photo] && isempty(part(v, :face, 1).key) && "AL" in texts(v)
   arrived[] = true
   for _ in 1:200
-    frames(1, w6)
+    frames(w6, 1)
     isempty(part(v, :face, 1).key) || break
     sleep(0.01)
   end
   @test !isempty(part(v, :face, 1).key) && !("AL" in texts(v)) && asked == [photo]
-  shot("contact-web-photo.png", w6)
+  drive(w6).shot("contact-web-photo.png")
   close(w6)
 end
 
@@ -587,25 +580,25 @@ end
   chmod(fixed, 0o444)
   e4 = K.build_editor(fixed)
   w4 = Window(e4, size=(800px, 700px))
-  frames(3, w4)
+  frames(w4, 3)
   v, n = view(1, e4), view(2, e4)
   @test e4.buf.fixed && K.locked(v)
   # A click opens at once, since no second click can change anything
   empty!(opened)
-  click(spot(v, :row, 1, 3), w4)
+  drive(w4).click(spot(v, :row, 1, 3))
   @test opened == ["mailto:ada@example.com"]
   twice(spot(v, :words, 1, :name), w4)
   @test v.editing === nothing
-  at(spot(v, :row, 1, 3), w4); frames(2, w4)
+  drive(w4).at(spot(v, :row, 1, 3)); frames(w4, 2)
   # It has the buttons that copy and that add to Contacts, and none that changes the block
   @test shows(v, :button, (:copy, 1, 3)) && shows(v, :button, (:keep, 1)) && !shows(v, :button, (:more, 1)) && !shows(v, :button, (:new,))
-  click(spot(v, :button, (:copy, 1, 3)), w4)
+  drive(w4).click(spot(v, :button, (:copy, 1, 3)))
   @test clipboard(w4) == "ada@example.com"
   # An empty block says nothing, and takes no name
   @test !("Name" in texts(n))
-  click(spot(n, :words, 1, :name), w4)
+  drive(w4).click(spot(n, :words, 1, :name))
   @test n.editing === nothing && !K.dirty(e4.buf)
-  shot("contact-fixed.png", w4)
+  drive(w4).shot("contact-fixed.png")
   close(w4)
   chmod(fixed, 0o644)
 end
