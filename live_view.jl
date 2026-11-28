@@ -160,7 +160,7 @@ evaluate(e, code::String; key=(:live, e.buf.path, code), inline=false) = begin
       value = running_code(m -> (inline ? run_sum : run_in)(m, code, isempty(path) ? joinpath(e.folder, "untitled.md") : path), e)
       node = inline ? present_inline(value) : present(value)
       # Keep the amount, with its unit, so a chart can read that and not the words around it
-      inline && node === nothing && (e.nodes[(:amount, key[2], key[3], key[4])] = value)
+      inline && node === nothing && length(key) == 4 && (e.nodes[(:amount, key[2], key[3], key[4])] = value)
       node !== nothing ? node : inline ? (said(value), false) : note(repr("text/plain", value), colours.ink)
     end
   catch err
