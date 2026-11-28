@@ -61,7 +61,7 @@ list_open() = any(p -> p.key == K.COMMIT_LIST, popups(w))
 "Click the chevron, and click the row of the way `way` in its list: :file, :part or :all"
 choose(way) = (click(rect(e.nodes[:commit_more])); click(rect(e.nodes[(:commit_way, way)])); frames())
 commit_button() = e.nodes[:commit]
-said() = get(e.nodes, :result, ("", 0.0))[1]
+said() = something(K.said_result(e), ("", 0.0))[1]
 subjects() = split(chomp(git("log", "--format=%s")), '\n')
 "Close the palette, and draw until it has slid away"
 close_palette() = (K.close_palette!(e); t = time(); while K.palette_shows(e) && time() - t < 2; frames(1); sleep(0.02) end; frames())

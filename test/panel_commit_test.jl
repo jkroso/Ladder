@@ -72,7 +72,7 @@ commit!() = begin
     sleep(0.02)
   end
   again()
-  first(e.nodes[:result])
+  first(K.said_result(e))
 end
 "The files that the last commit changed"
 last_files() = sort(split(said("show", "--name-only", "--format=", "HEAD"), '\n', keepempty=false))

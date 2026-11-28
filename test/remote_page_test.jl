@@ -143,7 +143,7 @@ press(k, held...) = begin
   frames()
 end
 typed(s) = (foreach(c -> ontype(w, Typed(c, w)), s); frames())
-said() = get(e.nodes, :result, ("", 0.0))[1]
+said() = something(K.said_result(e), ("", 0.0))[1]
 
 @testset "addresses" begin
   @test Remote.typed("example.com/notes.md") == "https://example.com/notes.md"

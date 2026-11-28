@@ -59,7 +59,7 @@ finish() = begin
     sleep(0.05)
   end
   settle()
-  first(e.nodes[:result])
+  first(K.said_result(e))
 end
 "Click the Pull or the Push button, and draw until git has finished. It gives what Ladder said under the top bar."
 press(what) = (click(middle(button(what))); finish())
@@ -244,7 +244,7 @@ end
 "A window that isn't on the screen, on the file at `path`"
 window_on(path) = (o = K.build_editor(path); v = Window(o, size=(900px, 600px)); foreach(_ -> Base.invokelatest(frame, v), 1:2); o)
 "Run the palette's command called `name`. It gives the words under the top bar while git runs."
-run_command(name) = (K.open_palette!(e, K.COMMANDS[name]); first(e.nodes[:result]))
+run_command(name) = (K.open_palette!(e, K.COMMANDS[name]); first(K.said_result(e)))
 
 @testset "the command palette has Push and Pull in a repository, and not outside one" begin
   again()

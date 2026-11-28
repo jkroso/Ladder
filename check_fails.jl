@@ -148,8 +148,7 @@ check_button!(e, w) = begin
       Base.invokelatest(action == :fix ? fix_check! : show_steps!, e, check)
     catch err
       err isa InterruptException && rethrow()
-      e.nodes[:result] = (String(first(split(sprint(showerror, err), '\n'))), time())
-      redraw_in!(e, 0)
+      say_result!(e, first(split(sprint(showerror, err), '\n')))
     end
     return true
   end

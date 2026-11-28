@@ -55,13 +55,13 @@ end
   # It isn't one of the commands that run at once, so Run runs it
   @test p.at == 3 && e.popup == :commands
   press(Keys.enter)
-  @test e.popup == :none && first(e.nodes[:result]) == "Invoice: Ada owes 270"
+  @test e.popup == :none && first(K.said_result(e)) == "Invoice: Ada owes 270"
   @test any(x -> x.key == :result, popups(w))
   # A value that isn't words shows as Julia shows it
   press(Keys.p, Keys.cmd, Keys.shft)
   typed("week"); press(Keys.enter)
   typed("5"); press(Keys.enter); press(Keys.enter)
-  @test first(e.nodes[:result]) == "Week: 40"
+  @test first(K.said_result(e)) == "Week: 40"
 end
 
 close(w)

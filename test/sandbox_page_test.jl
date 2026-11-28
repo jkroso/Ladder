@@ -147,7 +147,7 @@ end
     empty!(asks)
     K.navigate!(e, "pkg.example.com/page.md"); frames(6)
     @test asks == [(pkg_site, "load the package nobody-here/Blocks.jl from GitHub, which isn't on your Mac yet")]
-    @test occursin("Claude is reading the package nobody-here/Blocks.jl", get(e.nodes, :result, ("", 0.0))[1])
+    @test occursin("Claude is reading the package nobody-here/Blocks.jl", something(K.said_result(e), ("", 0.0))[1])
     for _ in 1:100
       isempty(checks) || break
       sleep(0.05); frames(1)

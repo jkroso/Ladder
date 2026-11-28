@@ -25,6 +25,7 @@
 @use "./file_blocks" exports...
 @use "./toasts" exports...
 @use "./commands" exports...
+@use "./git_page" said_result
 
 export STARTUP, STARTUP_FOLDER, STARTUP_SHOWS, page_commands, result_tick!, startup_text,
        startup_tick!, stopped_tick!
@@ -181,7 +182,7 @@ page_commands(e) = begin
 end
 
 "Say what a command of the page gave back, under the top bar, for a while"
-result_tick!(e) = (r = get(e.nodes, :result, nothing); r === nothing || stopped_tick!(e, :result, r...))
+result_tick!(e) = (r = said_result(e); r === nothing || stopped_tick!(e, :result, r...))
 
 "Show the toasts that say what failed in the code of the startup page or of a folder's page, and what a command of the page gave back"
 startup_tick!(e) = (toasts_tick!(e); result_tick!(e))

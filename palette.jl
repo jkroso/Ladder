@@ -1450,8 +1450,7 @@ palette_run!(e, w, p::CommandPalette) = begin
     # What a command of the page's own gave back shows under the top bar
     if p.command.kind == :page && value !== nothing
       said = first(split(value isa AbstractString ? value : value_text(value, parentmodule(p.command.call)), '\n'))
-      e.nodes[:result] = ("$(palette_name(p.command.name)): " * (length(said) > 120 ? first(said, 119) * "…" : said), time())
-      redraw_in!(e, 0)
+      say_result!(e, "$(palette_name(p.command.name)): " * (length(said) > 120 ? first(said, 119) * "…" : said))
     end
   catch err
     err isa InterruptException && rethrow()

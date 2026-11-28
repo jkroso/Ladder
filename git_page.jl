@@ -85,7 +85,7 @@ export GitDirectory, RepoView, GitPanel, follow_words, GIT_RUNS, send_command, S
        switch_look, diffing, toggle_diff!, show_changes!, change_span, go_change!, change_after, step_change!,
        next_change!, previous_change!, step_tip, COMMITTED, committed_lines, diff_now, gone_h, inline_diff!,
        gone_now, gone_rows, gone_under, gone_over, is_new, tint_new, draw_diff_bars, put_change_back!,
-       PutBack, put_back_over, diff_part
+       PutBack, put_back_over, diff_part, BarWords, said_result, unsay_result!
 
 "A folder that git keeps: the top folder of a repository, or a folder in one"
 @def struct GitDirectory <: AbstractDirectory end
@@ -466,10 +466,21 @@ sending_words(what, s) = begin
   "Pulling the new commits of $there into $(s.branch)…"
 end
 
+"What a window says under its top bar for a while: see `say_result!`"
+@def mutable struct BarWords
+  said::Union{Nothing,Tuple{String,Float64}} = nothing   # the words, and when the window said them
+end
+
+"What the window of `e` last said under its top bar, with when it said it, or nothing"
+said_result(e) = state_of(e, BarWords).said
+
+"Take away what the window of `e` says under its top bar"
+unsay_result!(e) = (state_of(e, BarWords).said = nothing)
+
 "Say `words` under the top bar of `e` again when they're still there, so that they stay while something takes long"
 keep_saying!(e, words) = begin
-  said = get(e.nodes, :result, nothing)
-  (said === nothing || said[1] != words || time() - said[2] > 2) && (e.nodes[:result] = (words, time()))
+  said = said_result(e)
+  (said === nothing || said[1] != words || time() - said[2] > 2) && (state_of(e, BarWords).said = (String(words), time()))
   nothing
 end
 
@@ -1382,7 +1393,7 @@ wide_words(::Val{:commit_all}) = true
 wide_words(::Val{:commit_ticked}) = true
 wide_words(::Val{:commit_staged}) = true
 "Say `words` under the top bar for a while"
-say_result!(e, words) = (e.nodes[:result] = (String(words), time()); redraw_in!(e, 0); e)
+say_result!(e, words) = (state_of(e, BarWords).said = (String(words), time()); redraw_in!(e, 0); e)
 
 "Commit what `commit_now!` started, once the agent has written its message. Each window does this in each frame."
 commit_tick!(e) = begin

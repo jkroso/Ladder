@@ -39,6 +39,7 @@
 @use "./view_block" exports...
 @use "./result_block" exports...
 @use "./folder_kinds" exports...
+@use "./git_page" keep_saying! said_result unsay_result!
 
 export COPY_ADDRESSES, COPY_MARK, GOT_MARK, PAGE_WAIT, PageAsked, RELOAD_ASKER, SHOWN_BLOCKS,
        ask_reload!, fingerprint, forget_view_copies!, got_mark, land_page!, mark_copy!, mark_file!,
@@ -393,9 +394,8 @@ remote_tick!(e) = begin
   if got === nothing
     # A page that comes at once shows with no words before it. The words stay for as long as the page takes.
     # A page that shows already, from the browser folder, needs none, unless you asked for it again.
-    said = get(e.nodes, :result, ("", 0.0))
     words = "Getting $(Remote.label(a.address))…"
-    (!a.again || a.reload) && time() - a.since > PAGE_WAIT && (said[1] != words || time() - said[2] > 2) && (e.nodes[:result] = (words, time()))
+    (!a.again || a.reload) && time() - a.since > PAGE_WAIT && keep_saying!(e, words)
     redraw_in!(e, 0.05)
     return nothing
   end
@@ -408,9 +408,9 @@ end
 
 "Take away the words under the top bar that say that Ladder is getting a page"
 unsay_getting!(e) = begin
-  said = get(e.nodes, :result, nothing)
+  said = said_result(e)
   (said !== nothing && startswith(said[1], "Getting ")) || return nothing
-  delete!(e.nodes, :result)
+  unsay_result!(e)
   w = window_of(e)
   w === nothing || close_popup!(w, :result)
   nothing

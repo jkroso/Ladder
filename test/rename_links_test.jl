@@ -75,7 +75,7 @@ frames()
 file_line(path, start) = first(l for l in split(read(path, String), '\n') if startswith(l, start))
 "The line of the open page that starts with `start`"
 open_line(b, start) = first(l for l in b.lines if startswith(l, start))
-said() = (r = get(e.nodes, :result, nothing); r === nothing ? "" : r[1])
+said() = (r = K.said_result(e); r === nothing ? "" : r[1])
 
 "Give the file or the folder at `path` the name `name`, as the text field of the sidebar does"
 rename_to!(path, name) = begin
@@ -134,7 +134,7 @@ end
 end
 
 @testset "a page that moves to another folder keeps its links, and the links to it follow" begin
-  delete!(e.nodes, :result)
+  K.unsay_result!(e)
   K.move!(e, joinpath(top, "notes", "sub", "deep.md"), joinpath(top, "deep.md")); frames()
   deep = e.buffers[joinpath(top, "deep.md")]
   # Its own link to a file is from its new folder, and its wiki link still finds the page
@@ -147,14 +147,14 @@ end
   write(joinpath(top, "x", "Plan.md"), "# The plan of x\n")
   write(joinpath(top, "y", "Plan.md"), "# The plan of y\n")
   write(joinpath(top, "x", "a.md"), "# A\n\nSee [[Plan]] and [[Missing]].\n")
-  delete!(e.nodes, :result)
+  K.unsay_result!(e)
   K.move!(e, joinpath(top, "x", "a.md"), joinpath(top, "y", "a.md")); frames()
   @test file_line(joinpath(top, "y", "a.md"), "See") == "See [[x/Plan]] and [[Missing]]."
   @test said() == "Changed 1 link in 1 page to the new place"
 end
 
 @testset "a folder's new name goes into the paths and the names with folders that go through it" begin
-  delete!(e.nodes, :result)
+  K.unsay_result!(e)
   rename_to!(joinpath(top, "notes"), "thinking")
   b = e.buf
   @test b.lines[3] == "See [[Thoughts]], [[Thoughts|my ideas]], [[Thoughts#Big step]] and ![[Thoughts]]."
@@ -166,7 +166,7 @@ end
 end
 
 @testset "a file that isn't a page, and a name with spaces" begin
-  delete!(e.nodes, :result)
+  K.unsay_result!(e)
   # The field keeps the file's ending when the name is typed without it
   rename_to!(joinpath(top, "thinking", "plan.png"), "drawing")
   @test e.buf.lines[7] == "A picture: ![a plan](thinking/drawing.png) and [[drawing.png]]."
@@ -183,7 +183,7 @@ end
 end
 
 @testset "no link changes, and no note, when nothing links to the file" begin
-  delete!(e.nodes, :result)
+  K.unsay_result!(e)
   rename_to!(joinpath(top, "plain.md"), "flat")
   @test isfile(joinpath(top, "flat.md")) && said() == ""
   # A new page that's named as it's made takes no links: pages can link to the name Untitled before it's there

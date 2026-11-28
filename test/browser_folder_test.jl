@@ -78,7 +78,7 @@ const e = K.blank_editor()
 const w = Window(e, size=(1000px, 800px))
 frames(n=3) = foreach(_ -> frame(w), 1:n)
 frames()
-said() = get(e.nodes, :result, ("", 0.0))[1]
+said() = something(K.said_result(e), ("", 0.0))[1]
 at(p) = joinpath(browser, p)
 
 @testset "where each address goes, from the folder of its site" begin

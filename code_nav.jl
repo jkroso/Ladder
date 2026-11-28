@@ -562,8 +562,7 @@ word_count(e) = begin
   end
   n, chars = words(lines), sum(length, lines, init=0)
   said = "$(commas(n)) word$(n == 1 ? "" : "s")  ·  $(commas(chars)) character$(chars == 1 ? "" : "s")  ·  $(max(1, round(Int, n / 230))) min read"
-  e.nodes[:result] = (said, time())
-  redraw_in!(e, 0)
+  say_result!(e, said)
   said
 end
 add_command!(word_count, title="Say how many words the page has, how many characters, and how long it takes to read", kind=:look)

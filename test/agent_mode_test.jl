@@ -1791,7 +1791,7 @@ try
     K.stop!(s)
     ok = until(() -> !haskey(e.nodes, :writing))
     @test ok && strip(git("log", "-1", "--format=%B")) == "Buy less paint\n\nThe plan says why."
-    @test isempty(strip(git("status", "--porcelain", "plan.md"))) && startswith(e.nodes[:result][1], "Committed plan.md: Buy less paint")
+    @test isempty(strip(git("status", "--porcelain", "plan.md"))) && startswith(K.said_result(e)[1], "Committed plan.md: Buy less paint")
     # The pane shows the question and the message. The diff and the last messages went to the agent, though the pane doesn't show them.
     asked = s.items[findlast(it -> it isa K.YouSaid, s.items)]
     @test asked.words == "Write the commit message for plan.md." && last(s.items) isa K.AgentReply && !s.busy

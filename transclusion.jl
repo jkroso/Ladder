@@ -489,8 +489,7 @@ copy_link_to_block!(e) = begin
   link = block_link!(e)
   link === nothing && return nothing
   clipboard(link)
-  e.nodes[:result] = ("Copied $link", time())
-  redraw_in!(e, 0)
+  say_result!(e, "Copied $link")
   link
 end
 add_command!(copy_link_to_block!, title="Copy a link that shows the block at the caret in another page, like ![[Ideas#^prices]]", kind=:edit)

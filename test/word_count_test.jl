@@ -47,7 +47,7 @@ end
   typed(w, "word count")
   @test "Word Count" in names(e)
   press(w, Keys.enter)
-  @test first(e.nodes[:result]) == "4 words  ·  23 characters  ·  1 min read"
+  @test first(K.said_result(e)) == "4 words  ·  23 characters  ·  1 min read"
   frames(w)
   @test any(pop -> pop.key == :result, popups(w))
 end
