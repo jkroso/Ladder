@@ -164,7 +164,9 @@ end
   @test join(String(l.texts[4].chars[span]) for span in l.bands[4].lines[1]) == v.data.hunks[1].rows[4].text
   # The lines have the colours of Julia code, because the file is greet.jl
   @test (3:9, :call) in l.texts[2].parts && (11:18, :string) in l.texts[2].parts && any(p -> p[2] == :comment, l.texts[2].parts)
-  @test all(t -> all(p -> p[2] == :plain, t.parts), K.laid(view(1), 3, wide).texts)   # Readme.md has none
+  # The lines of Readme.md have the colours of Markdown: its heading has a colour, and isn't the comment that Julia would read
+  heading = K.laid(view(1), 3, wide).texts[2]
+  @test String(heading.chars) == "# The app" && !isempty(heading.parts) && all(p -> p[2] ∉ (:plain, :comment), heading.parts)
   # The old line is beside its new version, and the new line's other words are marked
   @test l.texts[4].marks[1] == 17:17 && isempty(l.texts[3].marks)
   shot("changes-under.png")
