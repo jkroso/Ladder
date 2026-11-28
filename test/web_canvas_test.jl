@@ -147,16 +147,21 @@ end
     <script>var v = document.getElementById('v'), x = document.getElementById('c').getContext('2d')</script></body>"""; wide=300, load=src -> src == "clip.mp4" ? clip : nothing)
   js(code) = Live.evaluate(l, code)
   left() = Live.page!(l).words[1].edges[1]
+  # The test sets the page's clock, so that a busy Mac changes nothing. The page's time is the time since its scripts
+  # started, so the page is `t` seconds old when they started `t` seconds ago. A page that moves isn't laid out again
+  # for a moment after a layout, and that moment ends here too.
+  at!(t) = (l.scripts.started = time() - t; l.rest = 0.0)
   # Nothing moves, so the page is laid out once
   p = Live.page!(l)
   @test !Web.moving(p) && Live.page!(l) === p && left() == 0
   # An animation that a script starts runs from then, and the page is laid out again while it does
   js("document.getElementById('p').className = 'on'")
+  at!(10)
   first = Live.page!(l)
   @test Web.moving(first) && first.words[1].edges[1] < 50
-  sleep(0.1)
+  at!(10.1)   # half of the animation's time has gone
   @test Live.page!(l) !== first && 20 < left() < 100
-  sleep(0.2)
+  at!(10.3)
   @test left() == 100 && !Web.moving(Live.page!(l)) && Live.page!(l) === Live.page!(l)
   # The scripts are told when the animation is over, by its name
   js("var ends = []; document.addEventListener('animationend', e => ends.push([e.target.id, e.animationName, e.elapsedTime, e instanceof Event].join()))")
@@ -167,15 +172,19 @@ end
   # A style that a script changes takes the time that its `transition` says, and then the scripts are told
   js("""var p = document.getElementById('p'); p.className = ''; p.style.transition = 'margin-left 0.2s linear'
         p.ontransitionend = e => ends.push([e.propertyName, e.elapsedTime, e.bubbles].join())""")
+  at!(11)
   @test left() == 100   # the animation is gone, and the margin takes its time to go back from where the animation left it
-  sleep(0.3)
+  at!(11.3)
   @test left() == 0
   js("p.style.marginLeft = '60px'")
+  at!(12)
   first = Live.page!(l)
   @test Web.moving(first) && first.words[1].edges[1] < 30
-  sleep(0.1)
-  @test 10 < left() < 60 && parse(Float64, replace(js("getComputedStyle(p).marginLeft"), "px" => "")) < 60
-  sleep(0.2)
+  at!(12.1)   # half of the transition's time has gone
+  @test 10 < left() < 60
+  at!(12.11)
+  @test parse(Float64, replace(js("getComputedStyle(p).marginLeft"), "px" => "")) < 60
+  at!(12.3)
   @test left() == 60 && !Web.moving(Live.page!(l))
   Live.step!(l)
   @test js("ends.slice(1).join(';')") == "margin-left,0.2,true;margin-left,0.2,true" && js("new TransitionEvent('transitionend', {propertyName: 'x'}).propertyName") == "x"
