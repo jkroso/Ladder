@@ -399,7 +399,7 @@ open_part!(v::Transclusion) = begin
   s = v.sub === nothing ? 1 : something(ties(v.sub).span, (1, 1))[1]
   open!(top, v.path)
   show_line!(top, s)
-  top.nodes[:hold] = (s, 24px - PAGE_TOP)
+  hold!(top, s, 24px - PAGE_TOP)
   top
 end
 

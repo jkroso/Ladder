@@ -337,7 +337,7 @@ show_steps!(e, check::FileCheck) = begin
   _, tall = window_size(e)
   if r === nothing || r.top < above_page(e) || r.top + r.height > tall
     note_place!(e)
-    e.nodes[:hold] = (max(steps.first - 3, 1), 24px - PAGE_TOP)
+    hold!(e, max(steps.first - 3, 1), 24px - PAGE_TOP)
   end
   redraw_in!(e, 0)
   nothing

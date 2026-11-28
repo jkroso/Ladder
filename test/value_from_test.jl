@@ -74,7 +74,7 @@ value_at(i, code; k=1, n=1) = begin
 end
 
 "Scroll so that line `i` is near the top of the window"
-show_line(i) = (e.nodes[:hold] = (i, 40px); frames())
+show_line(i) = (K.hold!(e, i, 40px); frames())
 
 @testset "the places that give a name its value" begin
   @test K.givers(e, "area") == [sum_place(top_sums, "area = l * h")]

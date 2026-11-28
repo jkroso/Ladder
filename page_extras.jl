@@ -793,7 +793,7 @@ stay!(e, moved) = begin
   i = findfirst(it -> it.top + it.tall > y, e.layout)
   i === nothing && return
   it = e.layout[i]
-  e.nodes[:hold] = (clamp(follow(moved, it.first), 1, length(e.buf.lines)), it.top - y)
+  hold!(e, clamp(follow(moved, it.first), 1, length(e.buf.lines)), it.top - y)
 end
 
 # --- the lines that just changed on the disk ------------------------------------------------

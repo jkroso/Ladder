@@ -348,7 +348,7 @@ file_level!(e, view::Symbol) = begin
   e.scroll.offset = 0px
   # The window stays at the same place in the file, between its bits, its bytes and its text
   line = line_of_byte(b, at)
-  line > 1 && (e.nodes[:hold] = (line, 0px))
+  line > 1 && hold!(e, line, 0px)
   focus(e)
   e
 end

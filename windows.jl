@@ -596,6 +596,16 @@ describe(e::Editor) = begin
   scene
 end
 
+"""
+Keep line `line` of the page of `e` at `top` under the top of the page's space
+in the window, when the next frame has laid the page out. So a line that the
+window jumps to goes near the top of the window, and text that wraps again
+stays where it was. With nothing for `line`, the next frame leaves the page
+where it finds it.
+"""
+hold!(e::Editor, line, top) = (next_frame(e).hold = (Int(line), convert(px, top)); nothing)
+hold!(e::Editor, ::Nothing) = (next_frame(e).hold = nothing; nothing)
+
 "What the window shows, and what Ladder does in each frame before it"
 describe_window(e::Editor) = begin
   # A page of a blog looks as the blog's site does, whatever the theme. Text laid out in the other look is laid out again.
@@ -657,7 +667,8 @@ describe_window(e::Editor) = begin
     scroll_sideways!(e, 0px)
   end
   # A live block that changed the size of the text stays where it was in the window
-  hold = pop!(e.nodes, :hold, nothing)
+  asked = next_frame(e)
+  hold, asked.hold = asked.hold, nothing
   hold === nothing || (e.scroll.offset = max(0px, item(e, hold[1]).top - hold[2]))
   e.reveal && (reveal!(e); e.reveal = false)
   reveal_part!(e)   # the caret of a part of another page that has the keyboard
@@ -668,7 +679,8 @@ describe_window(e::Editor) = begin
     # While the sidebar or the panel at the right slides, the top bar's buttons slide, the command palette slides, or the caret moves to a new place, each frame is drawn as soon as it can be
     win.animating = sliding(e) || right_sliding(e) || clearing(e) || gliding(e) || palette_moving(e) || bar_sliding(e)
     # A part of a live block that has the keyboard, like a text field, blinks its own caret
-    win.wake = pop!(e.nodes, :ran, false) ? 0.05 : win.focus === e ? 0.51 - mod(time() - e.blink, 0.5) :
+    soon, asked.soon = asked.soon, false
+    win.wake = soon ? 0.05 : win.focus === e ? 0.51 - mod(time() - e.blink, 0.5) :
                win.focus === nothing ? 0.0 : 0.25
   end
   window_view(e, window_object(e))

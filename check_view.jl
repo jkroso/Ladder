@@ -683,7 +683,7 @@ next_check!(e) = begin
   i = something(findfirst(>(e.buf.caret[1]), lines), 1)
   note_place!(e)   # ⌘⌥← comes back here
   show_line!(e, lines[i])
-  e.nodes[:hold] = (max(lines[i] - 3, 1), 24px - PAGE_TOP)
+  hold!(e, max(lines[i] - 3, 1), 24px - PAGE_TOP)
   nothing
 end
 

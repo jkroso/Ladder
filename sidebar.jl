@@ -309,7 +309,7 @@ go_entry!(e, line, caret) = begin
   column_fold(b, at) === nothing || (b.caret = b.anchor = b.stood = line_end(b, at))
   # Put its first line near the top of the window rather than just on screen.
   # The next frame does it, once it has laid out the file that's showing.
-  e.nodes[:hold] = (clamp(line, 1, length(b.lines)), 24px - PAGE_TOP)
+  hold!(e, clamp(line, 1, length(b.lines)), 24px - PAGE_TOP)
   e.blink = time()
 end
 

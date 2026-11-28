@@ -297,7 +297,7 @@ its_code(f::Film) = begin
   say!(f, "Click, and you're in that code. Change it, and press ⌘Return.")
   K.open!(e, file)
   K.show_line!(e, at)
-  e.nodes[:hold] = (at, 150px)
+  K.hold!(e, at, 150px)
   at!(f, 980, 300)
   hold!(f, 1.8)
   b = e.buf
@@ -317,7 +317,7 @@ its_code(f::Film) = begin
   K.open!(e, f.page)
   # The caret goes to a heading: in the block's own lines, it would show those lines and not the bar
   K.show_line!(e, line(f, "## What it costs"))
-  e.nodes[:hold] = (line(f, "## What it costs"), 30px)
+  K.hold!(e, line(f, "## What it costs"), 30px)
   at!(f, 900, 300)
   hold!(f, 2.6)
 end

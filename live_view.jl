@@ -99,7 +99,7 @@ rewrap!(e) = begin
   if win !== nothing && !isempty(e.layout)
     y = win.mouse[2] - above_page(e) - PAGE_TOP + e.scroll.offset
     i = findfirst(it -> it.top <= y < it.top + it.tall, e.layout)
-    i === nothing || (e.nodes[:hold] = (e.layout[i].first, e.layout[i].top - e.scroll.offset))
+    i === nothing || hold!(e, e.layout[i].first, e.layout[i].top - e.scroll.offset)
   end
   e
 end
@@ -151,7 +151,7 @@ evaluate(e, code::String; key=(:live, e.buf.path, code), inline=false) = begin
   path = e.buf.path
   # The code can load the drawing methods of a node, and the frame that runs it
   # can't call them yet. So the window draws one more frame soon after.
-  e.nodes[:ran] = true
+  one_more_frame!(e)
   e.nodes[:running] = key
   try
     # Kip finds a path like "./widgets.jl" from the folder of the document, and so does a relative FSPath

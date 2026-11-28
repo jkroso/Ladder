@@ -406,7 +406,7 @@ go_heading!(e, path, name) = begin
   i === nothing && return true
   show_line!(e, i)
   # Its line goes near the top of the window. The next frame does it, once it has laid out the page.
-  e.nodes[:hold] = (i, 24px - PAGE_TOP)
+  hold!(e, i, 24px - PAGE_TOP)
   true
 end
 
@@ -452,6 +452,6 @@ go_lines!(e, url) = begin
   line = clamp(parse(Int, m[1]), 1, length(e.buf.lines))
   show_line!(e, line)
   # The next frame puts the line near the top of the window, once it has laid out the file
-  e.nodes[:hold] = (line, 24px - PAGE_TOP)
+  hold!(e, line, 24px - PAGE_TOP)
   true
 end

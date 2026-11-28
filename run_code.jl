@@ -342,7 +342,7 @@ code failed. Then the value is the error.
 run_code(e, code::String) = begin
   path, dir = run_place(e)
   # The code can load the drawing methods of a node, so the window draws one more frame soon after
-  e.nodes[:ran] = true
+  one_more_frame!(e)
   out = with_printed(() -> cd(() -> running_code(m -> run_in(m, code, path), e), dir))
   code_ran!(path)
   out
@@ -682,7 +682,7 @@ came_back!(run::CodeRun, piece) = begin
   e = run.e
   o, code = run.outcomes[piece.k], run.codes[piece.k]
   # The code can load the drawing methods of a node, so the window draws one more frame soon after
-  e.nodes[:ran] = true
+  one_more_frame!(e)
   code_ran!(run.path)
   piece.wrong && run.failed == 0 && (run.failed = piece.k)
   # The levels under the value show the code of what ran
@@ -850,7 +850,7 @@ bring_failed!(e, o) = begin
   _, tall = window_size(e)
   if r === nothing || r.top < above_page(e) || r.top + r.height > tall
     note_place!(e)   # so ⌘⌥← goes back
-    e.nodes[:hold] = (max(failed - 3, 1), 24px - PAGE_TOP)
+    hold!(e, max(failed - 3, 1), 24px - PAGE_TOP)
   end
   redraw_in!(e, 0)
 end

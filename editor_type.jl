@@ -34,7 +34,8 @@ export Item, Live, Grid, isspread, Glide, Editor, TopBar, Sidebar, Page, Documen
        FileCheck, DesignSheet, FolderPage, SourceChooser, SearchView, SearchChoice, ChoiceMenu, ChoiceRow,
        editors, EmailHead, EACH_FRAME, AT_QUIT, BAR_PARTS, BUTTONS, AgentKind, WebFolder, WebPage,
        PAGE_WINDOWS, OutcomeBody, Bound, AgentPane, FileBlock, Things, each_thing, CodePicker,
-       Ties, ties, host!, shown_span, span!, WindowParts, window_parts
+       Ties, ties, host!, shown_span, span!, WindowParts, window_parts,
+       NextFrame, next_frame, one_more_frame!
 
 # --- what a window holds ---------------------------------------------------------
 
@@ -390,6 +391,22 @@ end
 
 "The parts of the window of `e` that more than one file asks for: see `WindowParts`"
 window_parts(e) = state_of(e, WindowParts)
+
+"What the parts of a window ask of its next frame. The frame takes each thing once."
+@def mutable struct NextFrame
+  hold::Union{Nothing,Tuple{Int,px}} = nothing   # a line of the page, and how far under the top of the page's space it goes once the page is laid out: see `hold!`
+  soon::Bool = false                             # one more frame is drawn soon after: see `one_more_frame!`
+end
+
+"What the next frame of the window of `e` is asked for: see `NextFrame`"
+next_frame(e) = state_of(e, NextFrame)
+
+"""
+Draw one more frame of the window of `e` soon after the next one. Code that
+has just run can load the drawing methods of a node, and the frame that ran
+it can't call them yet.
+"""
+one_more_frame!(e) = (next_frame(e).soon = true; e)
 
 # --- what the parts of a window ask of it ------------------------------------------------
 

@@ -126,7 +126,7 @@ adopt_settings!(o, e) = begin
   # Text of another size or width wraps again, and that moves the lines
   y = o.scroll.offset
   i = findfirst(it -> it.top + it.tall > y, o.layout)
-  i === nothing || (o.nodes[:hold] = (o.layout[i].first, o.layout[i].top - y))
+  i === nothing || hold!(o, o.layout[i].first, o.layout[i].top - y)
   empty!(o.flows)
   w = window_of(o)
   w === nothing || stale!(w)

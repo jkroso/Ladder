@@ -906,7 +906,7 @@ show_place!(e, file::AbstractString, line::Int) = begin
   end
   show_line!(shown, line)
   # The method's first line goes near the top of the window. The next frame does it, once it has laid out the file.
-  shown.nodes[:hold] = (line, 24px - PAGE_TOP)
+  hold!(shown, line, 24px - PAGE_TOP)
   shown
 end
 

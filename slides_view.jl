@@ -141,7 +141,7 @@ end_slides!(e) = begin
   k = clamp(s.at, 1, max(1, length(list)))
   if !isempty(list) && !(k == s.first && Slides.number(list, b.caret[1]) == k)
     b.caret = b.anchor = (list[k].first, 0)
-    e.nodes[:hold] = (list[k].first, 24px - PAGE_TOP)   # the next frame puts that line near the top of the window
+    hold!(e, list[k].first, 24px - PAGE_TOP)   # the next frame puts that line near the top of the window
     e.reveal = true
   end
   e.blink = time()
@@ -191,7 +191,7 @@ slide_tick!(e) = begin
   e.panel = false
   # The page doesn't scroll to its caret, or to the line that it showed before a change
   e.reveal = false
-  delete!(e.nodes, :hold)
+  hold!(e, nothing)
   fit_slide!(e, s)
   nothing
 end

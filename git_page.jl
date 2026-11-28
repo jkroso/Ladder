@@ -1748,7 +1748,7 @@ go_change!(e, k) = begin
   b.caret = b.anchor = (i, 0)
   touch!(e)
   # The change is near the top of the window, with a few lines over it, so the lines under it show too
-  e.nodes[:hold] = (max(i - 3, 1), 24px - PAGE_TOP)
+  hold!(e, max(i - 3, 1), 24px - PAGE_TOP)
   redraw_in!(e, 0)
   e
 end

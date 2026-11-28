@@ -184,7 +184,7 @@ go_to_place!(e, place) = begin
   e.buf.caret = e.buf.anchor = place
   focus(e)
   touch!(e)
-  e.nodes[:hold] = (max(place[1] - 3, 1), 24px - PAGE_TOP)
+  hold!(e, max(place[1] - 3, 1), 24px - PAGE_TOP)
   true
 end
 
@@ -481,7 +481,7 @@ find_uses!(e, place::Use) = begin
     note_place!(e)   # ⌘⌥← comes back here
     show_line!(e, place.line)
     e.buf.caret = e.buf.anchor = (place.line, place.col)
-    e.nodes[:hold] = (max(place.line - 3, 1), 24px - PAGE_TOP)
+    hold!(e, max(place.line - 3, 1), 24px - PAGE_TOP)
   else
     shown = show_place!(e, place.file, place.line)
     shown.buf.caret = shown.buf.anchor = (place.line, place.col)
@@ -494,8 +494,8 @@ works_here(e, ::Val{:find_uses}) = own_name(e, e.buf.caret) !== nothing
 
 # As the arrows go down the list, the window scrolls to each place of its own file. The caret stays where it is.
 look_of(e, ::Val{:find_uses}) = e.scroll.offset
-put_look!(e, ::Val{:find_uses}, was) = (e.scroll.offset = was; delete!(e.nodes, :hold); nothing)
-look!(e, ::Val{:find_uses}, f, _, u::Use) = (!isempty(e.buf.path) && page_key(e.buf.path) == u.file && (e.nodes[:hold] = (max(u.line - 3, 1), 24px - PAGE_TOP)); nothing)
+put_look!(e, ::Val{:find_uses}, was) = (e.scroll.offset = was; hold!(e, nothing); nothing)
+look!(e, ::Val{:find_uses}, f, _, u::Use) = (!isempty(e.buf.path) && page_key(e.buf.path) == u.file && hold!(e, max(u.line - 3, 1), 24px - PAGE_TOP); nothing)
 
 "A heading of the page that shows, or a place of a file of code, for a command to take"
 struct HeadingLine
@@ -519,7 +519,7 @@ go_to!(e, heading::HeadingLine) = begin
   note_place!(e)   # ⌘⌥← comes back here
   show_line!(e, heading.line)
   # A place of a file of code goes near the top of the window, with a few lines over it
-  e.buf.view == :code && (e.nodes[:hold] = (max(heading.line - 3, 1), 24px - PAGE_TOP))
+  e.buf.view == :code && hold!(e, max(heading.line - 3, 1), 24px - PAGE_TOP)
   nothing
 end
 "Put the caret on the line with the number `line`, and bring it in sight"
@@ -534,8 +534,8 @@ add_command!(go_to!, title="Go to a heading of the page, to a function or a sect
 
 # As the arrows go down Go To's list, the window scrolls to each place, with a line round it. The caret stays where it is.
 look_of(e, ::Val{:go_to}) = e.scroll.offset
-put_look!(e, ::Val{:go_to}, was) = (e.scroll.offset = was; delete!(e.nodes, :hold); nothing)
-look!(e, ::Val{:go_to}, f, _, h::HeadingLine) = (e.nodes[:hold] = (max(h.line - 3, 1), 24px - PAGE_TOP); nothing)
+put_look!(e, ::Val{:go_to}, was) = (e.scroll.offset = was; hold!(e, nothing); nothing)
+look!(e, ::Val{:go_to}, f, _, h::HeadingLine) = (hold!(e, max(h.line - 3, 1), 24px - PAGE_TOP); nothing)
 look!(e, ::Val{:go_to}, f, _, n::Integer) = nothing
 
 "Where line `i` of the page is in the window of `e`, across the whole page"

@@ -2128,7 +2128,7 @@ show_code!(e, node::ToChange) = begin
   if !isempty(b.path) && page_key(b.path) == node.file
     note_place!(e)   # ⌘⌥← comes back here
     show_line!(e, line)
-    e.nodes[:hold] = (line, 24px - PAGE_TOP)
+    hold!(e, line, 24px - PAGE_TOP)
     return e
   end
   show_place!(e, node.file, line)

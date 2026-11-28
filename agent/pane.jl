@@ -1991,7 +1991,7 @@ onkey(r::OutlineRow, ev::KeyPress{Keys.mouse_left}) = begin
     note_place!(e)   # ⌘⌥← comes back here
     show_line!(e, r.caret)
     # The heading goes near the top of the window. The next frame does it, once it has laid out the page.
-    e.nodes[:hold] = (r.line, 24px - PAGE_TOP)
+    hold!(e, r.line, 24px - PAGE_TOP)
   end
   redraw_in!(e, SOON)
   handled

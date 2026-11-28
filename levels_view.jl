@@ -367,7 +367,7 @@ plain!(e, on::Bool) = begin
       k = something(findfirst(it -> it.top + it.tall > y, e.layout), 1)
       it, line = e.layout[k], e.layout[k].first
     end
-    e.nodes[:hold] = (line, it.top - y)
+    hold!(e, line, it.top - y)
   end
   save_settings!(e)
   rerun!(e, :plain)
@@ -423,7 +423,7 @@ lower!(e, v) = begin
   empty!(b.others)
   b.caret = b.anchor = (min(s + 1, t), 0)
   plain!(e, true)
-  delete!(e.nodes, :hold)   # the lines start at the top of the window
+  hold!(e, nothing)   # the lines start at the top of the window
   e.nodes[:lowered] = (view=v, path=b.path, offset=e.scroll.offset)
   e.scroll.offset = 0px
   touch!(e)
@@ -471,7 +471,7 @@ end
 refill!(e, kept) = begin
   b = e.buf
   delete!(e.nodes, :lowered)
-  delete!(e.nodes, :hold)
+  hold!(e, nothing)
   e.scroll.offset = kept.offset
   span = block_span(b, kept.view)
   span === nothing && return e

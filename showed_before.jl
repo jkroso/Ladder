@@ -102,7 +102,7 @@ go_place!(e, p) = begin
   fit(c) = (n = clamp(c[1], 1, length(b.lines)); (n, clamp(c[2], 0, length(b.lines[n]))))
   b.caret, b.anchor = fit(p.caret), fit(p.anchor)
   e.scroll.offset = p.offset
-  delete!(e.nodes, :hold)
+  hold!(e, nothing)
   focus(e)
   redraw_in!(e, 0)
   nothing
