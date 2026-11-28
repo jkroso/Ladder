@@ -44,9 +44,9 @@
 @use "./terminal_view" term_shown
 @use "./tabs" files_listed menu_w side_button side_least
 
-export JOB_SHOWS, JobAsk, bar_row, bread_crumb, hidden_button, history_buttons, job, job_args,
-       job_part, job_tick!, job_words, making, matter_value, progress_address, said_face, said_part,
-       JobState
+export JOB_SHOWS, JobAsk, bar_row, bread_crumb, crumb_centred, hidden_button, history_buttons, job,
+       job_args, job_part, job_tick!, job_words, making, matter_value, progress_address, said_face,
+       said_part, JobState
 
 # --- a job in Centient from the page ------------------------------------------------------
 #
@@ -274,13 +274,14 @@ bar_row(t::TopBar, inks=(nothing, nothing, nothing)) = begin
   # button when there are no arrows. The dot beside the sidebar's button has room of its own.
   need = mac_buttons_room(e) + 32px * length(buttons) + (isempty(arrows) ? 8px : 72px) + (toggles && waiting_dot(e) ? DOT_GAP + DOT_W : 0px)
   over = max(need, room)
-  # Ladder's own name is in the middle of the bar, so the left end is as wide as the right. A kind of folder's own
-  # path has all the room from the buttons over the sidebar, so it can start at the page's left edge.
+  # Ladder's own name is in the middle of the bar, so the left end is as wide as the right. So is anything else
+  # that says it's centred, like a picker a page puts there. A kind of folder's own path has all the room from the
+  # buttons over the sidebar, so it can start at the page's left edge.
   # A page that shows the path itself, as a SolidCraft design does in its toolbar, runs up to the window's top. The
   # bar then has only its left end, so that the page has the room of the bar's middle and its right end.
   inpage = crumb_in_page(e)
   crumb = inpage ? nothing : bread_crumb(e, window_object(e))
-  own = !inpage && !(crumb isa Title)
+  own = !inpage && !crumb_centred(crumb)
   left = own || inpage ? max(need - room, 0px) :
                          max(150px * (1 - showing), need - room, min(side, wide - room - side - TITLE_ROOM))
   bar_space(e).past_side = left   # the page that shows the path leaves this room at its top left: see `bar_corner`
@@ -289,8 +290,8 @@ bar_row(t::TopBar, inks=(nothing, nothing, nothing)) = begin
   side = min(side, max(side - grown, wide - room - left))
   beside > 0px && (side = max(side, min(left, wide - room - left)))
   inpage || (bar_space(e).title = wide - room - left - side)   # the name is cut short to fit in it. In the page, the page says how much room it has.
-  # The path that Ladder's own name opens into goes when a kind of folder shows something else there
-  own && (w = window_of(e); w !== nothing && any(p -> p.key == :title_trail, popups(w)) && close_popup!(w, :title_trail))
+  # The path that the file's name opens into goes when the middle of the bar shows something else
+  !inpage && !(crumb isa Title) && (w = window_of(e); w !== nothing && any(p -> p.key == :title_trail, popups(w)) && close_popup!(w, :title_trail))
   # The top bar lies over the top of the sidebar. The file's name is in the
   # middle of the space beside the sidebar, so it moves as the sidebar slides.
   # In agent mode the agent's heading is over the agent's pane. So it starts after the bar's buttons, or at the
@@ -347,11 +348,15 @@ path there: `bread_crumb(e, d)` for the folder, and `bread_crumb(e, d, o)`
 for each thing `o` that it holds. Its room starts where the buttons over the
 sidebar end, which is the sidebar's edge while the sidebar is open, and ends
 at the buttons of the bar's right end. `bar_space(e).title` is how wide
-that was in the last frame.
+that was in the last frame. What a kind of folder shows there starts at the
+page's left edge, unless `crumb_centred` says it stays in the middle.
 """
 bread_crumb(e, o) = bread_crumb(e, o.parent, o)
 bread_crumb(e, ::Nothing) = bread_crumb(e, nothing, nothing)
 bread_crumb(e, d, o) = node!(Title, e, :title)
+
+"True when `crumb` stays in the middle of the top bar, with the two ends as wide as each other. The file's name does."
+crumb_centred(crumb) = crumb isa Title
 
 "The face of what a file that's only shown says of itself, in the top bar"
 said_face() = Face(SANS, "", 12px, colours.dim, false)
