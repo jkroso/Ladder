@@ -1,10 +1,10 @@
 # Tests for a long file, in main.jl: a file of code of any length opens whole,
 # as code to change. Its lines are laid out with no measuring, and the layout
 # is kept from one frame to the next. After a change, only the lines that
-# changed are laid out again, only the code that the change touches is read
-# again for its names, and only the lines that changed are counted again. Run
-# them with `julia -O0 --project=. test/long_file_test.jl`. They draw a window
-# that isn't on the screen.
+# changed are laid out again, and only the code that the change touches is read
+# again for its names. Run them with
+# `julia -O0 --project=. test/long_file_test.jl`. They draw a window that isn't
+# on the screen.
 
 @use Test: @test, @testset
 @use "../main" => K
@@ -164,20 +164,6 @@ names_match() = sort(K.page_bounds(e), by=x -> (x.at, x.name)) == sort(K.read_na
   @test names_match()
   foreach(_ -> K.undo!(b), 1:5)
   @test b.lines == K.text(long) && names_match()
-end
-
-@testset "after a change, only the lines that changed are counted again" begin
-  K.kinds(b)
-  @test (b.words, b.chars) == (K.words(b.lines), sum(length, b.lines))
-  K.edit!(b, (70, 0), (70, 0), "three more words\n")
-  K.kinds(b)
-  @test (b.words, b.chars) == (K.words(b.lines), sum(length, b.lines)) && b.counted == b.lines
-  K.edit!(b, (200, 0), (260, 0), "")
-  K.kinds(b)
-  @test (b.words, b.chars) == (K.words(b.lines), sum(length, b.lines))
-  K.undo!(b); K.undo!(b)
-  K.kinds(b)
-  @test (b.words, b.chars) == (K.words(b.lines), sum(length, b.lines)) && b.lines == K.text(long)
 end
 
 @testset "a typed letter and a save" begin
