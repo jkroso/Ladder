@@ -125,7 +125,10 @@ const first_line = findfirst(startswith("describe(g::Gauge)"), readlines(source)
   K.SOURCE_FILES[String(m.file)] = other
   @test K.code_place(m) == (realpath(other), first_line)
   delete!(K.SOURCE_FILES, String(m.file))
-  @test K.code_label(which(K.describe, Tuple{K.Editor})) == "Ladder/main.jl:$(which(K.describe, Tuple{K.Editor}).line)"
+  # A file called main.jl has its folder's name before it, which says whose main file it is
+  mkpath(joinpath(dir, "Pump"))
+  write(joinpath(dir, "Pump", "main.jl"), "# A pump\nstart() = 1\n")
+  @test K.code_label(only(methods(Base.include(Module(), joinpath(dir, "Pump", "main.jl"))))) == "Pump/main.jl:2"
 end
 
 @testset "a click with ⌘ and ⌥ down shows the code" begin
