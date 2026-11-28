@@ -145,9 +145,10 @@ end
   @test sw.focus !== s
   press(sw, Keys.comma, Keys.cmd)
   @test K.settings_editor() === nothing
-  # The find bar has the keyboard in the page's window
-  press(w, Keys.f, Keys.cmd)
-  @test w.focus !== e
+  # The bar that finds text has the keyboard in the page's window. ⌘F opens that bar for a file of code. On a
+  # page of Markdown ⌘F opens the search in the top bar instead, so the test opens the bar itself.
+  K.open_find!(e); frame(w)
+  @test w.focus === K.find_input(e)
   press(w, Keys.w, Keys.cmd)
   @test e.buf.path == dirname(page)
   press(w, Keys.w, Keys.cmd)
