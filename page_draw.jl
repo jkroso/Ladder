@@ -46,6 +46,8 @@
 @use "./tabs" exports...
 @use "./transclusion" exports...
 @use "./peek_cards" scrubbing
+@use "./fill_view" zoomed_node
+@use "./windows" page_cover
 
 export SELECTION_RADIUS, blocktype, corners, guide_under, nofile_view, rounded
 

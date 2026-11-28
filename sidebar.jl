@@ -38,10 +38,11 @@
 @use "./palette" exports...
 @use "./finder" exports...
 @use "./commands" TreeTook
+@use "./showed_before" ignored_shown input
 
 export COMPONENTS, LAYOUTS, PanelEdge, SIDEBAR_GUIDES, SIDEBAR_ICONS, TRAIL_ARROW, TRAIL_GAP,
        TRAIL_PAD, TRAIL_SIZE, TrailName, chose!, edited, edited_entries, go_entry!, goes, outline!,
-       page_elsewhere, panel_edge, show_folder!, show_open_file!, trail_names, SidebarTree
+       page_elsewhere, panel_edge, show_folder!, show_open_file!, trail_names, SidebarTree, items
 
 # --- the sidebar --------------------------------------------------------------------------
 

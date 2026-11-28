@@ -37,7 +37,8 @@ export TABS_MOST, TAB_KEYS_WAIT, TabClose, TabLabel, add_tab!, choose_tab!, clos
        drop_gone_tabs!, fill_tabs!, focus_panel!, new_tab, new_tab!, own_scroll!, own_side_menu,
        show_tab!, show_tab_page!, side_menu, side_tick!, sidebar_view, tab_after_close!, tab_dots,
        tab_folder, tab_keys, tab_keys_shown!, tab_list, tab_marks, tab_menu!, tab_name, tab_rows,
-       tab_tree, tabbable, NewTab, no_new_tab!, TabsState, OwnSideMenu
+       tab_tree, tabbable, NewTab, no_new_tab!, TabsState, OwnSideMenu, files_listed, menu_w,
+       news_tab, side_button, side_least
 
 # --- the files that are open, as tabs -------------------------------------------------------
 #

@@ -46,15 +46,18 @@
 @use "./schedule_view" exports...
 @use "./timelog_view" exports...
 @use "./slides_view" exports...
+@use "./agent/page" marking
+@use "./media_view" table_html
 
-export notes, follow_note!, NOTE_KEY, NOTE_WAIT, NOTE_CARD_W, note_at, note_card, note_peek!, FindBar,
-       FindButton, find_input, open_find!, found, go_found!, find_step!, find_tick!, find_key!, FIND_W,
-       findbar, CHECKED, spellable, misspellings, misspelling_at, respell!, spelling!, stretches, FOUND,
-       annotate, COMMENT_W, COMMENT_GAP, COMMENT_PAD, COMMENT_SPACE, COMMENT_LEADING, PageComment,
-       has_comments, comments_in, comment_w, comment_room, comment_balance, with_comments, page_comments,
-       comment_face, Comments, CommentCard, mark_commented, add_comment!, selected_word, same_word,
-       outline_same_word, spell_act!, SVG_TEXT_AS_SHAPES, diagram_svg, export_html!, stay!, FRESH, FRESH_FADE,
-       fresh!, fresh, draw_fresh, NotePeek, note_peeked, FindState, CommentsSeen, FreshLines
+export notes, follow_note!, NOTE_KEY, NOTE_WAIT, NOTE_CARD_W, note_at, note_card, note_peek!,
+       FindBar, FindButton, find_input, open_find!, found, go_found!, find_step!, find_tick!,
+       find_key!, FIND_W, findbar, CHECKED, spellable, misspellings, misspelling_at, respell!,
+       spelling!, stretches, FOUND, annotate, COMMENT_W, COMMENT_GAP, COMMENT_PAD, COMMENT_SPACE,
+       COMMENT_LEADING, PageComment, has_comments, comments_in, comment_w, comment_room,
+       comment_balance, with_comments, page_comments, comment_face, Comments, CommentCard,
+       mark_commented, add_comment!, selected_word, same_word, outline_same_word, spell_act!,
+       SVG_TEXT_AS_SHAPES, diagram_svg, export_html!, stay!, FRESH, FRESH_FADE, fresh!, fresh,
+       draw_fresh, NotePeek, note_peeked, FindState, CommentsSeen, FreshLines, save_panel
 
 "The number of each footnote of the document, by name"
 notes(e) = (b = e.buf; get!(() -> footnotes(b.lines), e.flows, (:notes, b.path, b.version)))

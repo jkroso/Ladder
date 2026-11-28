@@ -19,7 +19,8 @@
 @use "./live_view" reads!
 @use "./design_view" unsaved_designs
 
-export updates!, unsaved, extensions_tick!, extensions_news, extensions_act!, update_act!, UpdatesState
+export updates!, unsaved, extensions_tick!, extensions_news, extensions_act!, update_act!,
+       UpdatesState, update_news, update_tick!
 
 # --- the app's own updates ------------------------------------------------------------------
 #

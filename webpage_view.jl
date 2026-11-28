@@ -54,8 +54,9 @@
 @use "./folder_page" exports...
 @use "./linkcard_view" exports...
 
-export WEBVIEW, WEB_HIGH, WEB_LEAST, WEB_GETTER, web_online, web_files, web_source, web_lines, web_says,
-       SI_UNITS, script_value, script_sums, send_sums!, HTMLPage, html_part, WEB_DARK, html_browser
+export WEBVIEW, WEB_HIGH, WEB_LEAST, WEB_GETTER, web_online, web_files, web_source, web_lines,
+       web_says, SI_UNITS, script_value, script_sums, send_sums!, HTMLPage, html_part, WEB_DARK,
+       html_browser, html_shown, html_page
 
 "The name that a `view` block of a page of the web had before, which still works"
 const WEBVIEW = "web"

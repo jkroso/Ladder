@@ -74,9 +74,12 @@
 @use "./palette" exports...
 @use "./finder" exports...
 @use "./sidebar" exports...
+@use "./bar_hides" bar_back bar_shown bar_tick! hides_bar
+@use "./marked_things" point_tick!
+@use "./app_updates" update_tick!
 
 export WELCOME, closes_to, current_folder, describe_window, leave_page!, window_body, window_over,
-       window_view, OpenedOn, TextObjectKept
+       window_view, OpenedOn, TextObjectKept, listed, page_cover
 
 # --- the app -------------------------------------------------------------------------
 

@@ -40,11 +40,13 @@
 @use "./views" exports...
 @use "./json_view" exports...
 @use "./load_view" exports...
+@use "./media_view" istable chart_path
+@use "./find_view" choice_matches
 
 export SOURCE_MENU, SourceButton, close_picker!, from_picker, from_picker_section, headless_name,
-       open_sources!, own_rows, pick_file!, set_source!, several_sources, source_button,
-       source_chooser, source_files, source_folder, source_from, source_lang, source_rows,
-       source_tables, source_words, table_kind, table_name, with_from
+       named_table, open_sources!, own_rows, pick_file!, set_source!, several_sources,
+       source_button, source_chooser, source_files, source_folder, source_from, source_lang,
+       source_rows, source_tables, source_words, table_kind, table_name, with_from
 
 const SOURCE_MENU = :source_menu   # the key of the list of where a block's rows can come from
 

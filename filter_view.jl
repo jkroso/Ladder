@@ -66,13 +66,15 @@
 @use "./json_view" exports...
 @use "./load_view" exports...
 @use "./rows_from" exports...
+@use "./page_extras" save_panel
 
 export ADD_W, CHIP_H, ChipCross, FILTER_COLUMNS, FILTER_KEY, FILTER_ROWS, FilterChip, FilterFound,
        FilterGrid, FilterHead, FilterMenu, FilterMore, FilterPick, chip_problem, chip_width,
        close_filter_menu!, filter_adder, filter_cell, filter_chips, filter_field, filter_files,
-       filter_found, filter_grid, filter_html, filter_page_table, filter_shown!, filter_values,
-       filter_widths!, json_cell, json_cells!, json_filter_rows, json_first_list, json_line,
-       json_table, json_things, no_rows, page_filter_rows, rows_to_show, save_name, save_rows
+       filter_found, filter_grid, filter_html, filter_page_table, filter_shown!, filter_subset,
+       filter_table, filter_values, filter_widths!, json_cell, json_cells!, json_filter_rows,
+       json_first_list, json_line, json_table, json_things, no_rows, page_filter_rows, rows_to_show,
+       save_name, save_rows
 
 const FILTER_ROWS = 30              # the rows that a filter shows until you ask for the rest
 const FILTER_COLUMNS = 60           # the most columns that the things of a JSON file make

@@ -41,11 +41,11 @@
 @use "./csv_view" exports...
 @use "./file_view" exports...
 
-export SPREAD_Y, gridrows, cellnames, spreadgrid, spreadsheet, ring, spreadop!, droprow!, SpreadBlock,
-       SHEET_GAP, SHEET_X, SHEET_Y, RAISE, RESULT_X, load_sheet_font, drawn, exprpieces, chip_w, sheet_case,
-       sheetgrid, row_top, expr_x, cellflow, cellunder, rowunder, place, sheetseg, sheetlines, next_row!,
-       sheet_tab!, erase_row!, isnamechar, offered, suggesting, suggestion, suggest_key!, suggestbox, LinkNotes,
-       Suggesting
+export SPREAD_Y, gridrows, cellnames, spreadgrid, spreadsheet, ring, spreadop!, droprow!,
+       SpreadBlock, SHEET_GAP, SHEET_X, SHEET_Y, RAISE, RESULT_X, load_sheet_font, drawn,
+       exprpieces, chip_w, sheet_case, sheetgrid, row_top, expr_x, cellflow, cellunder, rowunder,
+       place, sheetseg, sheetlines, next_row!, sheet_tab!, erase_row!, isnamechar, offered,
+       suggesting, suggestion, suggest_key!, suggestbox, LinkNotes, Suggesting, enter
 
 const SPREAD_Y = 5px   # above and below the text of a cell
 

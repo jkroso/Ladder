@@ -34,6 +34,9 @@
 @use "./line_history" exports...
 @use "./todo_clock" exports...
 @use "./givers" exports...
+@use "./webpage_view" html_shown
+@use "./showed_before" note_place! input
+@use "./columns_view" item_under
 
 export follow_heading!, go_lines!, heading_slug, holds, inline_at, link_at, linked_file, page_uri,
        pick_clicked!, read_step, word_at

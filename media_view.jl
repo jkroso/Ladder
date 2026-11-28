@@ -49,16 +49,18 @@
 @use "./live_view" exports...
 @use "./email_view" exports...
 
-export Picture, pictures_dir, picture_item, HTML_BLOCK_TAGS, HTML_RAW_TAGS, HTML_OPENS, HTML_ATTRIBUTE,
-       HTML_LONE, HTML_CLOSES, HTML_RUNS, html_end, html_runs, html_typed, HTMLBlock, html_base, html_file,
-       html_bytes, html_arrivals!, LADDER_FONT_FILES, LADDER_FACES, font_faces, html_css, html_item,
-       html_link, html_follow!, RETRY, downloads, MediaNote, web_file, web_media, media_file, local_media,
-       download!, media_note, TABLE_ROWS, table_files, TableLine, TableMore, FileGrid, file_grid, row_flows,
-       caption_high, has_more, rows_shown, chart_files, media_part, clock_time, video_item, TRANSCRIPT_W,
-       TRANSCRIPT_HIGH, TRANSCRIPT_PAD, COPIED_FOR, Transcript, CopyButton, video_words, transcribe_video!,
-       transcript_of, transcript_w, said_text, SoundLine, TranscribeButton, TRANSCRIBE_H, TRANSCRIBE_GAP,
-       recorders, transcriptions, transcribed, recorder, sound_file, sound_line, sound_item, sound_over,
-       transcribing, add_recording!, new_recording, add_words!, sound_tick!
+export Picture, pictures_dir, picture_item, HTML_BLOCK_TAGS, HTML_RAW_TAGS, HTML_OPENS,
+       HTML_ATTRIBUTE, HTML_LONE, HTML_CLOSES, HTML_RUNS, html_end, html_runs, html_typed,
+       HTMLBlock, html_base, html_file, html_bytes, html_arrivals!, LADDER_FONT_FILES, LADDER_FACES,
+       font_faces, html_css, html_item, html_link, html_follow!, RETRY, downloads, MediaNote,
+       web_file, web_media, media_file, local_media, download!, media_note, TABLE_ROWS, table_files,
+       TableLine, TableMore, FileGrid, file_grid, row_flows, caption_high, has_more, rows_shown,
+       chart_files, media_part, clock_time, video_item, TRANSCRIPT_W, TRANSCRIPT_HIGH,
+       TRANSCRIPT_PAD, COPIED_FOR, Transcript, CopyButton, video_words, transcribe_video!,
+       transcript_of, transcript_w, said_text, SoundLine, TranscribeButton, TRANSCRIBE_H,
+       TRANSCRIBE_GAP, recorders, transcriptions, transcribed, recorder, sound_file, sound_line,
+       sound_item, sound_over, transcribing, add_recording!, new_recording, add_words!, sound_tick!,
+       chart_file, file_table, istable, table_rows, chart_path, table_file, table_html
 
 "A picture that a line of the document shows"
 @def mutable struct Picture <: SemanticUI

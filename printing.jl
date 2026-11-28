@@ -31,7 +31,7 @@
 @use "./toasts" exports...
 
 export A4, NSSize, PRINT_TEXT, PRINT_X, PRINT_Y, breaks, clip!, listener, paper_size, print!,
-       print_listener, print_panel!, print_pdf, printed, PrintedPDF
+       print_listener, print_panel!, print_pdf, printed, PrintedPDF, blank, pages
 
 # --- printing ------------------------------------------------------------------------------
 #

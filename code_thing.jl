@@ -61,12 +61,14 @@
 @use "./run_code" exports...
 @use "./agent/page" exports...
 
-export SOURCE_FILES, drawn_by, BUILT_JULIA, JULIA_CODE, code_under, TextRun, pick_name, run_kind, span_kind,
-       run_on, RUN_ROOM, text_run, code_label, code_picker, picks, code_tick!, asks_whom, same_thing,
-       shown_now, PICK_LINE, LABEL_CLOSE, close_spot, pick_mark, PULSE_TIME, spin_ring, BlockDrag, block_drag,
-       drop_tried, whole_block, HANDLE_WIDE, HANDLE_TALL, draw_handle, grab_block!, Drop, SIDE_DEAD,
-       alone_line, column_of, empty_line, take_out!, put_in!, place_of, shares_text, rearranged, drop_target,
-       drop_block!, rearrange!, window_beside, LADDER_FOLDER, ladder_folder, ladder_file, MadePicker, made_picker, DropsTried
+export SOURCE_FILES, drawn_by, BUILT_JULIA, JULIA_CODE, code_under, TextRun, pick_name, run_kind,
+       span_kind, run_on, RUN_ROOM, text_run, code_label, code_picker, picks, code_tick!, asks_whom,
+       same_thing, shown_now, PICK_LINE, LABEL_CLOSE, close_spot, pick_mark, PULSE_TIME, spin_ring,
+       BlockDrag, block_drag, drop_tried, whole_block, HANDLE_WIDE, HANDLE_TALL, draw_handle,
+       grab_block!, Drop, SIDE_DEAD, alone_line, column_of, empty_line, take_out!, put_in!,
+       place_of, shares_text, rearranged, drop_target, drop_block!, rearrange!, window_beside,
+       LADDER_FOLDER, ladder_folder, ladder_file, MadePicker, made_picker, DropsTried, code_place,
+       settled_line
 
 "Where the source of a file of code is on this Mac, by where it was on the Mac that built the app. The app fills it in when it starts: see app/app.jl."
 const SOURCE_FILES = Dict{String,String}()

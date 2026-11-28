@@ -23,7 +23,8 @@
 @use "./kinds" exports...
 @use "../git_page" AgentMarks
 
-export waiters, agents, elsewhere, send!, hand_over!, agent_part, toggle_marks!, whose, sharer, PageAgents, page_agents, forget_waiters!
+export waiters, agents, elsewhere, send!, hand_over!, agent_part, toggle_marks!, whose, sharer,
+       PageAgents, page_agents, forget_waiters!, marking
 
 "What a window keeps about the agents that its page is shared with"
 @def mutable struct PageAgents

@@ -47,10 +47,10 @@
 @use "./takeoff_view" exports...
 @use "./schedule_view" exports...
 
-export FIND, FIND_MOST, FIND_PAGES, FIND_EVERY, FIND_BUDGET, FIND_BAR, FIND_MENU, SearchPage, SearchRow,
-       SearchTick, search_input, search_folders, look_in!, list_kind!, choice_words, choice_rows,
-       open_choices!, pages_under, PAGE_TEXTS, search_folder, page_name, tick_found!, forget_ticked!,
-       search_words, find_html
+export FIND, FIND_MOST, FIND_PAGES, FIND_EVERY, FIND_BUDGET, FIND_BAR, FIND_MENU, SearchPage,
+       SearchRow, SearchTick, search_input, search_folders, look_in!, list_kind!, choice_words,
+       choice_rows, open_choices!, pages_under, PAGE_TEXTS, search_folder, page_name, tick_found!,
+       forget_ticked!, search_words, find_html, choice_matches
 
 const FIND = Searches.FIND
 const FIND_MOST = 200     # the most lines that a list shows

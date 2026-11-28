@@ -24,7 +24,7 @@
 @use "./editing" exports...
 
 export MAC_BUTTONS_W, RIGHT_W, cleared, clearing, mac_buttons_room, right_part, right_slid,
-       right_sliding, screen_tick!, RightSlide
+       right_sliding, screen_tick!, RightSlide, toggle_right!
 
 # --- the panel at the right ---------------------------------------------------------------
 #

@@ -56,18 +56,18 @@ export Argument, CommandPalette, OMNI_BAR_X, OMNI_BAR_Y, OMNI_BLUR, OMNI_BOTTOM,
        OMNI_WRONG, PaletteBar, PaletteCatch, PaletteChip, PaletteFrost, PaletteLens, PaletteMore,
        PaletteRow, PaletteRun, SITE_FONT_FILES, UNSAID, Unsaid, Wanted, adds_things, askable,
        askable_types, best_fits, blur_under, chip_choices, chip_letters, chip_name, chip_points,
-       chip_tip, chip_typed, chip_value, chip_wide, chooses, chosen_path, click_chip,
-       clicked_thing, close_palette!, command_fit, counts_from, drawn_for, focus_taken, font_from,
-       hit_past, in_palette, key_signs, load_omni_font, load_site_font, match_parts,
-       method_keywords, next_mark, omni, omni_at, omni_family, omni_field, omni_font, omni_key,
-       omni_weight, omni_wide, on_palette, paler, palette_address, palette_advanced!, palette_args,
+       chip_tip, chip_typed, chip_value, chip_wide, chooses, chosen_path, click_chip, clicked_thing,
+       close_palette!, command_fit, counts_from, drawn_for, focus_taken, font_from, hit_past,
+       in_palette, key_signs, load_omni_font, load_site_font, match_parts, method_keywords,
+       next_mark, omni, omni_at, omni_family, omni_field, omni_font, omni_key, omni_weight,
+       omni_wide, on_palette, paler, palette_address, palette_advanced!, palette_args,
        palette_bar_lines, palette_browse!, palette_clear!, palette_commands, palette_fit,
        palette_fits, palette_focus!, palette_ghost, palette_items, palette_lines, palette_moving,
        palette_name, palette_next!, palette_risen, palette_room, palette_rows, palette_run!,
        palette_said, palette_say!, palette_shows, palette_sync!, palette_tab!, palette_take!,
-       palette_target, palette_text!, preview!, reads, ready_method, resize_thing!,
-       run_when_ready!, segment_state, segment_step!, start_chips!, strip_text, switch!,
-       take_command!, thing_chip, type_words, unpreview!, PaletteState
+       palette_target, palette_text!, preview!, reads, ready_method, resize_thing!, run_when_ready!,
+       segment_state, segment_step!, start_chips!, strip_text, switch!, take_command!, thing_chip,
+       type_words, unpreview!, PaletteState, fits, given
 
 # --- the command palette --------------------------------------------------------------------
 #
@@ -606,6 +606,7 @@ callable_methods(f, focus=Any[]) = begin
   out
 end
 
+"True when `x` is of one of the types that the argument `c` takes"
 fits(x, c::Wanted) = any(T -> x isa T, c.types)
 
 """

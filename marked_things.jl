@@ -28,8 +28,9 @@
 @use "./calendar_view" exports...
 @use "./timelog_view" exports...
 @use "./chart_view" exports...
+@use "./columns_view" item_under
 
-export item_table, named_rows, pointed_line, row_name, PointedThing
+export item_table, named_rows, pointed_line, row_name, PointedThing, point_tick!
 
 # --- one thing in many parts of the page -------------------------------------------------------
 #

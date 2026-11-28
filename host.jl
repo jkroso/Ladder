@@ -8,55 +8,49 @@
 #     go_folder!(e, "/Users/sam")    # list that folder in the sidebar
 #     open_folder!(e, "/Users/sam")  # show it in the page
 
-export editor, page_object, object, list_files!, go_folder!, open!, open_folder!, show_path!, show_beside!,
-       free_path, folder_kind, page_top, trash!, file_act!, show_in_finder, above_page, under_bar, page_crumb, bar_corner,
-       touch!, show_line!,
-       page_day, save_settings!, rerun!, page_room, page_tables, named_table, layout!, command_of,
-       click_page!, text_object, say_result!, lowered, rewrap!, reload_changed!, loaded_module, fillable,
-       diagram_html, outcome_face, julia_code, calendar_today, marked, term_page, chat_page, scroll_page!,
-       keep_talk!, follow_host!, celltext, lowest, component, unscaled, command_kind, pinch_open, another_day,
-       blocks, chart_file, chat_shown, code_offered, code_start, complete!, def_call, definition_of,
-       design_field_of, escaped, file_table, folder_pages, follow_wiki!, hide_bar!, hiding_name, html_shown,
-       hiding_named, same_settings!,
-       ispicture, istable, keep_copy, keep_pasted, line_step, listed_agents, mark_colour, markdown_app,
-       name_at, name_notes, needs_run, note_place!, page_covered, page_given, page_log, page_text, page_then,
-       part_lines, part_texts, passing, plain_name, planned_tasks, redraw_windows!, rows, run_in, run_sum,
-       running_code, save_panel, selected, sheet_given, sheet_html, sheet_work, shown_buffers, standing,
-       table_rows, term_choice, term_look!, term_shown, text_left, thing_name, tick!, tick_page!, tip_code,
-       todo_called, todos_then, update_news, value_parts, visit!, wiki_offered, wiki_path, worked,
-       write_blocks!, item_room, item_under, gallery_buttons, gallery_edges, go_view!, view_name, side_w,
-       look_key, player, show_crumb!, video_wide, textview, bytes, model, terminal, html_page, scrolled,
-       design, kept!, text!, make_default!, fill_what, fill_wide, preview, zoomed_node, zoom_for, held_room,
-       square_button, enter, bar_bottom, chart_path, chart_sources, isfilterable, filter_file, filter_write!,
-       filter_table, filter_subset, key_panel, error_words, file_start, server_said, keep_key, table_file,
-       choice_matches, toggle_source!, tick_item!, block_end, type!, web_browser, sum_name, given_and_sums,
-       carry_sums!, follow_remote!, run_place, value_text, usual_module, own_units, remote_src, finding,
-       follow!, filled, todo_at, link_on, close_find!, took, page_bottom, keep_got!, get_page!, site_shows!, browser_path,
-       page_online, changed_here, fetched, email_head!, email_shows, ismouse, ignored_shown, file_menu!,
-       holds_words, page_html, new_page!, build_editor, news_look, web_page_kind, rename!, renaming,
-       copy_text!, renamer, move!, toggle_right!, right_w, open_palette!, lens_shapes, theirs, change_diff,
-       kind_command, right_opened, in_focus, right_view, agent_kind, commit_talk, ask_talk!, page_module, detail_view, type_brief,
-       line_rect, declared, detail_wide, sandbox, made_workspace, coloured, code_place, show_method!,
-       settled_line, code_blocks, text_lines, show_code!, select_all!, add_block!, sources_tick!,
-       from_pick_tick!, page_media, marking, page_span, table_html, isword, places, run!, as_app, bar_tint,
-       right_panel, side_part, each_selection!, nofile, scrub_tick!, end_companions!, eased, omni_arc, tabs,
+export editor, page_object, object, list_files!, go_folder!, open!, open_folder!, show_path!,
+       show_beside!, free_path, folder_kind, page_top, trash!, file_act!, show_in_finder,
+       above_page, under_bar, page_crumb, bar_corner, touch!, show_line!, page_day, save_settings!,
+       rerun!, page_room, page_tables, layout!, command_of, click_page!, text_object, say_result!,
+       lowered, rewrap!, reload_changed!, loaded_module, fillable, diagram_html, outcome_face,
+       julia_code, calendar_today, marked, chat_page, scroll_page!, keep_talk!, follow_host!,
+       celltext, lowest, component, unscaled, command_kind, another_day, blocks, chat_shown,
+       code_offered, code_start, complete!, def_call, definition_of, design_field_of, escaped,
+       folder_pages, follow_wiki!, hiding_named, same_settings!, ispicture, keep_copy, keep_pasted,
+       line_step, mark_colour, markdown_app, name_at, name_notes, needs_run, page_covered,
+       page_given, page_log, page_text, page_then, part_lines, part_texts, passing, plain_name,
+       planned_tasks, redraw_windows!, rows, run_in, run_sum, running_code, selected, sheet_given,
+       sheet_html, sheet_work, shown_buffers, standing, text_left, thing_name, tick!, tick_page!,
+       tip_code, todo_called, todos_then, value_parts, visit!, wiki_offered, wiki_path, worked,
+       write_blocks!, item_room, gallery_buttons, gallery_edges, go_view!, view_name, side_w,
+       look_key, player, show_crumb!, textview, bytes, model, terminal, scrolled, design, kept!,
+       text!, make_default!, zoom_for, bar_bottom, chart_sources, isfilterable, filter_file,
+       filter_write!, key_panel, error_words, file_start, server_said, keep_key, toggle_source!,
+       tick_item!, block_end, type!, web_browser, sum_name, given_and_sums, carry_sums!,
+       follow_remote!, run_place, value_text, usual_module, own_units, remote_src, finding, follow!,
+       filled, todo_at, link_on, close_find!, took, page_bottom, keep_got!, get_page!, site_shows!,
+       browser_path, page_online, changed_here, fetched, email_head!, email_shows, ismouse,
+       file_menu!, holds_words, page_html, new_page!, build_editor, news_look, web_page_kind,
+       rename!, renaming, copy_text!, renamer, move!, right_w, open_palette!, lens_shapes, theirs,
+       change_diff, right_opened, in_focus, right_view, commit_talk, ask_talk!, page_module,
+       detail_view, type_brief, line_rect, declared, detail_wide, sandbox, coloured, show_method!,
+       code_blocks, text_lines, show_code!, select_all!, add_block!, sources_tick!, from_pick_tick!,
+       page_media, page_span, isword, places, run!, as_app, bar_tint, right_panel, side_part,
+       each_selection!, nofile, scrub_tick!, end_companions!, eased, omni_arc, tabs,
        preferred_agent!, inline_tick!, unused, is_companion, outline, companion_pane, screen_room,
-       palette_click!, show_window!, shown_parts, window!, paper_window, todo_box, go_chip!, palette_chips,
-       palette, under_palette, startup_page, command_focus, copied!, mark_chips, mark_preview, text_width,
-       code_module!, page_value, page_code, show_opened!, toast!, untoast!, site_code_changed!,
-       go_heading!, known_lang, reset_module!, input,
-       after, bar_back, bar_parts, bar_shown, bar_sliding, bar_tick!, bar_top, blank, blank_editor,
-       block, callable_methods, close_file!, close_file_or_window!, code_module, delete_lines!,
-       directory, ended_rename!, enter_part!, file_tree, files_listed, fill_selection, fill_tree!,
-       find!, finder_key!, fits, folder_trail, given, hides_bar, inside_path, issettings,
-       items, job_tip, ladder_runs, listed, load_settings!, make_job!, mark, mark_pointed, menu_w,
-       move_old_folders!, new_window!, news_tab, node_name!, nodes_inside, off, omni_label,
-       open_finder!, open_on_folder!, open_projects!, opens, own_page, page_cover, page_window,
-       pages, palette_key!, palette_plan, panel_theme, paste!,
-       paths_inside, peek!, point_tick!, rename_key!, ring_part, run_startup!, scrub!,
-       settings_page, show_no_file!, side_button, side_least, startup_page!, toggle_palette!,
-       toggle_panel!, toggle_settings!, transclusion_item, unlist!, update_tick!, watch_front!,
-       whole_node, window_object, with_others, written
+       palette_click!, show_window!, shown_parts, window!, paper_window, todo_box, go_chip!,
+       palette_chips, palette, under_palette, startup_page, command_focus, copied!, mark_chips,
+       mark_preview, text_width, code_module!, page_value, page_code, show_opened!, toast!,
+       untoast!, site_code_changed!, go_heading!, known_lang, reset_module!, bar_parts, bar_sliding,
+       bar_top, blank_editor, block, callable_methods, close_file!, close_file_or_window!,
+       code_module, delete_lines!, directory, ended_rename!, enter_part!, file_tree, fill_selection,
+       fill_tree!, find!, finder_key!, folder_trail, inside_path, issettings, job_tip, ladder_runs,
+       load_settings!, make_job!, mark, mark_pointed, move_old_folders!, new_window!, node_name!,
+       nodes_inside, off, omni_label, open_finder!, open_on_folder!, open_projects!, own_page,
+       page_window, palette_key!, palette_plan, panel_theme, paste!, paths_inside, peek!,
+       rename_key!, ring_part, run_startup!, scrub!, settings_page, show_no_file!, startup_page!,
+       toggle_palette!, toggle_settings!, transclusion_item, unlist!, watch_front!, whole_node,
+       window_object, with_others
 
 "The editor of the window that `node`, a part of a page, is part of"
 function editor end
@@ -139,9 +133,6 @@ function page_room end
 "Every table of the page of the editor `e` that shows, with its lines, its heading and the text of its cells"
 function page_tables end
 
-"Which of `tables`, the tables of the page of the editor `e`, the line `from` calls, or nothing"
-function named_table end
-
 "Work out what the page of the editor `e` shows and how tall each part is, for text that's `width` wide"
 function layout! end
 
@@ -187,9 +178,6 @@ function calendar_today end
 "True while the mouse is on a thing called `name`, in any part of the page"
 function marked end
 
-"True when the page shows a terminal's file at one of its levels"
-function term_page end
-
 "True when the page shows a session's file at one of its levels"
 function chat_page end
 
@@ -217,17 +205,11 @@ function unscaled end
 "What kind of command the command `name` is"
 function command_kind end
 
-"A pinch outwards on a picture, a diagram, a page or a sketch in the page makes it fill the window"
-function pinch_open end
-
 "True when the page shows a day that isn't today"
 function another_day end
 
 "The items as the nodes of the document"
 function blocks end
-
-"What the chart `c` draws when its `from` names a CSV file"
-function chart_file end
 
 "True when the page shows a session's file as the session"
 function chat_shown end
@@ -253,32 +235,17 @@ function design_field_of end
 "`path` as a link writes it"
 function escaped end
 
-"The table in the CSV file at `path`"
-function file_table end
-
 "The pages of `folder`, with when the file of each last changed"
 function folder_pages end
 
 "Follow a wiki link to `target`"
 function follow_wiki! end
 
-"Hide the top bar until the mouse is at the top of the window"
-function hide_bar! end
-
-"The settings page's name for `how` the top bar hides"
-function hiding_name end
-
 "How the top bar hides, from its name on the settings page"
 function hiding_named end
 
-"True when the page shows an HTML file as the page that its HTML makes"
-function html_shown end
-
 "True when the name of the file at `path` ends as one of `kinds` does, like .png"
 function ispicture end
-
-"True when the file at `path` is one that holds a table"
-function istable end
 
 "Copy the file at `path` to the media folder of the document's folder, under its own name, and return the copy's path"
 function keep_copy end
@@ -288,9 +255,6 @@ function keep_pasted end
 
 "The place one line up or down the screen from the caret, in the order of the page's lines"
 function line_step end
-
-"The names of the agents that Ladder lists for you to choose from"
-function listed_agents end
 
 "The colour `back` with the accent colour over it, as strong as a mark is"
 function mark_colour end
@@ -306,9 +270,6 @@ function name_notes end
 
 "True when the check that went as `r` stopped only because the code of the file that the window of `e` shows hasn't run"
 function needs_run end
-
-"Note where the window of `e` is, before it jumps to another line of the file, so ⌘⌥← comes back to it"
-function note_place! end
 
 "True when the folder or the file that shows covers the page's whole space with a view of its own"
 function page_covered end
@@ -355,9 +316,6 @@ function run_sum end
 "Run `f` with the module of the page's code, for code that the window `e` runs in it now"
 function running_code end
 
-"Ask where to save a file, with `name` to start with, in the document's folder"
-function save_panel end
-
 "The part of line `i` that's selected, as columns, and whether the selection goes on past it"
 function selected end
 
@@ -375,18 +333,6 @@ function shown_buffers end
 
 "How the task `t` of a schedule stands on the page's day"
 function standing end
-
-"The rows of the table that line `i` shows when it holds only a CSV file, for a chart to draw"
-function table_rows end
-
-"The choice of `options` that `x` names, for a live block of the settings"
-function term_choice end
-
-"Give the terminal `v` the font of code and the colours of the theme, as the window of `e` has them now, and the terminal's settings"
-function term_look! end
-
-"True when the page shows a terminal's file as the terminal"
-function term_shown end
 
 "How far the left edge of the page's text is from the left edge of the window"
 function text_left end
@@ -409,9 +355,6 @@ function todo_called end
 "The to-do items of the page as they stand on the page's day"
 function todos_then end
 
-"A sentence or two on how far the app's update has got, for the settings page"
-function update_news end
-
 "The parts of the row that `value_row` makes for `text`, in the font `face`"
 function value_parts end
 
@@ -432,9 +375,6 @@ function write_blocks! end
 
 "How far the left edge of `it` is from the left edge of the page's text, and how wide it is"
 function item_room end
-
-"The place in the page's layout of the item under a point that's `dx` across and `dy` down from the top left corner of the page's text"
-function item_under end
 
 "What the bar under a file of a gallery starts with"
 function gallery_buttons end
@@ -460,9 +400,6 @@ function player end
 "Show the file or the folder at `path` in the window, as the path in the top bar does"
 function show_crumb! end
 
-"How wide the picture of a video is at most"
-function video_wide end
-
 "The text of a file"
 function textview end
 
@@ -474,9 +411,6 @@ function model end
 
 "What shows the terminal's file at `path` under a path and in a `view` block"
 function terminal end
-
-"True when the page shows an HTML file at one of its levels"
-function html_page end
 
 "`n` rows that are each `high` tall, `PREVIEW_LINES` of them at a time"
 function scrolled end
@@ -493,35 +427,11 @@ function text! end
 "Ask macOS to make Ladder the app that opens Markdown files"
 function make_default! end
 
-"What fills the window when you click the button over `x`, a node that a live block made, or nothing if it has no button"
-function fill_what end
-
-"How wide `x` is at most in the page, for the button over its top right corner"
-function fill_wide end
-
-"What shows under the path of a file"
-function preview end
-
-"True when `node`, a model or a video, fills the window now"
-function zoomed_node end
-
 "The zoom that makes the page's text `size` pixels tall"
 function zoom_for end
 
-"The empty room that the page keeps for the model or the video that fills the window"
-function held_room end
-
-"A small square button with a line round it and the icon `icon`, like the one that makes a picture fill the window"
-function square_button end
-
-"Where the caret goes when ↑ or ↓ brings it into a sheet from the line above or below it"
-function enter end
-
 "How far down the window the top bar reaches now"
 function bar_bottom end
-
-"The CSV file that the `from` of a chart names, or nothing when it names a heading or several tables"
-function chart_path end
 
 "The tables that the `from` of the chart `c` names, with commas between them"
 function chart_sources end
@@ -534,12 +444,6 @@ function filter_file end
 
 "Write `f` as the lines of the filter `v`"
 function filter_write! end
-
-"What a filter shows of `d`, its rows"
-function filter_table end
-
-"What the filter in `lines`, on line `line`, shows"
-function filter_subset end
 
 "Ask for the key called `name`, in a panel that hides what you type"
 function key_panel end
@@ -555,12 +459,6 @@ function server_said end
 
 "Keep `key` in the login Keychain as the password called `name`, in place of one that's there"
 function keep_key end
-
-"The CSV file that the line `text` holds, if it holds only that, and the words of its link"
-function table_file end
-
-"True when the row `r` has every one of the words in `typed`"
-function choice_matches end
 
 "Add the table of row `k` of the list to the tables that the chart of `c` draws, or take it away when the chart draws it already"
 function toggle_source! end
@@ -658,9 +556,6 @@ function email_shows end
 "True when the key `k` is a button of the mouse"
 function ismouse end
 
-"True when a list shows the file or the folder at `path` only because it shows the hidden files too"
-function ignored_shown end
-
 "Show the menu of the file or the folder at `path`"
 function file_menu! end
 
@@ -697,9 +592,6 @@ function renamer end
 "Move the caret to `p`, which was reached by going in the direction `by`"
 function move! end
 
-"Show or hide the panel at the right of the page, like git's panel beside a repository's files"
-function toggle_right! end
-
 "How wide the panel at the right is when it's open"
 function right_w end
 
@@ -715,9 +607,6 @@ function theirs end
 "The diff of the text `was` of the file `file` to the text `now`, as `git diff` writes it, with the file's whole path"
 function change_diff end
 
-"The command of the agent `k` with the options `options`, which the words go after, with its own folder and Homebrew's on its PATH"
-function kind_command end
-
 "How far the panel at the right is open, from 0 to 1"
 function right_opened end
 
@@ -726,9 +615,6 @@ function in_focus end
 
 "What the panel at the right shows for the page, or nothing when the page has no panel"
 function right_view end
-
-"The agent called `name` that Ladder can start, or Claude Code when there's none of that name"
-function agent_kind end
 
 "The pane of the conversation beside the page of the editor `e`, whose agent writes the message of a commit, or nothing"
 function commit_talk end
@@ -757,20 +643,11 @@ function detail_wide end
 "The names that the window gives the code of its pages, with no line that loads them, in a module of the window"
 function sandbox end
 
-"The module of the page's `julia` code, or nothing when it has none yet"
-function made_workspace end
-
 "One part of a line of code in a chip, in the colour of its kind, as the parts of a row"
 function coloured end
 
-"The file on this Mac that has the method `m`, and its line there"
-function code_place end
-
 "Show the code of the method `m`"
 function show_method! end
-
-"The line of `lines`, the lines of a file as it is now, that the method `m` starts on"
-function settled_line end
 
 "The blocks of Julia code in the window of `e`, in the order of its lines"
 function code_blocks end
@@ -796,14 +673,8 @@ function from_pick_tick! end
 "The folder for the files that the pages of the folder `dir` make"
 function page_media end
 
-"True while the bars beside the agent's changes stay on the page that's showing"
-function marking end
-
 "Where the page's space is across the window"
 function page_span end
-
-"The line `text` as HTML when it holds only a CSV file"
-function table_html end
 
 "What `isword` gives"
 function isword end
@@ -946,32 +817,14 @@ function known_lang end
 "Give the file that the window `e` shows a new, empty module for its code, in place of the one it had."
 function reset_module! end
 
-"The field of the window that you type in to find a file, a project or a command"
-function input end
-
-"The one after `x` in `list`, going back to the start after the last"
-function after end
-
-"What the top bar that hides lies on, so the page doesn't show through it: the colours of the sidebar, the page and the panel at the right, as a bar that doesn't hide has under it, with a line along its bottom."
-function bar_back end
-
 "The buttons that code from the startup page adds to the top bar for the page that shows"
 function bar_parts end
-
-"How much of the top bar shows, from 0 to 1."
-function bar_shown end
 
 "True while the top bar slides into the window or out of it"
 function bar_sliding end
 
-"Bring out the top bar that hides, or put it away, as the mouse and what's open ask."
-function bar_tick! end
-
 "Where the top bar's top is: 0 while the bar shows, and as far above the window as the bar is tall while it hides"
 function bar_top end
-
-"True when item `it` is a line with nothing on it"
-function blank end
 
 "An editor that shows no file yet"
 function blank_editor end
@@ -1006,9 +859,6 @@ function enter_part! end
 "The sidebar's tree"
 function file_tree end
 
-"True when the sidebar shows Ladder's own tree of the folder's files, and not a list or a menu that a kind of folder made"
-function files_listed end
-
 "Fill the selection."
 function fill_selection end
 
@@ -1021,17 +871,8 @@ function find! end
 "What the key `K` does while the file finder or the project picker is open, or nothing when it does nothing there"
 function finder_key! end
 
-"True when `x` is of one of the types that the argument `c` takes"
-function fits end
-
 "The folder at the top of the sidebar, as a trail of names"
 function folder_trail end
-
-"What gives a method its argument called `name`, of the type `T`, when the things in `focus` are in focus."
-function given end
-
-"True when the top bar hides now: always, or while the window fills a screen of its own"
-function hides_bar end
 
 "True when `p` is the path `at`, or the path of something in the folder at `at`"
 function inside_path end
@@ -1039,17 +880,11 @@ function inside_path end
 "True when `e` is the editor of the settings window: the one that ⌘, opened, while it shows a page of the settings' folder."
 function issettings end
 
-"The items in `parent` and in the groups in it, from the top."
-function items end
-
 "What the tooltip of the button that makes the job says: what the button does, or what happened when it did it"
 function job_tip end
 
 "True when Ladder runs the code of the page at `path` itself: the startup page, and a folder's page"
 function ladder_runs end
-
-"True if `node` is in the list of the children of `d`"
-function listed end
 
 "Give `e` the settings that were kept the last time one changed"
 function load_settings! end
@@ -1063,17 +898,11 @@ function mark end
 "Mark the thing that the mouse is on where the page's text has it too: a soft box behind each to-do item and each row of a table that has its name."
 function mark_pointed end
 
-"How wide the sidebar is now, or the side menu that a kind of folder has in its place: all of its width while it's open, none while it's closed, or the width of its compact form, and between the two while it slides."
-function menu_w end
-
 "Give the app's folders in `home`'s Library the name Ladder, if they still have the old name Kaydown"
 function move_old_folders! end
 
 "⌘N: open a new window on the folder that the window of `e` is in."
 function new_window! end
-
-"True when the folder at `path` is a folder of news, whose front page you read as a page, so it has a tab: see `news_companion!`"
-function news_tab end
 
 "The name of the block of `b` from line `s` to line `t`, which a link from another page uses, like `prices` in ![[costs#^prices]]."
 function node_name! end
@@ -1096,20 +925,11 @@ function open_on_folder! end
 "Open the project picker."
 function open_projects! end
 
-"True when a line of code that ends with `text` opens a block, so the next line goes further in"
-function opens end
-
 "True when a kind of folder or of file shows the page its own way, as wide as the window has room for"
 function own_page end
 
-"What covers the page's whole space, when the folder or the file that shows is of a kind that covers it, or nothing"
-function page_cover end
-
 "A window that shows the Markdown file or the folder at `path`, with the settings of the editor `like`."
 function page_window end
-
-"The part of the page's text that each printed page shows, from its top to its bottom."
-function pages end
 
 "What a key does while the palette shows."
 function palette_key! end
@@ -1129,9 +949,6 @@ function paths_inside end
 "Show the card of the words `found` when the mouse has rested on them for a moment while ⌘ is held, and take it away when the mouse is on other words."
 function peek! end
 
-"Find the thing that the mouse is on, before the page is laid out: in the page's text, or else in the first part of the page that says so."
-function point_tick! end
-
 "Return gives the file the name that's typed, and esc leaves it with the name it has"
 function rename_key! end
 
@@ -1150,20 +967,11 @@ function settings_page end
 "Show no file in the window: an empty page that nothing can be typed in"
 function show_no_file! end
 
-"The button that the top bar has for the side menu `menu`, in the place of its own button that shows and hides the sidebar: a node 30px wide at the most, or nothing."
-function side_button end
-
-"How wide the side menu stays while the sidebar is closed: its compact form's width, or 0px"
-function side_least end
-
 "Write the startup page, if there's none."
 function startup_page! end
 
 "Show the command palette, or close it when it shows"
 function toggle_palette! end
-
-"Show the sidebar if it's hidden, or hide it."
-function toggle_panel! end
 
 "Show the settings page in a window of its own."
 function toggle_settings! end
@@ -1173,9 +981,6 @@ function transclusion_item end
 
 "Take every child out of the document's list."
 function unlist! end
-
-"What happens to the app's update in each frame."
-function update_tick! end
 
 "Have macOS tell `e` when its window `w` comes to the front, and when it stops being the front window."
 function watch_front! end
@@ -1188,6 +993,3 @@ function window_object end
 
 "Do `f` with each of the other selections in the main one's place, then put the main one back."
 function with_others end
-
-"How the settings file writes a stroke, a shortcut or a command's shortcuts."
-function written end

@@ -95,15 +95,17 @@
 @use "./schedule_view" exports...
 @use "./timelog_view" exports...
 @use "./result_block" exports...
+@use "./showed_before" note_place!
 
 export OUTCOME_GAP, OUTCOME_LINES, OUTCOME_COLS, OUTCOME_NODE_W, OUTCOME_EDGE, MEMBERS, MEMBER_COLS,
-       MEMBER_INDENT, MEMBERS_LEAST, Outcome, Member, statements, window_names!, acts_on_window, window_call,
-       RUNNING_WINDOW, FRONT_WINDOW, acting_window, run_code, with_printed, code_ran!, written_in, clipped,
-       Unset, Unlisted, NODE_LINKS, plainly_shown, field_pairs, members, find_members, has_members,
-       brief_text, member_lines, unfolded, printed_rest, member_cols, outcome_line, outcome_wide, outcomes,
-       outcome!, SPIN_TURN, SPIN_FRAME, CodeRun, run_pieces!, run_piece, run_tick!, came_back!, run_here!,
-       sum_code_at, run_sum_here!, in_its_sum, sum_box_place, run_all!, bring_failed!, follow_outcomes!,
-       forget_outcomes!, outcome_over, value_row, isvalue, members_view, Spinner, inside_corner, CodeRuns
+       MEMBER_INDENT, MEMBERS_LEAST, Outcome, Member, statements, window_names!, acts_on_window,
+       window_call, RUNNING_WINDOW, FRONT_WINDOW, acting_window, run_code, with_printed, code_ran!,
+       written_in, clipped, Unset, Unlisted, NODE_LINKS, plainly_shown, field_pairs, members,
+       find_members, has_members, brief_text, member_lines, unfolded, printed_rest, member_cols,
+       outcome_line, outcome_wide, outcomes, outcome!, SPIN_TURN, SPIN_FRAME, CodeRun, run_pieces!,
+       run_piece, run_tick!, came_back!, run_here!, sum_code_at, run_sum_here!, in_its_sum,
+       sum_box_place, run_all!, bring_failed!, follow_outcomes!, forget_outcomes!, outcome_over,
+       value_row, isvalue, members_view, Spinner, inside_corner, CodeRuns, made_workspace
 
 const OUTCOME_GAP = 14px        # between the end of a line of code and the box of what it came to
 const OUTCOME_LINES = 30        # the most lines of a value that Julia writes

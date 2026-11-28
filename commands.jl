@@ -67,17 +67,17 @@ end
 @use "./printing" exports...
 @use "./tabs" exports...
 
-export ADDED_ORDER, AT_EACH, AgentChoice, BUILDING_APP, BUNDLES, Bundle, COMMANDS,
-       COMMAND_GROUPS, COMMENT_MARKS, Colours, FIELD_KEYS, HOLDS, InsertKind, KEY_NAMES,
-       KEY_OF, KEY_ROW_H, KEY_SIGNS, KeyList, KeyReset, KeyRow, PAGE_NAMES, SETTINGS_FOLDERS,
-       Shortcut, Stroke, TAB_ORDINALS, TYPING_KEYS, TabCommand,
-       add_insert!, bundle!, bundle_keys, caps, caret_number, caret_page!, caret_step!,
-       caret_value, caret_word, clashes, command!, command_here, duplicate_lines!, erase_back!,
-       erase_line_end!, erase_next!, erase_start!, findfirst_here, follow_lines!, in_order!,
-       insert_block!, key_asking, key_bindings!, key_does!, keycap, keys!, keys_now, lost_note!,
-       move_lines!, number_plus, pressed!, put_commands!, read_shortcuts, read_stroke, rebind!,
-       select_lines!, select_next!, select_word!, side_button!, step_value!, stop_asking_keys!,
-       switch_agent!, toggle_comment!, touched, typing_key, with_added, TreeTook, tree_took!, KeysState, KeysAsked
+export ADDED_ORDER, AT_EACH, AgentChoice, BUILDING_APP, BUNDLES, Bundle, COMMANDS, COMMAND_GROUPS,
+       COMMENT_MARKS, Colours, FIELD_KEYS, HOLDS, InsertKind, KEY_NAMES, KEY_OF, KEY_ROW_H,
+       KEY_SIGNS, KeyList, KeyReset, KeyRow, PAGE_NAMES, SETTINGS_FOLDERS, Shortcut, Stroke,
+       TAB_ORDINALS, TYPING_KEYS, TabCommand, add_insert!, bundle!, bundle_keys, caps, caret_number,
+       caret_page!, caret_step!, caret_value, caret_word, clashes, command!, command_here,
+       duplicate_lines!, erase_back!, erase_line_end!, erase_next!, erase_start!, findfirst_here,
+       follow_lines!, in_order!, insert_block!, key_asking, key_bindings!, key_does!, keycap, keys!,
+       keys_now, lost_note!, move_lines!, number_plus, pressed!, put_commands!, read_shortcuts,
+       read_stroke, rebind!, select_lines!, select_next!, select_word!, side_button!, step_value!,
+       stop_asking_keys!, switch_agent!, toggle_comment!, touched, typing_key, with_added, TreeTook,
+       tree_took!, KeysState, KeysAsked, written
 
 # --- key bindings ------------------------------------------------------------------------
 #

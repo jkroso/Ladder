@@ -19,12 +19,13 @@
 @use "../editor_type" exports...
 @use "../host" exports...
 
-export AGENT_KINDS, AGENTS_RENAMED, agent_renamed, AGENTS_HIDDEN, agent_listed!, agent_path, agent_command,
-       AgentModel, model_list, KNOWN_MODELS, AGENT_MODELS, MODELS_ASKING, MODELS_ASKED, agent_models,
-       ask_models!, claude_models, claude_list, grok_models, grok_list, antigravity_models, antigravity_list,
-       codex_models, pretty_model, model_of, model_name, MODELS_CHOSEN, chosen_model, model_chosen!,
-       models_setting, json_field, agent_json, AGENT_COMMAND, CLAUDE_LOGO, GROK_LOGO, OPENAI_LOGO,
-       GEMINI_LOGO, ANTIGRAVITY_LOGO, AGENT_LOGOS, agent_logo
+export AGENT_KINDS, AGENTS_RENAMED, agent_renamed, AGENTS_HIDDEN, agent_listed!, agent_path,
+       agent_command, AgentModel, model_list, KNOWN_MODELS, AGENT_MODELS, MODELS_ASKING,
+       MODELS_ASKED, agent_models, ask_models!, claude_models, claude_list, grok_models, grok_list,
+       antigravity_models, antigravity_list, codex_models, pretty_model, model_of, model_name,
+       MODELS_CHOSEN, chosen_model, model_chosen!, models_setting, json_field, agent_json,
+       AGENT_COMMAND, CLAUDE_LOGO, GROK_LOGO, OPENAI_LOGO, GEMINI_LOGO, ANTIGRAVITY_LOGO,
+       AGENT_LOGOS, agent_logo, listed_agents, kind_command, agent_kind
 
 # Claude's words go straight after -p. An option that takes a list, like --allowedTools, would take them as part of its list.
 const AGENT_KINDS = [

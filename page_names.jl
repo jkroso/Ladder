@@ -17,13 +17,14 @@
 @use "./folder_page" exports...
 @use "./views" exports...
 @use "./live_view" USUAL share! reads! default_app!
-@use "./terminal_view" TERM_BELLS term_setting!
-@use "./agent/kinds" AGENT_KINDS agent_listed!
+@use "./terminal_view" TERM_BELLS term_setting! term_choice
+@use "./agent/kinds" AGENT_KINDS agent_listed! listed_agents
 @use "./news_page" NEWS_PRUNED
 @use "./markdown_app" app_path
 @use "./commands" BUNDLES KeyList PAGE_NAMES bundle!
-@use "./app_updates" update_act! extensions_news extensions_act!
+@use "./app_updates" update_act! extensions_news extensions_act! update_news
 @use "./settings" Setting SETTINGS HIDINGS
+@use "./bar_hides" hiding_name
 
 export page_getter, page_setter
 

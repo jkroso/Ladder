@@ -26,7 +26,8 @@
 @use "./title_path" exports...
 
 export BAR_BELOW, BAR_EDGE, BAR_HIDINGS, BAR_STAYS, BAR_WAIT, bar_out, bar_slid, bar_wanted,
-       hiding_named, slide_bar!, HidingBar
+       hiding_named, slide_bar!, HidingBar, hide_bar!, hiding_name, bar_back, bar_shown, bar_tick!,
+       hides_bar
 
 # --- a top bar that hides -------------------------------------------------------------------
 #

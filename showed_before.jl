@@ -24,9 +24,10 @@
 @use "./views" exports...
 @use "./takeoff_view" exports...
 
-export __init__, full_takeoff, go_back!, go_forward!, go_place!, hidden!, ignore!,
-       ignored_changed!, ignored_tick!, jump_list, last_shown, place_back, place_now, showable,
-       step_back!, step_words, takeoff_over, Unpreviewed, unpreviewed!, Jumps, IgnoredSeen
+export __init__, full_takeoff, go_back!, go_forward!, go_place!, hidden!, ignore!, ignored_changed!,
+       ignored_tick!, jump_list, last_shown, place_back, place_now, showable, step_back!,
+       step_words, takeoff_over, Unpreviewed, unpreviewed!, Jumps, IgnoredSeen, note_place!,
+       ignored_shown, input
 
 # --- the files that showed before --------------------------------------------------------
 #
@@ -224,6 +225,7 @@ go_folder!(e, folder) = begin
   e.files_scroll.offset = 0px
   e
 end
+"The field of the window that you type in to find a file, a project or a command"
 input(e) = window_parts(e).input::TextInput
 
 "The takeoff of the page that fills the window, or nothing"

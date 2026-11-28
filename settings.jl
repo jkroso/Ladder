@@ -29,6 +29,7 @@
 @use "./caret_glide" glide!
 @use "./peek_cards" peeks!
 @use "./app_updates" updates!
+@use "./bar_hides" hide_bar! hiding_name
 
 export SETTINGS_DROP, SETTINGS_SIZE, adopt_settings!, pages_dir, settings_dir, settings_editor,
        share_settings!, Setting, SETTINGS, SHARED, FOLLOWED, HIDINGS, on_unless_false, off_unless_true,

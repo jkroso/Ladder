@@ -45,10 +45,12 @@
 @use "./strokes" exports...
 @use "./shared" exports...
 @use "./host" exports...
+@use "./sheet_view" enter
 
-export COLUMN_BLOCK, COLUMN_GAP, COLUMN_MARK, PageColumn, ColumnGroup, PageColumns, column_gap, column_groups,
-       page_columns!, flat, column_cache, in_column, shifted, column_turn!, whole_groups, page_parts, land,
-       ColumnsView, COLUMN_WORDS, html_columns, columns_html, LaidColumns, laid_columns
+export COLUMN_BLOCK, COLUMN_GAP, COLUMN_MARK, PageColumn, ColumnGroup, PageColumns, column_gap,
+       column_groups, page_columns!, flat, column_cache, in_column, shifted, column_turn!,
+       whole_groups, page_parts, land, ColumnsView, COLUMN_WORDS, html_columns, columns_html,
+       LaidColumns, laid_columns, item_under
 
 const COLUMN_BLOCK = Columns.COLUMNS   # the language of the block. `COLUMNS` is the columns of a takeoff's table.
 const COLUMN_GAP = 1.6     # the room between two columns, as a part of the size of the page's text

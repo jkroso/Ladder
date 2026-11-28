@@ -20,6 +20,7 @@
 @use "./folder_page" exports...
 @use "./views" exports...
 @use "./live_view" DefaultAsked
+@use "./webpage_view" html_page
 
 export MARKDOWN_TYPE, app_path, await_default!, inbox, markdown_type, open_outside, open_outside!,
        outside_button, receive!

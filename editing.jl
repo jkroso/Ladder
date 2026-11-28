@@ -42,7 +42,7 @@ export CLOSING, ENDING, OPENERS, OPENING, PAIRS, PAIR_REACH, SLIDE_TIME, backste
        bracket_runs, caret_pair, carry, copy_selection!, erase!, glow_bracket_pair, in_empty_pair,
        in_long_string, indent!, indent_lines!, neighbour, newline!, next_cell!, opened, pair!,
        parts_of, pass, quotes, screen_edge, shift_lines!, sidebar_room!, sliding, surround!,
-       text_size, typed_code, word_step, zoom!, BracketsState
+       text_size, typed_code, word_step, zoom!, BracketsState, after, opens, toggle_panel!
 
 # --- editing -----------------------------------------------------------------------------
 

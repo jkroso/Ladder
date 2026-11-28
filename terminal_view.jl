@@ -49,8 +49,9 @@
 @use "./host" exports...
 @use "./folder_page" exports...
 
-export terminals, term_colour, term_mix, term_palette, TERM_BELLS, term_setting!, term_settings_text,
-       read_term_setting!, term_part, term_tick!, close_terminals!, Terminals
+export terminals, term_colour, term_mix, term_palette, TERM_BELLS, term_setting!,
+       term_settings_text, read_term_setting!, term_part, term_tick!, close_terminals!, Terminals,
+       term_choice, term_page, term_look!, term_shown
 
 "True when the page shows a terminal's file at one of its levels: as the terminal, its text, its bytes in hexadecimal or its bits"
 term_page(b::Buffer) = b.view in FILE_VIEWS && lowercase(splitext(b.path)[2]) in TERMINALS && isfile(b.path)

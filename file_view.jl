@@ -25,10 +25,14 @@
 @use "./sketch_view" exports...
 @use "./csv_view" exports...
 @use "./json_view" exports...
+@use "./terminal_view" term_page
+@use "./fill_view" video_wide
+@use "./webpage_view" html_page
 
-export MOST_ZIP, zipped, MOST_COLUMNS, FileTable, tabled, tableview, tablerow, PAGE_ZOOM, PAGE_HEIGHT,
-       FilePage, room, filepage, pageview, pager, FILE_ICONS, framed, peek, MOST_LINE, MOST_HEX, MOST_BITS,
-       viewed, shown_line, text_look, file_views, hexlines, hex_about, bitlines, bits_about, hex!
+export MOST_ZIP, zipped, MOST_COLUMNS, FileTable, tabled, tableview, tablerow, PAGE_ZOOM,
+       PAGE_HEIGHT, FilePage, room, filepage, pageview, pager, FILE_ICONS, framed, peek, MOST_LINE,
+       MOST_HEX, MOST_BITS, viewed, shown_line, text_look, file_views, hexlines, hex_about,
+       bitlines, bits_about, hex!, preview
 
 const MOST_ZIP = 300_000_000   # bytes. A bigger zip isn't read.
 

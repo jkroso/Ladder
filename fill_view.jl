@@ -62,13 +62,14 @@
 @use "./math_view" exports...
 @use "./takeoff_view" exports...
 
-export ZOOM_EDGE, BAR_ROOM, MODEL_FOOT, MOST_ZOOM, PAGE_COMMANDS, ZoomView, ZoomArea, Fillable, FillButton,
-       button_what, FILL_GAP, zooming, same_what, fills, fill_spot, video_of, buttons_tall, scrolls_with_page,
-       fill_rect, fill_over, button_above, fill_window!, zoom_in!, screening, screen!, screen_video!,
-       zoom_out!, zoom_tick!, diagram_code, diagram_block, changing, refit!, write_diagram!, zoom_over,
-       BAR_NEAR, bar_near, diagram_buttons, use_tool!, lay_diagram!, subject_size, zoom_edge, bar_room,
-       view_middle, reframe!, fit_now!, zoom_by!, zoom_ink, pdf_ink, picture_spot, let_go!, zoom_key!,
-       FillState, zoom_view
+export ZOOM_EDGE, BAR_ROOM, MODEL_FOOT, MOST_ZOOM, PAGE_COMMANDS, ZoomView, ZoomArea, Fillable,
+       FillButton, button_what, FILL_GAP, zooming, same_what, fills, fill_spot, video_of,
+       buttons_tall, scrolls_with_page, fill_rect, fill_over, button_above, fill_window!, zoom_in!,
+       screening, screen!, screen_video!, zoom_out!, zoom_tick!, diagram_code, diagram_block,
+       changing, refit!, write_diagram!, zoom_over, BAR_NEAR, bar_near, diagram_buttons, use_tool!,
+       lay_diagram!, subject_size, zoom_edge, bar_room, view_middle, reframe!, fit_now!, zoom_by!,
+       zoom_ink, pdf_ink, picture_spot, let_go!, zoom_key!, FillState, zoom_view, pinch_open,
+       video_wide, fill_what, fill_wide, zoomed_node, held_room, square_button
 
 const ZOOM_EDGE = 24.0   # px of room round a picture that fits the window
 const BAR_ROOM = 64px    # the bottom of the window, where the bar of buttons is
