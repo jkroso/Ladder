@@ -268,7 +268,3 @@ end
 
 "Print the page: show the Mac's print panel with the page drawn for paper"
 print!(e, w) = e.buf.view != :markdown ? nothing : print_panel!(e, w, print_pdf(e), splitext(name(e.buf))[1])   # only a Markdown file is a page
-
-if abspath(PROGRAM_FILE) == @__FILE__
-  open_editor(ARGS)
-end

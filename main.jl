@@ -2881,3 +2881,7 @@ add_command!(get_the_news!, title="Get the news of the folder of news that shows
 # autosave.jl has this part of Ladder. Its commands are here.
 
 add_command!(autosave!, title="Turn on or off saving a page when you leave its window")
+
+if abspath(PROGRAM_FILE) == @__FILE__
+  open_editor(ARGS)
+end
