@@ -90,9 +90,12 @@ end
 @testset "Halfway through its slide the bar is halfway in" begin
   at(AT_EDGE); wait_for(K.BAR_WAIT)
   @test K.bar_out(e)
-  sleep(K.SLIDE_TIME / 2); frames(1)
-  @test -K.num(K.TOPBAR_H) < K.num(K.bar_top(e)) < 0
-  @test abs(K.num(bar().top) - K.num(K.bar_top(e))) <= 2   # the bar's place is from the last frame, a moment ago
+  sleep(K.SLIDE_TIME / 2)
+  # Where the bar is just before a frame and just after it. The frame drew it at a place between the two,
+  # however long the frame took.
+  before = K.num(K.bar_top(e)); frames(1); after = K.num(K.bar_top(e))
+  @test -K.num(K.TOPBAR_H) < before < 0
+  @test min(before, after) - 1 <= K.num(bar().top) <= max(before, after) + 1
   settle()
   put_away!()
 end
