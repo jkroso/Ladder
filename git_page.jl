@@ -53,6 +53,7 @@
 @use "./strokes" exports...
 @use "./shared" exports...
 @use "./host" exports...
+@use "./additions" exports...
 @use "./folder_page" exports...
 @use "./views" exports...
 @use "./git_marks" exports...
@@ -73,7 +74,7 @@ export GitDirectory, RepoView, GitPanel, follow_words, GIT_RUNS, send_command, S
        push_branch!, pull_branch!, merge_branch!, rebase_branch!, FileTick, committing, file_tick, tick_file!,
        commit_button, LOG_LEAST, tree_of_commits, OPEN_MOST, OPEN_ALL, CommitView, shown_commit, show_commit!,
        close_commit!, CommitLine, LANE_W, TREE_X, COMMIT_PAD, REF_H, dot_y, tree_colour, ref_boxes, bent_line,
-       commit_line, file_tally, open_first!, file_changes, message_lines, commit_when, touched_words,
+       commit_line, file_tally, open_first!, file_changes, message_by, message_lines, commit_when, touched_words,
        commit_file, commit_change, unsaved_in, with_windows, commit_file!, commit_part, MESSAGE_COMMAND,
        MOST_DIFF, message_command, recent_messages, message_prompt, talk_prompt, read_message, clean_message, text_diff, committed_text,
        with_changes, commit_now!, repo_of, save_for_commit!, ticked_text, commit_scope!, commit_all_files!,
@@ -500,6 +501,10 @@ pull_branch!(e) = send_from_palette!(e, :pull)
 merge_branch!(e) = send_from_palette!(e, :merge)
 "Pull the commits of the branch that this one follows, and make this branch's own commits again after them"
 rebase_branch!(e) = send_from_palette!(e, :rebase)
+add_command!(push_branch!, name=:push, title="Send the branch's new commits to the branch that it follows, like origin/main")
+add_command!(pull_branch!, name=:pull, title="Bring the new commits of the branch that this one follows, like origin/main")
+add_command!(merge_branch!, name=:merge, title="Pull the commits of the branch that this one follows, and join the two branches with a new commit")
+add_command!(rebase_branch!, name=:rebase, title="Pull the commits of the branch that this one follows, and make this branch's own commits again after them")
 
 # Push shows in any repository. Pull shows while the branch follows one, and Merge and Rebase while the two have gone apart.
 works_here(e, ::Val{:push}) = !isempty(repo_of(e))
@@ -1057,6 +1062,7 @@ commit_file!(e, file::FS.File, message::String) = begin
   done || error("git didn't commit it: " * String(first(split(isempty(strip(why)) ? "it gave no reason" : strip(why), '\n'))))
   nothing
 end
+add_command!(commit_file!, name=:commit, title="Commit the file to its git repository, with words that say what changed")
 
 # The palette lists Commit only while the file in focus has a change to commit
 works_here(e, ::Val{:commit}) = begin
@@ -1309,6 +1315,24 @@ commit_scope!(e, what::Symbol) = begin
   e
 end
 
+# The Commit button of the top bar. In agent mode, once you have talked with
+# the agent beside the page, the button asks that agent for the commit's
+# message in the conversation, as it knows why the page changed. See "an agent
+# writes the commit's message", and `commit_talk` and `ask_talk!` in agent/pane.jl.
+
+"Who writes the message of a commit from the Commit button of `e`, in words that go after what it commits"
+message_by(e) = e.own ? ", with a message that you write" :
+  (p = commit_talk(e); p === nothing ? ", with a message that $(e.ai) writes" : ", with a message that $(p.session.agent) writes in the conversation")
+
+# A click commits the file with a message that the agent of the conversation beside the page writes, or else the
+# agent that Settings chose, or that you write when the setting says so. While ticked changes are chosen, it commits only those.
+BUTTONS[:commit] = (run=e -> commit_scope!(e, choosing(e) ? :part : :file), off=e -> choosing(e) && isempty(ticked(e)), strong=false,
+                    busy=e -> haskey(e.nodes, :writing),
+                    tip=e -> haskey(e.nodes, :writing) ? "$(e.nodes[:writing].who) is writing the commit message…" :
+                             (!choosing(e) ? "Commit $(basename(e.buf.path))" :
+                              (n = length(ticked(e)); n == 0 ? "Tick the changes to commit" : n == 1 ? "Commit the ticked change" : "Commit the $n ticked changes")) *
+                             (choosing(e) && isempty(ticked(e)) ? "" : message_by(e)))
+
 "Commit every file of the repository that has a change, with words that say what changed"
 commit_all_files!(e, message::String) = begin
   words = strip(message)
@@ -1320,6 +1344,7 @@ commit_all_files!(e, message::String) = begin
   say_result!(e, "Committed all changed files")
   nothing
 end
+add_command!(commit_all_files!, name=:commit_all, title="Commit every changed file of the repository, with words that say what changed")
 
 "Commit the files that are ticked in git's panel, with words that say what changed"
 commit_staged_files!(e, message::String) = begin
@@ -1331,6 +1356,7 @@ commit_staged_files!(e, message::String) = begin
   say_result!(e, "Committed the ticked files")
   nothing
 end
+add_command!(commit_staged_files!, name=:commit_staged, title="Commit the files that are ticked in git's panel, with words that say what changed")
 
 "Commit the ticked changes of the file, with words that say what they change. The file keeps the changes that aren't ticked."
 commit_ticked!(e, message::String) = begin
@@ -1346,6 +1372,7 @@ commit_ticked!(e, message::String) = begin
   say_result!(e, "Committed the ticked changes of $(basename(path))")
   nothing
 end
+add_command!(commit_ticked!, name=:commit_ticked, title="Commit the ticked changes of the file, with words that say what they change")
 
 # The palette lists these while they have something to commit
 works_here(e, ::Val{:commit_all}) = (root = repo_of(e); !isempty(root) && !isempty(watch_git!(e, root).changes))
@@ -1687,6 +1714,10 @@ hide it again. Hiding it hides the bars beside the agent's changes too, since
 their button goes with it.
 """
 toggle_diff!(e) = (diffing(e) ? (delete!(e.nodes, :diffing); delete!(e.nodes, :marking)) : (e.nodes[:diffing] = e.buf.path); redraw_in!(e, 0); e)
+add_command!(toggle_diff!, name=:show_changes_in_place, title="Show or hide what changed in the file since the last commit, in the file itself")
+
+BUTTONS[:diff] = (run=toggle_diff!, off=e -> false, strong=false, on=diffing,
+                  tip=e -> (diffing(e) ? "Hide what changed in " : "Show what changed in ") * basename(e.buf.path) * " since the last commit")
 
 """
 Show the file at `path` with what changed in it since the last commit marked
@@ -1752,6 +1783,8 @@ end
 next_change!(e) = step_change!(e, 1)
 "Go to the change in the file since the last commit before the caret"
 previous_change!(e) = step_change!(e, -1)
+add_command!(next_change!, title="Go to the next change in the file since the last commit, after the caret")
+add_command!(previous_change!, title="Go to the change in the file since the last commit before the caret")
 
 "What the tooltip of a chevron beside the diff button says: which change it goes to, of how many, while they show"
 step_tip(e, by) = begin

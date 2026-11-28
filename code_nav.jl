@@ -35,6 +35,7 @@
 @use "./rich" exports...
 @use "./shared" exports...
 @use "./host" exports...
+@use "./additions" exports...
 @use "./folder_page" exports...
 @use "./sketch_view" exports...
 @use "./sheet_view" exports...
@@ -203,6 +204,7 @@ end
 
 "Go to where the name at the caret is defined: a function, a type or a value of the page's Julia code, or of a file that Ladder loaded"
 go_to_definition!(e) = definition!(e, e.buf.caret) || error("Nothing here says where the name at the caret is defined.")
+add_command!(go_to_definition!, title="Go to where the name at the caret is defined", kind=:look)
 
 # --- give a name another name ---------------------------------------------------------------
 #
@@ -315,6 +317,7 @@ rename_in_code!(e, name::NameAt, new_name::String) = begin
   isempty(was) || (e.nodes[:renamed] = (before=v, after=b.version, was=was, now=Dict(f => read(f, String) for f in keys(was)), seen=b.version))
   nothing
 end
+add_command!(rename_in_code!, title="Give a name of the page's Julia code another name, wherever it means the same thing", kind=:edit)
 
 """
 Give the name `n` the name `new_name` in the other Julia files of the git
@@ -484,6 +487,7 @@ find_uses!(e, place::Use) = begin
   end
   nothing
 end
+add_command!(find_uses!, title="List each place that uses the name at the caret, and go to one", kind=:look)
 
 works_here(e, ::Val{:find_uses}) = own_name(e, e.buf.caret) !== nothing
 
@@ -525,6 +529,7 @@ go_to!(e, line::Integer) = begin
   show_line!(e, Int(line))
   nothing
 end
+add_command!(go_to!, title="Go to a heading of the page, to a function or a section of a file of code, or to a line by its number", kind=:look)
 
 # As the arrows go down Go To's list, the window scrolls to each place, with a line round it. The caret stays where it is.
 look_of(e, ::Val{:go_to}) = e.scroll.offset
@@ -560,4 +565,5 @@ word_count(e) = begin
   redraw_in!(e, 0)
   said
 end
+add_command!(word_count, title="Say how many words the page has, how many characters, and how long it takes to read", kind=:look)
 works_here(e, ::Val{:word_count}) = e.buf.view in (:markdown, :code)

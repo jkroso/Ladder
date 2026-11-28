@@ -33,6 +33,7 @@
 @use "../strokes" exports...
 @use "../shared" exports...
 @use "../host" exports...
+@use "../additions" exports...
 @use "../folder_page" exports...
 @use "../git_marks" exports...
 @use "../linkcard_view" exports...
@@ -2057,9 +2058,11 @@ agent_mode!(e) = begin
   redraw_in!(e, SOON)
   nothing
 end
+add_command!(agent_mode!, title="Show an agent's session at the left of the page and the page's outline at its right, in a wider window. Again puts the window back.")
 works_here(e, ::Val{:agent_mode}) = agent_mode(e) || !nofile(e)
 "End the session of agent mode. Your next words there start a new one."
 end_agent_session!(e) = (new_session!(agent_pane(top_editor(e))); nothing)
+add_command!(end_agent_session!, title="End the session of agent mode. Your next words there start a new one.")
 works_here(e, ::Val{:end_agent_session}) = agent_mode(e) && agent_pane(e).session !== nothing
 
 # --- a session's file ----------------------------------------------------------------------
@@ -2401,6 +2404,7 @@ new_agent_session!(e, dir) = begin
   nothing
 end
 new_agent_session!(e, d::AbstractDirectory) = new_agent_session!(e, path_of(d))
+add_command!(new_agent_session!; group="The file or the folder in focus", title="Start a session with your agent in the folder, shown as a page", keys="cmd+shift+a")
 
 # --- the conversation writes the message of a commit ---
 #

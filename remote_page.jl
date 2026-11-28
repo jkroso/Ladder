@@ -29,6 +29,7 @@
 @use "./strokes" exports...
 @use "./shared" exports...
 @use "./host" exports...
+@use "./additions" exports...
 @use "./folder_page" exports...
 @use "./views" exports...
 @use "./linkcard_view" exports...
@@ -507,6 +508,7 @@ navigate!(e, address::String) = begin
   to === nothing && return (say_result!(e, "“$(strip(address))” isn't a file, a folder or a web address. Write one like ~/Desktop or example.com/notes.md."); e)
   get_page!(e, to)
 end
+add_command!(navigate!, title="Go to a file or a folder, like ~/Desktop, or a web address, like example.com/notes.md: Markdown on the web shows here, and the rest in your browser", keys="cmd+l")
 
 """
 The path of the Mac that `text` names when it's typed for Navigate, or nothing
@@ -549,12 +551,14 @@ wide_words(::Val{:navigate}) = true
 
 "Reload Page: ask the server again for the page from the web that shows"
 reload_page!(e) = in_browser(e.buf.path) ? (at = web_address(e.buf.path); forget_view_copies!(web_site(at)); get_page!(e, at, record=false, again=true, reload=true)) : e
+add_command!(reload_page!, title="Ask the server again for the page from the web that shows", kind=:look)
 
 "Ask again for the files that the `view` blocks of the pages of `site` show, the next time that each shows"
 forget_view_copies!(site) = filter!(((url, _),) -> web_site(url) != site, VIEW_COPIES)
 
 "Open In Browser: show the page from the web that shows in your browser"
 open_in_browser!(e) = (in_browser(e.buf.path) && BROWSER[](web_address(e.buf.path)); e)
+add_command!(open_in_browser!, title="Show the page from the web that shows in your browser", kind=:look)
 
 works_here(e, ::Union{Val{:reload_page},Val{:open_in_browser}}) = in_browser(e.buf.path)
 

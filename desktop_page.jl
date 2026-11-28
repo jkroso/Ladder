@@ -59,6 +59,7 @@
 @use "./rich" exports...
 @use "./shared" exports...
 @use "./host" exports...
+@use "./additions" exports...
 @use "./folder_page" exports...
 @use "./views" exports...
 @use "./linkcard_view" exports...
@@ -933,6 +934,7 @@ add_to_favourites!(e) = begin
   sites_changed!()
   say_result!(e, added ? "$name is a favourite now. It shows in the browser folder." : "This page is a favourite already.")
 end
+add_command!(add_to_favourites!, title="Put the page from the web that shows on the browser folder's desktop of favourite sites", kind=:look)
 
 "Remove from Favourites: take the page from the web that shows off the desktop of the browser folder"
 remove_from_favourites!(e) = begin
@@ -941,6 +943,7 @@ remove_from_favourites!(e) = begin
   sites_changed!()
   gone ? say_result!(e, "This page isn't a favourite now.") : e
 end
+add_command!(remove_from_favourites!, title="Take the page from the web that shows off the browser folder's desktop of favourite sites", kind=:look)
 
 works_here(e, ::Val{:add_to_favourites}) = in_browser(e.buf.path) && !is_favourite(e)
 works_here(e, ::Val{:remove_from_favourites}) = is_favourite(e)

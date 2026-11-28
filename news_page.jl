@@ -75,6 +75,7 @@
 @use "./strokes" exports...
 @use "./shared" exports...
 @use "./host" exports...
+@use "./additions" exports...
 @use "./folder_page" exports...
 @use "./views" exports...
 @use "./agent/kinds" exports...
@@ -415,10 +416,12 @@ end
 
 "Show the page that says the kinds of news that you want, of the folder of news that shows"
 show_interests!(e) = (o = page_object(e); o isa NewsDirectory ? open_interests!(e, string(o.path)) : nothing)
+add_command!(show_interests!, title="Show the page that says the news that you want, of the folder of news that shows: Interests.md")
 works_here(e, ::Val{:show_interests}) = page_object(e) isa NewsDirectory
 
 "Show the page that lists the feeds of the folder of news that shows"
 show_feeds!(e) = (o = page_object(e); o isa NewsDirectory ? open_feeds!(e, string(o.path)) : nothing)
+add_command!(show_feeds!, title="Show the page that lists the RSS and Atom feeds of the folder of news that shows: Feeds.md")
 works_here(e, ::Val{:show_feeds}) = page_object(e) isa NewsDirectory
 
 "Get the news of the folder of news `folder` now: its feeds, and the news of each section from Ladder's agent, when Settings let it"
@@ -1067,7 +1070,9 @@ open_news!(e) = begin
   list_files!(e)
   nothing
 end
+add_command!(open_news!, title="Show your newspaper: the folder News in your home folder, where agents write the news that you ask for")
 
 "Ask the agents for the news of each section of the folder of news that shows, now, as the round arrow in the top bar does"
 get_the_news!(e) = (o = page_object(e); o isa NewsDirectory ? news_now!(e, string(o.path)) : nothing)
+add_command!(get_the_news!, title="Get the news of the folder of news that shows, now: the posts of its feeds, and the news of each section from Ladder's agent")
 works_here(e, ::Val{:get_the_news}) = (o = page_object(e); o isa NewsDirectory && (News.agents() != :off || !isempty(Feeds.feeds(string(o.path)))))

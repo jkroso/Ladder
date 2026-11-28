@@ -55,6 +55,7 @@
 @use "../strokes" exports...
 @use "../shared" exports...
 @use "../host" exports...
+@use "../additions" exports...
 @use "../folder_page" exports...
 @use "../changes_view" exports...
 @use "../file_view" exports...
@@ -1444,6 +1445,7 @@ ask_agent!(e, node::Union{ToChange,Things}, request::String) = begin
   queue_ask!(e, words, places, isempty(name) ? said -> ask_change!(e, places, said, prompt=either_prompt(places, said), asks=true, talk=talk) :
                                                said -> ask_sharer!(e, name, places, said, asks=true, talk=talk))
 end
+add_command!(ask_agent!, title="Ask an agent for a change to a block of code or a part of the window, or a question about it, in your own words")
 
 """
 Open the palette with the command `command`, like Ask Agent, with the part
@@ -1782,6 +1784,7 @@ stop_agent!(e) = begin
   isempty(found) && error("No agent is working now.")
   stop_agents!(e, found)
 end
+add_command!(stop_agent!, title="Stop the agent that's working now. What it changed so far stays, for Undo Change")
 
 "Stop each agent of `found`, which are working in the window of `e`, as `stop_agent!` does"
 stop_agents!(e, found) = begin
@@ -2024,6 +2027,7 @@ show_change!(e) = begin
   show_window!(window!(shown, title="What the agents changed", size=size, position=at), by)
   shown
 end
+add_command!(show_change!, title="Show each change that an agent made, the newest first, and reject any part of one")
 
 "True when each file of the change `a` has the text that it had before the agent started: it was taken out again"
 taken_out(a::AskedChange) = all(((f, was),) -> isfile(f) && read(f, String) == was, a.before)
@@ -2046,6 +2050,7 @@ undo_change!(e) = begin
   isempty(failed) || error("The files are as they were, but some of the code doesn't run: " * failed)
   nothing
 end
+add_command!(undo_change!, title="Put back the files that an agent changed last, as they were before")
 
 works_here(e, ::Val{:show_change}) = !isempty(AGENT_CHANGES)
 works_here(e, ::Val{:undo_change}) = any(a -> !a.undone, AGENT_CHANGES)
@@ -2114,6 +2119,7 @@ keep_change!(e) = begin
   redraw_windows!()
   nothing
 end
+add_command!(keep_change!, name=:keep_this_change, title="Keep the function at the caret for each time that Ladder starts: a change to Ladder's own code")
 
 # Show Code takes the same node as Ask Agent: see "the code of a thing"
 """
@@ -2138,3 +2144,4 @@ show_code!(e, node::ToChange) = begin
   end
   show_place!(e, node.file, line)
 end
+add_command!(show_code!, title="Show the code that draws a part of the window, or a block of Julia code")

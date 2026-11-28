@@ -48,11 +48,11 @@ export editor, page_object, object, list_files!, go_folder!, open!, open_folder!
        after, bar_back, bar_parts, bar_shown, bar_sliding, bar_tick!, bar_top, blank, blank_editor,
        block, callable_methods, close_file!, close_file_or_window!, code_module, delete_lines!,
        directory, ended_rename!, enter_part!, file_tree, files_listed, fill_selection, fill_tree!,
-       find!, finder_key!, fits, folder_trail, given, go_home!, hides_bar, inside_path, issettings,
+       find!, finder_key!, fits, folder_trail, given, hides_bar, inside_path, issettings,
        items, job_tip, ladder_runs, listed, load_settings!, make_job!, mark, mark_pointed, menu_w,
        move_old_folders!, new_window!, news_tab, node_name!, nodes_inside, off, omni_label,
        open_finder!, open_on_folder!, open_projects!, opens, own_page, page_cover, page_window,
-       pages, palette_address, palette_key!, palette_plan, panel_theme, part_key!, paste!,
+       pages, palette_key!, palette_plan, panel_theme, part_key!, paste!,
        paths_inside, peek!, point_tick!, rename_key!, ring_part, run_startup!, scrub!,
        settings_page, show_no_file!, side_button, side_least, startup_page!, toggle_palette!,
        toggle_panel!, toggle_settings!, transclusion_item, unlist!, update_tick!, watch_front!,
@@ -1027,9 +1027,6 @@ function folder_trail end
 "What gives a method its argument called `name`, of the type `T`, when the things in `focus` are in focus."
 function given end
 
-"Open the home folder in the page."
-function go_home! end
-
 "True when the top bar hides now: always, or while the window fills a screen of its own"
 function hides_bar end
 
@@ -1110,9 +1107,6 @@ function page_window end
 
 "The part of the page's text that each printed page shows, from its top to its bottom."
 function pages end
-
-"The web address or the path of the Mac that's typed in the palette's list of commands, when the list has Navigate to go there, or nothing."
-function palette_address end
 
 "What a key does while the palette shows."
 function palette_key! end

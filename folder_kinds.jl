@@ -29,6 +29,7 @@
 @use "./strokes" exports...
 @use "./shared" exports...
 @use "./host" exports...
+@use "./additions" exports...
 @use "./folder_page" exports...
 @use "./views" exports...
 @use "./desktop_page" exports...
@@ -424,9 +425,11 @@ trust_site!(e) = begin
   yes && site_runs!(site, true, (e,))
   e
 end
+add_command!(trust_site!, title="Trust this page's site: the code of its pages runs with no sandbox, and its .ladder pages change how they show", kind=:look)
 
 "Stop Trusting Site: put the code of the pages of the site of the page from the web that shows back in the sandbox"
 stop_trusting_site!(e) = (in_browser(e.buf.path) && site_runs!(page_site(e.buf.path), false, (e,)); e)
+add_command!(stop_trusting_site!, title="Stop trusting this page's site: the code of its pages runs in the sandbox again", kind=:look)
 
 works_here(e, ::Val{:trust_site}) = in_browser(e.buf.path) && site_runs(page_site(e.buf.path)) !== true
 works_here(e, ::Val{:stop_trusting_site}) = in_browser(e.buf.path) && site_runs(page_site(e.buf.path)) === true
@@ -579,6 +582,7 @@ show_folder_as!(e, folder::AbstractDirectory, kind::KindChoice) = begin
   Base.invokelatest(folder_shown!, e, path)
   nothing
 end
+add_command!(show_folder_as!, title="Show a folder as a kind of folder: a desktop, notes, or a kind from GitHub")
 
 "Show the folder at `path` in the window of `e`, as its kind shows it, after its page ran"
 folder_shown!(e, path) = begin

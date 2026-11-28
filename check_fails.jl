@@ -22,6 +22,7 @@
 @use "./strokes" exports...
 @use "./shared" exports...
 @use "./host" exports...
+@use "./additions" exports...
 @use "./folder_page" exports...
 @use "./check_view" exports...
 @use "./agent/ask" exports...
@@ -97,6 +98,7 @@ fix_check!(e, check::FileCheck) = begin
   words = "Fix the check $(r.code)"
   queue_ask!(e, words, [c], said -> ask_change!(e, [c], said; prompt=reworded(prompt, words, said)))
 end
+add_command!(fix_check!, title="Ask an agent to make a check of the file pass, by changing the function under it", kind=:edit)
 
 works_here(e, ::Val{:fix_check}) = julia_file(e) && any(((_, r),) -> r.went != :pass, file_results(e))
 
@@ -127,6 +129,7 @@ ask_for_checks!(e, node::ToChange) = begin
     """
   queue_ask!(e, "Write checks", [node], said -> ask_change!(e, [node], said; prompt=reworded(prompt, "Write checks", said)))
 end
+add_command!(ask_for_checks!, title="Ask an agent to write checks of a function, with the values that it should give")
 
 works_here(e, ::Val{:ask_for_checks}) = julia_file(e)
 
@@ -339,6 +342,7 @@ show_steps!(e, check::FileCheck) = begin
   redraw_in!(e, 0)
   nothing
 end
+add_command!(show_steps!, title="Run a check of the file again, and show what each line of the function that it calls came to", kind=:look)
 
 works_here(e, ::Val{:show_steps}) = julia_file(e) && !isempty(file_results(e))
 

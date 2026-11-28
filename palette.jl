@@ -28,6 +28,7 @@
 @use "./strokes" exports...
 @use "./shared" exports...
 @use "./host" exports...
+@use "./additions" exports...
 @use "./folder_page" exports...
 @use "./views" exports...
 @use "./sketch_view" exports...
@@ -59,7 +60,7 @@ export Argument, CommandPalette, OMNI_BAR_X, OMNI_BAR_Y, OMNI_BLUR, OMNI_BOTTOM,
        clicked_thing, close_palette!, command_fit, counts_from, drawn_for, focus_taken, font_from,
        hit_past, in_palette, key_signs, load_omni_font, load_site_font, match_parts,
        method_keywords, next_mark, omni, omni_at, omni_family, omni_field, omni_font, omni_key,
-       omni_weight, omni_wide, on_palette, paler, palette_advanced!, palette_args,
+       omni_weight, omni_wide, on_palette, paler, palette_address, palette_advanced!, palette_args,
        palette_bar_lines, palette_browse!, palette_clear!, palette_commands, palette_fit,
        palette_fits, palette_focus!, palette_ghost, palette_items, palette_lines, palette_moving,
        palette_name, palette_next!, palette_risen, palette_room, palette_rows, palette_run!,
@@ -755,6 +756,18 @@ end
 palette_commands(e, focus=in_focus(e)) =
   sort!(Command[[c for (_, cs) in COMMAND_GROUPS for c in cs if in_palette(e, c, focus)]; [c for c in page_commands(e) if in_palette(e, c, focus)]],
         by=c -> String(c.name))
+
+"""
+The web address or the path of the Mac that's typed in the palette's list of
+commands, when the list has Navigate to go there, or nothing. Navigate is then
+the list's first row, and Return goes there at once. A path here starts with
+/, ~ or file://, so that the name of a command is never one.
+"""
+palette_address(e, p::CommandPalette) = begin
+  p.command === nothing || return nothing
+  to = navigate_place(e, input(e).text, near=false)
+  to !== nothing && any(c -> c.name == :navigate, p.listed) ? to : nothing
+end
 
 """
 The name of the thing in focus that the command `c` works on, to show in its

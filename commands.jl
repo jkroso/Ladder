@@ -2,9 +2,8 @@
 #
 # Each thing that a key does is a command with a name. COMMANDS has them all,
 # and the key bindings page lists them in COMMAND_GROUPS. add_command! makes a
-# function a command of the command palette.
-#
-# Its commands are in main.jl.
+# function a command of the command palette: additions.jl has it, and each
+# file adds its own commands with it.
 
 @use "github.com/jkroso/Prospects.jl" @def
 @use "github.com/jkroso/MiniFB.jl"... onfiledrop onscroll
@@ -36,6 +35,7 @@ end
 @use "./strokes" exports...
 @use "./shared" exports...
 @use "./host" exports...
+@use "./additions" exports...
 @use "./folder_page" exports...
 @use "./views" exports...
 @use "./takeoff_view" exports...
@@ -67,13 +67,13 @@ end
 @use "./printing" exports...
 @use "./tabs" exports...
 
-export ADDED_COMMANDS, AT_EACH, AgentChoice, BUILDING_APP, BUNDLES, Bundle, COMMANDS,
-       COMMAND_GROUPS, COMMENT_MARKS, Colours, Command, FIELD_KEYS, HOLDS, InsertKind, KEY_NAMES,
+export ADDED_ORDER, AT_EACH, AgentChoice, BUILDING_APP, BUNDLES, Bundle, COMMANDS,
+       COMMAND_GROUPS, COMMENT_MARKS, Colours, FIELD_KEYS, HOLDS, InsertKind, KEY_NAMES,
        KEY_OF, KEY_ROW_H, KEY_SIGNS, KeyList, KeyReset, KeyRow, PAGE_NAMES, SETTINGS_FOLDERS,
-       Shortcut, Stroke, TAB_ORDINALS, TYPING_KEYS, TabCommand, add_command!, add_commands!,
+       Shortcut, Stroke, TAB_ORDINALS, TYPING_KEYS, TabCommand,
        add_insert!, bundle!, bundle_keys, caps, caret_number, caret_page!, caret_step!,
        caret_value, caret_word, clashes, command!, command_here, duplicate_lines!, erase_back!,
-       erase_line_end!, erase_next!, erase_start!, findfirst_here, first_words, follow_lines!,
+       erase_line_end!, erase_next!, erase_start!, findfirst_here, follow_lines!, in_order!,
        insert_block!, key_asking, key_bindings!, key_does!, keycap, keys!, keys_now, lost_note!,
        move_lines!, number_plus, pressed!, put_commands!, read_shortcuts, read_stroke, rebind!,
        select_lines!, select_next!, select_word!, side_button!, step_value!, stop_asking_keys!,
@@ -163,22 +163,8 @@ written(list::Vector{Shortcut}) = join(map(written, list), ", ")
 caps(s::Stroke) = join([sign for (key, _, sign) in HOLDS if key in s.held]) * get(() -> uppercase(KEY_OF[s.key]), KEY_SIGNS, s.key)
 caps(s::Shortcut) = join(map(caps, s), ' ')
 
-"""
-Something that a key does. `keys` are its shortcuts in the bundle called
-Ladder. `run` gets the editor, its window, and true when ⇧ is held to grow
-the selection. `call` is the function that the command palette calls, after
-it asks for each thing that the function takes. It's nothing for a command
-that takes nothing. See "the command palette".
-"""
-struct Command
-  name::Symbol
-  title::String   # what the key bindings page calls it
-  kind::Symbol
-  keys::String
-  run::Function
-  call::Any
-end
-Command(name, title, kind, keys, run) = Command(name, title, kind, keys, run, nothing)
+# A `Command` is something that a key does: its name, what the key bindings page calls it, its kind, its
+# keys in the bundle called Ladder, and what it does. additions.jl has the type.
 
 "Move the caret one character left or right. With a selection and no ⇧, it goes to that end of the selection."
 caret_step!(e, by::Int, select::Bool) = begin
@@ -634,13 +620,10 @@ step_value!(e, steps::Int) = begin
   touch!(e)
 end
 
-"""
-Each command that `add_commands!` added, with the name of its group, in the
-order that they came. A hot reload makes `COMMAND_GROUPS` again when a name
-in it changes, and doesn't call `add_command!` again further down the file.
-So the list takes these back in: see `with_added`.
-"""
-const ADDED_COMMANDS = Pair{String,Command}[]
+# `ADDED_COMMANDS`, in additions.jl, has each command that `add_commands!` added, with the name of its
+# group, in the order that they came. A file that loads before this one adds its commands before
+# `COMMAND_GROUPS` is made. And a hot reload makes `COMMAND_GROUPS` again when a name in it changes,
+# and doesn't call `add_command!` again. So the list takes these in when it's made: see `with_added`.
 
 """
 Put each of `commands` in the group of `groups` called `group`, at the end,
@@ -658,8 +641,53 @@ put_commands!(groups, group::AbstractString, commands) = begin
   groups
 end
 
-"`groups` with each command that `add_commands!` added put back in its group"
-with_added(groups) = (foreach(((group, c),) -> put_commands!(groups, group, (c,)), ADDED_COMMANDS); groups)
+"""
+The groups of the commands that functions make, and each group's commands in
+the order that the key bindings page lists them. Each file adds its own
+commands, and the files load in another order than this one, so this list
+keeps each row of the page where it was. A command that isn't named here
+needs no line: it comes after these, in the order that it was added.
+"""
+const ADDED_ORDER = [
+  "The file or the folder in focus" => [
+    :rename, :duplicate, :move_to_trash, :show_in_finder, :copy_path, :new_page, :new_folder, :new_terminal,
+    :new_agent_session, :add_to_favourites, :remove_from_favourites],
+  "Commands that ask for something" => [
+    :go_to, :go_to_definition, :rename_in_code, :find_uses, :add_check, :run_all, :insert, :theme, :text_size,
+    :key_bindings, :switch_agent, :spelling, :peeks, :word_count, :copy_link_to_block,
+    :navigate, :reload_page, :open_in_browser, :show_as_app,
+    :agent_mode, :end_agent_session, :ask_agent, :show_change, :undo_change, :show_code, :keep_this_change,
+    :stop_agent, :fix_check, :ask_for_checks, :show_steps,
+    :trust_site, :stop_trusting_site, :add_to_favourites, :remove_from_favourites,
+    :right_panel, :push, :pull, :merge, :rebase, :commit, :commit_all, :commit_staged, :commit_ticked,
+    :show_changes_in_place, :next_change, :previous_change,
+    :go_to_favourite, :show_folder_as, :show_interests, :show_feeds, :open_news, :get_the_news, :autosave]]
+
+"""
+Put the commands of each group of `groups` that `ADDED_ORDER` names in its
+order. The other commands of the group come after them, in the order that
+they have.
+"""
+in_order!(groups) = begin
+  for (group, names) in ADDED_ORDER
+    i = findfirst(g -> first(g) == group, groups)
+    i === nothing && continue
+    place(c) = something(findfirst(==(c.name), names), length(names) + 1)
+    sort!(last(groups[i]), by=place, alg=MergeSort)   # a sort that keeps the order of the commands with one place
+  end
+  groups
+end
+
+"""
+`groups` with each command that `add_commands!` added put in its group. The
+groups that `ADDED_ORDER` names come first after the ones of `groups`, in
+its order.
+"""
+with_added(groups) = begin
+  foreach(((group, _),) -> put_commands!(groups, group, ()), ADDED_ORDER)
+  foreach(((group, c),) -> put_commands!(groups, group, (c,)), ADDED_COMMANDS)
+  in_order!(groups)
+end
 
 """
 The commands, in the groups and the order that the key bindings page shows
@@ -742,8 +770,19 @@ const COMMAND_GROUPS = with_added([
     Command(:erase_line_start, "Delete to the start of the line", :type, "cmd+backspace", (e, w, _) -> erase!(e, (e.buf.caret[1], 0))),
     Command(:erase_line_end, "Delete to the end of the line", :type, "ctrl+k", (e, w, _) -> erase_line_end!(e))]])
 
-"Each command, by its name"
-const COMMANDS = Dict{Symbol,Command}(c.name => c for (_, cs) in COMMAND_GROUPS for c in cs)
+"""
+Each command, by its name. Two groups can each have a command with one name,
+like Add To Favourites for a folder and for a page from the web. The name
+then stands for the one that was added last.
+"""
+const COMMANDS = Dict{Symbol,Command}(c.name => c for c in Command[reduce(vcat, last.(COMMAND_GROUPS)); last.(ADDED_COMMANDS)])
+
+list_commands!(group::AbstractString, commands) = begin
+  put_commands!(COMMAND_GROUPS, group, commands)
+  in_order!(COMMAND_GROUPS)
+  foreach(c -> COMMANDS[c.name] = c, commands)
+  nothing
+end
 
 "What kind of command the command `name` is: :type, :move, :edit, :look or :window"
 command_kind(name::Symbol) = COMMANDS[name].kind
@@ -1265,21 +1304,7 @@ end
 "The buttons that code from the startup page adds to the top bar for the page that shows"
 bar_parts(e) = Tuple(Iterators.flatten(f(e) for f in values(BAR_PARTS)))
 
-"""
-Add `commands` to Ladder's commands, in the group called `group` on the key
-bindings page. Each is a `Command`: its name, what the page calls it, its
-kind, its keys, and what it does. A command that has the name of one that's
-there takes its place. `ADDED_COMMANDS` keeps them too, for a hot reload.
-"""
-add_commands!(group::AbstractString, commands) = begin
-  put_commands!(COMMAND_GROUPS, group, commands)
-  for c in commands
-    COMMANDS[c.name] = c
-    k = findfirst(((_, o),) -> o.name == c.name, ADDED_COMMANDS)
-    k === nothing ? push!(ADDED_COMMANDS, String(group) => c) : (ADDED_COMMANDS[k] = String(group) => c)
-  end
-  nothing
-end
+# `add_commands!` is in additions.jl, with `add_command!`.
 
 # Reset Module gives the page's code a new module: see `reset_module!`
 add_commands!("The text", [Command(:reset_module, "Run the page's Julia code in a new, empty module, without what it made before", :window, "",
@@ -1306,42 +1331,13 @@ works_here(e, ::Val{:new_tab}) = !issettings(top_editor(e))
 
 # --- commands that are functions ----------------------------------------------------------
 #
-# `add_command!` makes a Julia function a command of the command palette. The
-# palette asks for each thing that the function takes, by the argument's name
-# and type, and calls the function with them. See "the command palette" for
-# how a type is asked for, and how the methods of a function share its chips.
-#
-#     "Make the page's text `size` pixels tall"
-#     text_size!(e, size::Real) = (e.zoom = zoom_for(size); rewrap!(e))
-#     add_command!(text_size!)
-#
-# The command is called Text Size, and it asks for the size, a number. Its row
-# says what the function's docstring starts with, or the `title` that
-# `add_command!` is given. It has a place on the key bindings page, and its
-# keys open the palette with the command taken.
-#
-# A function that takes a part of a page, a file or a kind of folder is a
-# command only while one is in focus, and gets that one:
-#
-#     "Fetch what's new in a git folder"
-#     fetch!(d::GitDirectory) = ...
-#     add_command!(fetch!)
-#
-# See "what's in focus" in the section of the command palette.
+# `add_command!` makes a Julia function a command of the command palette: see
+# additions.jl. Each file has the commands of its own functions. The ones
+# here are the commands of the settings that a command changes, and of the
+# Insert menu.
 
 "What the docstring of `f` starts with: its first sentence, without the marks round code and the full stop. With no docstring, it's \"\"."
 first_words(f) = String(rstrip(replace(doc_sentence(parentmodule(f), nameof(f)), "`" => ""), '.'))
-
-"""
-Make the function `f` a command, in the group called `group` on the key
-bindings page. `name` is the command's name, which the palette shows as
-words: the function's own name, without a `!`. `title` says what it does:
-the first line of the function's docstring. `kind` says where it works, and
-`keys` are its shortcuts, as a `Command` has them.
-"""
-add_command!(f; name::Symbol=Symbol(rstrip(String(nameof(f)), '!')), title::AbstractString=first_words(f), kind::Symbol=:window,
-             keys::AbstractString="", group::AbstractString="Commands that ask for something") =
-  add_commands!(group, [Command(name, String(title), kind, String(keys), (e, w, _) -> open_palette!(e, COMMANDS[name]), f)])
 
 "The colours of a page, for a command to take: Sepia, Paper or Night"
 struct Colours
@@ -1351,6 +1347,7 @@ choices_for(::Type{Colours}, e) = [Colours(name) for name in THEME_ORDER]
 chip_kind(::Type{Colours}) = :choice
 worded(c::Colours) = uppercasefirst(String(c.name))
 theme!(e, colours::Colours) = theme!(e, colours.name)
+add_command!(theme!, title="Use other colours for the page")
 
 "A bundle of key bindings, for a command to take: Ladder's own keys, or the keys of another editor"
 struct Bundle
@@ -1361,6 +1358,7 @@ chip_kind(::Type{Bundle}) = :choice
 worded(b::Bundle) = b.name
 "Use the keys of a bundle"
 key_bindings!(e, bundle::Bundle) = bundle!(e, bundle.name)
+add_command!(key_bindings!, title="Use the keys of another editor")
 
 "An agent that Ladder can start, for a command to take: Claude, Antigravity, Codex or Grok. See \"the agents that Ladder can start\"."
 struct AgentChoice
@@ -1376,6 +1374,7 @@ does. A page that an agent shares still asks that agent.
 """
 switch_agent!(e, agent::AgentChoice) = preferred_agent!(e, agent.name)
 runs_at_once(::Val{:switch_agent}) = true
+add_command!(switch_agent!, title="Choose the agent that Ladder asks for a change or a question: Claude, Antigravity, Codex or Grok")
 
 "A kind of block that the Insert menu adds, for a command to take"
 struct InsertKind
@@ -1391,6 +1390,7 @@ insert_block!(e, block::InsertKind) = begin
   j === nothing && error("The Insert menu has no $(block.name).")
   page_act!(e, i, j)
 end
+add_command!(insert_block!, name=:insert, title="Add a block to the page: a table, a sheet, a chart and so on", kind=:edit)
 
 
 

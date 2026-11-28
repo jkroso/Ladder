@@ -32,7 +32,7 @@ export own!, node!, MARKDOWN, window_size, PICTURES, MODELS, TERMINALS, CHATS, S
        PageRow, PAGE_ROW_H, page_row!, page_heading, page_note, PageButton, page_button!, git_colour,
        favourite_item, ishidden, left_out, on_screen, whole_picture, MEDIA_CACHE, media_dir, tilde, title,
        held, not_pictures, picture_key, SETTINGS_FILE, settings_file, BROWSER_FOLDER, browser_folder, path_of,
-       HOME, home_folder, KEY_KEEPER, PAGE_GETTER, TRUE_PATHS, truepath, PASSING
+       HOME, home_folder, go_home!, KEY_KEEPER, PAGE_GETTER, TRUE_PATHS, truepath, PASSING
 
 "A node that belongs to `e` and is kept for as long as `e` is"
 own!(e, node) = (node.parent === nothing && setfield!(node, :parent, e); node)
@@ -359,6 +359,9 @@ path_of(o::FSObject) = (path = string(o.path); length(path) > 1 ? String(rstrip(
 const HOME = Ref("")
 
 home_folder() = isempty(HOME[]) ? homedir() : HOME[]
+
+"Open the home folder in the page. The sidebar lists the home folder, and a sidebar that's hidden stays hidden."
+go_home!(e) = open_folder!(e, home_folder())
 
 "What keeps a key in the Keychain. A test puts its own function here, so that it leaves the Keychain alone."
 const KEY_KEEPER = Ref{Function}(keep_key)
