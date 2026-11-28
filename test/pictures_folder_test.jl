@@ -1,6 +1,6 @@
 # Tests for the pages of the Mac's Pictures folder and of a folder of
 # screenshots: a grid of the pictures, the newest first, in groups of months or
-# of days. See "the Mac's own folders: Pictures and the screenshots" in main.jl.
+# of days. See "the Mac's own folders: Pictures and the screenshots" in macfolders_page.jl.
 # Run them with `julia -O0 --project=. test/pictures_folder_test.jl`. They use a
 # folder of their own, never the Mac's Pictures, and they click in a window
 # that isn't on the screen. With `LADDER_SHOTS` set to a folder, they save

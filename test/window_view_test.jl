@@ -1,7 +1,7 @@
 # Tests for the window of a kind of folder: `window_view` makes all that the
 # window shows, `side_menu` a side menu in the sidebar's place, and `bread_crumb` the
 # middle of the top bar. Each asks the object of the file or the folder that
-# the window shows. See "the whole window" in main.jl. Run them with
+# the window shows. See "the whole window" in windows.jl. Run them with
 # `julia -O0 --project=. test/window_view_test.jl`. They draw a window that
 # isn't on the screen.
 

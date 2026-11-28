@@ -1,5 +1,5 @@
 # Tests for an HTML file, which shows as the page that its HTML makes: see
-# "an HTML file as its page" in main.jl. Run them with
+# "an HTML file as its page" in webpage_view.jl. Run them with
 # `julia -O0 --project=. test/html_file_test.jl`. They write an HTML file into
 # a temporary folder, and show it in a window that isn't on the screen. Set
 # `LADDER_SHOTS` to a folder, and they save pictures of the page there.

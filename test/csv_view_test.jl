@@ -1,5 +1,5 @@
 # Tests for a line that holds only a CSV file, which the page shows as a table.
-# See "a table from a CSV file" in main.jl. Run them with
+# See "a table from a CSV file" in media_view.jl. Run them with
 # `julia -O0 --project=. test/csv_view_test.jl`. They write small CSV files
 # into a temporary folder, and click in a window that isn't on the screen. Set
 # `LADDER_SHOTS` to a folder, and they save pictures of the tables there.

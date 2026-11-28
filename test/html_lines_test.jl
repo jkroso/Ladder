@@ -1,5 +1,5 @@
 # Tests for HTML on lines of its own in a page: which lines are HTML, and how
-# web/ draws them. See "HTML in a page" in main.jl. Run them with
+# web/ draws them. See "HTML in a page" in media_view.jl. Run them with
 # `julia -O0 --project=. test/html_lines_test.jl`. They use a window that
 # isn't on the screen. Set `LADDER_SHOTS` to a folder, and they save a
 # picture there.

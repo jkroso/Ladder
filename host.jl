@@ -43,7 +43,19 @@ export editor, page_object, object, list_files!, go_folder!, open!, open_folder!
        palette_click!, show_window!, shown_parts, window!, paper_window, todo_box, go_chip!, palette_chips,
        palette, under_palette, startup_page, command_focus, copied!, mark_chips, mark_preview, text_width,
        code_module!, page_value, page_code, show_opened!, toast!, untoast!, site_code_changed!,
-       go_heading!, known_lang, reset_module!, input
+       go_heading!, known_lang, reset_module!, input,
+       after, bar_back, bar_parts, bar_shown, bar_sliding, bar_tick!, bar_top, blank, blank_editor,
+       block, callable_methods, close_file!, close_file_or_window!, code_module, delete_lines!,
+       directory, ended_rename!, enter_part!, file_tree, files_listed, fill_selection, fill_tree!,
+       find!, finder_key!, fits, folder_trail, given, go_home!, hides_bar, inside_path, issettings,
+       items, job_tip, ladder_runs, listed, load_settings!, make_job!, mark, mark_pointed, menu_w,
+       move_old_folders!, new_window!, news_tab, node_name!, nodes_inside, off, omni_label,
+       open_finder!, open_on_folder!, open_projects!, opens, own_page, page_cover, page_window,
+       pages, palette_address, palette_key!, palette_plan, panel_theme, part_key!, paste!,
+       paths_inside, peek!, point_tick!, rename_key!, ring_part, run_startup!, scrub!,
+       settings_page, show_no_file!, side_button, side_least, startup_page!, toggle_palette!,
+       toggle_panel!, toggle_settings!, transclusion_item, unlist!, update_tick!, watch_front!,
+       whole_node, window_object, with_others, written
 
 "The editor of the window that `node`, a part of a page, is part of"
 function editor end
@@ -926,3 +938,255 @@ function reset_module! end
 
 "The field of the window that you type in to find a file, a project or a command"
 function input end
+
+"The one after `x` in `list`, going back to the start after the last"
+function after end
+
+"What the top bar that hides lies on, so the page doesn't show through it: the colours of the sidebar, the page and the panel at the right, as a bar that doesn't hide has under it, with a line along its bottom."
+function bar_back end
+
+"The buttons that code from the startup page adds to the top bar for the page that shows"
+function bar_parts end
+
+"How much of the top bar shows, from 0 to 1."
+function bar_shown end
+
+"True while the top bar slides into the window or out of it"
+function bar_sliding end
+
+"Bring out the top bar that hides, or put it away, as the mouse and what's open ask."
+function bar_tick! end
+
+"Where the top bar's top is: 0 while the bar shows, and as far above the window as the bar is tall while it hides"
+function bar_top end
+
+"True when item `it` is a line with nothing on it"
+function blank end
+
+"An editor that shows no file yet"
+function blank_editor end
+
+"The kind of block that line `i` is in."
+function block end
+
+"The methods of `f` that the palette can call when the things in `focus` are in focus, each as its arguments, in the order that they're written in."
+function callable_methods end
+
+"Close the file that the window shows, and its tab, and show the tab under it."
+function close_file! end
+
+"What ⌘W does: close the file that the window shows, or the window when it shows a page of the settings, or no file and no tab is open."
+function close_file_or_window! end
+
+"A new module for the code of the startup page, or of a folder's page, at `path`."
+function code_module end
+
+"Take away each line that the selection touches"
+function delete_lines! end
+
+"The object of the sidebar's folder, or nothing when no folder is there"
+function directory end
+
+"A click somewhere else while a file is renamed gives the file the name that's typed"
+function ended_rename! end
+
+"What Return does while the caret is on a part of the page as a whole: it gives the part the keyboard, in the way that suits the part."
+function enter_part! end
+
+"The sidebar's tree"
+function file_tree end
+
+"True when the sidebar shows Ladder's own tree of the folder's files, and not a list or a menu that a kind of folder made"
+function files_listed end
+
+"Fill the selection."
+function fill_selection end
+
+"Make the sidebar's tree show the folder's files and the headings of each file that's open in it"
+function fill_tree! end
+
+"⌘F, and Find… in the page's menu."
+function find! end
+
+"What the key `K` does while the file finder or the project picker is open, or nothing when it does nothing there"
+function finder_key! end
+
+"True when `x` is of one of the types that the argument `c` takes"
+function fits end
+
+"The folder at the top of the sidebar, as a trail of names"
+function folder_trail end
+
+"What gives a method its argument called `name`, of the type `T`, when the things in `focus` are in focus."
+function given end
+
+"Open the home folder in the page."
+function go_home! end
+
+"True when the top bar hides now: always, or while the window fills a screen of its own"
+function hides_bar end
+
+"True when `p` is the path `at`, or the path of something in the folder at `at`"
+function inside_path end
+
+"True when `e` is the editor of the settings window: the one that ⌘, opened, while it shows a page of the settings' folder."
+function issettings end
+
+"The items in `parent` and in the groups in it, from the top."
+function items end
+
+"What the tooltip of the button that makes the job says: what the button does, or what happened when it did it"
+function job_tip end
+
+"True when Ladder runs the code of the page at `path` itself: the startup page, and a folder's page"
+function ladder_runs end
+
+"True if `node` is in the list of the children of `d`"
+function listed end
+
+"Give `e` the settings that were kept the last time one changed"
+function load_settings! end
+
+"Ask Centient to make the page's job."
+function make_job! end
+
+"The icon that a file, a heading or a component starts with in the sidebar, in the place a tree has its arrow"
+function mark end
+
+"Mark the thing that the mouse is on where the page's text has it too: a soft box behind each to-do item and each row of a table that has its name."
+function mark_pointed end
+
+"How wide the sidebar is now, or the side menu that a kind of folder has in its place: all of its width while it's open, none while it's closed, or the width of its compact form, and between the two while it slides."
+function menu_w end
+
+"Give the app's folders in `home`'s Library the name Ladder, if they still have the old name Kaydown"
+function move_old_folders! end
+
+"⌘N: open a new window on the folder that the window of `e` is in."
+function new_window! end
+
+"True when the folder at `path` is a folder of news, whose front page you read as a page, so it has a tab: see `news_companion!`"
+function news_tab end
+
+"The name of the block of `b` from line `s` to line `t`, which a link from another page uses, like `prices` in ![[costs#^prices]]."
+function node_name! end
+
+"The keys of the editor's nodes that it keeps for a file by its path, for the files at `at`"
+function nodes_inside end
+
+"True for a button of the top bar that does nothing now: the one that makes the job, when the Mac has no Centient or Centient makes a job, the ones that go back and forward, when they have no file to go to, and one that code from the startup page added, when that code says so"
+function off end
+
+"A line of words in the command palette's font, at the size and in the colour that it's given"
+function omni_label end
+
+"Open the file finder"
+function open_finder! end
+
+"Show the folder at `path` in a window that's opened on it: its first Markdown file, or the folder's own page when it has no Markdown file."
+function open_on_folder! end
+
+"Open the project picker."
+function open_projects! end
+
+"True when a line of code that ends with `text` opens a block, so the next line goes further in"
+function opens end
+
+"True when a kind of folder or of file shows the page its own way, as wide as the window has room for"
+function own_page end
+
+"What covers the page's whole space, when the folder or the file that shows is of a kind that covers it, or nothing"
+function page_cover end
+
+"A window that shows the Markdown file or the folder at `path`, with the settings of the editor `like`."
+function page_window end
+
+"The part of the page's text that each printed page shows, from its top to its bottom."
+function pages end
+
+"The web address or the path of the Mac that's typed in the palette's list of commands, when the list has Navigate to go there, or nothing."
+function palette_address end
+
+"What a key does while the palette shows."
+function palette_key! end
+
+"Where each part of the palette is in the window in this frame, in pixels: the strip along the bottom, the bar in it, each thing in the bar, and the list with what it hangs over."
+function palette_plan end
+
+"The colours of the sidebar's tree"
+function panel_theme end
+
+"What a key does in a part of another page before the part's editor does what it does with a key."
+function part_key! end
+
+"Put what the clipboard holds into the text at the caret."
+function paste! end
+
+"The keys of `d` that are paths of what's at `at`: `at` itself, and what's in it when it's a folder"
+function paths_inside end
+
+"Show the card of the words `found` when the mouse has rested on them for a moment while ⌘ is held, and take it away when the mouse is on other words."
+function peek! end
+
+"Find the thing that the mouse is on, before the page is laid out: in the page's text, or else in the first part of the page that says so."
+function point_tick! end
+
+"Return gives the file the name that's typed, and esc leaves it with the name it has"
+function rename_key! end
+
+"Draw a line round the part of the page that the caret is on as a whole."
+function ring_part end
+
+"Run the code of the startup page: each of its `julia` blocks, from the top, in one module, which this gives."
+function run_startup! end
+
+"Take hold of the number at `found`, which `scrub_at` gave, with the mouse at `pos`"
+function scrub! end
+
+"Where the page of the settings is whose file is called `name`."
+function settings_page end
+
+"Show no file in the window: an empty page that nothing can be typed in"
+function show_no_file! end
+
+"The button that the top bar has for the side menu `menu`, in the place of its own button that shows and hides the sidebar: a node 30px wide at the most, or nothing."
+function side_button end
+
+"How wide the side menu stays while the sidebar is closed: its compact form's width, or 0px"
+function side_least end
+
+"Write the startup page, if there's none."
+function startup_page! end
+
+"Show the command palette, or close it when it shows"
+function toggle_palette! end
+
+"Show the sidebar if it's hidden, or hide it."
+function toggle_panel! end
+
+"Show the settings page in a window of its own."
+function toggle_settings! end
+
+"What line `i` shows when it holds a link to a part of another page."
+function transclusion_item end
+
+"Take every child out of the document's list."
+function unlist! end
+
+"What happens to the app's update in each frame."
+function update_tick! end
+
+"Have macOS tell `e` when its window `w` comes to the front, and when it stops being the front window."
+function watch_front! end
+
+"The block of `b` that lines `s` to `t` are the whole of, or nothing: a block of the page, a heading with the lines under it, or an item of a list with the lines indented under it."
+function whole_node end
+
+"The object that the window is about: the file or the folder that it shows."
+function window_object end
+
+"Do `f` with each of the other selections in the main one's place, then put the main one back."
+function with_others end
+
+"How the settings file writes a stroke, a shortcut or a command's shortcuts."
+function written end

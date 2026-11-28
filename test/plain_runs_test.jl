@@ -1,6 +1,6 @@
 # Tests for how a line of text shows as plain text: only the run that the caret
 # is in shows its markup, like bold words, a link or inline code, and the rest
-# of the line reads as rich text. See "rich text and plain text" in main.jl. Run
+# of the line reads as rich text. See "rich text and plain text" in rich.jl. Run
 # them with `julia -O0 --project=. test/plain_runs_test.jl`. They use windows
 # that aren't on the screen.
 

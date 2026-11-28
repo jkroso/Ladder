@@ -1,7 +1,7 @@
 # Tests for the file finder that ⌘O opens, a bar near the top of the window
 # with the folder's pages in a list under it, and the project picker that ⌘P
 # opens, which lists projects the same way. Both look like the command
-# palette. See "the file finder and the project picker" in main.jl. Run them with
+# palette. See "the file finder and the project picker" in finder.jl. Run them with
 # `julia -O0 --project=. test/file_finder_test.jl`. They use windows that
 # aren't on the screen.
 

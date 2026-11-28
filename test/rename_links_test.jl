@@ -1,5 +1,5 @@
 # Tests that the links to a file follow it when it gets a new name or moves,
-# as in Obsidian. See "links that follow a rename" in main.jl. Run them with
+# as in Obsidian. See "links that follow a rename" in renames.jl. Run them with
 # `julia -O0 --project=. test/rename_links_test.jl`. They use a window that
 # isn't on the screen, and a project of their own in a folder for tests.
 

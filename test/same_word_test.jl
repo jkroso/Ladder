@@ -1,5 +1,5 @@
 # Tests for the lines round the other places that have the word that's
-# selected. See `same_word` in main.jl. Run them with
+# selected. See `same_word` in page_extras.jl. Run them with
 # `julia -O0 --project=. test/same_word_test.jl`. They select text in a window
 # that isn't on the screen. With a folder as the first argument, they save
 # pictures of the window there.

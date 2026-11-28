@@ -1,6 +1,7 @@
 # Tests for a project page: a page whose videos and sounds are at web addresses,
 # and whose front matter has a `progress` line. See "video and sound from the
-# web" and "a job in Centient from the page" in main.jl. Run them with
+# web" in media_view.jl and "a job in Centient from the page" in centient_job.jl.
+# Run them with
 # `julia -O0 --project=. test/project_page_test.jl`. They use no network: `curl` is a
 # program of the test's own, and Centient is centient_fake.jl. They need ffmpeg
 # to make a video and a sound, and macOS to play them.

@@ -28,7 +28,7 @@ export SANS, SERIF, MONO, CODE_FONT, CODE_STYLE, CODE_SLANT, CODE_SCALE, code_ty
        added_colour, TIP_INK, tip_label, dark_page, takeoff_back, elide, FLOAT_ROW, float_row, found_colours,
        rule, tint, wrapped, ROW_H, LISTING_W, PANEL_PAD, PREVIEW_LINES, LINE_H, TEXT_PAD, PAGE_W, ZOOM_STEP,
        FILL_SIDE, CHECK_BAD, MOST_CHOICES, MARK_FILL, THEME_ORDER, NOTE_GAP, SPELL_RED, OUTCOME_ROUND,
-       MEMBERS_H, EDGE_W, SIDE_GAP, OMNI_FOOT, PICK_FAILED, CHIP_MARKS, QUEUED_LINE
+       MEMBERS_H, EDGE_W, SIDE_GAP, OMNI_FOOT, PICK_FAILED, CHIP_MARKS, QUEUED_LINE, RING_OUT
 
 # --- look --------------------------------------------------------------------
 
@@ -307,6 +307,7 @@ spared(text::AbstractString, f::Face) =
 # --- what every block of a page has ---------------------------------------------------
 
 const LIVE_GAP = 8px   # above and below what a live block shows
+const RING_OUT = 10.0   # px from the page's text to the line round a part that the caret is on
 
 "Every icon that a block can show. The built app reads them all when it's made."
 const BLOCK_ICONS = String["bar-chart", "graph-up", "pie-chart"]

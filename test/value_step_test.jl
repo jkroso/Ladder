@@ -1,5 +1,5 @@
 # Tests for ⌃↑ and ⌃↓, which make the number or the word at the caret a step
-# bigger or smaller. See `step_value!` in main.jl. Run them with
+# bigger or smaller. See `step_value!` in commands.jl. Run them with
 # `julia -O0 --project=. test/value_step_test.jl`. They use windows that aren't on the screen.
 
 @use Test: @test, @testset

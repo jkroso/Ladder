@@ -1,6 +1,6 @@
 # Tests for the tabs at the top of the sidebar: each file that shows stays open
 # as a tab until ⌘W closes it. See "the files that are open, as tabs" and
-# "closing a file" in main.jl. Run them with `julia -O0 --project=. test/tabs_test.jl`.
+# "closing a file" in windows.jl. Run them with `julia -O0 --project=. test/tabs_test.jl`.
 # They click and press keys in windows that aren't on the screen.
 
 @use "../main" => K

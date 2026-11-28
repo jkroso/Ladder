@@ -1,6 +1,6 @@
 # Tests for wiki links, like [[Ideas]]: how markdown.jl reads them, how the
 # page shows them, where `follow!` finds the page that one names, and the HTML
-# that `html` writes for one. See "wiki links" in main.jl. Run them with
+# that `html` writes for one. See "wiki links" in wiki_links.jl. Run them with
 # `julia -O0 --project=. test/wiki_link_test.jl`. They use a window that isn't
 # on the screen.
 

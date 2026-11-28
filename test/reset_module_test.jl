@@ -1,5 +1,5 @@
 # Tests for the Reset Module command, which gives the file that a window shows
-# a new, empty module for its code. See `reset_module!` in main.jl. Run them
+# a new, empty module for its code. See `reset_module!` in sum_functions.jl. Run them
 # with `julia -O0 --project=. test/reset_module_test.jl`. They use windows that
 # aren't on the screen.
 

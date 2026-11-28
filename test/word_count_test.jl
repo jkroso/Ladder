@@ -1,5 +1,5 @@
 # Tests for the command Word Count, which says how many words a page has. The
-# top bar has no count of its own. See `word_count` in main.jl. Run them with
+# top bar has no count of its own. See `word_count` in code_nav.jl. Run them with
 # `julia -O0 --project=. test/word_count_test.jl`. They use windows that
 # aren't on the screen.
 

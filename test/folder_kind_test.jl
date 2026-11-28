@@ -1,6 +1,6 @@
 # Tests for a kind of folder in the sidebar: a type under `AbstractDirectory`
 # that code gives to a folder, with methods that say how the sidebar shows
-# that folder, and how the page shows it. See the comment over `list_files!` in main.jl. Run them with
+# that folder, and how the page shows it. See the comment over `list_files!` in windows.jl. Run them with
 # `julia -O0 --project=. test/folder_kind_test.jl`. They draw a window that
 # isn't on the screen.
 

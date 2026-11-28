@@ -1,7 +1,7 @@
 # Tests for a click on a live block that nothing in the block takes: it puts
 # the caret on the block as a whole, as ↑ and ↓ do. A picture, a table from a
 # CSV file, the front matter and a sound do the same, and ⌥-click shows their
-# lines as they're written. See `pick_clicked!` in main.jl. Run them with `julia -O0 --project=. test/click_picks_block_test.jl`.
+# lines as they're written. See `pick_clicked!` in page_mouse.jl. Run them with `julia -O0 --project=. test/click_picks_block_test.jl`.
 # They click in a window that isn't on the screen. Set `LADDER_SHOTS` to a
 # folder, and they save pictures there.
 

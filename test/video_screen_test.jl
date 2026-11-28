@@ -1,6 +1,6 @@
 # Tests for a video that fills the screen: the F key and the button of a video
 # that fills the window, the top bar that goes, and the video's controls over
-# its picture. See `screen!` in main.jl. Run them with
+# its picture. See `screen!` in fill_view.jl. Run them with
 # `julia -O0 --project=. test/video_screen_test.jl`. They need ffmpeg to make
 # the video, and macOS to play it. The window isn't on the screen, so it never
 # fills a screen itself: the tests look at what the window would show.

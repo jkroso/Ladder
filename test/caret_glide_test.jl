@@ -1,5 +1,5 @@
 # Tests for the caret's glide: the caret moves to a new place in a short time,
-# and doesn't jump there. See "the caret's glide" in main.jl. Run them with
+# and doesn't jump there. See "the caret's glide" in caret_glide.jl. Run them with
 # `julia -O0 --project=. test/caret_glide_test.jl`. They press keys and type in
 # a window that isn't on the screen. With LADDER_SHOTS set to a folder, they
 # save a picture of the caret on its way.

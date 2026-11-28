@@ -1,6 +1,6 @@
 # Tests for the two ways a page is written: as rich text, where a line keeps its
 # look when the caret comes onto it, and as plain text, where the part of the
-# page with the caret shows its markup. See "rich text and plain text" in main.jl. Run them with
+# page with the caret shows its markup. See "rich text and plain text" in rich.jl. Run them with
 # `julia -O0 --project=. test/rich_test.jl`. They use windows that aren't on the screen.
 
 @use Test: @test, @testset

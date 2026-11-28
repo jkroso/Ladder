@@ -1,5 +1,6 @@
 # Tests for Ladder's windows: the settings window that ⌘, opens, ⌘W, and the
-# settings that every window shares. See "windows" and "settings" in main.jl.
+# settings that every window shares. See "windows" in windows.jl and "settings"
+# in settings.jl.
 # Run them with `julia -O0 --project=. test/window_test.jl`. They press keys in windows
 # that aren't on the screen, and they don't write the settings file.
 

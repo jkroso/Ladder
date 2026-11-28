@@ -1,5 +1,5 @@
 # Tests for a commit's page: a click on a commit in git's panel shows what the
-# commit holds in the page beside the panel. See "a commit's page" in main.jl,
+# commit holds in the page beside the panel. See "a commit's page" in git_page.jl,
 # and `shown` in git.jl. Run them with `julia -O0 --project=. test/commit_view_test.jl`.
 # They make a repository in a temporary folder with the Mac's own git, and click
 # in a window that isn't on the screen. With `LADDER_SHOTS` set to a folder,

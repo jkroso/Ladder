@@ -1,5 +1,5 @@
 # Tests for the tick boxes of the changes in git's panel, and its Commit button.
-# See "commits from git's panel" in main.jl. Run them with
+# See "commits from git's panel" in git_page.jl. Run them with
 # `julia -O0 --project=. test/panel_commit_test.jl`. They make a repository in a
 # temporary folder with the Mac's own git, and click in a window that isn't on
 # the screen. A script stands in for Claude. With `LADDER_SHOTS` set to a

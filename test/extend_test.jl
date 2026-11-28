@@ -1,7 +1,7 @@
 # Tests for what code from the startup page can add to Ladder: the tables that
 # Ladder calls at its own times, a command with its key, and an item of the
 # Insert menu. A folder has no table: test/folder_kind_test.jl has the tests
-# for a kind of folder. See "what code from the startup page adds to" in main.jl. Run
+# for a kind of folder. See "what code from the startup page adds to" in commands.jl. Run
 # them with `julia -O0 --project=. test/extend_test.jl`. They add a small
 # extension of their own, called `:notes`, and click in a window that isn't on
 # the screen.

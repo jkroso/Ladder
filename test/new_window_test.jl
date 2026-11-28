@@ -1,5 +1,5 @@
 # Tests for ⌘N: it opens a new window on the folder that the window is in, with
-# the folder in its page. See `new_window!` in main.jl. Run them with
+# the folder in its page. See `new_window!` in windows.jl. Run them with
 # `julia -O0 --project=. test/new_window_test.jl`. They press keys in windows
 # that aren't on the screen, so the new windows aren't on the screen either.
 

@@ -1,5 +1,5 @@
 # Tests for going back to the file that showed before, and forward again. See
-# "the files that showed before" in main.jl. Run them with
+# "the files that showed before" in showed_before.jl. Run them with
 # `julia -O0 --project=. test/back_test.jl`. They follow links and press keys
 # in a window that isn't on the screen.
 

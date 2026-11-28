@@ -1,5 +1,5 @@
 # Tests for a zip file in the page: the list of what it holds, one file shown
-# from inside it, and the button that unpacks it. See "a zip file" in main.jl,
+# from inside it, and the button that unpacks it. See "a zip file" in zip_page.jl,
 # and zip.jl. Run them with `julia -O0 --project=. test/zip_view_test.jl`. They
 # make a zip file with the Mac's own `zip`, and click in a window that isn't on
 # the screen. With `LADDER_SHOTS` set to a folder, they save pictures there.

@@ -1,5 +1,5 @@
 # Tests for the top bar over a web page, which takes the page's colour as a
-# browser's bar does: see "the top bar over a web page" in main.jl, and
+# browser's bar does: see "the top bar over a web page" in top_bar.jl, and
 # `edge_colour` in web/paint.jl. Run them with
 # `julia -O0 --project=. test/bar_tint_test.jl`. They write HTML files into a
 # temporary folder, and show them in a window that isn't on the screen. Set

@@ -25,7 +25,7 @@
 # and [[Ideas#Plans]] goes to the heading Plans of that page. [[#Plans]] goes to
 # a heading of the page that it's in. In a table, write the | as \|. The link
 # of each span of its text is the name between the brackets, in brackets: see
-# `wikilink`. The editor finds the page, wherever it is: see `wiki_path` in main.jl.
+# `wikilink`. The editor finds the page, wherever it is: see `wiki_path` in wiki_links.jl.
 
 @use "github.com/jkroso/Prospects.jl" ["Enum" @Enum]
 
@@ -493,7 +493,7 @@ end
 # A block can have a name, as Obsidian gives one: ^prices at the end of its
 # last line, after a space, or on a line of its own under the block, for a
 # table or a code block. Another page shows that block with ![[Costs#^prices]].
-# The name doesn't show in rich text. See "a part of another page" in main.jl.
+# The name doesn't show in rich text. See "a part of another page" in transclusion.jl.
 
 const BLOCK_ID = r"(?:^|\s)\^([\p{L}\p{N}][\p{L}\p{N}_-]*)\s*$"
 

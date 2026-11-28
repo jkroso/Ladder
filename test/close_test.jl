@@ -1,6 +1,6 @@
 # Tests for ⌘W: it closes the file, and the window shows the file's folder.
 # ⌘W on a folder's page closes it, and the window stays open with no file in it.
-# ⌘W in a window with no file closes the window. See "closing a file" in main.jl.
+# ⌘W in a window with no file closes the window. See "closing a file" in windows.jl.
 # Run them with `julia -O0 --project=. test/close_test.jl`. They press keys in
 # windows that aren't on the screen.
 
