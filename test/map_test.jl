@@ -9,6 +9,7 @@
 M.HELPER[] = Fake.helper
 M.FINDER[] = Fake.finder
 M.OPENER[] = Fake.opener
+Fake.fresh!()   # nothing that a test before this one asked the fake for, when the tests share a process
 const dir = mktempdir()
 const WATTLE = "8 Wattle Street, Brunswick VIC 3056"
 const HERE = (-37.7681, 144.9426)

@@ -34,6 +34,13 @@ const ADDRESS = (-37.769417, 144.940514)
 const SLOW = 0.4
 const slow, offline, broken = Ref(false), Ref(false), Ref(false)
 
+"""
+Forget what was asked for, and turn the three switches off. A test calls this
+when it starts: the tests that use this file share it when they run in one
+process, so the lists have what the test before asked for.
+"""
+fresh!() = (empty!(calls); empty!(finds); empty!(opened); slow[] = offline[] = broken[] = false; nothing)
+
 const CRC = [foldl((c, _) -> isodd(c) ? 0xedb88320 ⊻ (c >> 1) : c >> 1, 1:8, init=UInt32(n)) for n in 0:255]
 crc(bytes) = begin
   c = 0xffffffff

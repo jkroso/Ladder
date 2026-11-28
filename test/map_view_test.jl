@@ -24,6 +24,7 @@ const M = K.Maps
 M.HELPER[] = Fake.helper
 M.FINDER[] = Fake.finder
 M.OPENER[] = Fake.opener
+Fake.fresh!()   # nothing that a test before this one asked the fake for, when the tests share a process
 K.MEDIA_CACHE[] = mktempdir()   # the places and the pictures are kept here, and not in the Mac's caches
 
 const WATTLE = "8 Wattle Street, Brunswick VIC 3056"
